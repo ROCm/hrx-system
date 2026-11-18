@@ -483,6 +483,124 @@ TEST_F(KfdMemoryReservationTest, PartialRemovalPublishesSurvivingSource) {
   EXPECT_EQ(native_.publications[0].first, (std::vector<uint32_t>{29, 30}));
 }
 
+class KfdReservationFragmentTest
+    : public KfdMemoryReservationTest,
+      public ::testing::WithParamInterface<uint64_t> {};
+
+TEST_P(KfdReservationFragmentTest, PreservesExactRangesAndOnePublication) {
+  const uint64_t fragment = GetParam();
+  const uint64_t page = device_.page_size;
+  device_.topology.virtual_address.fragment_size = fragment;
+  ASSERT_NO_FATAL_FAILURE(Create(4 * fragment, fragment));
+  ASSERT_NO_FATAL_FAILURE(CreateSource(4 * fragment));
+  ASSERT_NO_FATAL_FAILURE(CreateSource(4 * fragment));
+  struct Range {
+    // Page-aligned destination within the reservation.
+    uint64_t offset;
+    // Exact logical extent, independent of native fragment alignment.
+    uint64_t length;
+    // Leading native extent, or zero when the range stays whole.
+    uint64_t prefix;
+  };
+  const Range ranges[] = {
+      {0, 3 * fragment, 0},
+      {page, fragment - page, 0},
+      {page, fragment, 0},
+      {page, 2 * fragment - page, fragment - page},
+      {page, 2 * fragment + page, fragment - page},
+  };
+  for (const auto& range : ranges) {
+    SCOPED_TRACE(range.length);
+    for (uint32_t generation = 0; generation < 2; ++generation) {
+      SCOPED_TRACE(generation);
+      native_.mutations.clear();
+      const amdf_gpu_umd_mapping_update_t update = {
+          .target_byte_offset = range.offset,
+          .byte_length = range.length,
+          .memory = sources_[generation],
+          .source_byte_offset = page * (generation + 1),
+          .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+          .previous_memory = generation ? sources_[0] : nullptr,
+      };
+      ASSERT_NO_FATAL_FAILURE(
+          Update({update}, generation ? std::vector<uint32_t>{29, 30, 31}
+                                      : std::vector<uint32_t>{29, 30}));
+      ASSERT_EQ(native_.mutations.size(), range.prefix ? 2u : 1u);
+      EXPECT_EQ(native_.publications[0].second, native_.mutations.size());
+      uint64_t consumed = 0;
+      for (size_t i = 0; i < native_.mutations.size(); ++i) {
+        const auto& actual = native_.mutations[i];
+        EXPECT_EQ(actual.va_address, address_ + range.offset + consumed);
+        EXPECT_EQ(actual.offset_in_bo, update.source_byte_offset + consumed);
+        EXPECT_EQ(actual.handle, 30u + generation);
+        EXPECT_EQ(actual.operation, AMDGPU_VA_OP_REPLACE);
+        EXPECT_EQ(actual.flags, AMDGPU_VM_DELAY_UPDATE |
+                                    AMDGPU_VM_PAGE_READABLE |
+                                    AMDGPU_VM_PAGE_WRITEABLE);
+        EXPECT_EQ(actual.map_size, i == 0 && range.prefix
+                                       ? range.prefix
+                                       : range.length - consumed);
+        consumed += actual.map_size;
+      }
+      EXPECT_EQ(consumed, range.length);
+    }
+    native_.mutations.clear();
+    ASSERT_NO_FATAL_FAILURE(Update({{
+                                       .target_byte_offset = range.offset,
+                                       .byte_length = range.length,
+                                       .previous_memory = sources_[1],
+                                   }},
+                                   {29, 31}));
+    ASSERT_EQ(native_.mutations.size(), 1u);
+    EXPECT_EQ(native_.mutations[0].operation, AMDGPU_VA_OP_CLEAR);
+    EXPECT_EQ(native_.mutations[0].map_size, range.length);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(NativeFragmentGeometry, KfdReservationFragmentTest,
+                         ::testing::Values(UINT64_C(65536),
+                                           UINT64_C(2) * 1024 * 1024));
+
+class KfdReservationFragmentFailureTest
+    : public KfdMemoryReservationTest,
+      public ::testing::WithParamInterface<uint32_t> {};
+
+TEST_P(KfdReservationFragmentFailureTest,
+       FailedFragmentRetainsOwnershipUntilCompleteDetach) {
+  constexpr uint64_t kFragment = UINT64_C(2) * 1024 * 1024;
+  ASSERT_NO_FATAL_FAILURE(Create(4 * kFragment, kFragment));
+  ASSERT_NO_FATAL_FAILURE(CreateSource(2 * kFragment));
+  const amdf_gpu_umd_mapping_update_t update = {
+      .target_byte_offset = 4096,
+      .byte_length = 2 * kFragment,
+      .memory = sources_[0],
+      .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+  };
+  native_.failure_request = DRM_IOCTL_AMDGPU_GEM_VA;
+  native_.failure_countdown = GetParam();
+  bool mutation_started = false;
+  EXPECT_EQ(amdf_gpu_umd_memory_reservation_update(reservation_, 0, 1, &update,
+                                                   &mutation_started),
+            amdf_linux_error(EIO));
+  EXPECT_TRUE(mutation_started);
+  EXPECT_EQ(native_.mutations.size(), GetParam() - 1);
+  EXPECT_TRUE(native_.publications.empty());
+  EXPECT_FALSE(memory_lock_.occupied);
+  ASSERT_EQ(amdf_gpu_umd_memory_reservation_detach(reservation_, 0),
+            AMDF_STATUS_OK);
+  ASSERT_EQ(native_.publications.size(), 1u);
+  EXPECT_EQ(native_.mutations.back().operation, AMDGPU_VA_OP_CLEAR);
+  EXPECT_EQ(native_.mutations.back().va_address, address_);
+  EXPECT_EQ(native_.mutations.back().map_size, 4 * kFragment);
+  EXPECT_EQ(native_.allocation_count, 2u);
+  EXPECT_EQ(native_.gem_count, 2u);
+  EXPECT_TRUE(IsReserved(address_));
+}
+
+INSTANTIATE_TEST_SUITE_P(NativeFragmentFailure,
+                         KfdReservationFragmentFailureTest,
+                         ::testing::Values(1u, 2u));
+
 TEST_F(KfdMemoryReservationTest, RepeatedSplitsPublishCallerOwnedSource) {
   ASSERT_NO_FATAL_FAILURE(Create());
   ASSERT_NO_FATAL_FAILURE(CreateSource(32768));

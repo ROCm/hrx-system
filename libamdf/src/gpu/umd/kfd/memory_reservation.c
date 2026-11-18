@@ -515,8 +515,27 @@ amdf_status_t amdf_gpu_umd_memory_reservation_update(
           .offset_in_bo = entry->source_byte_offset,
           .map_size = entry->byte_length,
       };
-      status = amdf_gpu_kfd_reservation_ioctl(target, DRM_IOCTL_AMDGPU_GEM_VA,
-                                              &update);
+      const uint64_t fragment_size =
+          target->device->topology.virtual_address.fragment_size;
+      const uint64_t prefix =
+          fragment_size - (update.va_address & (fragment_size - 1));
+      if (entry->memory != NULL && prefix != fragment_size &&
+          update.map_size > prefix &&
+          update.map_size - prefix >= fragment_size) {
+        // Start the aligned interior with a fresh native page-table walk.
+        // Otherwise a walk leaving the partial head can allocate a child
+        // table only to discard it when choosing a larger parent entry.
+        update.map_size = prefix;
+        status = amdf_gpu_kfd_reservation_ioctl(target, DRM_IOCTL_AMDGPU_GEM_VA,
+                                                &update);
+        update.va_address += prefix;
+        update.offset_in_bo += prefix;
+        update.map_size = entry->byte_length - prefix;
+      }
+      if (amdf_status_is_ok(status)) {
+        status = amdf_gpu_kfd_reservation_ioctl(target, DRM_IOCTL_AMDGPU_GEM_VA,
+                                                &update);
+      }
       ++count;
     }
     if (amdf_status_is_ok(status)) {
