@@ -8,6 +8,7 @@
 
 #include <stddef.h>
 
+#include "iree/base/checked_math.h"
 #include "iree/hal/detail.h"
 #include "iree/hal/device.h"
 
@@ -154,6 +155,118 @@ IREE_API_EXPORT bool iree_hal_file_supports_synchronous_io(
     iree_hal_file_t* file) {
   IREE_ASSERT_ARGUMENT(file);
   return _VTABLE_DISPATCH(file, supports_synchronous_io)(file);
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_file_transfer_record_decode(
+    const iree_hal_file_transfer_record_t* record,
+    iree_hal_file_transfer_t* out_transfer) {
+  const uint64_t mask = UINT64_C(0x0000FFFFFFFFFFFF);
+  const uint64_t shape = iree_unaligned_load_le_u64(&record->words[2]);
+  const uint64_t row_length = shape & mask;
+  if (!row_length) {
+    out_transfer->row_length = 0;
+    return iree_ok_status();
+  }
+  const uint64_t form = shape >> 48;
+  if (IREE_UNLIKELY(form > 1)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported file transfer record form %" PRIu64,
+                            form);
+  }
+  uint64_t row_count = 1;
+  uint64_t slice_count = 1;
+  iree_hal_transfer_strides_t file_strides = {0};
+  iree_hal_transfer_strides_t buffer_strides = {0};
+  if (form == 1) {
+    const uint64_t file_row = iree_unaligned_load_le_u64(&record->words[3]);
+    const uint64_t buffer_row = iree_unaligned_load_le_u64(&record->words[4]);
+    const uint64_t file_slice = iree_unaligned_load_le_u64(&record->words[5]);
+    const uint64_t buffer_slice = iree_unaligned_load_le_u64(&record->words[6]);
+    row_count = (file_row >> 48) | ((buffer_row >> 48) << 16);
+    slice_count = (file_slice >> 48) | ((buffer_slice >> 48) << 16);
+    if (!row_count || !slice_count) {
+      out_transfer->row_length = 0;
+      return iree_ok_status();
+    }
+    file_strides.row_stride = file_row & mask;
+    file_strides.slice_stride = file_slice & mask;
+    buffer_strides.row_stride = buffer_row & mask;
+    buffer_strides.slice_stride = buffer_slice & mask;
+  }
+  const uint64_t file = iree_unaligned_load_le_u64(&record->words[0]);
+  const uint64_t buffer = iree_unaligned_load_le_u64(&record->words[1]);
+  const uint64_t buffer_offset = buffer & mask;
+  if (IREE_UNLIKELY(buffer_offset > IREE_DEVICE_SIZE_MAX)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "file transfer buffer offset is not representable");
+  }
+  *out_transfer = (iree_hal_file_transfer_t){
+      .file_binding = (uint32_t)(file >> 48),
+      .buffer_binding = (uint32_t)(buffer >> 48),
+      .file_offset = file & mask,
+      .buffer_offset = (iree_device_size_t)buffer_offset,
+      .row_length = row_length,
+      .row_count = row_count,
+      .slice_count = slice_count,
+      .file_strides = file_strides,
+      .buffer_strides = buffer_strides,
+  };
+  return iree_ok_status();
+}
+
+// Subtraction keeps the binding origin out of the calculation and avoids an
+// overflow at the end of an otherwise valid window. Counts are nonzero here.
+static bool iree_hal_file_transfer_range_fits(
+    uint64_t offset, const iree_hal_file_transfer_t* transfer,
+    const iree_hal_transfer_strides_t* strides, uint64_t length) {
+  if (offset > length || transfer->row_length > length - offset) {
+    return false;
+  }
+  uint64_t remaining = length - offset - transfer->row_length;
+  uint64_t displacement = 0;
+  if (transfer->row_count > 1) {
+    if (!iree_checked_mul_u64(transfer->row_count - 1, strides->row_stride,
+                              &displacement) ||
+        displacement > remaining) {
+      return false;
+    }
+    remaining -= displacement;
+  }
+  if (transfer->slice_count > 1) {
+    if (!iree_checked_mul_u64(transfer->slice_count - 1, strides->slice_stride,
+                              &displacement) ||
+        displacement > remaining) {
+      return false;
+    }
+  }
+  return true;
+}
+
+IREE_API_EXPORT iree_status_t
+iree_hal_file_transfer_validate(iree_hal_file_binding_table_t files,
+                                iree_hal_buffer_binding_table_t buffers,
+                                const iree_hal_file_transfer_t* transfer) {
+  if (!transfer->row_length || !transfer->row_count || !transfer->slice_count) {
+    return iree_ok_status();
+  }
+  if (IREE_UNLIKELY(transfer->file_binding >= files.count ||
+                    transfer->buffer_binding >= buffers.count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "file transfer binding index exceeds table size");
+  }
+  if (IREE_UNLIKELY(!iree_hal_file_transfer_range_fits(
+          transfer->file_offset, transfer, &transfer->file_strides,
+          files.bindings[transfer->file_binding].length))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "file transfer exceeds its file binding window");
+  }
+  if (IREE_UNLIKELY(!iree_hal_file_transfer_range_fits(
+          transfer->buffer_offset, transfer, &transfer->buffer_strides,
+          buffers.bindings[transfer->buffer_binding].length))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "file transfer exceeds its buffer binding window");
+  }
+  return iree_ok_status();
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_file_prepare_transfer(

@@ -17,6 +17,7 @@
 #include "iree/hal/driver/amd/fabric/memory_backend_test_base.h"
 #include "iree/hal/driver/amd/fabric/virtual_buffer.h"
 #include "iree/hal/utils/fd_file.h"
+#include "iree/hal/utils/file_request.h"
 #include "iree/io/file_contents.h"
 #include "iree/testing/temp_file.h"
 
@@ -27,7 +28,7 @@ using iree::hal::cts::Ref;
 
 class FileTransferRangesTest
     : public MemoryBackendTest,
-      public ::testing::WithParamInterface<std::tuple<uint32_t, bool, bool>> {};
+      public ::testing::WithParamInterface<std::tuple<uint32_t, bool>> {};
 
 TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
   static_assert(sizeof(iree_hal_amd_fabric_file_source_t) <= 64);
@@ -37,7 +38,7 @@ TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
   constexpr uint64_t kBufferOffset = 128;
   constexpr uint64_t kFileOffset = 64;
   constexpr uint64_t kLength = 3 * kUnit - 256;
-  const auto [routes, write, direct] = GetParam();
+  const auto [routes, write] = GetParam();
   // Each physical source is private, CPU-only, pinnable for file I/O, or
   // buffered-only. The default route stages unpinnable views even when they
   // support native buffered access.
@@ -136,23 +137,16 @@ TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
     const uint64_t start = std::max(i * kUnit, kBufferOffset);
     const uint64_t end = std::min((i + 1) * kUnit, kBufferOffset + kLength);
     const bool host = source_routes[i] == 2;
-    iree_hal_amd_fabric_file_transfer_t transfer = {};
-    IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_initialize(
-        file,
-        write ? IREE_HAL_MEMORY_ACCESS_WRITE : IREE_HAL_MEMORY_ACCESS_READ,
-        kFileOffset + start - kBufferOffset, sources[i], kUnit + start % kUnit,
-        end - start, allocator_, &transfer));
-    // Route qualification is independent of the temporary filesystem's mode.
-    if (direct) {
-      transfer.async.file->flags |= IREE_ASYNC_FILE_FLAG_DIRECT;
-    }
+    const auto access =
+        write ? IREE_HAL_MEMORY_ACCESS_WRITE : IREE_HAL_MEMORY_ACCESS_READ;
     iree_hal_memory_effects_t before = {}, after = {};
-    IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_prepare_source(
-        &transfer, &native_.api, families_[0],
-        native_families_[0].queue_family_ordinal, &before, &after));
+    iree_hal_amd_fabric_file_source_t range;
+    IREE_ASSERT_OK(iree_hal_amd_fabric_file_source_initialize(
+        &native_.api, families_[0], native_families_[0].queue_family_ordinal,
+        access, {sources[i], kUnit + start % kUnit, end - start}, &range,
+        &before, &after));
     EXPECT_EQ(before.bits, 0u);
     EXPECT_EQ(after.bits, 0u);
-    const auto& range = transfer.source;
     const auto* memory =
         reinterpret_cast<const FakeNative::Memory*>(range.storage->handle);
     EXPECT_EQ(memory->data, source_contents[i]);
@@ -163,12 +157,14 @@ TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
     EXPECT_EQ(range.access_ordinal, 0u);
     EXPECT_EQ(range.region, nullptr);
     EXPECT_EQ(range.effects.bits, 0u);
-    transfer.async.request.file_offset = transfer.file_offset;
-    if (host && !direct) {
-      IREE_ASSERT_OK(
-          iree_hal_amd_fabric_file_transfer_prepare_range(&transfer, &range));
-      EXPECT_EQ(iree_hal_file_request_span(&transfer.async.request).length,
-                end - start);
+    if (host) {
+      iree_hal_file_request_t request = {};
+      IREE_ASSERT_OK(iree_hal_file_request_prepare(
+          file, access, kFileOffset + start - kBufferOffset, end - start,
+          iree_async_span_from_ptr(range.contents.data,
+                                   range.contents.data_length),
+          &request));
+      EXPECT_EQ(iree_hal_file_request_span(&request).length, end - start);
     }
     // Resolution and request preparation neither copy nor mutate payloads.
     for (uint64_t j = 0; j < 2 * kUnit; ++j) {
@@ -180,7 +176,6 @@ TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
               : uint8_t{0xCD};
       EXPECT_EQ(source_contents[i][j], expected_byte) << i << ':' << j;
     }
-    iree_hal_amd_fabric_file_transfer_deinitialize(&transfer);
   }
   file.reset();
   iree_async_proactor_release(proactor);
@@ -280,22 +275,24 @@ TEST_F(MemoryBackendTest, ExplicitSourcesPreserveIoCoordinatesAcrossLayouts) {
                                 : i == 1         ? 2 * kUnit
                                                  : kUnit;
         const size_t owner = range_count > 1 && i == 1 ? 1 : 0;
-        iree_hal_amd_fabric_file_transfer_t transfer = {};
-        IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_initialize(
-            file, access, offset, sources[owner], offset, length, allocator_,
-            &transfer));
         iree_hal_memory_effects_t before = {}, after = {};
-        IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_prepare_source(
-            &transfer, &native_.api, families_[0],
-            native_families_[0].queue_family_ordinal, &before, &after));
-        EXPECT_NE(transfer.source.contents.data, nullptr);
+        iree_hal_amd_fabric_file_source_t range;
+        IREE_ASSERT_OK(iree_hal_amd_fabric_file_source_initialize(
+            &native_.api, families_[0],
+            native_families_[0].queue_family_ordinal, access,
+            {sources[owner], offset, length}, &range, &before, &after));
+        EXPECT_NE(range.contents.data, nullptr);
         EXPECT_EQ(before.bits, 0u);
         EXPECT_EQ(after.bits, 0u);
-        while (iree_hal_amd_fabric_file_transfer_bytes_transferred(&transfer) <
-               transfer.length) {
-          const auto* range = &transfer.source;
-          IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_prepare_range(
-              &transfer, range));
+        EXPECT_EQ(range.effects.bits, 0u);
+        uint64_t position = 0;
+        while (position < length) {
+          iree_hal_file_request_t request = {};
+          IREE_ASSERT_OK(iree_hal_file_request_prepare(
+              file, access, offset + position, length - position,
+              iree_async_span_from_ptr(range.contents.data + position,
+                                       length - position),
+              &request));
           struct Completion {
             // Set by the proactor callback before polling returns.
             bool complete = false;
@@ -304,24 +301,20 @@ TEST_F(MemoryBackendTest, ExplicitSourcesPreserveIoCoordinatesAcrossLayouts) {
             iree_status_t status = iree_ok_status();
           } completion;
           IREE_ASSERT_OK(iree_hal_file_request_submit(
-              &transfer.async.request,
-              {+[](void* user_data, iree_status_t status) {
-                 auto* completion = static_cast<Completion*>(user_data);
-                 completion->status = status;
-                 completion->complete = true;
-               },
-               &completion}));
+              &request, {+[](void* user_data, iree_status_t status) {
+                           auto* completion =
+                               static_cast<Completion*>(user_data);
+                           completion->status = status;
+                           completion->complete = true;
+                         },
+                         &completion}));
           while (!completion.complete) {
             IREE_ASSERT_OK(iree_async_proactor_poll(
                 proactor, iree_infinite_timeout(), nullptr));
           }
-          if (!iree_status_is_ok(completion.status)) {
-            iree_hal_amd_fabric_file_transfer_deinitialize(&transfer);
-          }
           IREE_ASSERT_OK(completion.status);
+          position += iree_hal_file_request_span(&request).length;
         }
-        IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_flush(&transfer));
-        iree_hal_amd_fabric_file_transfer_deinitialize(&transfer);
       }
       for (size_t source = 0; source < contents.size(); ++source) {
         for (size_t i = 0; i < expected.size(); ++i) {
@@ -347,7 +340,6 @@ TEST_F(MemoryBackendTest, ExplicitSourcesPreserveIoCoordinatesAcrossLayouts) {
 
 INSTANTIATE_TEST_SUITE_P(Routes, FileTransferRangesTest,
                          ::testing::Combine(::testing::Range(0u, 64u),
-                                            ::testing::Bool(),
                                             ::testing::Bool()));
 
 }  // namespace

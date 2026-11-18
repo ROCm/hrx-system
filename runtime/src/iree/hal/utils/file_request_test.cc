@@ -41,6 +41,7 @@ struct NativeFile {
   static iree_status_t Submit(iree_async_proactor_t* proactor,
                               iree_async_operation_list_t operations) {
     auto* self = iree_containerof(proactor, NativeFile, proactor);
+    self->submission_sizes.push_back(operations.count);
     if (self->submission_failure != IREE_STATUS_OK) {
       return iree_status_from_code(self->submission_failure);
     }
@@ -93,6 +94,8 @@ struct NativeFile {
   std::array<uint8_t, 128> bytes = {};
   // Accepted operations; callbacks may add partial continuations.
   std::vector<iree_async_operation_t*> pending;
+  // Admission calls distinguish one batch from repeated scalar submissions.
+  std::vector<iree_host_size_t> submission_sizes;
   // Synchronous native rejection, with no accepted operation or callback.
   iree_status_code_t submission_failure = IREE_STATUS_OK;
 };
@@ -137,6 +140,15 @@ class FileRequestTest : public ::testing::TestWithParam<bool> {
   iree_status_t Submit(size_t index) {
     return iree_hal_file_request_submit(
         &requests_[index], {Completion::Complete, &completions_[index]});
+  }
+  iree_status_t SubmitBatch() {
+    std::array<iree_async_operation_t*, 2> operations;
+    for (size_t i = 0; i < operations.size(); ++i) {
+      operations[i] = iree_hal_file_request_bind(
+          &requests_[i], {Completion::Complete, &completions_[i]});
+    }
+    return iree_async_proactor_submit(&file_.proactor,
+                                      {operations.data(), operations.size()});
   }
   // Controlled native file and submission dependency.
   NativeFile file_;
@@ -214,6 +226,69 @@ TEST_P(FileRequestTest, RejectionDoesNotCompleteAndAcceptedFailureDoes) {
   EXPECT_EQ(requests_[0].bytes_transferred, 7u);
   EXPECT_EQ(completions_[0].count, 1u);
   EXPECT_EQ(completions_[0].code, IREE_STATUS_DATA_LOSS);
+}
+
+TEST_P(FileRequestTest, BatchAdmitsOnceAndRetiresPartialIoIndependently) {
+  const auto original_file = file_.bytes;
+  const auto original_buffer = bytes_;
+  IREE_ASSERT_OK(
+      Prepare(0, 19, 16, iree_async_span_from_ptr(bytes_.data() + 7, 16)));
+  IREE_ASSERT_OK(
+      Prepare(1, 73, 24, iree_async_span_from_ptr(bytes_.data() + 49, 24)));
+  IREE_ASSERT_OK(SubmitBatch());
+  EXPECT_EQ(file_.submission_sizes, (std::vector<iree_host_size_t>{2}));
+  ASSERT_EQ(file_.pending.size(), 2u);
+
+  file_.Complete(1, 9);
+  EXPECT_EQ(completions_[1].count, 0u);
+  EXPECT_EQ(file_.submission_sizes, (std::vector<iree_host_size_t>{2, 1}));
+  file_.Complete(0, 16);
+  EXPECT_EQ(completions_[0].count, 1u);
+  EXPECT_EQ(completions_[1].count, 0u);
+  file_.Complete(0, 15);
+  EXPECT_EQ(completions_[1].count, 1u);
+  EXPECT_EQ(completions_[0].code, IREE_STATUS_OK);
+  EXPECT_EQ(completions_[1].code, IREE_STATUS_OK);
+  EXPECT_TRUE(file_.pending.empty());
+
+  auto expected_file = original_file;
+  auto expected_buffer = original_buffer;
+  if (GetParam()) {
+    std::memcpy(expected_file.data() + 19, original_buffer.data() + 7, 16);
+    std::memcpy(expected_file.data() + 73, original_buffer.data() + 49, 24);
+  } else {
+    std::memcpy(expected_buffer.data() + 7, original_file.data() + 19, 16);
+    std::memcpy(expected_buffer.data() + 49, original_file.data() + 73, 24);
+  }
+  EXPECT_EQ(file_.bytes, expected_file);
+  EXPECT_EQ(bytes_, expected_buffer);
+}
+
+TEST_P(FileRequestTest, RejectedBatchRetainsAllRequestsAndCanBeResubmitted) {
+  for (size_t i = 0; i < requests_.size(); ++i) {
+    IREE_ASSERT_OK(Prepare(
+        i, i * 32, 16, iree_async_span_from_ptr(bytes_.data() + i * 32, 16)));
+  }
+  file_.submission_failure = IREE_STATUS_RESOURCE_EXHAUSTED;
+  EXPECT_THAT(
+      iree::Status(SubmitBatch()),
+      iree::testing::status::StatusIs(iree::StatusCode::kResourceExhausted));
+  EXPECT_TRUE(file_.pending.empty());
+  EXPECT_EQ(completions_[0].count, 0u);
+  EXPECT_EQ(completions_[1].count, 0u);
+
+  file_.submission_failure = IREE_STATUS_OK;
+  IREE_ASSERT_OK(SubmitBatch());
+  file_.Complete(0, 0, IREE_STATUS_DATA_LOSS);
+  EXPECT_EQ(completions_[0].count, 1u);
+  EXPECT_EQ(completions_[0].code, IREE_STATUS_DATA_LOSS);
+  EXPECT_EQ(completions_[1].count, 0u);
+  // A sibling failure does not release another request's accepted native use.
+  ASSERT_EQ(file_.pending.size(), 1u);
+  file_.Complete(0, 16);
+  EXPECT_EQ(completions_[1].count, 1u);
+  EXPECT_EQ(completions_[1].code, IREE_STATUS_OK);
+  EXPECT_TRUE(file_.pending.empty());
 }
 
 TEST_P(FileRequestTest, ZeroProgressFails) {

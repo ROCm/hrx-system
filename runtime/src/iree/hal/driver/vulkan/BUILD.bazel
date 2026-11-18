@@ -297,6 +297,33 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "file_transfer_test",
+    testonly = True,
+    srcs = [
+        "file_transfer_test.cc",
+    ],
+    deps = [
+        ":headers",
+        ":profile",
+        ":vulkan",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/threading:thread",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/driver/vulkan/util:libvulkan",
+        "//runtime/src/iree/hal/utils:files",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:temp_file",
+    ],
+    alwayslink = True,
+)
+
+iree_runtime_cc_library(
     name = "queue_test",
     testonly = True,
     srcs = [
@@ -304,6 +331,8 @@ iree_runtime_cc_library(
         "barrier.h",
         "builtins.h",
         "queue.h",
+        "queue_staging.h",
+        "queue_staging_test.cc",
         "queue_test.cc",
         "semaphore.h",
     ],
@@ -420,6 +449,8 @@ iree_runtime_cc_library(
         "queue.c",
         "queue.h",
         "queue_memory.c",
+        "queue_staging.c",
+        "queue_staging.h",
         "queue_stats.h",
         "semaphore.c",
         "semaphore.h",
@@ -455,6 +486,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/memory:slab_provider",
         "//runtime/src/iree/hal/memory:tracing",
         "//runtime/src/iree/hal/utils:file_request",
+        "//runtime/src/iree/hal/utils:file_transfer",
         "//runtime/src/iree/hal/utils:files",
         "//runtime/src/iree/hal/utils:resource_set",
         "//third_party:vulkan_headers",

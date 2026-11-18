@@ -117,12 +117,12 @@ class VulkanFileTest : public CtsTestBase<> {
     SemaphoreList empty_wait;
     SemaphoreList write_signal(device_, {0}, {1});
     SemaphoreList read_signal(device_, {0}, {1});
-    IREE_ASSERT_OK(iree_hal_queue_write(
+    IREE_ASSERT_OK(iree_hal_queue_write_linear(
         transfer_queue_, empty_wait, write_signal, source_buffer.get(),
         /*source_offset=*/0, file.get(),
         /*target_offset=*/0, file_length, /*barriers=*/NULL,
         IREE_HAL_WRITE_FLAG_NONE));
-    IREE_ASSERT_OK(iree_hal_queue_read(
+    IREE_ASSERT_OK(iree_hal_queue_read_linear(
         transfer_queue_, write_signal, read_signal, file.get(),
         /*source_offset=*/0, target_buffer.get(),
         /*target_offset=*/0, file_length, /*barriers=*/NULL,
@@ -198,7 +198,7 @@ TEST_P(VulkanFileTest, NativeFileShortReadExceedsStagingRingFails) {
   IREE_ASSERT_OK(iree_async_semaphore_acquire_timepoint(
       reinterpret_cast<iree_async_semaphore_t*>(read_signal.semaphores[0]), 1,
       &timepoint));
-  IREE_ASSERT_OK(iree_hal_queue_read(
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(
       transfer_queue_, empty_wait, read_signal, file.get(),
       /*source_offset=*/0, target_buffer.get(), /*target_offset=*/0,
       import_length, /*barriers=*/NULL, IREE_HAL_READ_FLAG_NONE));
@@ -383,9 +383,9 @@ class VulkanImportedFileTest : public VulkanFileTest {
       SemaphoreList wait = i == 0 ? initialized : written;
       loaded.payload_values[0] = copied.payload_values[0] =
           modified.payload_values[0] = written.payload_values[0] = i + 1;
-      IREE_ASSERT_OK(iree_hal_queue_read(transfer_queue_, wait, loaded, input,
-                                         source_offset, view, offset, length,
-                                         barriers, IREE_HAL_READ_FLAG_NONE));
+      IREE_ASSERT_OK(iree_hal_queue_read_linear(
+          transfer_queue_, wait, loaded, input, source_offset, view, offset,
+          length, barriers, IREE_HAL_READ_FLAG_NONE));
       IREE_ASSERT_OK(iree_hal_queue_copy(transfer_queue_, loaded, copied, view,
                                          offset, consumed[i], 0, length,
                                          barriers, IREE_HAL_COPY_FLAG_NONE));
@@ -395,7 +395,7 @@ class VulkanImportedFileTest : public VulkanFileTest {
       IREE_ASSERT_OK(iree_hal_queue_fill(
           transfer_queue_, copied, modified, view, offset, length, &pattern,
           sizeof(pattern), barriers, IREE_HAL_FILL_FLAG_NONE));
-      IREE_ASSERT_OK(iree_hal_queue_write(
+      IREE_ASSERT_OK(iree_hal_queue_write_linear(
           transfer_queue_, modified, written, view, offset, output,
           source_offset, length, barriers, IREE_HAL_WRITE_FLAG_NONE));
       std::memset(expected_file.data() + source_offset, pattern, length);
@@ -444,7 +444,7 @@ class VulkanImportedFileTest : public VulkanFileTest {
     IREE_ASSERT_OK(
         CreateUninitializedDeviceBuffer(expected_file.size(), readback.out()));
     SemaphoreList readback_done(device_, {0}, {1});
-    IREE_ASSERT_OK(iree_hal_queue_read(
+    IREE_ASSERT_OK(iree_hal_queue_read_linear(
         transfer_queue_, written, readback_done, output, 0, readback, 0,
         expected_file.size(), nullptr, IREE_HAL_READ_FLAG_NONE));
     IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -480,9 +480,9 @@ class VulkanImportedFileTest : public VulkanFileTest {
     IREE_ASSERT_OK(iree_async_semaphore_acquire_timepoint(
         reinterpret_cast<iree_async_semaphore_t*>(done.semaphores[0]), 1,
         &timepoint));
-    IREE_ASSERT_OK(iree_hal_queue_read(transfer_queue_, start, done, file, 0,
-                                       buffer, 0, length, nullptr,
-                                       IREE_HAL_READ_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_queue_read_linear(
+        transfer_queue_, start, done, file, 0, buffer, 0, length, nullptr,
+        IREE_HAL_READ_FLAG_NONE));
     if (fail_dependency) {
       iree_hal_semaphore_list_fail(start,
                                    iree_status_from_code(IREE_STATUS_ABORTED));

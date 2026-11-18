@@ -55,6 +55,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:test_base",
         "//runtime/src/iree/hal/driver/amd/registration",
+        "//runtime/src/iree/hal/driver/amd/xdna:queue",
         "//runtime/src/iree/hal/driver/amd/xdna/image/testdata:add_i32",
         "//runtime/src/iree/hal/driver/amd/xdna/image/testdata:add_i32_npu4",
         "//runtime/src/iree/hal/driver/amd/xdna/image/testdata:mul_i32",

@@ -241,13 +241,29 @@ static iree_status_t iree_hal_task_queue_barrier_default_operands(
   iree_status_t status = iree_ok_status();
   switch (operation->type) {
     case IREE_HAL_TASK_QUEUE_OP_READ:
-      return iree_hal_task_queue_barrier_default_range(
-          operation->read.buffer, operation->read.buffer_offset,
-          operation->read.length, IREE_HAL_MEMORY_ACCESS_WRITE, access);
     case IREE_HAL_TASK_QUEUE_OP_WRITE:
-      return iree_hal_task_queue_barrier_default_range(
-          operation->write.buffer, operation->write.buffer_offset,
-          operation->write.length, IREE_HAL_MEMORY_ACCESS_READ, access);
+      for (iree_host_size_t i = 0;
+           i < operation->file.buffers.count && iree_status_is_ok(status);
+           ++i) {
+        const iree_hal_buffer_binding_t binding =
+            operation->file.buffers.bindings[i];
+        status = iree_hal_task_queue_barrier_default_range(
+            binding.buffer, binding.offset, binding.length,
+            operation->type == IREE_HAL_TASK_QUEUE_OP_READ
+                ? IREE_HAL_MEMORY_ACCESS_WRITE
+                : IREE_HAL_MEMORY_ACCESS_READ,
+            access);
+      }
+      if (iree_status_is_ok(status) && access == IREE_HAL_MEMORY_ACCESS_READ &&
+          operation->file.transfers.type ==
+              IREE_HAL_FILE_TRANSFER_LIST_TYPE_INDIRECT) {
+        const iree_hal_file_transfer_list_t* transfers =
+            &operation->file.transfers;
+        status = iree_hal_task_queue_barrier_default_range(
+            transfers->indirect.count_buffer, transfers->indirect.count_offset,
+            8, IREE_HAL_MEMORY_ACCESS_READ, access);
+      }
+      break;
     case IREE_HAL_TASK_QUEUE_OP_TRANSFER:
       for (iree_host_size_t i = 0;
            i < operation->transfer.operation_count && iree_status_is_ok(status);
@@ -350,11 +366,20 @@ iree_status_t iree_hal_task_queue_memory_barriers_after(
 
 bool iree_hal_task_queue_memory_barriers_file_needs_worker(
     const iree_hal_task_queue_op_t* operation) {
-  return (operation->memory_barriers &&
-          operation->memory_barriers->after_count) ||
-         ((operation->flags & IREE_HAL_TASK_QUEUE_OP_FLAG_AFTER_DEFAULT) &&
-          operation->type == IREE_HAL_TASK_QUEUE_OP_READ &&
-          operation->read.length &&
-          !iree_any_bit_set(iree_hal_buffer_memory_type(operation->read.buffer),
-                            IREE_HAL_MEMORY_TYPE_HOST_COHERENT));
+  if (operation->memory_barriers && operation->memory_barriers->after_count) {
+    return true;
+  }
+  if ((operation->flags & IREE_HAL_TASK_QUEUE_OP_FLAG_AFTER_DEFAULT) &&
+      operation->type == IREE_HAL_TASK_QUEUE_OP_READ) {
+    for (iree_host_size_t i = 0; i < operation->file.buffers.count; ++i) {
+      const iree_hal_buffer_binding_t binding =
+          operation->file.buffers.bindings[i];
+      if (binding.length &&
+          !iree_any_bit_set(iree_hal_buffer_memory_type(binding.buffer),
+                            IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }

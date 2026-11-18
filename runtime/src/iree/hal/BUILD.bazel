@@ -284,8 +284,19 @@ iree_runtime_cc_test(
     deps = [
         ":hal",
         "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_fuzz(
+    name = "file_transfer_fuzz",
+    srcs = ["file_transfer_fuzz.cc"],
+    deps = [
+        ":hal",
+        "//runtime/src/iree/base",
     ],
 )
 

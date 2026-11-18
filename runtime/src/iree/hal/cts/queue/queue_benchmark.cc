@@ -335,8 +335,9 @@ class TransferChain {
     const iree_hal_semaphore_list_t waits = {1, &timeline_, &submitted_value_};
     const iree_hal_semaphore_list_t signals = {1, &timeline_, &next_value};
     if (iree_status_is_ok(status)) {
-      status = iree_hal_queue_write(queue_, waits, signals, buffer_, 0, file, 0,
-                                    length, nullptr, IREE_HAL_WRITE_FLAG_NONE);
+      status = iree_hal_queue_write_linear(queue_, waits, signals, buffer_, 0,
+                                           file, 0, length, nullptr,
+                                           IREE_HAL_WRITE_FLAG_NONE);
       if (iree_status_is_ok(status)) {
         submitted_value_ = next_value++;
       }
@@ -352,8 +353,9 @@ class TransferChain {
       }
     }
     if (iree_status_is_ok(status)) {
-      status = iree_hal_queue_read(queue_, waits, signals, file, 0, buffer_, 0,
-                                   length, nullptr, IREE_HAL_READ_FLAG_NONE);
+      status = iree_hal_queue_read_linear(queue_, waits, signals, file, 0,
+                                          buffer_, 0, length, nullptr,
+                                          IREE_HAL_READ_FLAG_NONE);
       if (iree_status_is_ok(status)) {
         submitted_value_ = next_value;
       }

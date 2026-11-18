@@ -82,6 +82,29 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "file_transfer",
+    srcs = ["file_transfer.c"],
+    hdrs = ["file_transfer.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "file_transfer_test",
+    srcs = ["file_transfer_test.cc"],
+    deps = [
+        ":file_transfer",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "files",
     srcs = [
         "fd_file.c",

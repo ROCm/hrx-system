@@ -223,27 +223,27 @@ static inline bool iree_hal_semaphore_list_is_empty(
   return semaphore_list.count == 0;
 }
 
-// Describes a subrange of a buffer bound to a command-buffer binding slot.
+// Describes a subrange of a buffer bound to an operation binding slot.
 typedef struct iree_hal_buffer_binding_t {
-  // Buffer bound to the slot. Unowned. May be NULL when the slot is unused by
-  // the submitted command buffer.
+  // Buffer bound to the slot. Unowned. Command-buffer execution permits NULL
+  // for unused slots; file transfers require every provided binding to be
+  // valid.
   iree_hal_buffer_t* buffer;
 
   // Byte offset into |buffer| where the binding begins.
   iree_device_size_t offset;
 
-  // Byte length of the buffer range available to the command buffer.
+  // Byte length of the buffer range available to the operation.
   // May be IREE_HAL_WHOLE_BUFFER.
   iree_device_size_t length;
 } iree_hal_buffer_binding_t;
 
-// Binding table provided when executing an indirect command buffer.
-// The table storage is captured before iree_hal_queue_execute returns.
+// Binding table captured before the queue operation returns.
 typedef struct iree_hal_buffer_binding_table_t {
   // Number of entries in |bindings|.
   iree_host_size_t count;
 
-  // Binding entries indexed by command-buffer binding slot. Unowned.
+  // Binding entries indexed by operation binding slot. Unowned.
   const iree_hal_buffer_binding_t* bindings;
 } iree_hal_buffer_binding_table_t;
 
@@ -608,6 +608,115 @@ typedef uint64_t iree_hal_write_flags_t;
 enum iree_hal_write_flag_bits_t {
   IREE_HAL_WRITE_FLAG_NONE = 0,
 };
+
+typedef struct iree_hal_transfer_strides_t {
+  // Byte displacement between consecutive rows.
+  uint64_t row_stride;
+  // Byte displacement between consecutive slices.
+  uint64_t slice_stride;
+} iree_hal_transfer_strides_t;
+
+typedef struct iree_hal_file_binding_t {
+  // Borrowed file; an accepted operation retains this resource through use.
+  iree_hal_file_t* file;
+  // Byte origin within the file's existing logical range.
+  uint64_t offset;
+  // Accessible bytes beginning at offset; explicit, without a whole-file
+  // sentinel.
+  uint64_t length;
+} iree_hal_file_binding_t;
+
+typedef struct iree_hal_file_binding_table_t {
+  // Number of entries in bindings.
+  iree_host_size_t count;
+  // Borrowed table storage, copied before the enqueue call returns.
+  const iree_hal_file_binding_t* bindings;
+} iree_hal_file_binding_table_t;
+
+// One host-authored file/buffer region. All geometry is full-width. Offsets
+// are relative to the selected bindings. File and buffer roles do not change
+// when the same description is used with queue_read versus queue_write.
+// Transfers in one list are unordered siblings. Intersecting writes are a
+// caller data race; no quadratic overlap search is performed.
+typedef struct iree_hal_file_transfer_t {
+  // Index into the call's file binding table.
+  uint32_t file_binding;
+  // Index into the call's buffer binding table.
+  uint32_t buffer_binding;
+  // First useful byte relative to the selected file binding.
+  uint64_t file_offset;
+  // First useful byte relative to the selected buffer binding.
+  iree_device_size_t buffer_offset;
+  // Useful contiguous bytes in each row.
+  uint64_t row_length;
+  // Number of rows in each slice.
+  uint64_t row_count;
+  // Number of slices.
+  uint64_t slice_count;
+  // Byte displacements between rows and slices in the file.
+  iree_hal_transfer_strides_t file_strides;
+  // Byte displacements between rows and slices in the buffer.
+  iree_hal_transfer_strides_t buffer_strides;
+} iree_hal_file_transfer_t;
+
+// Fixed 64-byte device-authored encoding, in little-endian 64-bit words.
+// Word | low 48 bits                   | high 16 bits
+//   0  | binding-relative file offset  | file binding index
+//   1  | binding-relative buffer offset| buffer binding index
+//   2  | row length                    | form: 0 linear, 1 strided
+//   3  | file row stride               | row count bits 0-15
+//   4  | buffer row stride             | row count bits 16-31
+//   5  | file slice stride             | slice count bits 0-15
+//   6  | buffer slice stride           | slice count bits 16-31
+//   7  | ignored by finite operations; available to a transport envelope
+//
+// LINEAR implies one row and one slice and never inspects words 3-7. STRIDED
+// decodes words 0-6 and never inspects word 7. Zero row length is a no-op and
+// ignores all other fields. Other zero extents are also no-ops. For nonempty
+// records, forms other than 0/1 are invalid. The enqueue entry point supplies
+// direction, so the same records describe reads and writes unchanged.
+//
+// This defines the payload, not a resident ring's publication protocol. The
+// finite operation's waits publish both records and live count as one group.
+typedef struct iree_hal_file_transfer_record_t {
+  // Aligned wire words; producers construct complete words before storing.
+  uint64_t words[8];
+} iree_hal_file_transfer_record_t;
+
+typedef enum iree_hal_file_transfer_list_type_e {
+  // Host records are copied before enqueue returns, independently of waits.
+  IREE_HAL_FILE_TRANSFER_LIST_TYPE_HOST = 0,
+  // Buffer contents are consumed only after the enqueue waits are satisfied.
+  IREE_HAL_FILE_TRANSFER_LIST_TYPE_INDIRECT = 1,
+} iree_hal_file_transfer_list_type_t;
+
+// Call-time value selecting one metadata acquisition contract. Contains no
+// owned resource or new resource lifetime. The call captures this descriptor.
+typedef struct iree_hal_file_transfer_list_t {
+  // Selects the active member of the union.
+  iree_hal_file_transfer_list_type_t type;
+  union {
+    // Immediately readable host descriptions, borrowed only during enqueue.
+    struct {
+      // Number of values in transfers; zero permits a NULL pointer.
+      iree_host_size_t count;
+      // Full-width descriptions copied during enqueue, never retained by
+      // pointer.
+      const iree_hal_file_transfer_t* transfers;
+    } host;
+    // Deferred record bytes and a runtime-produced count, retained through use.
+    struct {
+      // Direct buffer window of 64-byte records. Resolved length is a multiple
+      // of 64 and defines capacity; the byte offset is at least 8-byte aligned.
+      // A 64-byte-aligned base keeps each record within one 64-byte cache line.
+      iree_hal_buffer_binding_t records;
+      // Buffer containing an aligned little-endian u64 live record count.
+      iree_hal_buffer_t* count_buffer;
+      // Byte offset of that count. The eight-byte access must fit count_buffer.
+      iree_device_size_t count_offset;
+    } indirect;
+  };
+} iree_hal_file_transfer_list_t;
 
 // Identifies the payload active in an iree_hal_transfer_operation_t.
 typedef enum iree_hal_transfer_operation_type_t {
@@ -1154,50 +1263,80 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_download(
     void* target, iree_device_size_t length,
     const iree_hal_queue_barriers_t* barriers);
 
-// Enqueues a file read on the exact hardware |queue|.
+// Enqueues one finite group of file-to-buffer transfers on the exact queue.
 //
-// A non-empty operation retains |source_file| and |target_buffer| until it
-// reaches a terminal state. The file must allow read access and the buffer must
-// allow write access with transfer-target usage. When |source_file| wraps host
-// memory, callers order host writes before the read with
-// |wait_semaphore_list| and do not mutate the source range again until
-// |signal_semaphore_list| is reached.
+// Captures binding tables, waits, signals, barriers, and the list descriptor
+// before returning. HOST additionally captures every host record. INDIRECT
+// retains the records/count buffers without reading their contents until all
+// waits succeed. Caller references may be released after successful capture;
+// the existing device/pool/external-backing lifetime obligations still apply.
 //
-// Device-visible storage-backed files are copied on |queue| through the normal
-// transfer path. Other file representations are handled by the queue
-// implementation.
+// Every provided file and payload-buffer binding is valid and qualified for
+// this direction. The operation retains those resources through their use.
+// Buffer binding lengths may use the existing WHOLE_BUFFER convention; file
+// lengths are explicit. Indirect tables contain at most 65,536 entries each.
+// Direct host records use full uint32 binding indices and full-width geometry.
 //
-// A zero-length read performs no data access, ignores the file, buffer, offset,
-// and flag arguments, and executes |barriers| between the wait and signal
-// dependencies as an empty transfer transaction.
+// At execution, INDIRECT loads the count once, checks it against capacity, and
+// visits only that prefix. Count and live records remain unchanged until the
+// operation retires. Metadata requires READ access and TRANSFER_SOURCE usage;
+// producer requirements (for example STORAGE_WRITE) are additional. CPU-cached
+// host-local metadata with producer visibility permits direct host consumption.
+// Other supported placements use bounded acquisition through existing queue
+// machinery; the API does not require CPU visibility or device atomics.
+//
+// Useful bytes must fit each binding window before its origin is added. Strides
+// are explicit byte distances; unused dimensions ignore their strides. Any
+// zero extent performs no data access. Padding is not copied or overwritten.
+// Empty groups still execute barriers between waits and signals. Queue-visible
+// payloads are accessed only after waits and before successful signals.
+//
+// Synchronous rejection schedules nothing and leaves signal semaphores alone.
+// After acceptance, failure stops further admission and joins all accepted I/O,
+// copies, and visibility work before this operation publishes terminal failure.
+// Targets may contain a partially transferred prefix/subset. A semaphore failed
+// independently of this operation is not proof that its accesses have retired.
+//
+// Native file mode/alignment requirements remain in force. A strided or batched
+// description does not promise one syscall, bypass DIRECT requirements, or
+// authorize read-modify-write of file gaps. NULL barriers retain the existing
+// conservative queue barrier semantics.
 IREE_API_EXPORT iree_status_t iree_hal_queue_read(
-    iree_hal_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_queue_t* queue, iree_hal_semaphore_list_t wait_semaphore_list,
+    iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_file_binding_table_t source_files,
+    iree_hal_buffer_binding_table_t target_buffers,
+    const iree_hal_file_transfer_list_t* transfers,
+    const iree_hal_queue_barriers_t* barriers, iree_hal_read_flags_t flags);
+
+// Enqueues buffer-to-file transfers with queue_read's capture, indirect-count,
+// unordered-sibling, visibility, and terminal-retirement contracts. Geometry
+// remains named file/buffer; reversing direction requires no record repacking.
+// Write completion does not promise persistence across crashes or power loss.
+IREE_API_EXPORT iree_status_t iree_hal_queue_write(
+    iree_hal_queue_t* queue, iree_hal_semaphore_list_t wait_semaphore_list,
+    iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_binding_table_t source_buffers,
+    iree_hal_file_binding_table_t target_files,
+    const iree_hal_file_transfer_list_t* transfers,
+    const iree_hal_queue_barriers_t* barriers, iree_hal_write_flags_t flags);
+
+// Single-range conveniences construct one HOST transfer and one binding at
+// each endpoint, then use the same native group implementation. Length zero
+// performs no data access: endpoints, offsets, and flags are ignored; barriers
+// execute between the waits and signals.
+IREE_API_EXPORT iree_status_t iree_hal_queue_read_linear(
+    iree_hal_queue_t* queue, iree_hal_semaphore_list_t wait_semaphore_list,
+    iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_file_t* source_file, uint64_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, const iree_hal_queue_barriers_t* barriers,
     iree_hal_read_flags_t flags);
 
-// Enqueues a file write on the exact hardware |queue|.
-//
-// A non-empty operation retains |source_buffer| and |target_file| until it
-// reaches a terminal state. The buffer must allow read access with
-// transfer-source usage and the file must allow write access. When
-// |target_file| wraps host memory, callers do not access the target range until
-// |signal_semaphore_list| is reached.
-//
-// Device-visible storage-backed files are copied on |queue| through the normal
-// transfer path. Other file representations are handled by the queue
-// implementation.
-//
-// A zero-length write performs no data access, ignores the buffer, file,
-// offset, and flag arguments, and executes |barriers| between the wait and
-// signal dependencies as an empty transfer transaction.
-IREE_API_EXPORT iree_status_t iree_hal_queue_write(
-    iree_hal_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
+// Single-range write with the same empty-operation semantics as read_linear.
+IREE_API_EXPORT iree_status_t iree_hal_queue_write_linear(
+    iree_hal_queue_t* queue, iree_hal_semaphore_list_t wait_semaphore_list,
+    iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_hal_file_t* target_file, uint64_t target_offset,
     iree_device_size_t length, const iree_hal_queue_barriers_t* barriers,
@@ -1356,25 +1495,24 @@ typedef struct iree_hal_queue_vtable_t {
       const iree_hal_transfer_operation_t* operations,
       const iree_hal_queue_barriers_t* barriers);
 
-  // Enqueues a file read operation.
+  // Captures and validates a finite file read group before scheduling it.
   iree_status_t(IREE_API_PTR* read)(
-      iree_hal_queue_t* queue,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_file_t* source_file, uint64_t source_offset,
-      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-      iree_device_size_t length, const iree_hal_queue_barriers_t* barriers,
-      iree_hal_read_flags_t flags);
+      iree_hal_queue_t* queue, iree_hal_semaphore_list_t wait_semaphore_list,
+      iree_hal_semaphore_list_t signal_semaphore_list,
+      iree_hal_file_binding_table_t source_files,
+      iree_hal_buffer_binding_table_t target_buffers,
+      const iree_hal_file_transfer_list_t* transfers,
+      const iree_hal_queue_barriers_t* barriers, iree_hal_read_flags_t flags);
 
-  // Enqueues a file write operation.
+  // Captures and validates a finite file write group before scheduling it.
   iree_status_t(IREE_API_PTR* write)(
-      iree_hal_queue_t* queue,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
-      iree_hal_file_t* target_file, uint64_t target_offset,
-      iree_device_size_t length, const iree_hal_queue_barriers_t* barriers,
-      iree_hal_write_flags_t flags);
+      iree_hal_queue_t* queue, iree_hal_semaphore_list_t wait_semaphore_list,
+      iree_hal_semaphore_list_t signal_semaphore_list,
+      iree_hal_buffer_binding_table_t source_buffers,
+      iree_hal_file_binding_table_t target_files,
+      const iree_hal_file_transfer_list_t* transfers,
+      const iree_hal_queue_barriers_t* barriers, iree_hal_write_flags_t flags);
+
   // Optional native queue-ordered mapping submission. NULL selects one captured
   // host call using the reservation backend's synchronous update operation.
   iree_status_t(IREE_API_PTR* map)(iree_hal_queue_t* queue,

@@ -14,6 +14,7 @@
 #include "iree/hal/driver/amd/gpu/queue/file_staging.h"
 #include "iree/hal/driver/amd/gpu/queue/host_wait.h"
 #include "iree/hal/driver/amd/gpu/queue/transfer.h"
+#include "iree/hal/utils/file_transfer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -54,42 +55,37 @@ typedef struct iree_hal_amd_gpu_file_executor_t {
   // trusted global/ranged queue effects and performs no allocation or query.
   void (*add_effects)(iree_hal_queue_t* queue,
                       iree_hal_memory_effects_t effects, void* barrier);
-  // Captures one transfer or, for NULL operation, a barrier. The caller has
-  // already accepted the file operation, resolved dependencies, and prepared
-  // immutable cache recipes. Public queue closure does not reject these
-  // continuations; native queue failure still does. Success owns
-  // captured arguments until callback reports retirement; failure retains no
-  // borrowed payload and invokes no callback. An early failure notification
-  // does not end borrowed payload lifetime.
-  // NULL before/after omits that boundary. Other values point to barrier_size
-  // prepared bytes that remain live through this call.
+  // Captures a bounded transfer window or, for zero count, a barrier. The
+  // caller has already accepted the file operation, resolved dependencies, and
+  // prepared immutable cache recipes. Public queue closure does not reject
+  // these continuations; native queue failure still does. Success owns captured
+  // arguments until callback reports retirement; failure retains no borrowed
+  // payload and invokes no callback. An early failure notification does not end
+  // borrowed payload lifetime. NULL before/after omits that boundary. Other
+  // values point to barrier_size prepared bytes that remain live through this
+  // call.
   iree_status_t (*submit)(
-      iree_hal_queue_t* queue,
-      const iree_hal_amd_gpu_transfer_operation_t* operation,
+      iree_hal_queue_t* queue, iree_host_size_t count,
+      const iree_hal_amd_gpu_transfer_operation_t* operations,
       const void* before, const void* after,
       iree_hal_amd_gpu_retirement_callback_t callback);
 } iree_hal_amd_gpu_file_executor_t;
 
-// The executor is queue-owned and outlives accepted operations.
-// Captures a validated, nonempty queue_read/write transaction. Memory files
-// use their owned host span directly. Buffered platform files use a prepared
-// host view when its device transitions are qualified; other platform transfers
-// use native copies through staging. Device buffers need no public CPU mapping.
-// The before boundary precedes native buffer access. The after boundary and
-// public signals follow every native copy, file request, and host effect.
+// Captures a finite file group. Indirect bytes are acquired only after waits;
+// bounded windows share staging, registration membership, and native copies.
+// Acceptance retains operands through every accepted access and final cache
+// boundary. Synchronous rejection retains nothing and signals nothing.
 // Captured buffer uses end before public signaling, permitting immediate
-// source-pool destruction once completion is observed.
-// Before/after each point to executor->barrier_size prepared bytes, captured
-// before returning. Their representation and application belong to the
-// executor. Failure retains nothing. Success transfers ownership to terminal
-// signaling.
-iree_status_t iree_hal_amd_gpu_file_transfer_submit(
+// source-pool destruction once completion is observed. Before/after each point
+// to executor->barrier_size immutable prepared bytes, copied before returning;
+// their representation and application belong to the queue executor.
+iree_status_t iree_hal_amd_gpu_file_transfer_submit_batch(
     const iree_hal_amd_gpu_file_executor_t* executor,
     iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
-    iree_hal_file_t* file, iree_hal_memory_access_t file_access,
-    uint64_t file_offset, iree_hal_buffer_t* buffer,
-    iree_device_size_t buffer_offset, iree_device_size_t length,
-    const void* before, const void* after);
+    iree_hal_memory_access_t file_access, iree_hal_file_binding_table_t files,
+    iree_hal_buffer_binding_table_t buffers,
+    const iree_hal_file_transfer_list_t* transfers, const void* before,
+    const void* after);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -7,6 +7,7 @@
 """Runtime-specific C/C++ Bazel test macros."""
 
 load("//build_tools/bazel:cc_test.bzl", "iree_cc_test")
+load("//build_tools/bazel:executable.bzl", "iree_executable_test")
 load(
     "//runtime/requirements:package_policy.bzl",
     "apply_runtime_test_policy",
@@ -43,5 +44,19 @@ iree_runtime_cc_test = macro(
     doc = """Defines a runtime C/C++ test target.""",
     implementation = _iree_runtime_cc_test_impl,
     inherit_attrs = iree_cc_test,
+    attrs = {},
+)
+
+def _iree_runtime_executable_test_impl(name, visibility, **kwargs):
+    iree_executable_test(
+        name = name,
+        visibility = visibility,
+        **apply_runtime_test_policy(kwargs)
+    )
+
+iree_runtime_executable_test = macro(
+    doc = "Runs an executable with the runtime package's hardware and resource policy.",
+    implementation = _iree_runtime_executable_test_impl,
+    inherit_attrs = iree_executable_test,
     attrs = {},
 )

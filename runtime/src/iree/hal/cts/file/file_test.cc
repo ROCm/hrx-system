@@ -388,7 +388,7 @@ class FileTest : public CtsTestBase<> {
                         iree_device_size_t length) {
     SemaphoreList empty_wait;
     SemaphoreList read_signal(device_, {0}, {1});
-    IREE_ASSERT_OK(iree_hal_queue_read(
+    IREE_ASSERT_OK(iree_hal_queue_read_linear(
         transfer_queue_, empty_wait, read_signal, source_file, source_offset,
         target_buffer, target_offset, length, /*barriers=*/NULL,
         IREE_HAL_READ_FLAG_NONE));
@@ -403,7 +403,7 @@ class FileTest : public CtsTestBase<> {
                          iree_device_size_t length) {
     SemaphoreList empty_wait;
     SemaphoreList write_signal(device_, {0}, {1});
-    IREE_ASSERT_OK(iree_hal_queue_write(
+    IREE_ASSERT_OK(iree_hal_queue_write_linear(
         transfer_queue_, empty_wait, write_signal, source_buffer, source_offset,
         target_file, target_offset, length, /*barriers=*/NULL,
         IREE_HAL_WRITE_FLAG_NONE));
@@ -426,13 +426,13 @@ class FileTest : public CtsTestBase<> {
     SemaphoreList empty_wait;
     SemaphoreList write_signal(device_, {0}, {1});
     SemaphoreList read_signal(device_, {0}, {1});
-    IREE_ASSERT_OK(iree_hal_queue_write(
+    IREE_ASSERT_OK(iree_hal_queue_write_linear(
         transfer_queue_, empty_wait, write_signal, source_buffer, source_offset,
         file, file_offset, length, &barriers, IREE_HAL_WRITE_FLAG_NONE));
-    IREE_ASSERT_OK(iree_hal_queue_read(transfer_queue_, write_signal,
-                                       read_signal, file, file_offset,
-                                       target_buffer, target_offset, length,
-                                       &barriers, IREE_HAL_READ_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_queue_read_linear(
+        transfer_queue_, write_signal, read_signal, file, file_offset,
+        target_buffer, target_offset, length, &barriers,
+        IREE_HAL_READ_FLAG_NONE));
     iree::Status status = iree_hal_semaphore_list_wait(
         read_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
     if (!status.ok()) {
@@ -851,7 +851,7 @@ TEST_P(FileTest, ReadRejectsFileRangeOverflow) {
   SemaphoreList signal(device_, {0}, {1});
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
-      iree_hal_queue_read(
+      iree_hal_queue_read_linear(
           transfer_queue_, iree_hal_semaphore_list_empty(), signal, file.get(),
           UINT64_MAX - 3, target_buffer.get(), /*target_offset=*/0,
           /*length=*/8, /*barriers=*/NULL, IREE_HAL_READ_FLAG_NONE));
@@ -867,7 +867,7 @@ TEST_P(FileTest, ReadRejectsRangePastBufferEnd) {
   SemaphoreList signal(device_, {0}, {1});
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
-      iree_hal_queue_read(
+      iree_hal_queue_read_linear(
           transfer_queue_, iree_hal_semaphore_list_empty(), signal, file.get(),
           /*source_offset=*/0, target_buffer.get(), /*target_offset=*/15,
           /*length=*/2, /*barriers=*/NULL, IREE_HAL_READ_FLAG_NONE));
@@ -883,11 +883,11 @@ TEST_P(FileTest, WriteRejectsRangePastFileEnd) {
   SemaphoreList signal(device_, {0}, {1});
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
-      iree_hal_queue_write(transfer_queue_, iree_hal_semaphore_list_empty(),
-                           signal, source_buffer.get(), /*source_offset=*/0,
-                           file.get(),
-                           /*target_offset=*/15, /*length=*/2,
-                           /*barriers=*/NULL, IREE_HAL_WRITE_FLAG_NONE));
+      iree_hal_queue_write_linear(
+          transfer_queue_, iree_hal_semaphore_list_empty(), signal,
+          source_buffer.get(), /*source_offset=*/0, file.get(),
+          /*target_offset=*/15, /*length=*/2,
+          /*barriers=*/NULL, IREE_HAL_WRITE_FLAG_NONE));
 }
 
 TEST_P(FileTest, WriteRejectsRangePastBufferEnd) {
@@ -900,11 +900,11 @@ TEST_P(FileTest, WriteRejectsRangePastBufferEnd) {
   SemaphoreList signal(device_, {0}, {1});
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
-      iree_hal_queue_write(transfer_queue_, iree_hal_semaphore_list_empty(),
-                           signal, source_buffer.get(), /*source_offset=*/15,
-                           file.get(),
-                           /*target_offset=*/0, /*length=*/2, /*barriers=*/NULL,
-                           IREE_HAL_WRITE_FLAG_NONE));
+      iree_hal_queue_write_linear(
+          transfer_queue_, iree_hal_semaphore_list_empty(), signal,
+          source_buffer.get(), /*source_offset=*/15, file.get(),
+          /*target_offset=*/0, /*length=*/2, /*barriers=*/NULL,
+          IREE_HAL_WRITE_FLAG_NONE));
 }
 
 TEST_P(FileTest, ReadRejectsIncompatibleBufferAccess) {
@@ -918,11 +918,11 @@ TEST_P(FileTest, ReadRejectsIncompatibleBufferAccess) {
   SemaphoreList access_signal(device_, {0}, {1});
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_PERMISSION_DENIED,
-      iree_hal_queue_read(transfer_queue_, iree_hal_semaphore_list_empty(),
-                          access_signal, file.get(), /*source_offset=*/0,
-                          read_only_buffer.get(), /*target_offset=*/0,
-                          /*length=*/1, /*barriers=*/NULL,
-                          IREE_HAL_READ_FLAG_NONE));
+      iree_hal_queue_read_linear(
+          transfer_queue_, iree_hal_semaphore_list_empty(), access_signal,
+          file.get(), /*source_offset=*/0, read_only_buffer.get(),
+          /*target_offset=*/0,
+          /*length=*/1, /*barriers=*/NULL, IREE_HAL_READ_FLAG_NONE));
 }
 
 TEST_P(FileTest, WriteRejectsIncompatibleBufferAccess) {
@@ -934,13 +934,13 @@ TEST_P(FileTest, WriteRejectsIncompatibleBufferAccess) {
   Ref<iree_hal_buffer_t> write_only_buffer =
       CreateBufferWithAccess(IREE_HAL_MEMORY_ACCESS_WRITE, 16);
   SemaphoreList access_signal(device_, {0}, {1});
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_PERMISSION_DENIED,
-      iree_hal_queue_write(transfer_queue_, iree_hal_semaphore_list_empty(),
-                           access_signal, write_only_buffer.get(),
-                           /*source_offset=*/0, file.get(),
-                           /*target_offset=*/0, /*length=*/1, /*barriers=*/NULL,
-                           IREE_HAL_WRITE_FLAG_NONE));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
+                        iree_hal_queue_write_linear(
+                            transfer_queue_, iree_hal_semaphore_list_empty(),
+                            access_signal, write_only_buffer.get(),
+                            /*source_offset=*/0, file.get(),
+                            /*target_offset=*/0, /*length=*/1,
+                            /*barriers=*/NULL, IREE_HAL_WRITE_FLAG_NONE));
 }
 
 TEST_P(FileTest, ReadRejectsWriteOnlyFile) {
@@ -953,7 +953,7 @@ TEST_P(FileTest, ReadRejectsWriteOnlyFile) {
   SemaphoreList signal(device_, {0}, {1});
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_PERMISSION_DENIED,
-      iree_hal_queue_read(
+      iree_hal_queue_read_linear(
           transfer_queue_, iree_hal_semaphore_list_empty(), signal, file.get(),
           /*source_offset=*/0, target_buffer.get(), /*target_offset=*/0,
           /*length=*/1, /*barriers=*/NULL, IREE_HAL_READ_FLAG_NONE));
@@ -969,11 +969,11 @@ TEST_P(FileTest, WriteRejectsReadOnlyFile) {
   SemaphoreList signal(device_, {0}, {1});
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_PERMISSION_DENIED,
-      iree_hal_queue_write(transfer_queue_, iree_hal_semaphore_list_empty(),
-                           signal, source_buffer.get(), /*source_offset=*/0,
-                           file.get(),
-                           /*target_offset=*/0, /*length=*/1, /*barriers=*/NULL,
-                           IREE_HAL_WRITE_FLAG_NONE));
+      iree_hal_queue_write_linear(
+          transfer_queue_, iree_hal_semaphore_list_empty(), signal,
+          source_buffer.get(), /*source_offset=*/0, file.get(),
+          /*target_offset=*/0, /*length=*/1, /*barriers=*/NULL,
+          IREE_HAL_WRITE_FLAG_NONE));
 }
 
 TEST_P(FileTest, ReadRejectsUnknownFlags) {
@@ -986,7 +986,7 @@ TEST_P(FileTest, ReadRejectsUnknownFlags) {
   SemaphoreList signal(device_, {0}, {1});
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_queue_read(
+      iree_hal_queue_read_linear(
           transfer_queue_, iree_hal_semaphore_list_empty(), signal, file.get(),
           /*source_offset=*/0, target_buffer.get(), /*target_offset=*/0,
           /*length=*/1, /*barriers=*/NULL, (iree_hal_read_flags_t)1u));
@@ -1002,11 +1002,11 @@ TEST_P(FileTest, WriteRejectsUnknownFlags) {
   SemaphoreList signal(device_, {0}, {1});
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_queue_write(transfer_queue_, iree_hal_semaphore_list_empty(),
-                           signal, source_buffer.get(), /*source_offset=*/0,
-                           file.get(),
-                           /*target_offset=*/0, /*length=*/1, /*barriers=*/NULL,
-                           (iree_hal_write_flags_t)1u));
+      iree_hal_queue_write_linear(
+          transfer_queue_, iree_hal_semaphore_list_empty(), signal,
+          source_buffer.get(), /*source_offset=*/0, file.get(),
+          /*target_offset=*/0, /*length=*/1, /*barriers=*/NULL,
+          (iree_hal_write_flags_t)1u));
 }
 
 TEST_P(FileTest, SynchronousReadRejectsRangePastFileEnd) {
@@ -1151,7 +1151,7 @@ TEST_P(AsyncFileTest, ZeroLengthReadForwardsDependencies) {
 
   SemaphoreList wait_signal(device_, {0}, {1});
   SemaphoreList read_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_read(
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(
       transfer_queue_, wait_signal, read_signal, file.get(),
       /*source_offset=*/16, target_buffer.get(), /*target_offset=*/16,
       /*length=*/0, /*barriers=*/NULL, IREE_HAL_READ_FLAG_NONE));
@@ -1176,7 +1176,7 @@ TEST_P(AsyncFileTest, ZeroLengthWriteForwardsDependencies) {
 
   SemaphoreList wait_signal(device_, {0}, {1});
   SemaphoreList write_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_write(
+  IREE_ASSERT_OK(iree_hal_queue_write_linear(
       transfer_queue_, wait_signal, write_signal, source_buffer.get(),
       /*source_offset=*/16, file.get(),
       /*target_offset=*/16, /*length=*/0, /*barriers=*/NULL,
@@ -1234,11 +1234,11 @@ void AsyncFileTest::CheckMemoryFileChainRetainsDeferredResources(
   SemaphoreList host_producer_signal(device_, {0}, {1});
   SemaphoreList read_signal(device_, {0}, {1});
   SemaphoreList write_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_read(
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(
       transfer_queue_, host_producer_signal, read_signal, source_file.get(),
       source_offset, subspan.get(), buffer_offset, transfer_length,
       /*barriers=*/NULL, IREE_HAL_READ_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_queue_write(
+  IREE_ASSERT_OK(iree_hal_queue_write_linear(
       transfer_queue_, read_signal, write_signal, subspan.get(), buffer_offset,
       target_file.get(), target_offset, transfer_length, /*barriers=*/NULL,
       IREE_HAL_WRITE_FLAG_NONE));
@@ -1318,17 +1318,17 @@ TEST_P(AsyncFileTest, NativeFileChainRetainsDeferredResources) {
   const auto request = iree_hal_make_pool_reservation_request(length + 64, 1);
   IREE_ASSERT_OK(iree_hal_queue_alloca(transfer_queue_, producer, allocated,
                                        pool, 1, &request, buffer.out()));
-  iree_status_t status = iree_hal_queue_read(
+  iree_status_t status = iree_hal_queue_read_linear(
       transfer_queue_, allocated, read_done, source_file.get(), file_offset,
       buffer.get(), buffer_offset, length, nullptr, IREE_HAL_READ_FLAG_NONE);
   if (!iree_status_is_ok(status)) {
     iree_hal_semaphore_fail(producer.semaphores[0], iree_status_clone(status));
   }
   IREE_ASSERT_OK(status);
-  status =
-      iree_hal_queue_write(transfer_queue_, read_done, write_done, buffer.get(),
-                           buffer_offset, target_file.get(), file_offset,
-                           length, nullptr, IREE_HAL_WRITE_FLAG_NONE);
+  status = iree_hal_queue_write_linear(transfer_queue_, read_done, write_done,
+                                       buffer.get(), buffer_offset,
+                                       target_file.get(), file_offset, length,
+                                       nullptr, IREE_HAL_WRITE_FLAG_NONE);
   if (!iree_status_is_ok(status)) {
     iree_hal_semaphore_fail(producer.semaphores[0], iree_status_clone(status));
   }
@@ -1381,7 +1381,7 @@ TEST_P(AsyncFileTest, TruncatedFileFailsItsConsumer) {
   // Admit the consumer before the read can fail. An already-failed dependency
   // can reject admission instead of failing an accepted consumer
   // asynchronously.
-  IREE_ASSERT_OK(iree_hal_queue_read(
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(
       transfer_queue_, producer, read_done, file.get(), 0, buffer.get(), 0,
       contents.size(), nullptr, IREE_HAL_READ_FLAG_NONE));
   iree_status_t status =
@@ -1422,11 +1422,11 @@ TEST_P(AsyncFileTest, FailedDependencyPreventsReadAndWrite) {
     SemaphoreList producer(device_, {0}, {1});
     SemaphoreList read_done(device_, {0}, {1});
     SemaphoreList write_done(device_, {0}, {1});
-    IREE_ASSERT_OK(iree_hal_queue_read(transfer_queue_, producer, read_done,
-                                       source_file.get(), 0,
-                                       target_buffer.get(), 0, source.size(),
-                                       nullptr, IREE_HAL_READ_FLAG_NONE));
-    iree_status_t status = iree_hal_queue_write(
+    IREE_ASSERT_OK(iree_hal_queue_read_linear(
+        transfer_queue_, producer, read_done, source_file.get(), 0,
+        target_buffer.get(), 0, source.size(), nullptr,
+        IREE_HAL_READ_FLAG_NONE));
+    iree_status_t status = iree_hal_queue_write_linear(
         transfer_queue_, producer, write_done, source_buffer.get(), 0,
         target_file.get(), 0, source.size(), nullptr, IREE_HAL_WRITE_FLAG_NONE);
     iree_hal_semaphore_fail(

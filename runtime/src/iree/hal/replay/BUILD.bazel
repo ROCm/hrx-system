@@ -114,6 +114,8 @@ iree_runtime_cc_library(
     name = "execute",
     srcs = [
         "execute.c",
+        "execute_file_transfer.c",
+        "execute_file_transfer.h",
         "execute_object.c",
         "execute_object.h",
         "execute_operation.c",
@@ -133,6 +135,7 @@ iree_runtime_cc_library(
         ":format",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:files",
         "//runtime/src/iree/io:file_handle",
     ],
 )
@@ -154,6 +157,8 @@ iree_runtime_cc_library(
         "recorder_executable.h",
         "recorder_file.c",
         "recorder_file.h",
+        "recorder_file_transfer.c",
+        "recorder_file_transfer.h",
         "recorder_pool.c",
         "recorder_pool.h",
         "recorder_queue.c",
@@ -174,6 +179,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:file_transfer",
         "//runtime/src/iree/io:file_handle",
     ],
 )
@@ -231,6 +237,25 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/driver/task/registration",
         "//runtime/src/iree/hal/memory:tlsf_pool",
         "//runtime/src/iree/hal/testing:mock_device",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "execute_file_transfer_test",
+    srcs = ["execute_file_transfer_test.cc"],
+    deps = [
+        ":execute",
+        ":file_reader",
+        ":recorder",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/task/registration",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

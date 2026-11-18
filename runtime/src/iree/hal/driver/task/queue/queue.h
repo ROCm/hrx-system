@@ -39,6 +39,7 @@
 #include "iree/hal/driver/task/command/block_processor.h"
 #include "iree/hal/driver/task/profile.h"
 #include "iree/hal/driver/task/queue/memory_barrier.h"
+#include "iree/hal/utils/file_transfer.h"
 #include "iree/task/executor.h"
 #include "iree/task/process.h"
 #include "iree/task/tuning.h"
@@ -265,22 +266,8 @@ struct iree_hal_task_queue_op_t {
       // True while this operation owns each buffer's deallocation mark.
       bool marks_owned;
     } dealloca;
-    struct {
-      iree_hal_file_t* hal_file;
-      iree_async_file_t* async_file;  // NULL = sync fallback via hal_file.
-      uint64_t file_offset;
-      iree_hal_buffer_t* buffer;
-      iree_device_size_t buffer_offset;
-      iree_device_size_t length;
-    } read;
-    struct {
-      iree_hal_file_t* hal_file;
-      iree_async_file_t* async_file;  // NULL = sync fallback via hal_file.
-      uint64_t file_offset;
-      iree_hal_buffer_t* buffer;
-      iree_device_size_t buffer_offset;
-      iree_device_size_t length;
-    } write;
+    // Captured file operands; their progress state is placed after waits.
+    iree_hal_file_transfer_batch_t file;
     struct {
       // Number of operations in the captured transaction.
       iree_host_size_t operation_count;
@@ -859,21 +846,9 @@ iree_status_t iree_hal_task_queue_submit_dealloca(
     iree_hal_semaphore_list_t wait_semaphores,
     iree_hal_semaphore_list_t signal_semaphores);
 
-iree_status_t iree_hal_task_queue_submit_read(
-    iree_hal_task_queue_t* queue, iree_hal_file_t* source_file,
-    uint64_t source_offset, iree_hal_buffer_t* target_buffer,
-    iree_device_size_t target_offset, iree_device_size_t length,
-    iree_hal_semaphore_list_t wait_semaphores,
-    iree_hal_semaphore_list_t signal_semaphores,
-    const iree_hal_queue_barriers_t* barriers);
-
-iree_status_t iree_hal_task_queue_submit_write(
-    iree_hal_task_queue_t* queue, iree_hal_buffer_t* source_buffer,
-    iree_device_size_t source_offset, iree_hal_file_t* target_file,
-    uint64_t target_offset, iree_device_size_t length,
-    iree_hal_semaphore_list_t wait_semaphores,
-    iree_hal_semaphore_list_t signal_semaphores,
-    const iree_hal_queue_barriers_t* barriers);
+// Begins dependency-ready file work, completing/failing the operation only
+// after every accepted native request and worker access retires.
+void iree_hal_task_queue_issue_file(iree_hal_task_queue_op_t* operation);
 
 iree_status_t iree_hal_task_queue_submit_fill(
     iree_hal_task_queue_t* queue, iree_hal_buffer_t* target_buffer,

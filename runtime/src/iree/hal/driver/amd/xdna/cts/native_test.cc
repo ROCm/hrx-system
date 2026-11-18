@@ -17,6 +17,7 @@
 #include "iree/hal/driver/amd/xdna/image/testdata/add_i32_npu4.h"
 #include "iree/hal/driver/amd/xdna/image/testdata/mul_i32.h"
 #include "iree/hal/driver/amd/xdna/image/testdata/mul_i32_npu4.h"
+#include "iree/hal/driver/amd/xdna/queue.h"
 #include "iree/hal/slab_pool.h"
 #include "iree/hal/utils/file_registry.h"
 #include "iree/io/file_contents.h"
@@ -1035,6 +1036,223 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(IREE_HAL_EXTERNAL_STORAGE_TYPE_NONE,
                       IREE_HAL_EXTERNAL_STORAGE_TYPE_DMA_BUF_FD));
 
+TEST_F(XdnaNativeTest, FiniteFileGroupsCaptureAndRetireTheirLivePrefix) {
+  using iree::hal::cts::Ref;
+  IREE_ASSERT_OK(CreateMemoryPool(IREE_HAL_BUFFER_USAGE_TRANSFER |
+                                  IREE_HAL_BUFFER_USAGE_STORAGE));
+  IREE_ASSERT_OK(iree_async_proactor_pool_create(
+      1, nullptr, iree_async_proactor_pool_options_default(),
+      iree_allocator_system(), &file_pool_));
+  iree_async_proactor_t* file_proactor = nullptr;
+  IREE_ASSERT_OK(iree_async_proactor_pool_get(file_pool_, 0, &file_proactor));
+  constexpr size_t kRows = 65, kCapacity = 68, kOrigin = 32;
+  constexpr size_t kWidth = 90, kFileStride = 192, kBufferStride = 128;
+  constexpr size_t kLength = 2 * kOrigin + kRows * kBufferStride;
+  std::vector<uint8_t> input(2 * kOrigin + kRows * kFileStride, 0xCD);
+  for (size_t i = 0; i < input.size(); ++i) {
+    input[i] = uint8_t(i * 17 + 3);
+  }
+  std::vector<uint8_t> empty(input.size(), 0xCD);
+  iree::testing::TempFilePath input_path("xdna_finite_input");
+  iree::testing::TempFilePath output_path("xdna_finite_output");
+  iree_hal_file_t *input_file = nullptr, *output_file = nullptr;
+  ASSERT_NO_FATAL_FAILURE(ImportNativeFile(
+      input_path.path_view(),
+      iree_make_const_byte_span(input.data(), input.size()),
+      IREE_HAL_MEMORY_ACCESS_READ, file_proactor, &input_file));
+  ASSERT_NO_FATAL_FAILURE(ImportNativeFile(
+      output_path.path_view(),
+      iree_make_const_byte_span(empty.data(), empty.size()),
+      IREE_HAL_MEMORY_ACCESS_WRITE, file_proactor, &output_file));
+  std::vector<uint8_t> memory_output(empty);
+  Ref<iree_hal_file_t> memory_input_file, memory_output_file;
+  auto import_memory = [&](std::vector<uint8_t>& bytes,
+                           iree_hal_memory_access_t access,
+                           iree_hal_file_t** out_file) {
+    iree_io_file_handle_t* handle = nullptr;
+    IREE_ASSERT_OK(iree_io_file_handle_wrap_host_allocation(
+        access == IREE_HAL_MEMORY_ACCESS_READ ? IREE_IO_FILE_ACCESS_READ
+                                              : IREE_IO_FILE_ACCESS_WRITE,
+        iree_make_byte_span(bytes.data(), bytes.size()), {},
+        iree_allocator_system(), &handle));
+    iree_status_t status = iree_hal_file_import(
+        device_, nullptr, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, access, handle, 0,
+        out_file);
+    iree_io_file_handle_release(handle);
+    IREE_ASSERT_OK(status);
+  };
+  ASSERT_NO_FATAL_FAILURE(import_memory(input, IREE_HAL_MEMORY_ACCESS_READ,
+                                        memory_input_file.out()));
+  ASSERT_NO_FATAL_FAILURE(import_memory(
+      memory_output, IREE_HAL_MEMORY_ACCESS_WRITE, memory_output_file.out()));
+  for (bool indirect : {false, true}) {
+    for (size_t count : {size_t{0}, size_t{1}, kRows, kRows + 1}) {
+      const bool invalid = count > kRows;
+      if (invalid && !indirect) {
+        continue;
+      }
+      SCOPED_TRACE(::testing::Message()
+                   << "indirect=" << indirect << ", count=" << count);
+      IREE_ASSERT_OK(iree_io_file_contents_write(
+          output_path.path_view(),
+          iree_make_const_byte_span(empty.data(), empty.size()),
+          iree_allocator_system()));
+      std::copy(empty.begin(), empty.end(), memory_output.begin());
+      Ref<iree_hal_buffer_t> payload, metadata, independent;
+      std::array<uint64_t, 8 + kCapacity * 8> words;
+      words.fill(UINT64_MAX);
+      words[0] = count;
+      std::array<iree_hal_file_transfer_t, kRows> rows = {};
+      std::vector<uint8_t> expected(kLength, 0xA5);
+      std::vector<uint8_t> expected_file(empty);
+      std::vector<uint8_t> expected_memory(empty);
+      for (size_t i = 0; i < std::min(count, kRows); ++i) {
+        // A single destination binding alternates native I/O and CPU copies.
+        // Both paths publish only their own useful rows and preserve padding.
+        const uint32_t file_index = static_cast<uint32_t>(!invalid && (i & 1));
+        rows[i] = {
+            file_index, 0, i * kFileStride, i * kBufferStride, kWidth, 1, 1,
+            {},         {}};
+        words[8 + i * 8] = i * kFileStride | (uint64_t{file_index} << 48);
+        words[9 + i * 8] = i * kBufferStride;
+        words[10 + i * 8] = kWidth;
+        memcpy(expected.data() + kOrigin + i * kBufferStride,
+               input.data() + kOrigin + i * kFileStride, kWidth);
+        auto& output = file_index ? expected_memory : expected_file;
+        memcpy(output.data() + kOrigin + i * kFileStride,
+               input.data() + kOrigin + i * kFileStride, kWidth);
+      }
+      if (invalid) {
+        // Malformed metadata follows two full native windows. Completion must
+        // retire their accepted I/O before exposing the validation failure.
+        words[8 + kRows * 8] = UINT64_C(2) << 48;
+        words[9 + kRows * 8] = 0;
+        words[10 + kRows * 8] = kWidth;
+      }
+      IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+          memory_pool_, iree_hal_make_pool_reservation_request(kLength, 64),
+          iree_infinite_timeout(), payload.out()));
+      IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+          memory_pool_,
+          iree_hal_make_pool_reservation_request(sizeof(words), 64),
+          iree_infinite_timeout(), metadata.out()));
+      IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+          memory_pool_,
+          iree_hal_make_pool_reservation_request(sizeof(uint32_t), 64),
+          iree_infinite_timeout(), independent.out()));
+      const uint8_t guard = 0xA5;
+      IREE_ASSERT_OK(iree_hal_buffer_map_fill(payload, 0, kLength, &guard, 1));
+      iree_hal_semaphore_t *gate = nullptr, *ready = nullptr, *loaded = nullptr;
+      iree_hal_semaphore_t *written = nullptr, *finished = nullptr,
+                           *unrelated = nullptr;
+      ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&gate));
+      ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&ready));
+      ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&loaded));
+      ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&written));
+      ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&finished));
+      ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&unrelated));
+      uint64_t one = 1, two = 2;
+      IREE_ASSERT_OK(iree_hal_queue_upload(
+          queue_, {1, &gate, &one}, {1, &ready, &one}, words.data(), metadata,
+          0, sizeof(words), nullptr));
+      std::array<iree_hal_file_binding_t, 2> sources = {{
+          {input_file, kOrigin, kRows * kFileStride},
+          {memory_input_file, kOrigin, kRows * kFileStride},
+      }};
+      std::array<iree_hal_file_binding_t, 2> targets = {{
+          {output_file, kOrigin, kRows * kFileStride},
+          {memory_output_file, kOrigin, kRows * kFileStride},
+      }};
+      iree_hal_buffer_binding_t buffer = {payload, kOrigin,
+                                          kRows * kBufferStride};
+      iree_hal_file_transfer_list_t list = {};
+      if (indirect) {
+        list.type = IREE_HAL_FILE_TRANSFER_LIST_TYPE_INDIRECT;
+        list.indirect = {{metadata, 64, kCapacity * 64}, metadata, 0};
+      } else {
+        list.host = {count, rows.data()};
+      }
+      iree_hal_semaphore_t* tail = ready;
+      iree_status_t status =
+          iree_hal_queue_read(queue_, {1, &ready, &one}, {1, &loaded, &one},
+                              {sources.size(), sources.data()}, {1, &buffer},
+                              &list, nullptr, IREE_HAL_READ_FLAG_NONE);
+      if (iree_status_is_ok(status)) {
+        tail = loaded;
+        if (!invalid) {
+          status = iree_hal_queue_write(queue_, {1, &loaded, &one},
+                                        {1, &written, &one}, {1, &buffer},
+                                        {targets.size(), targets.data()}, &list,
+                                        nullptr, IREE_HAL_WRITE_FLAG_NONE);
+        }
+      }
+      std::vector<uint8_t> actual(kLength);
+      if (iree_status_is_ok(status) && !invalid) {
+        tail = written;
+        status = iree_hal_queue_download(queue_, {1, &written, &one},
+                                         {1, &finished, &one}, payload, 0,
+                                         actual.data(), actual.size(), nullptr);
+      }
+      if (iree_status_is_ok(status) && !invalid) {
+        tail = finished;
+      }
+      uint32_t value = 0;
+      const uint32_t pattern = 0x35791ACE;
+      uint64_t independent_tail = 0;
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_queue_fill(queue_, {}, {1, &unrelated, &one},
+                                     independent, 0, sizeof(value), &pattern,
+                                     sizeof(pattern), nullptr, 0);
+      }
+      if (iree_status_is_ok(status)) {
+        independent_tail = one;
+        status = iree_hal_queue_download(queue_, {1, &unrelated, &one},
+                                         {1, &unrelated, &two}, independent, 0,
+                                         &value, sizeof(value), nullptr);
+        if (iree_status_is_ok(status)) {
+          independent_tail = two;
+        }
+      }
+      if (independent_tail) {
+        status = iree_status_join(
+            status, iree_hal_semaphore_wait(unrelated, independent_tail,
+                                            iree_infinite_timeout(), 0));
+      }
+      if (iree_status_is_ok(status)) {
+        EXPECT_EQ(value, pattern);
+      }
+      sources.fill({});
+      targets.fill({});
+      buffer = {};
+      list = {};
+      rows.fill({});
+      payload.reset();
+      metadata.reset();
+      IREE_EXPECT_OK(iree_hal_semaphore_signal(gate, one, nullptr));
+      status = iree_status_join(
+          status,
+          iree_hal_semaphore_wait(tail, one, iree_infinite_timeout(), 0));
+      if (invalid) {
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE, status);
+        continue;
+      }
+      IREE_ASSERT_OK(status);
+      EXPECT_EQ(actual, expected);
+      EXPECT_EQ(memory_output, expected_memory);
+      iree_io_file_contents_t* output = nullptr;
+      IREE_ASSERT_OK(iree_io_file_contents_read(
+          output_path.path_view(), iree_allocator_system(), &output));
+      EXPECT_EQ(output->buffer.data_length, expected_file.size());
+      if (output->buffer.data_length == expected_file.size()) {
+        EXPECT_EQ(memcmp(output->buffer.data, expected_file.data(),
+                         expected_file.size()),
+                  0);
+      }
+      iree_io_file_contents_free(output);
+    }
+  }
+}
+
 TEST_F(XdnaNativeTest, FilesRoundTripThroughDeferredDeviceOnlyBuffers) {
   IREE_ASSERT_OK(CreateMemoryPool(
       IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,
@@ -1088,7 +1306,7 @@ TEST_F(XdnaNativeTest, FilesRoundTripThroughDeferredDeviceOnlyBuffers) {
 
   // Consumers arrive before producers, and all public resource references are
   // released before the start gate opens. No buffer backing exists at capture.
-  IREE_ASSERT_OK(iree_hal_queue_write(
+  IREE_ASSERT_OK(iree_hal_queue_write_linear(
       queue_, {1, &progress, &computed}, {1, &progress, &written}, roots[2], 0,
       output_file, kBytes, 3 * kBytes, nullptr, IREE_HAL_WRITE_FLAG_NONE));
   const iree_hal_buffer_ref_t bindings[] = {
@@ -1101,14 +1319,14 @@ TEST_F(XdnaNativeTest, FilesRoundTripThroughDeferredDeviceOnlyBuffers) {
       executable_, function_, iree_hal_make_static_dispatch_config(1, 1, 1), {},
       {IREE_ARRAYSIZE(bindings), bindings}, nullptr,
       IREE_HAL_DISPATCH_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_queue_read(queue_, {1, &progress, &lhs_loaded},
-                                     {1, &progress, &rhs_loaded}, input_file,
-                                     2 * kBytes, roots[1], kBytes, kBytes,
-                                     nullptr, IREE_HAL_READ_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_queue_read(queue_, {1, &progress, &initialized},
-                                     {1, &progress, &lhs_loaded}, input_file,
-                                     kBytes, roots[0], kBytes, kBytes, nullptr,
-                                     IREE_HAL_READ_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(
+      queue_, {1, &progress, &lhs_loaded}, {1, &progress, &rhs_loaded},
+      input_file, 2 * kBytes, roots[1], kBytes, kBytes, nullptr,
+      IREE_HAL_READ_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(
+      queue_, {1, &progress, &initialized}, {1, &progress, &lhs_loaded},
+      input_file, kBytes, roots[0], kBytes, kBytes, nullptr,
+      IREE_HAL_READ_FLAG_NONE));
   const uint8_t guard = 0xA5;
   std::array<iree_hal_transfer_operation_t, 3> fills = {};
   for (size_t i = 0; i < fills.size(); ++i) {
@@ -1176,12 +1394,12 @@ TEST_F(XdnaNativeTest, FileIoReturnsFromAnIndependentProactor) {
   iree_hal_semaphore_t* progress = nullptr;
   ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&progress));
   uint64_t read = 1, written = 2;
-  IREE_ASSERT_OK(iree_hal_queue_write(
+  IREE_ASSERT_OK(iree_hal_queue_write_linear(
       queue_, {1, &progress, &read}, {1, &progress, &written}, buffer, 0, file,
       2 * kBytes, kBytes, nullptr, IREE_HAL_WRITE_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_queue_read(queue_, {}, {1, &progress, &read}, file,
-                                     kBytes, buffer, 0, kBytes, nullptr,
-                                     IREE_HAL_READ_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(queue_, {}, {1, &progress, &read},
+                                            file, kBytes, buffer, 0, kBytes,
+                                            nullptr, IREE_HAL_READ_FLAG_NONE));
   for (auto* buffer : buffers_) {
     iree_hal_buffer_release(buffer);
   }
@@ -1229,9 +1447,9 @@ TEST_F(XdnaNativeTest, TruncatedFileFailsItsConsumerAndRetiresIo) {
   ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&consumer));
   ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&independent));
   uint64_t value = 1;
-  IREE_ASSERT_OK(iree_hal_queue_read(queue_, {}, {1, &failed, &value}, file, 0,
-                                     buffer, 0, kBytes, nullptr,
-                                     IREE_HAL_READ_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(queue_, {}, {1, &failed, &value},
+                                            file, 0, buffer, 0, kBytes, nullptr,
+                                            IREE_HAL_READ_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_queue_barrier(queue_, {1, &failed, &value},
                                         {1, &consumer, &value}, nullptr,
                                         IREE_HAL_QUEUE_BARRIER_FLAG_NONE));

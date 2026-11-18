@@ -231,14 +231,17 @@ iree_status_t iree_hal_amd_gpu_transfer_initialize(
   return status;
 }
 
-void iree_hal_amd_gpu_transfer_initialize_operation(
+void iree_hal_amd_gpu_transfer_initialize_operations(
     iree_hal_amd_gpu_transfer_staging_limits_t staging_limits,
-    const iree_hal_amd_gpu_transfer_operation_t* operation,
+    iree_host_size_t count,
+    const iree_hal_amd_gpu_transfer_operation_t* operations,
     iree_hal_amd_gpu_transfer_operation_t* storage,
     iree_hal_amd_gpu_transfer_t* out_transfer) {
   *out_transfer = (iree_hal_amd_gpu_transfer_t){.operations = storage};
-  iree_hal_amd_gpu_transfer_append_operation(staging_limits, operation,
-                                             out_transfer);
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    iree_hal_amd_gpu_transfer_append_operation(staging_limits, &operations[i],
+                                               out_transfer);
+  }
 }
 
 void iree_hal_amd_gpu_transfer_deinitialize(

@@ -193,7 +193,7 @@ TEST_P(GpuTransferQueueTest,
   auto* gate_handle = gate.get();
   auto* done_handle = done.get();
   uint64_t one = 1, read = 1, copied = 2, computed = 3, written = 4;
-  IREE_ASSERT_OK(iree_hal_queue_read(
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(
       transfer_, {1, &gate_handle, &one}, {1, &done_handle, &read}, file,
       kFileOffset, buffers[0], kBufferOffset, kLength, nullptr, 0));
   // Growth happens with both kinds of resident recordings already registered
@@ -213,7 +213,7 @@ TEST_P(GpuTransferQueueTest,
   IREE_ASSERT_OK(iree_hal_queue_execute(
       extra_compute, {1, &done_handle, &copied}, {1, &done_handle, &computed},
       compute, {1, &bindings[1]}, 0));
-  IREE_ASSERT_OK(iree_hal_queue_write(
+  IREE_ASSERT_OK(iree_hal_queue_write_linear(
       transfer_, {1, &done_handle, &computed}, {1, &done_handle, &written},
       buffers[1], kBufferOffset, file, kFileOffset + kLength, kLength, nullptr,
       0));

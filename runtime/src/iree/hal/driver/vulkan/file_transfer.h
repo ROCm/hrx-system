@@ -14,20 +14,18 @@
 extern "C" {
 #endif
 
-// Transfers a validated native file range through |buffer| after its queue
-// dependencies retire. |file_access| is READ (file to buffer) or WRITE (buffer
-// to file). The operation captures buffer/file lifetimes and terminal
-// semaphores. Backing is resolved at readiness: imported host backing receives
-// native I/O directly; device-only storage uses the queue's staging ring.
-// Direct I/O uses bounded request metadata with no payload allocation, mapping,
-// or staging copy.
+// Captures a finite file group and schedules it after its producer
+// dependencies. File/buffer tables are retained once. Indirect metadata is
+// acquired only for the live prefix; device-private metadata uses bounded
+// staging downloads. Native files access original imported host backing
+// directly when admitted. Other paths share the queue's existing staging slots
+// and native copy batches.
 iree_status_t iree_hal_vulkan_queue_submit_file_transfer(
-    iree_hal_vulkan_queue_t* queue,
-    iree_hal_semaphore_list_t wait_semaphore_list,
-    iree_hal_semaphore_list_t signal_semaphore_list, iree_hal_file_t* file,
-    iree_hal_memory_access_t file_access, uint64_t file_offset,
-    iree_hal_buffer_t* buffer, iree_device_size_t buffer_offset,
-    iree_device_size_t length,
+    iree_hal_vulkan_queue_t* queue, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_file_binding_table_t files,
+    iree_hal_buffer_binding_table_t buffers,
+    const iree_hal_file_transfer_list_t* transfers,
+    iree_hal_memory_access_t file_access,
     const iree_hal_vulkan_queue_barriers_t* barriers);
 
 #ifdef __cplusplus

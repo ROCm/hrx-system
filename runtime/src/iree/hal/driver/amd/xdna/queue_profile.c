@@ -130,11 +130,30 @@ iree_status_t iree_hal_amd_xdna_operation_profile_capture(
       }
       break;
     case IREE_HAL_AMD_XDNA_OPERATION_FILE:
-      event->type =
-          operation->file.transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ
-              ? IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_READ
-              : IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_WRITE;
-      event->payload_length = operation->file.transfer->length;
+      event->type = operation->file.access == IREE_HAL_MEMORY_ACCESS_READ
+                        ? IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_READ
+                        : IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_WRITE;
+      event->operation_count = 0;
+      if (operation->file.batch.transfers.type ==
+          IREE_HAL_FILE_TRANSFER_LIST_TYPE_HOST) {
+        const iree_hal_file_transfer_list_t* list =
+            &operation->file.batch.transfers;
+        for (iree_host_size_t i = 0; i < list->host.count; ++i) {
+          const iree_hal_file_transfer_t* transfer = &list->host.transfers[i];
+          uint64_t length = transfer->row_length;
+          length =
+              transfer->row_count && length > UINT64_MAX / transfer->row_count
+                  ? UINT64_MAX
+                  : length * transfer->row_count;
+          length = transfer->slice_count &&
+                           length > UINT64_MAX / transfer->slice_count
+                       ? UINT64_MAX
+                       : length * transfer->slice_count;
+          event->payload_length +=
+              iree_min(length, UINT64_MAX - event->payload_length);
+          event->operation_count += event->operation_count < UINT32_MAX;
+        }
+      }
       break;
   }
   return iree_ok_status();

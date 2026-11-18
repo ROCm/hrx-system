@@ -192,8 +192,8 @@ static iree_status_t iree_hal_amd_gpu_sdma_queue_transfer(
 }
 
 static iree_status_t iree_hal_amd_gpu_sdma_file_submit(
-    iree_hal_queue_t* base,
-    const iree_hal_amd_gpu_transfer_operation_t* transfer, const void* before,
+    iree_hal_queue_t* base, iree_host_size_t count,
+    const iree_hal_amd_gpu_transfer_operation_t* transfers, const void* before,
     const void* after, iree_hal_amd_gpu_retirement_callback_t callback) {
   iree_hal_amd_gpu_sdma_queue_t* queue = (void*)base;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_sdma_check_failure(queue));
@@ -203,23 +203,23 @@ static iree_status_t iree_hal_amd_gpu_sdma_file_submit(
   void* payload = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_sdma_operation_create(
       queue, iree_hal_semaphore_list_empty(), iree_hal_semaphore_list_empty(),
-      transfer ? sizeof(*transfer) : 0, &barriers, &operation, &payload));
+      count * sizeof(*transfers), &barriers, &operation, &payload));
   operation->callback = callback;
   operation->before =
       before ? *(const iree_hal_amd_gpu_sdma_barrier_t*)before : 0;
   operation->after = after ? *(const iree_hal_amd_gpu_sdma_barrier_t*)after : 0;
-  if (transfer) {
+  if (count) {
     operation->kind = IREE_HAL_AMD_GPU_SDMA_OPERATION_TRANSFER;
-    iree_hal_amd_gpu_transfer_initialize_operation(
+    iree_hal_amd_gpu_transfer_initialize_operations(
         (iree_hal_amd_gpu_transfer_staging_limits_t){
             queue->options.staging_capacity, queue->options.staging_capacity},
-        transfer, payload, &operation->transfer);
+        count, transfers, payload, &operation->transfer);
   }
   iree_hal_amd_gpu_sdma_profile(operation,
-                                transfer
+                                count
                                     ? IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_TRANSFER
                                     : IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_BARRIER,
-                                transfer ? 1 : 0);
+                                count);
   iree_hal_amd_gpu_sdma_execution_submit(operation);
   return iree_ok_status();
 }
@@ -230,40 +230,46 @@ static void iree_hal_amd_gpu_sdma_file_effects(
       iree_hal_amd_gpu_sdma_barrier_effects(effects);
 }
 
-static iree_status_t iree_hal_amd_gpu_sdma_queue_read(
+static iree_status_t iree_hal_amd_gpu_sdma_queue_file_transfer(
     iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals, iree_hal_file_t* source,
-    uint64_t source_offset, iree_hal_buffer_t* target,
-    iree_device_size_t target_offset, iree_device_size_t length,
-    const iree_hal_queue_barriers_t* barriers, iree_hal_read_flags_t flags) {
+    iree_hal_semaphore_list_t signals, iree_hal_file_binding_table_t files,
+    iree_hal_buffer_binding_table_t buffers,
+    const iree_hal_file_transfer_list_t* transfers,
+    iree_hal_memory_access_t file_access,
+    const iree_hal_queue_barriers_t* barriers) {
   iree_hal_amd_gpu_sdma_queue_t* queue = (void*)base;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_sdma_check_acceptance(queue));
   const iree_hal_amd_gpu_sdma_barrier_t before =
       iree_hal_amd_gpu_sdma_barrier_prepare(barriers ? barriers->before : NULL);
   const iree_hal_amd_gpu_sdma_barrier_t after =
       iree_hal_amd_gpu_sdma_barrier_prepare(barriers ? barriers->after : NULL);
-  return iree_hal_amd_gpu_file_transfer_submit(
-      &queue->file_executor, waits, signals, source,
-      IREE_HAL_MEMORY_ACCESS_READ, source_offset, target, target_offset, length,
-      &before, &after);
+  return iree_hal_amd_gpu_file_transfer_submit_batch(
+      &queue->file_executor, waits, signals, file_access, files, buffers,
+      transfers, &before, &after);
+}
+
+static iree_status_t iree_hal_amd_gpu_sdma_queue_read(
+    iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_file_binding_table_t files,
+    iree_hal_buffer_binding_table_t buffers,
+    const iree_hal_file_transfer_list_t* transfers,
+    const iree_hal_queue_barriers_t* barriers, iree_hal_read_flags_t flags) {
+  (void)flags;
+  return iree_hal_amd_gpu_sdma_queue_file_transfer(
+      base, waits, signals, files, buffers, transfers,
+      IREE_HAL_MEMORY_ACCESS_READ, barriers);
 }
 
 static iree_status_t iree_hal_amd_gpu_sdma_queue_write(
     iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals, iree_hal_buffer_t* source,
-    iree_device_size_t source_offset, iree_hal_file_t* target,
-    uint64_t target_offset, iree_device_size_t length,
+    iree_hal_semaphore_list_t signals, iree_hal_buffer_binding_table_t buffers,
+    iree_hal_file_binding_table_t files,
+    const iree_hal_file_transfer_list_t* transfers,
     const iree_hal_queue_barriers_t* barriers, iree_hal_write_flags_t flags) {
-  iree_hal_amd_gpu_sdma_queue_t* queue = (void*)base;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_sdma_check_acceptance(queue));
-  const iree_hal_amd_gpu_sdma_barrier_t before =
-      iree_hal_amd_gpu_sdma_barrier_prepare(barriers ? barriers->before : NULL);
-  const iree_hal_amd_gpu_sdma_barrier_t after =
-      iree_hal_amd_gpu_sdma_barrier_prepare(barriers ? barriers->after : NULL);
-  return iree_hal_amd_gpu_file_transfer_submit(
-      &queue->file_executor, waits, signals, target,
-      IREE_HAL_MEMORY_ACCESS_WRITE, target_offset, source, source_offset,
-      length, &before, &after);
+  (void)flags;
+  return iree_hal_amd_gpu_sdma_queue_file_transfer(
+      base, waits, signals, files, buffers, transfers,
+      IREE_HAL_MEMORY_ACCESS_WRITE, barriers);
 }
 
 static iree_status_t iree_hal_amd_gpu_sdma_queue_timestamp(

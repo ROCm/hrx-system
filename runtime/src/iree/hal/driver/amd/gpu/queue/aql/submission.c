@@ -388,8 +388,8 @@ iree_status_t iree_hal_amd_gpu_aql_submission_transfer(
 }
 
 iree_status_t iree_hal_amd_gpu_aql_submission_file(
-    iree_hal_amd_gpu_capture_pool_t* pool,
-    const iree_hal_amd_gpu_transfer_operation_t* operation, uint32_t before,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t count,
+    const iree_hal_amd_gpu_transfer_operation_t* operations, uint32_t before,
     uint32_t after, iree_hal_amd_gpu_retirement_callback_t callback,
     iree_hal_amd_gpu_aql_submission_t** out_submission) {
   *out_submission = NULL;
@@ -398,17 +398,17 @@ iree_status_t iree_hal_amd_gpu_aql_submission_file(
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_submission_acquire(
       pool, NULL, IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER,
       iree_hal_semaphore_list_empty(), iree_hal_semaphore_list_empty(),
-      operation ? sizeof(*operation) : 0, &submission, &payload));
+      count * sizeof(*operations), &submission, &payload));
   submission->before = before;
   submission->after = after;
   iree_atomic_ref_count_init(&submission->transfer.ref_count);
-  if (operation) {
-    iree_hal_amd_gpu_transfer_initialize_operation(
+  if (count) {
+    iree_hal_amd_gpu_transfer_initialize_operations(
         (iree_hal_amd_gpu_transfer_staging_limits_t){
             .upload_capacity = IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_UPLOAD_LENGTH,
             .download_capacity =
                 IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_DOWNLOAD_LENGTH},
-        operation, payload, &submission->transfer.capture);
+        count, operations, payload, &submission->transfer.capture);
   }
   submission->transfer.callback = callback;
   *out_submission = submission;

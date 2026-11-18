@@ -66,6 +66,20 @@ iree_status_t iree_hal_file_request_prepare(
     uint64_t file_offset, uint64_t remaining_length, iree_async_span_t span,
     iree_hal_file_request_t* out_request);
 
+// Binds terminal completion and returns the prepared native operation for batch
+// submission. The request is caller-owned until its proactor accepts the batch;
+// synchronous rejection invokes no callback and leaves it available for reuse.
+// All operations submitted together belong to the same proactor. The enclosing
+// owner joins the submit call with every accepted callback before reclaiming
+// request storage, as completion may run concurrently with submission.
+// Partial I/O retains this callback until the exact prepared span retires.
+static inline iree_async_operation_t* iree_hal_file_request_bind(
+    iree_hal_file_request_t* request,
+    iree_hal_file_transfer_callback_t callback) {
+  request->callback = callback;
+  return &request->read.base;
+}
+
 // Submits the prepared request and continues partial I/O until its exact span
 // retires or fails. Rejection retains caller ownership and invokes no callback.
 // Acceptance transfers ownership to one terminal callback, which may reclaim

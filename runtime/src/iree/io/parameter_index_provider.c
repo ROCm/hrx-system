@@ -661,12 +661,12 @@ static iree_status_t iree_io_parameter_transfer_submit(
                                  transfer->splat.pattern_length,
                                  /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE);
     case IREE_IO_PARAMETER_TRANSFER_READ:
-      return iree_hal_queue_read(queue, waits, signals, transfer->file.handle,
-                                 transfer->file.offset, transfer->buffer,
-                                 transfer->buffer_offset, transfer->length,
-                                 /*barriers=*/NULL, IREE_HAL_READ_FLAG_NONE);
+      return iree_hal_queue_read_linear(
+          queue, waits, signals, transfer->file.handle, transfer->file.offset,
+          transfer->buffer, transfer->buffer_offset, transfer->length,
+          /*barriers=*/NULL, IREE_HAL_READ_FLAG_NONE);
     case IREE_IO_PARAMETER_TRANSFER_WRITE:
-      return iree_hal_queue_write(
+      return iree_hal_queue_write_linear(
           queue, waits, signals, transfer->buffer, transfer->buffer_offset,
           transfer->file.handle, transfer->file.offset, transfer->length,
           /*barriers=*/NULL, IREE_HAL_WRITE_FLAG_NONE);

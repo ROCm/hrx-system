@@ -31,8 +31,7 @@ iree_status_t iree_hal_replay_recorder_file_make_object_payload(
     iree_string_view_t* out_reference);
 
 iree_status_t iree_hal_replay_recorder_file_capture_read_data(
-    iree_hal_file_t* file, uint64_t source_offset, iree_device_size_t length,
-    iree_allocator_t host_allocator, iree_byte_span_t* out_storage);
+    iree_hal_file_t* file, uint64_t source_offset, iree_byte_span_t storage);
 
 iree_status_t iree_hal_replay_recorder_file_create_proxy(
     iree_hal_replay_recorder_t* recorder, iree_hal_replay_object_id_t device_id,

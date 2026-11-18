@@ -125,6 +125,6 @@ static void iree_hal_file_request_complete(
 iree_status_t iree_hal_file_request_submit(
     iree_hal_file_request_t* request,
     iree_hal_file_transfer_callback_t callback) {
-  request->callback = callback;
+  iree_hal_file_request_bind(request, callback);
   return iree_hal_file_request_issue(request);
 }

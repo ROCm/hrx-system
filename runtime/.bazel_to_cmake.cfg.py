@@ -114,6 +114,11 @@ class RuntimeBuildFileFunctions(
             **kwargs,
         )
 
+    def iree_runtime_executable_test(self, **kwargs):
+        self.iree_executable_test(
+            **self._apply_runtime_cmake_policy(kwargs, include_run_requirements=True)
+        )
+
     def iree_runtime_tracing_provider(self, name, header, **kwargs):
         self.iree_runtime_cc_library(
             name=name,

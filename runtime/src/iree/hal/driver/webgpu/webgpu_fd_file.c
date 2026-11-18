@@ -66,6 +66,11 @@ iree_status_t iree_hal_webgpu_fd_file_from_handle(
   return iree_ok_status();
 }
 
+bool iree_hal_webgpu_fd_file_isa(iree_hal_file_t* file) {
+  return iree_hal_resource_is((const iree_hal_resource_t*)file,
+                              &iree_hal_webgpu_fd_file_vtable);
+}
+
 int iree_hal_webgpu_fd_file_fd(iree_hal_file_t* file) {
   return iree_hal_webgpu_fd_file_cast(file)->fd;
 }

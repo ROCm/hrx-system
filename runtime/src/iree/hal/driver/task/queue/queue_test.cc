@@ -26,6 +26,20 @@
 
 namespace {
 
+static iree_status_t SubmitFileTransfer(
+    iree_hal_task_queue_t* queue, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_file_binding_table_t files,
+    iree_hal_buffer_binding_table_t buffers,
+    const iree_hal_file_transfer_list_t* transfers,
+    const iree_hal_queue_barriers_t* barriers,
+    iree_hal_memory_access_t access) {
+  return access == IREE_HAL_MEMORY_ACCESS_READ
+             ? iree_hal_queue_read(&queue->base, waits, signals, files, buffers,
+                                   transfers, barriers, 0)
+             : iree_hal_queue_write(&queue->base, waits, signals, buffers,
+                                    files, transfers, barriers, 0);
+}
+
 class TaskQueueTest : public ::testing::TestWithParam<iree_host_size_t> {
  protected:
   void SetUp() override {
@@ -82,6 +96,44 @@ class TaskQueueTest : public ::testing::TestWithParam<iree_host_size_t> {
     }
     iree_async_frontier_tracker_release(frontier_tracker);
     iree_hal_device_release(device);
+    return status;
+  }
+
+  iree_status_t WrapTransferBuffer(iree_byte_span_t bytes,
+                                   iree_hal_buffer_release_callback_t release,
+                                   iree_hal_buffer_t** out_buffer) {
+    return iree_hal_heap_buffer_wrap(
+        iree_hal_buffer_placement_undefined(),
+        IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
+            IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+        IREE_HAL_MEMORY_ACCESS_ALL, IREE_HAL_BUFFER_USAGE_TRANSFER,
+        bytes.data_length, bytes, release, iree_allocator_system(), out_buffer);
+  }
+
+  iree_status_t OpenTransferFile(iree_hal_device_t* device,
+                                 iree_string_view_t path,
+                                 iree_byte_span_t bytes, bool native,
+                                 iree_hal_file_t** out_file) {
+    iree_io_file_handle_t* handle = nullptr;
+    if (native) {
+      IREE_RETURN_IF_ERROR(iree_io_file_contents_write(
+          path, iree_const_cast_byte_span(bytes), iree_allocator_system()));
+      IREE_RETURN_IF_ERROR(iree_io_file_handle_open(
+          IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_WRITE |
+              IREE_IO_FILE_MODE_SHARE_READ | IREE_IO_FILE_MODE_SHARE_WRITE |
+              IREE_IO_FILE_MODE_ASYNC,
+          path, iree_allocator_system(), &handle));
+    } else {
+      IREE_RETURN_IF_ERROR(iree_io_file_handle_wrap_host_allocation(
+          IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE, bytes,
+          iree_io_file_handle_release_callback_null(), iree_allocator_system(),
+          &handle));
+    }
+    iree_status_t status = iree_hal_file_import(
+        device, nullptr, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+        IREE_HAL_MEMORY_ACCESS_ALL, handle, IREE_HAL_EXTERNAL_FILE_FLAG_NONE,
+        out_file);
+    iree_io_file_handle_release(handle);
     return status;
   }
 
@@ -455,8 +507,9 @@ TEST_P(TaskQueueTest, AsyncFileReadPublishesBeforeCompletion) {
                                 IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &done));
   uint64_t value = 1;
   const iree_hal_semaphore_list_t signals = {1, &done, &value};
-  IREE_ASSERT_OK(iree_hal_queue_read(queue, {}, signals, file, 3, target, 7, 24,
-                                     nullptr, IREE_HAL_READ_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(queue, {}, signals, file, 3, target,
+                                            7, 24, nullptr,
+                                            IREE_HAL_READ_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(signals, iree_infinite_timeout(),
                                               IREE_ASYNC_WAIT_FLAG_NONE));
   EXPECT_EQ(target->publications, 1u);
@@ -485,6 +538,491 @@ TEST_P(TaskQueueTest, AsyncFileReadPublishesBeforeCompletion) {
   iree_hal_semaphore_release(done);
   iree_hal_buffer_release(target);
   iree_hal_device_group_release(group);
+}
+
+TEST_P(TaskQueueTest, FileRectanglesCaptureOperandsAndPreservePadding) {
+  iree_hal_device_group_t* group = nullptr;
+  IREE_ASSERT_OK(CreateDeviceGroup(&group));
+  auto* device = iree_hal_device_group_device_at(group, 0);
+  auto* queue = reinterpret_cast<iree_hal_task_queue_t*>(
+      iree_hal_device_queue(device, 0, 0));
+  for (bool native : {false, true}) {
+    for (bool reading : {false, true}) {
+      SCOPED_TRACE(native);
+      SCOPED_TRACE(reading);
+      std::array<uint8_t, 1024> file_bytes, buffer_bytes;
+      for (size_t i = 0; i < file_bytes.size(); ++i) {
+        file_bytes[i] = reading ? static_cast<uint8_t>(i * 17 + 3) : 0xDA;
+        buffer_bytes[i] = reading ? 0xBD : static_cast<uint8_t>(i * 13 + 1);
+      }
+      auto expected_file = file_bytes;
+      auto expected_buffer = buffer_bytes;
+      iree::testing::TempFilePath path("task_file_rectangles");
+      iree_hal_file_t* file = nullptr;
+      IREE_ASSERT_OK(OpenTransferFile(
+          device, path.path_view(),
+          iree_make_byte_span(file_bytes.data(), file_bytes.size()), native,
+          &file));
+      std::atomic<uint32_t> releases{0};
+      iree_hal_buffer_t* buffer = nullptr;
+      IREE_ASSERT_OK(WrapTransferBuffer(
+          iree_make_byte_span(buffer_bytes.data(), buffer_bytes.size()),
+          {[](void* user_data, iree_hal_buffer_t*) {
+             static_cast<std::atomic<uint32_t>*>(user_data)->fetch_add(1);
+           },
+           &releases},
+          &buffer));
+      iree_hal_semaphore_t* semaphores[2] = {};
+      for (auto& semaphore : semaphores) {
+        IREE_ASSERT_OK(iree_hal_semaphore_create(
+            device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+            IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
+      }
+      uint64_t value = 1;
+      const iree_hal_semaphore_list_t waits = {1, &semaphores[0], &value};
+      const iree_hal_semaphore_list_t signals = {1, &semaphores[1], &value};
+      {
+        const iree_hal_file_binding_t file_binding = {file, 32, 512};
+        const iree_hal_buffer_binding_t buffer_binding = {buffer, 7, 768};
+        const iree_hal_file_transfer_t transfers[] = {
+            {
+                .file_offset = 3,
+                .buffer_offset = 5,
+                .row_length = 7,
+                .row_count = 3,
+                .slice_count = 2,
+                .file_strides = {16, 64},
+                .buffer_strides = {11, 43},
+            },
+            {
+                .file_offset = 256,
+                .buffer_offset = 256,
+                .row_length = 90,
+                .row_count = 1,
+                .slice_count = 1,
+            },
+            {
+                .file_binding = UINT32_MAX,
+                .buffer_binding = UINT32_MAX,
+                .row_length = 0,
+            },
+        };
+        const iree_hal_file_transfer_list_t list = {
+            .type = IREE_HAL_FILE_TRANSFER_LIST_TYPE_HOST,
+            .host = {IREE_ARRAYSIZE(transfers), transfers},
+        };
+        for (const auto& transfer : transfers) {
+          for (uint64_t slice = 0; slice < transfer.slice_count; ++slice) {
+            for (uint64_t row = 0; row < transfer.row_count; ++row) {
+              const size_t file_offset =
+                  file_binding.offset + transfer.file_offset +
+                  slice * transfer.file_strides.slice_stride +
+                  row * transfer.file_strides.row_stride;
+              const size_t buffer_offset =
+                  buffer_binding.offset + transfer.buffer_offset +
+                  slice * transfer.buffer_strides.slice_stride +
+                  row * transfer.buffer_strides.row_stride;
+              for (size_t byte = 0; byte < transfer.row_length; ++byte) {
+                if (reading) {
+                  expected_buffer[buffer_offset + byte] =
+                      file_bytes[file_offset + byte];
+                } else {
+                  expected_file[file_offset + byte] =
+                      buffer_bytes[buffer_offset + byte];
+                }
+              }
+            }
+          }
+        }
+        IREE_ASSERT_OK(
+            SubmitFileTransfer(queue, waits, signals, {1, &file_binding},
+                               {1, &buffer_binding}, &list, nullptr,
+                               reading ? IREE_HAL_MEMORY_ACCESS_READ
+                                       : IREE_HAL_MEMORY_ACCESS_WRITE));
+      }
+      // The call owns captures and references while its dependency is
+      // unresolved.
+      iree_hal_file_release(file);
+      iree_hal_buffer_release(buffer);
+      EXPECT_EQ(releases.load(), 0u);
+      IREE_ASSERT_OK(iree_hal_semaphore_signal(semaphores[0], value, nullptr));
+      IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+          signals, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+      EXPECT_EQ(releases.load(), 1u);
+      if (native) {
+        iree_io_file_contents_t* contents = nullptr;
+        IREE_ASSERT_OK(iree_io_file_contents_read(
+            path.path_view(), iree_allocator_system(), &contents));
+        ASSERT_EQ(contents->buffer.data_length, expected_file.size());
+        EXPECT_EQ(std::memcmp(contents->buffer.data, expected_file.data(),
+                              expected_file.size()),
+                  0);
+        iree_io_file_contents_free(contents);
+      } else {
+        EXPECT_EQ(file_bytes, expected_file);
+      }
+      EXPECT_EQ(buffer_bytes, expected_buffer);
+      for (auto* semaphore : semaphores) {
+        iree_hal_semaphore_release(semaphore);
+      }
+    }
+  }
+  iree_hal_device_group_release(group);
+}
+
+TEST_P(TaskQueueTest, IndirectFilesUsePublishedPrefixAndAllowIndependentWork) {
+  iree_hal_device_group_t* group = nullptr;
+  IREE_ASSERT_OK(CreateDeviceGroup(&group));
+  auto* device = iree_hal_device_group_device_at(group, 0);
+  auto* queue = reinterpret_cast<iree_hal_task_queue_t*>(
+      iree_hal_device_queue(device, 0, 0));
+  for (bool native : {false, true}) {
+    for (bool reading : {false, true}) {
+      SCOPED_TRACE(native);
+      SCOPED_TRACE(reading);
+      constexpr size_t kCapacity = 128;
+      std::array<uint8_t, 17 + kCapacity * 90> file_bytes;
+      std::array<uint8_t, 13 + kCapacity * 96 + 11> buffer_bytes;
+      alignas(64) std::array<uint64_t, 8 + kCapacity * 8> metadata;
+      for (size_t i = 0; i < file_bytes.size(); ++i) {
+        file_bytes[i] = reading ? static_cast<uint8_t>(i * 17 + 3) : 0xDA;
+      }
+      for (size_t i = 0; i < buffer_bytes.size(); ++i) {
+        buffer_bytes[i] = reading ? 0xBD : static_cast<uint8_t>(i * 13 + 1);
+      }
+      metadata.fill(UINT64_MAX);
+      auto expected_buffer = buffer_bytes;
+      auto expected_file = file_bytes;
+      iree::testing::TempFilePath path("task_file_indirect");
+      iree_hal_file_t* file = nullptr;
+      IREE_ASSERT_OK(OpenTransferFile(
+          device, path.path_view(),
+          iree_make_byte_span(file_bytes.data(), file_bytes.size()), native,
+          &file));
+      iree_hal_buffer_t* buffer = nullptr;
+      iree_hal_buffer_t* metadata_buffer = nullptr;
+      IREE_ASSERT_OK(WrapTransferBuffer(
+          iree_make_byte_span(buffer_bytes.data(), buffer_bytes.size()),
+          iree_hal_buffer_release_callback_null(), &buffer));
+      IREE_ASSERT_OK(WrapTransferBuffer(
+          iree_make_byte_span(metadata.data(), sizeof(metadata)),
+          iree_hal_buffer_release_callback_null(), &metadata_buffer));
+      iree_hal_semaphore_t* semaphores[4] = {};
+      for (auto& semaphore : semaphores) {
+        IREE_ASSERT_OK(iree_hal_semaphore_create(
+            device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+            IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
+      }
+      uint64_t value = 1;
+      const iree_hal_semaphore_list_t waits = {1, &semaphores[0], &value};
+      const iree_hal_semaphore_list_t signals = {1, &semaphores[1], &value};
+      const iree_hal_semaphore_list_t independent = {1, &semaphores[2], &value};
+      const iree_hal_semaphore_list_t consumed = {1, &semaphores[3], &value};
+      std::array<uint8_t, 13 + kCapacity * 96 + 11> consumed_bytes = {};
+      iree_hal_buffer_t* consumed_buffer = nullptr;
+      IREE_ASSERT_OK(WrapTransferBuffer(
+          iree_make_byte_span(consumed_bytes.data(), consumed_bytes.size()),
+          iree_hal_buffer_release_callback_null(), &consumed_buffer));
+      const iree_hal_file_binding_t file_binding = {file, 17, kCapacity * 90};
+      const iree_hal_buffer_binding_t buffer_binding = {buffer, 13,
+                                                        kCapacity * 96};
+      const iree_hal_file_transfer_list_t list = {
+          .type = IREE_HAL_FILE_TRANSFER_LIST_TYPE_INDIRECT,
+          .indirect = {{metadata_buffer, 64, kCapacity * 64},
+                       metadata_buffer,
+                       0},
+      };
+      IREE_ASSERT_OK(
+          SubmitFileTransfer(queue, waits, signals, {1, &file_binding},
+                             {1, &buffer_binding}, &list, nullptr,
+                             reading ? IREE_HAL_MEMORY_ACCESS_READ
+                                     : IREE_HAL_MEMORY_ACCESS_WRITE));
+      IREE_ASSERT_OK(iree_hal_queue_copy(
+          &queue->base, signals, consumed, buffer, 0, consumed_buffer, 0,
+          buffer_bytes.size(), nullptr, IREE_HAL_COPY_FLAG_NONE));
+      iree_hal_buffer_release(consumed_buffer);
+      IREE_ASSERT_OK(iree_hal_queue_barrier(&queue->base, {}, independent,
+                                            nullptr,
+                                            IREE_HAL_QUEUE_BARRIER_FLAG_NONE));
+      IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+          independent, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+      // Publish only the live prefix after enqueue. Inactive records remain
+      // invalid.
+      iree_unaligned_store_le_u64(&metadata[0], kCapacity - 1);
+      for (size_t i = 0; i < kCapacity - 1; ++i) {
+        iree_unaligned_store_le_u64(&metadata[8 + i * 8 + 0], i * 90);
+        iree_unaligned_store_le_u64(&metadata[8 + i * 8 + 1], i * 96);
+        iree_unaligned_store_le_u64(&metadata[8 + i * 8 + 2], i % 7 ? 90 : 0);
+        if (i % 7) {
+          if (reading) {
+            std::memcpy(expected_buffer.data() + 13 + i * 96,
+                        file_bytes.data() + 17 + i * 90, 90);
+          } else {
+            std::memcpy(expected_file.data() + 17 + i * 90,
+                        buffer_bytes.data() + 13 + i * 96, 90);
+          }
+        }
+      }
+      iree_hal_file_release(file);
+      iree_hal_buffer_release(buffer);
+      iree_hal_buffer_release(metadata_buffer);
+      IREE_ASSERT_OK(iree_hal_semaphore_signal(semaphores[0], value, nullptr));
+      IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+          consumed, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+      EXPECT_EQ(buffer_bytes, expected_buffer);
+      EXPECT_EQ(consumed_bytes, expected_buffer);
+      if (native) {
+        iree_io_file_contents_t* contents = nullptr;
+        IREE_ASSERT_OK(iree_io_file_contents_read(
+            path.path_view(), iree_allocator_system(), &contents));
+        ASSERT_EQ(contents->buffer.data_length, expected_file.size());
+        EXPECT_EQ(std::memcmp(contents->buffer.data, expected_file.data(),
+                              expected_file.size()),
+                  0);
+        iree_io_file_contents_free(contents);
+      } else {
+        EXPECT_EQ(file_bytes, expected_file);
+      }
+      for (auto* semaphore : semaphores) {
+        iree_hal_semaphore_release(semaphore);
+      }
+    }
+  }
+  iree_hal_device_group_release(group);
+}
+
+TEST_P(TaskQueueTest, FileGroupReadsAndWritesMixedNativeAndMemoryFiles) {
+  iree_hal_device_group_t* group = nullptr;
+  IREE_ASSERT_OK(CreateDeviceGroup(&group));
+  auto* device = iree_hal_device_group_device_at(group, 0);
+  auto* queue = reinterpret_cast<iree_hal_task_queue_t*>(
+      iree_hal_device_queue(device, 0, 0));
+  for (bool reading : {false, true}) {
+    SCOPED_TRACE(reading);
+    std::array<std::array<uint8_t, 11 + 64 * 90>, 2> file_bytes;
+    std::array<std::array<uint8_t, 17 + 64 * 96>, 2> buffer_bytes;
+    for (size_t binding = 0; binding < 2; ++binding) {
+      for (size_t i = 0; i < file_bytes[binding].size(); ++i) {
+        file_bytes[binding][i] =
+            reading ? static_cast<uint8_t>(i + binding * 13) : 0xDA;
+      }
+      for (size_t i = 0; i < buffer_bytes[binding].size(); ++i) {
+        buffer_bytes[binding][i] =
+            reading ? 0xBD : static_cast<uint8_t>(i * 7 + binding * 31);
+      }
+    }
+    auto expected_files = file_bytes;
+    auto expected_buffers = buffer_bytes;
+    iree::testing::TempFilePath path("task_file_mixed");
+    iree_hal_file_binding_t files[2] = {};
+    iree_hal_buffer_binding_t buffers[2] = {};
+    for (size_t i = 0; i < 2; ++i) {
+      IREE_ASSERT_OK(OpenTransferFile(
+          device, path.path_view(),
+          iree_make_byte_span(file_bytes[i].data(), file_bytes[i].size()),
+          i == 1, &files[i].file));
+      files[i].offset = 11;
+      files[i].length = 64 * 90;
+      IREE_ASSERT_OK(WrapTransferBuffer(
+          iree_make_byte_span(buffer_bytes[i].data(), buffer_bytes[i].size()),
+          iree_hal_buffer_release_callback_null(), &buffers[i].buffer));
+      buffers[i].offset = 17;
+      buffers[i].length = 64 * 96;
+    }
+    std::array<iree_hal_file_transfer_t, 128> transfers = {};
+    for (size_t i = 0; i < transfers.size(); ++i) {
+      const uint32_t binding = i % 2;
+      const size_t row = i / 2;
+      transfers[i] = {
+          .file_binding = binding,
+          .buffer_binding = 1 - binding,
+          .file_offset = row * 90,
+          .buffer_offset = row * 96,
+          .row_length = 90,
+          .row_count = 1,
+          .slice_count = 1,
+      };
+      if (reading) {
+        std::memcpy(expected_buffers[1 - binding].data() + 17 + row * 96,
+                    file_bytes[binding].data() + 11 + row * 90, 90);
+      } else {
+        std::memcpy(expected_files[binding].data() + 11 + row * 90,
+                    buffer_bytes[1 - binding].data() + 17 + row * 96, 90);
+      }
+    }
+    iree_hal_semaphore_t* done = nullptr;
+    IREE_ASSERT_OK(
+        iree_hal_semaphore_create(device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+                                  IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &done));
+    uint64_t value = 1;
+    const iree_hal_semaphore_list_t signals = {1, &done, &value};
+    auto invalid = transfers[0];
+    invalid.buffer_offset = buffers[1].length;
+    iree_hal_file_transfer_list_t list = {
+        .type = IREE_HAL_FILE_TRANSFER_LIST_TYPE_HOST,
+        .host = {1, &invalid},
+    };
+    const auto access =
+        reading ? IREE_HAL_MEMORY_ACCESS_READ : IREE_HAL_MEMORY_ACCESS_WRITE;
+    EXPECT_THAT(
+        iree::Status(SubmitFileTransfer(queue, {}, signals, {2, files},
+                                        {2, buffers}, &list, nullptr, access)),
+        iree::testing::status::StatusIs(iree::StatusCode::kOutOfRange));
+    uint64_t observed = UINT64_MAX;
+    IREE_ASSERT_OK(iree_hal_semaphore_query(done, &observed));
+    EXPECT_EQ(observed, 0u);
+    list.host = {transfers.size(), transfers.data()};
+    IREE_ASSERT_OK(SubmitFileTransfer(queue, {}, signals, {2, files},
+                                      {2, buffers}, &list, nullptr, access));
+    for (size_t i = 0; i < 2; ++i) {
+      iree_hal_file_release(files[i].file);
+      iree_hal_buffer_release(buffers[i].buffer);
+    }
+    IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+        signals, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+    EXPECT_EQ(buffer_bytes, expected_buffers);
+    EXPECT_EQ(file_bytes[0], expected_files[0]);
+    iree_io_file_contents_t* contents = nullptr;
+    IREE_ASSERT_OK(iree_io_file_contents_read(
+        path.path_view(), iree_allocator_system(), &contents));
+    ASSERT_EQ(contents->buffer.data_length, expected_files[1].size());
+    EXPECT_EQ(std::memcmp(contents->buffer.data, expected_files[1].data(),
+                          expected_files[1].size()),
+              0);
+    iree_io_file_contents_free(contents);
+    iree_hal_semaphore_release(done);
+  }
+  iree_hal_device_group_release(group);
+}
+
+TEST_P(TaskQueueTest,
+       FailedFileGroupRetiresAcceptedReadsBeforeReleasingBuffers) {
+  iree_hal_device_group_t* group = nullptr;
+  IREE_ASSERT_OK(CreateDeviceGroup(&group));
+  auto* device = iree_hal_device_group_device_at(group, 0);
+  auto* queue = reinterpret_cast<iree_hal_task_queue_t*>(
+      iree_hal_device_queue(device, 0, 0));
+  std::array<uint8_t, 1024> file_bytes;
+  file_bytes.fill(0x37);
+  struct Payload {
+    // Every read writes a separate row followed by untouched padding.
+    std::array<uint8_t, 2048> bytes;
+    // Captured prefix at final buffer release, before terminal signaling.
+    std::array<uint8_t, 512> released_prefix;
+    // Proves the batch dropped its final buffer reference before signaling.
+    std::atomic<bool> released{false};
+  } payload;
+  payload.bytes.fill(0xDA);
+  iree::testing::TempFilePath path("task_file_failed_group");
+  iree_hal_file_t* file = nullptr;
+  IREE_ASSERT_OK(OpenTransferFile(
+      device, path.path_view(),
+      iree_make_byte_span(file_bytes.data(), file_bytes.size()), true, &file));
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(WrapTransferBuffer(
+      iree_make_byte_span(payload.bytes.data(), payload.bytes.size()),
+      {[](void* user_data, iree_hal_buffer_t*) {
+         auto* payload = static_cast<Payload*>(user_data);
+         std::copy_n(payload->bytes.data(), payload->released_prefix.size(),
+                     payload->released_prefix.data());
+         payload->released.store(true);
+       },
+       &payload},
+      &buffer));
+  iree_hal_semaphore_t* semaphores[2] = {};
+  for (auto& semaphore : semaphores) {
+    IREE_ASSERT_OK(
+        iree_hal_semaphore_create(device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+                                  IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
+  }
+  uint64_t value = 1;
+  const iree_hal_semaphore_list_t waits = {1, &semaphores[0], &value};
+  const iree_hal_semaphore_list_t signals = {1, &semaphores[1], &value};
+  const iree_hal_file_binding_t file_binding = {file, 0, file_bytes.size()};
+  const iree_hal_buffer_binding_t buffer_binding = {buffer, 0,
+                                                    IREE_HAL_WHOLE_BUFFER};
+  const iree_hal_file_transfer_t transfer = {
+      .row_length = 16,
+      .row_count = 64,
+      .slice_count = 1,
+      .file_strides = {16, 0},
+      .buffer_strides = {32, 0},
+  };
+  const iree_hal_file_transfer_list_t list = {
+      .type = IREE_HAL_FILE_TRANSFER_LIST_TYPE_HOST,
+      .host = {1, &transfer},
+  };
+  IREE_ASSERT_OK(SubmitFileTransfer(queue, waits, signals, {1, &file_binding},
+                                    {1, &buffer_binding}, &list, nullptr,
+                                    IREE_HAL_MEMORY_ACCESS_READ));
+  // File size can change after capture. The first 16 rows remain readable;
+  // later accepted requests encounter EOF and must drain before failure.
+  IREE_ASSERT_OK(iree_io_file_contents_write(
+      path.path_view(), iree_make_const_byte_span(file_bytes.data(), 256),
+      iree_allocator_system()));
+  iree_hal_file_release(file);
+  iree_hal_buffer_release(buffer);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(semaphores[0], value, nullptr));
+  EXPECT_THAT(iree::Status(iree_hal_semaphore_list_wait(
+                  signals, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE)),
+              iree::testing::status::StatusIs(iree::StatusCode::kOutOfRange));
+  EXPECT_TRUE(payload.released.load());
+  for (size_t i = 0; i < payload.released_prefix.size(); ++i) {
+    EXPECT_EQ(payload.released_prefix[i], i % 32 < 16 ? 0x37 : 0xDA) << i;
+  }
+  for (size_t i = payload.released_prefix.size(); i < payload.bytes.size();
+       ++i) {
+    EXPECT_EQ(payload.bytes[i], 0xDA) << i;
+  }
+  for (auto* semaphore : semaphores) {
+    iree_hal_semaphore_release(semaphore);
+  }
+  iree_hal_device_group_release(group);
+}
+
+TEST_P(TaskQueueTest, IndirectFileCountIsCheckedAfterProducerAndBeforeRecords) {
+  for (uint64_t live_count : {UINT64_C(0), UINT64_MAX}) {
+    SCOPED_TRACE(live_count);
+    iree_hal_device_group_t* group = nullptr;
+    IREE_ASSERT_OK(CreateDeviceGroup(&group));
+    auto* device = iree_hal_device_group_device_at(group, 0);
+    auto* queue = reinterpret_cast<iree_hal_task_queue_t*>(
+        iree_hal_device_queue(device, 0, 0));
+    alignas(64) std::array<uint64_t, 16> metadata;
+    metadata.fill(UINT64_MAX);
+    iree_hal_buffer_t* buffer = nullptr;
+    IREE_ASSERT_OK(WrapTransferBuffer(
+        iree_make_byte_span(metadata.data(), sizeof(metadata)),
+        iree_hal_buffer_release_callback_null(), &buffer));
+    iree_hal_semaphore_t* semaphores[2] = {};
+    for (auto& semaphore : semaphores) {
+      IREE_ASSERT_OK(iree_hal_semaphore_create(
+          device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+          IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
+    }
+    uint64_t value = 1;
+    const iree_hal_semaphore_list_t waits = {1, &semaphores[0], &value};
+    const iree_hal_semaphore_list_t signals = {1, &semaphores[1], &value};
+    const iree_hal_file_transfer_list_t list = {
+        .type = IREE_HAL_FILE_TRANSFER_LIST_TYPE_INDIRECT,
+        .indirect = {{buffer, 64, 64}, buffer, 0},
+    };
+    IREE_ASSERT_OK(SubmitFileTransfer(queue, waits, signals, {}, {}, &list,
+                                      nullptr, IREE_HAL_MEMORY_ACCESS_READ));
+    iree_unaligned_store_le_u64(&metadata[0], live_count);
+    iree_hal_buffer_release(buffer);
+    IREE_ASSERT_OK(iree_hal_semaphore_signal(semaphores[0], value, nullptr));
+    EXPECT_THAT(
+        iree::Status(iree_hal_semaphore_list_wait(
+            signals, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE)),
+        iree::testing::status::StatusIs(live_count
+                                            ? iree::StatusCode::kOutOfRange
+                                            : iree::StatusCode::kOk));
+    for (auto* semaphore : semaphores) {
+      iree_hal_semaphore_release(semaphore);
+    }
+    iree_hal_device_group_release(group);
+  }
 }
 
 TEST_P(TaskQueueTest, ExecutesBindingsWithDeclaredPermissions) {

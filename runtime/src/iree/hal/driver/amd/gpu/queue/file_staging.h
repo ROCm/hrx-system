@@ -7,9 +7,8 @@
 #ifndef IREE_HAL_DRIVER_AMD_GPU_QUEUE_FILE_STAGING_H_
 #define IREE_HAL_DRIVER_AMD_GPU_QUEUE_FILE_STAGING_H_
 
-#include "iree/hal/driver/amd/fabric/file_transfer.h"
-#include "iree/hal/driver/amd/gpu/completion.h"
 #include "iree/hal/driver/amd/gpu/context.h"
+#include "iree/hal/utils/file_request.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,49 +18,41 @@ typedef struct iree_hal_amd_gpu_file_staging_t iree_hal_amd_gpu_file_staging_t;
 typedef struct iree_hal_amd_gpu_file_staging_bucket_t
     iree_hal_amd_gpu_file_staging_bucket_t;
 
-// Submits a dependency-ready native copy on the originating file queue. The
-// staging request owns both operands through the final retired callback.
-// Success may complete inline; failure retains nothing and invokes no callback.
-typedef iree_status_t (*iree_hal_amd_gpu_file_staging_copy_fn_t)(
-    void* user_data, uint64_t source, uint64_t target, uint64_t length,
-    iree_hal_memory_effects_t before, iree_hal_memory_effects_t after,
-    iree_hal_amd_gpu_retirement_callback_t callback);
+typedef struct iree_hal_amd_gpu_file_staging_slot_t
+    iree_hal_amd_gpu_file_staging_slot_t;
 
-// Placed staging use for one complete file operation. Physical ranges submit
-// serially through this state without releasing its prepared proactor view.
-// The parent file capture borrows the device and retains the immutable
-// transfer. Cursor, membership, status, and in_flight are protected by the
-// staging lock; slot I/O and GPU operations run outside that lock.
+// One placed loan or final registration-release notification. A reservation
+// borrows one physical lane until return; it performs no file I/O or device
+// copy. The enclosing file operation owns the bucket membership independently
+// of its loans, so replacing rows or files never detaches a live registration.
 typedef struct iree_hal_amd_gpu_file_staging_request_t {
-  // Previous range awaiting a slot or backing generation, or NULL.
+  // Previous request awaiting backing or final foreign registration detach.
   struct iree_hal_amd_gpu_file_staging_request_t* previous;
-  // Next range awaiting the same resource, or NULL.
+  // Next request awaiting the same resource, or NULL.
   struct iree_hal_amd_gpu_file_staging_request_t* next;
-  // Borrowed device-owned engine, dominated by the parent file capture.
+  // Borrowed device-owned storage, dominated by the enclosing operation.
   iree_hal_amd_gpu_file_staging_t* staging;
-  // Exact file-proactor views over device-owned physical staging.
+  // Borrowed exact proactor's views, kept live by the enclosing operation.
   iree_hal_amd_gpu_file_staging_bucket_t* bucket;
-  // Borrowed file and buffer facts, immutable through the entire operation.
-  const iree_hal_amd_fabric_file_transfer_t* transfer;
-  // Exact originating queue's native copy submission, stable through release.
-  iree_hal_amd_gpu_file_staging_copy_fn_t copy;
-  // Borrowed copy executor, owned by the enclosing file operation's queue.
-  void* copy_user_data;
-  // Next unassigned transfer-relative byte.
-  uint64_t cursor;
-  // Exclusive transfer-relative end of this physical range.
-  uint64_t end;
-  // GPU address corresponding to transfer-relative byte zero.
-  uint64_t device_address;
-  // Terminal callback after every accepted I/O and GPU use has retired.
+  // Borrowed physical lane, non-NULL only between reservation and return.
+  iree_hal_amd_gpu_file_staging_slot_t* slot;
+  // Native I/O span, valid only while slot is borrowed.
+  iree_async_span_t span;
+  // Queue address of span byte zero, valid while slot is borrowed.
+  uint64_t address;
+  struct {
+    // Acquire before a queue copy consumes native file-read output.
+    iree_hal_memory_effects_t read;
+    // Release before native file writes consume queue-copy output.
+    iree_hal_memory_effects_t write;
+  } effects;
+  // Reservation or final release notification, invoked outside the lock.
   iree_hal_file_transfer_callback_t completion;
-  // First terminal failure, owned until final callback delivery.
+  // Reservation/release failure transferred by the notification.
   iree_status_t status;
-  // Active slots plus the submitting caller's temporary ownership.
-  uint32_t in_flight;
-  // Eligible physical block slots; zero while awaiting backing or attachment.
+  // Eligible block bits; zero while awaiting backing or attachment.
   uint32_t block_mask;
-  // Requested lane capacity, used only for cache selection and growth.
+  // Minimum lane capacity for the queued reservation, in bytes.
   uint32_t chunk_capacity;
 } iree_hal_amd_gpu_file_staging_request_t;
 
@@ -96,36 +87,48 @@ iree_status_t iree_hal_amd_gpu_file_staging_allocate(
 // Copies use the same queue as public buffer access; no cross-family ownership
 // transition is needed. Direct host ranges are unchanged.
 iree_status_t iree_hal_amd_gpu_file_staging_prepare(
-    iree_hal_amd_gpu_file_staging_t* staging,
-    const iree_hal_amd_fabric_file_transfer_t* transfer);
+    iree_hal_amd_gpu_file_staging_t* staging, uint64_t alignment);
 
-// Acquires one staging use spanning all physical ranges of a qualified file
-// operation. The parent capture borrows the device and retains the transfer
-// through release completion. Acquisition allocates only per-proactor metadata;
-// native backing and registration attachment are demand-driven by submit.
+// Maximum bytes in one physical loan, established at device construction.
+uint32_t iree_hal_amd_gpu_file_staging_capacity(
+    const iree_hal_amd_gpu_file_staging_t* staging);
+
+// Number of useful concurrent lanes for a nonempty byte extent. This bounds
+// caller metadata independently of file size and does not acquire storage.
+uint32_t iree_hal_amd_gpu_file_staging_concurrency(
+    const iree_hal_amd_gpu_file_staging_t* staging, uint64_t length);
+
+// Acquires one use of an exact I/O proactor's views. Independent loans share
+// this membership without acquiring additional references. The caller retains
+// its file through release; native backing and attachments are demand-driven.
 iree_status_t iree_hal_amd_gpu_file_staging_acquire(
-    iree_hal_amd_gpu_file_staging_t* staging,
-    const iree_hal_amd_fabric_file_transfer_t* transfer,
-    iree_hal_amd_gpu_file_staging_copy_fn_t copy, void* copy_user_data,
+    iree_hal_amd_gpu_file_staging_t* staging, iree_async_proactor_t* proactor,
+    iree_hal_amd_gpu_file_staging_bucket_t** out_bucket);
+
+// Reserves one lane of up to length bytes, at least alignment bytes. The caller
+// already qualified nonzero length and file alignment. Success publishes span,
+// address, and visibility effects through request before invoking completion.
+// The callback may run before return. Only one reservation may be outstanding
+// on request; returning its lane permits reuse with any acquired bucket.
+void iree_hal_amd_gpu_file_staging_reserve(
+    iree_hal_amd_gpu_file_staging_bucket_t* bucket, uint64_t length,
+    uint64_t alignment, iree_hal_file_transfer_callback_t completion,
     iree_hal_amd_gpu_file_staging_request_t* request);
 
-// Begins one dependency-ready nonempty copy range on an acquired staging use.
-// The previous range must have completed. Native I/O uses the file's exact
-// proactor; completion leaves its prepared views available for subsequent
-// ranges. Completion may run before return; the caller joins its own submission
-// borrow.
-void iree_hal_amd_gpu_file_staging_submit(
-    iree_hal_amd_gpu_file_staging_request_t* request, uint64_t offset,
-    uint64_t length, uint64_t device_address,
-    iree_hal_file_transfer_callback_t completion);
+// Returns a lane after every accepted I/O/copy using it has retired. Native
+// backing remains cached, and another unrelated request may use it immediately.
+void iree_hal_amd_gpu_file_staging_return(
+    iree_hal_amd_gpu_file_staging_request_t* request);
 
-// Releases the complete file operation after every range retires. Consumes
+// Releases one membership after every loan borrowing it returns. Consumes
 // status and delivers it after relinquishing foreign-proactor registrations.
 // Completion may run before return and permits the caller to stop polling its
-// file owner. The request storage remains live through this final completion.
+// file owner. The request storage, which may reuse a returned loan, remains
+// live through this final completion.
 void iree_hal_amd_gpu_file_staging_release(
-    iree_hal_amd_gpu_file_staging_request_t* request, iree_status_t status,
-    iree_hal_file_transfer_callback_t completion);
+    iree_hal_amd_gpu_file_staging_bucket_t* bucket, iree_status_t status,
+    iree_hal_file_transfer_callback_t completion,
+    iree_hal_amd_gpu_file_staging_request_t* request);
 
 // Returns cached backing when whole file operations quiesce without
 // invalidating reusable live storage. Already prepared work progresses while

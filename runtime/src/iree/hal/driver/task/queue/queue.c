@@ -28,7 +28,6 @@
 #include "iree/hal/driver/task/executable/executable.h"
 #include "iree/hal/driver/task/queue/memory_barrier.h"
 #include "iree/hal/driver/task/transient_buffer.h"
-#include "iree/hal/utils/file_request.h"
 #include "iree/hal/utils/resource_set.h"
 
 #if !defined(NDEBUG)
@@ -2516,172 +2515,6 @@ static void iree_hal_task_queue_compute_process_release(
 }
 
 //===----------------------------------------------------------------------===//
-// File I/O (proactor-based async read/write)
-//===----------------------------------------------------------------------===//
-
-// Arena-owned request storage lives through all accepted native I/O. The queue
-// operation retains the file and buffer and owns final cache publication.
-typedef struct iree_hal_task_queue_io_context_t {
-  // Enclosing operation whose arena owns this placed request.
-  iree_hal_task_queue_op_t* operation;
-  // Independent progress within the current bounded native chunk.
-  iree_hal_file_request_t request;
-} iree_hal_task_queue_io_context_t;
-
-static void iree_hal_task_queue_io_completion(void* user_data,
-                                              iree_status_t status);
-
-static iree_status_t iree_hal_task_queue_io_submit(
-    iree_hal_task_queue_io_context_t* context, uint64_t offset,
-    iree_byte_span_t span) {
-  iree_hal_task_queue_op_t* operation = context->operation;
-  const bool reading = operation->type == IREE_HAL_TASK_QUEUE_OP_READ;
-  IREE_RETURN_IF_ERROR(iree_hal_file_request_prepare(
-      reading ? operation->read.hal_file : operation->write.hal_file,
-      reading ? IREE_HAL_MEMORY_ACCESS_READ : IREE_HAL_MEMORY_ACCESS_WRITE,
-      offset, span.data_length,
-      iree_async_span_from_ptr(span.data,
-                               iree_min(span.data_length, UINT32_C(1) << 30)),
-      &context->request));
-  return iree_hal_file_request_submit(
-      &context->request, (iree_hal_file_transfer_callback_t){
-                             iree_hal_task_queue_io_completion, context});
-}
-
-// A native completion runs on the proactor. Cache API calls belong to the
-// control worker; reuse the ready operation without allocating a continuation.
-static void iree_hal_task_queue_io_complete(
-    iree_hal_task_queue_op_t* operation) {
-  if (iree_hal_task_queue_memory_barriers_file_needs_worker(operation)) {
-    operation->flags |= IREE_HAL_TASK_QUEUE_OP_FLAG_COMPLETING_IO;
-    iree_hal_task_queue_schedule_ready(operation);
-  } else {
-    iree_hal_task_queue_op_complete(operation);
-  }
-}
-
-static void iree_hal_task_queue_io_completion(void* user_data,
-                                              iree_status_t status) {
-  iree_hal_task_queue_io_context_t* context = user_data;
-  iree_hal_task_queue_op_t* operation = context->operation;
-  if (iree_status_is_ok(status)) {
-    const bool reading = operation->type == IREE_HAL_TASK_QUEUE_OP_READ;
-    const uint64_t end =
-        context->request.file_offset + context->request.bytes_transferred;
-    const uint64_t file_offset =
-        reading ? operation->read.file_offset : operation->write.file_offset;
-    const iree_host_size_t length =
-        reading ? operation->read.length : operation->write.length;
-    const iree_host_size_t remaining = length - (end - file_offset);
-    if (remaining) {
-      uint8_t* next = (uint8_t*)iree_async_span_ptr(
-                          iree_hal_file_request_span(&context->request)) +
-                      context->request.bytes_transferred;
-      status = iree_hal_task_queue_io_submit(
-          context, end, iree_make_byte_span(next, remaining));
-      if (iree_status_is_ok(status)) {
-        return;
-      }
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    iree_hal_task_queue_io_complete(operation);
-  } else {
-    iree_hal_task_queue_op_fail(operation, status);
-  }
-}
-
-// Synchronous fallback for READ when no async file handle is available.
-// Calls iree_hal_file_read() inline on the worker thread. Blocks the worker
-// for the duration of the read but is always correct.
-static iree_status_t iree_hal_task_queue_drain_read_sync(
-    iree_hal_task_queue_t* queue, iree_hal_task_queue_op_t* operation) {
-  iree_byte_span_t span;
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_native_host_span(
-      operation->read.buffer, operation->read.buffer_offset,
-      operation->read.length, &span));
-  iree_status_t status = iree_hal_file_read(operation->read.hal_file,
-                                            operation->read.file_offset, span);
-  if (iree_status_is_ok(status)) {
-    iree_hal_task_queue_op_complete(operation);
-  } else {
-    iree_hal_task_queue_op_fail(operation, status);
-  }
-  return iree_ok_status();
-}
-
-// Handles a READ operation: resolves the native target, submits an async
-// proactor read, and returns immediately. The callback completes the operation.
-static iree_status_t iree_hal_task_queue_drain_read(
-    iree_hal_task_queue_t* queue, iree_hal_task_queue_op_t* operation) {
-  // Memory files and handles explicitly opened for synchronous access do not
-  // have an async handle. An async import failure instead fails file creation.
-  if (!operation->read.async_file) {
-    return iree_hal_task_queue_drain_read_sync(queue, operation);
-  }
-  iree_hal_task_queue_profile_add_host_flags(
-      operation, IREE_HAL_PROFILE_HOST_EXECUTION_EVENT_FLAG_DEFERRED);
-
-  // Borrow the prepared target address for the duration of the operation.
-  iree_hal_task_queue_io_context_t* io_context = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate(
-      &operation->arena, sizeof(*io_context), (void**)&io_context));
-  io_context->operation = operation;
-
-  iree_byte_span_t span;
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_native_host_span(
-      operation->read.buffer, operation->read.buffer_offset,
-      operation->read.length, &span));
-
-  return iree_hal_task_queue_io_submit(io_context, operation->read.file_offset,
-                                       span);
-}
-
-// Synchronous fallback for WRITE when no async file handle is available.
-static iree_status_t iree_hal_task_queue_drain_write_sync(
-    iree_hal_task_queue_t* queue, iree_hal_task_queue_op_t* operation) {
-  iree_byte_span_t span;
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_native_host_span(
-      operation->write.buffer, operation->write.buffer_offset,
-      operation->write.length, &span));
-  iree_status_t status = iree_hal_file_write(
-      operation->write.hal_file, operation->write.file_offset,
-      iree_make_const_byte_span(span.data, span.data_length));
-  if (iree_status_is_ok(status)) {
-    iree_hal_task_queue_op_complete(operation);
-  } else {
-    iree_hal_task_queue_op_fail(operation, status);
-  }
-  return iree_ok_status();
-}
-
-// Handles a WRITE operation: resolves the native source, submits an async
-// proactor write, and returns immediately. The callback completes the
-// operation.
-static iree_status_t iree_hal_task_queue_drain_write(
-    iree_hal_task_queue_t* queue, iree_hal_task_queue_op_t* operation) {
-  if (!operation->write.async_file) {
-    return iree_hal_task_queue_drain_write_sync(queue, operation);
-  }
-  iree_hal_task_queue_profile_add_host_flags(
-      operation, IREE_HAL_PROFILE_HOST_EXECUTION_EVENT_FLAG_DEFERRED);
-
-  // Borrow the prepared source address for the duration of the operation.
-  iree_hal_task_queue_io_context_t* io_context = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate(
-      &operation->arena, sizeof(*io_context), (void**)&io_context));
-  io_context->operation = operation;
-
-  iree_byte_span_t span;
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_native_host_span(
-      operation->write.buffer, operation->write.buffer_offset,
-      operation->write.length, &span));
-
-  return iree_hal_task_queue_io_submit(io_context, operation->write.file_offset,
-                                       span);
-}
-
-//===----------------------------------------------------------------------===//
 // Control process (wake_budget == 1 queue drain)
 //===----------------------------------------------------------------------===//
 
@@ -2771,20 +2604,11 @@ static iree_status_t iree_hal_task_queue_process_drain(
       iree_hal_task_queue_issue_dealloca(operation);
       break;
     case IREE_HAL_TASK_QUEUE_OP_READ:
-      iree_hal_task_queue_profile_start_host_execution(operation);
-      status = iree_hal_task_queue_drain_read(queue, operation);
-      if (!iree_status_is_ok(status)) {
-        iree_hal_task_queue_op_destroy(operation, status);
-        status = iree_ok_status();
-      }
-      break;
     case IREE_HAL_TASK_QUEUE_OP_WRITE:
       iree_hal_task_queue_profile_start_host_execution(operation);
-      status = iree_hal_task_queue_drain_write(queue, operation);
-      if (!iree_status_is_ok(status)) {
-        iree_hal_task_queue_op_destroy(operation, status);
-        status = iree_ok_status();
-      }
+      iree_hal_task_queue_profile_add_host_flags(
+          operation, IREE_HAL_PROFILE_HOST_EXECUTION_EVENT_FLAG_DEFERRED);
+      iree_hal_task_queue_issue_file(operation);
       break;
     case IREE_HAL_TASK_QUEUE_OP_TRANSFER:
       iree_hal_task_queue_profile_start_host_execution(operation);
@@ -3476,102 +3300,80 @@ iree_status_t iree_hal_task_queue_submit_dealloca(
   return status;
 }
 
-iree_status_t iree_hal_task_queue_submit_read(
-    iree_hal_task_queue_t* queue, iree_hal_file_t* source_file,
-    uint64_t source_offset, iree_hal_buffer_t* target_buffer,
-    iree_device_size_t target_offset, iree_device_size_t length,
-    iree_hal_semaphore_list_t wait_semaphores,
-    iree_hal_semaphore_list_t signal_semaphores,
-    const iree_hal_queue_barriers_t* barriers) {
+static iree_status_t iree_hal_task_queue_submit_file_transfer(
+    iree_hal_task_queue_t* queue, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_file_binding_table_t files,
+    iree_hal_buffer_binding_table_t buffers,
+    const iree_hal_file_transfer_list_t* transfers,
+    const iree_hal_queue_barriers_t* barriers,
+    iree_hal_memory_access_t file_access) {
   IREE_TRACE_ZONE_BEGIN(z0);
-
   iree_hal_task_queue_op_t* operation = NULL;
-  iree_status_t status = iree_hal_task_queue_op_allocate(
-      queue, IREE_HAL_TASK_QUEUE_OP_READ, &signal_semaphores, &operation);
-  if (!iree_status_is_ok(status)) {
-    IREE_TRACE_ZONE_END(z0);
-    return status;
-  }
-
-  iree_hal_task_queue_operation_begin(queue);
-  status = iree_hal_task_queue_memory_barriers_capture(operation, barriers);
-
-  operation->read.hal_file = source_file;
-  operation->read.async_file = iree_hal_file_async_handle(source_file);
-  operation->read.file_offset = source_offset;
-  operation->read.buffer = target_buffer;
-  operation->read.buffer_offset = target_offset;
-  operation->read.length = length;
-  iree_hal_task_queue_profile_set_payload(operation, length);
-
-  // Retain the HAL file and buffer through the operation lifetime.
-  iree_hal_resource_t* resources[2] = {
-      (iree_hal_resource_t*)source_file,
-      (iree_hal_resource_t*)target_buffer,
-  };
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_task_queue_submit_op_begin(
+              queue,
+              file_access == IREE_HAL_MEMORY_ACCESS_READ
+                  ? IREE_HAL_TASK_QUEUE_OP_READ
+                  : IREE_HAL_TASK_QUEUE_OP_WRITE,
+              &signals, &operation));
+  iree_host_size_t capture_size = 0;
+  iree_status_t status = iree_hal_file_transfer_batch_storage_size(
+      files, buffers, transfers, &capture_size);
+  void* capture = NULL;
   if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_resource_set_insert(operation->resource_set, 2, resources);
+    status = iree_arena_allocate(&operation->arena, capture_size, &capture);
   }
-
   if (iree_status_is_ok(status)) {
-    status = iree_hal_task_queue_submit_op_finish(
-        operation, wait_semaphores, /*resource_count=*/0, /*resources=*/NULL);
+    status = iree_hal_file_transfer_batch_capture(&queue->base, file_access,
+                                                  files, buffers, transfers,
+                                                  capture, &operation->file);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_resource_set_insert_strided(
+        operation->resource_set, files.count, files.bindings,
+        offsetof(iree_hal_file_binding_t, file), sizeof(*files.bindings));
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_resource_set_insert_strided(
+        operation->resource_set, buffers.count, buffers.bindings,
+        offsetof(iree_hal_buffer_binding_t, buffer), sizeof(*buffers.bindings));
+  }
+  if (iree_status_is_ok(status) &&
+      transfers->type == IREE_HAL_FILE_TRANSFER_LIST_TYPE_INDIRECT) {
+    iree_hal_buffer_t* metadata[] = {transfers->indirect.records.buffer,
+                                     transfers->indirect.count_buffer};
+    status = iree_hal_resource_set_insert(operation->resource_set,
+                                          IREE_ARRAYSIZE(metadata), metadata);
+  }
+  for (iree_host_size_t i = 0; i < files.count && iree_status_is_ok(status);
+       ++i) {
+    if (!iree_hal_file_async_handle(files.bindings[i].file) &&
+        !iree_hal_file_supports_synchronous_io(files.bindings[i].file)) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "file has neither native async nor host I/O");
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_task_queue_memory_barriers_capture(operation, barriers);
+  }
+  if (iree_status_is_ok(status)) {
+    if (transfers->type == IREE_HAL_FILE_TRANSFER_LIST_TYPE_HOST) {
+      iree_hal_task_queue_profile_set_operation_count(operation,
+                                                      transfers->host.count);
+      if (transfers->host.count == 1) {
+        const iree_hal_file_transfer_t* transfer = transfers->host.transfers;
+        if (transfer->row_length && transfer->row_count == 1 &&
+            transfer->slice_count == 1) {
+          iree_hal_task_queue_profile_set_payload(operation,
+                                                  transfer->row_length);
+        }
+      }
+    }
+    status = iree_hal_task_queue_submit_op_finish(operation, waits, 0, NULL);
   } else {
     iree_hal_task_queue_profile_record_failed_before_ready(operation);
-    iree_hal_task_queue_op_destroy(operation, iree_status_clone(status));
+    iree_hal_task_queue_op_discard(operation);
   }
-
-  IREE_TRACE_ZONE_END(z0);
-  return status;
-}
-
-iree_status_t iree_hal_task_queue_submit_write(
-    iree_hal_task_queue_t* queue, iree_hal_buffer_t* source_buffer,
-    iree_device_size_t source_offset, iree_hal_file_t* target_file,
-    uint64_t target_offset, iree_device_size_t length,
-    iree_hal_semaphore_list_t wait_semaphores,
-    iree_hal_semaphore_list_t signal_semaphores,
-    const iree_hal_queue_barriers_t* barriers) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_hal_task_queue_op_t* operation = NULL;
-  iree_status_t status = iree_hal_task_queue_op_allocate(
-      queue, IREE_HAL_TASK_QUEUE_OP_WRITE, &signal_semaphores, &operation);
-  if (!iree_status_is_ok(status)) {
-    IREE_TRACE_ZONE_END(z0);
-    return status;
-  }
-
-  iree_hal_task_queue_operation_begin(queue);
-  status = iree_hal_task_queue_memory_barriers_capture(operation, barriers);
-
-  operation->write.hal_file = target_file;
-  operation->write.async_file = iree_hal_file_async_handle(target_file);
-  operation->write.file_offset = target_offset;
-  operation->write.buffer = source_buffer;
-  operation->write.buffer_offset = source_offset;
-  operation->write.length = length;
-  iree_hal_task_queue_profile_set_payload(operation, length);
-
-  // Retain the HAL file and buffer through the operation lifetime.
-  iree_hal_resource_t* resources[2] = {
-      (iree_hal_resource_t*)target_file,
-      (iree_hal_resource_t*)source_buffer,
-  };
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_resource_set_insert(operation->resource_set, 2, resources);
-  }
-
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_task_queue_submit_op_finish(
-        operation, wait_semaphores, /*resource_count=*/0, /*resources=*/NULL);
-  } else {
-    iree_hal_task_queue_profile_record_failed_before_ready(operation);
-    iree_hal_task_queue_op_destroy(operation, iree_status_clone(status));
-  }
-
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -4357,49 +4159,27 @@ static iree_status_t iree_hal_task_queue_flush(iree_hal_queue_t* base_queue) {
 }
 
 static iree_status_t iree_hal_task_queue_read(
-    iree_hal_queue_t* base_queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_file_t* source_file, uint64_t source_offset,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, const iree_hal_queue_barriers_t* barriers,
-    iree_hal_read_flags_t flags) {
-  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_task_queue_vtable);
+    iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_file_binding_table_t files,
+    iree_hal_buffer_binding_table_t buffers,
+    const iree_hal_file_transfer_list_t* transfers,
+    const iree_hal_queue_barriers_t* barriers, iree_hal_read_flags_t flags) {
   (void)flags;
-  if (!iree_hal_file_async_handle(source_file) &&
-      !iree_hal_file_supports_synchronous_io(source_file)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "file has no async handle and does not support synchronous I/O; "
-        "cannot perform read");
-  }
-  return iree_hal_task_queue_submit_read(
-      (iree_hal_task_queue_t*)base_queue, source_file, source_offset,
-      target_buffer, target_offset, length, wait_semaphore_list,
-      signal_semaphore_list, barriers);
+  return iree_hal_task_queue_submit_file_transfer(
+      (iree_hal_task_queue_t*)base, waits, signals, files, buffers, transfers,
+      barriers, IREE_HAL_MEMORY_ACCESS_READ);
 }
 
 static iree_status_t iree_hal_task_queue_write(
-    iree_hal_queue_t* base_queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
-    iree_hal_file_t* target_file, uint64_t target_offset,
-    iree_device_size_t length, const iree_hal_queue_barriers_t* barriers,
-    iree_hal_write_flags_t flags) {
-  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_task_queue_vtable);
+    iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_buffer_binding_table_t buffers,
+    iree_hal_file_binding_table_t files,
+    const iree_hal_file_transfer_list_t* transfers,
+    const iree_hal_queue_barriers_t* barriers, iree_hal_write_flags_t flags) {
   (void)flags;
-  if (!iree_hal_file_async_handle(target_file) &&
-      !iree_hal_file_supports_synchronous_io(target_file)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "file has no async handle and does not support synchronous I/O; "
-        "cannot perform write");
-  }
-  return iree_hal_task_queue_submit_write(
-      (iree_hal_task_queue_t*)base_queue, source_buffer, source_offset,
-      target_file, target_offset, length, wait_semaphore_list,
-      signal_semaphore_list, barriers);
+  return iree_hal_task_queue_submit_file_transfer(
+      (iree_hal_task_queue_t*)base, waits, signals, files, buffers, transfers,
+      barriers, IREE_HAL_MEMORY_ACCESS_WRITE);
 }
 
 static const iree_hal_queue_vtable_t iree_hal_task_queue_vtable = {

@@ -8,13 +8,13 @@
 #define IREE_HAL_DRIVER_AMD_XDNA_QUEUE_OPERATION_H_
 
 #include "iree/async/frontier_tracker.h"
-#include "iree/hal/driver/amd/fabric/file_transfer.h"
 #include "iree/hal/driver/amd/xdna/command_buffer.h"
 #include "iree/hal/driver/amd/xdna/queue_frontier.h"
 #include "iree/hal/driver/amd/xdna/queue_producer_index.h"
 #include "iree/hal/driver/amd/xdna/queue_service.h"
 #include "iree/hal/driver/amd/xdna/queue_storage.h"
 #include "iree/hal/pool_wait.h"
+#include "iree/hal/utils/file_transfer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,6 +22,7 @@ extern "C" {
 
 typedef struct iree_hal_amd_xdna_queue_t iree_hal_amd_xdna_queue_t;
 typedef struct iree_hal_amd_xdna_operation_t iree_hal_amd_xdna_operation_t;
+typedef struct iree_hal_amd_xdna_file_t iree_hal_amd_xdna_file_t;
 
 // One locally visible signal owned by an unaccepted dispatch.
 typedef struct iree_hal_amd_xdna_producer_entry_t {
@@ -128,8 +129,6 @@ struct iree_hal_amd_xdna_operation_t {
   iree_atomic_int32_t wait_count;
   // First failure transferred from a resolved timepoint callback.
   iree_atomic_intptr_t wait_status;
-  // File-I/O status transferred to the proactor owner.
-  iree_atomic_intptr_t continuation_status;
   // Borrowed queue kept live by |device|.
   iree_hal_amd_xdna_queue_t* queue;
   // Retained device dominating the queue through arena return.
@@ -253,10 +252,12 @@ struct iree_hal_amd_xdna_operation_t {
     } transfer;
     // File transaction using a prepared host execution binding.
     struct {
-      // Arena-owned state retaining the file and logical buffer.
-      iree_hal_amd_fabric_file_transfer_t* transfer;
-      // True after a chunk retires until host publication prepares another.
-      bool io_completed;
+      // Immutable binding tables and descriptions, retained once per binding.
+      iree_hal_file_transfer_batch_t batch;
+      // Exactly READ (file to buffer) or WRITE (buffer to file).
+      iree_hal_memory_access_t access;
+      // Arena-owned bounded native requests and host visibility state.
+      iree_hal_amd_xdna_file_t* state;
     } file;
     // Captured host callback invoked after semaphore dependencies complete.
     struct {
@@ -373,20 +374,30 @@ iree_status_t iree_hal_amd_xdna_queue_transfer(
     const iree_hal_transfer_operation_t* operations,
     const iree_hal_queue_barriers_t* barriers);
 
+// Releases captures after all native requests and host accesses retire.
+void iree_hal_amd_xdna_file_release(iree_hal_amd_xdna_operation_t* operation);
+
+// Runs potentially blocking cache work and bounded copies on the host service.
+// Native request progression remains with its completion owner.
+void iree_hal_amd_xdna_file_execute(iree_hal_amd_xdna_operation_t* operation);
+
+// Resumes file progress after acknowledging the host service's borrow.
+void iree_hal_amd_xdna_file_continue(iree_hal_amd_xdna_operation_t* operation);
+
 // Captures a file read through the buffer's private host execution binding.
 iree_status_t iree_hal_amd_xdna_queue_read(
-    iree_hal_queue_t* base, const iree_hal_semaphore_list_t waits,
-    const iree_hal_semaphore_list_t signals, iree_hal_file_t* source_file,
-    uint64_t source_offset, iree_hal_buffer_t* target_buffer,
-    iree_device_size_t target_offset, iree_device_size_t length,
+    iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_file_binding_table_t files,
+    iree_hal_buffer_binding_table_t buffers,
+    const iree_hal_file_transfer_list_t* transfers,
     const iree_hal_queue_barriers_t* barriers, iree_hal_read_flags_t flags);
 
 // Captures a file write through the buffer's private host execution binding.
 iree_status_t iree_hal_amd_xdna_queue_write(
-    iree_hal_queue_t* base, const iree_hal_semaphore_list_t waits,
-    const iree_hal_semaphore_list_t signals, iree_hal_buffer_t* source_buffer,
-    iree_device_size_t source_offset, iree_hal_file_t* target_file,
-    uint64_t target_offset, iree_device_size_t length,
+    iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_buffer_binding_table_t buffers,
+    iree_hal_file_binding_table_t files,
+    const iree_hal_file_transfer_list_t* transfers,
     const iree_hal_queue_barriers_t* barriers, iree_hal_write_flags_t flags);
 
 #ifdef __cplusplus

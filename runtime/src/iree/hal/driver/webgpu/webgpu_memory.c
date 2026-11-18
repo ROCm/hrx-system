@@ -48,7 +48,9 @@ static iree_hal_webgpu_buffer_usage_t iree_hal_webgpu_native_buffer_usage(
   iree_hal_webgpu_buffer_usage_t native_usage =
       IREE_HAL_WEBGPU_BUFFER_USAGE_COPY_SRC |
       IREE_HAL_WEBGPU_BUFFER_USAGE_COPY_DST;
-  if (iree_any_bit_set(usage, IREE_HAL_BUFFER_USAGE_STORAGE |
+  // Exact byte transfers use the shared storage-buffer copy/fill shaders.
+  if (iree_any_bit_set(usage, IREE_HAL_BUFFER_USAGE_TRANSFER |
+                                  IREE_HAL_BUFFER_USAGE_STORAGE |
                                   IREE_HAL_BUFFER_USAGE_DISPATCH_IMAGE)) {
     native_usage |= IREE_HAL_WEBGPU_BUFFER_USAGE_STORAGE;
   }

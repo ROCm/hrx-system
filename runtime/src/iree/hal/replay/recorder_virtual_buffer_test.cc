@@ -306,9 +306,9 @@ TEST_F(ReplayRecorderVirtualBufferTest,
   IREE_ASSERT_OK(iree_hal_buffer_map_write(alias, 4, &alias_pattern,
                                            sizeof(alias_pattern)));
   uint64_t first_written = 4;
-  IREE_ASSERT_OK(iree_hal_queue_write(queue_, Point(&filled),
-                                      Point(&first_written), alias, 0, file, 0,
-                                      16, nullptr, IREE_HAL_WRITE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_write_linear(
+      queue_, Point(&filled), Point(&first_written), alias, 0, file, 0, 16,
+      nullptr, IREE_HAL_WRITE_FLAG_NONE));
   Wait(first_written);
 
   const uint32_t replacement_pattern = 0x87654321;
@@ -340,13 +340,13 @@ TEST_F(ReplayRecorderVirtualBufferTest,
                                     1, &replacement,
                                     IREE_HAL_QUEUE_MAP_FLAG_NONE));
   uint64_t replacement_written = 8;
-  IREE_ASSERT_OK(iree_hal_queue_write(
+  IREE_ASSERT_OK(iree_hal_queue_write_linear(
       queue_, Point(&restored), Point(&replacement_written), first, 0, file, 16,
       sizeof(replacement_pattern), nullptr, IREE_HAL_WRITE_FLAG_NONE));
   uint64_t alias_written = 9;
-  IREE_ASSERT_OK(iree_hal_queue_write(queue_, Point(&replacement_written),
-                                      Point(&alias_written), alias, 0, file, 20,
-                                      16, nullptr, IREE_HAL_WRITE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_write_linear(
+      queue_, Point(&replacement_written), Point(&alias_written), alias, 0,
+      file, 20, 16, nullptr, IREE_HAL_WRITE_FLAG_NONE));
   replacement.operation = IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND;
   replacement.previous_source = replacement.source;
   replacement.source = nullptr;
@@ -653,9 +653,9 @@ TEST_F(ReplayRecorderVirtualBufferTest,
   IREE_ASSERT_OK(
       iree_hal_buffer_mapping_invalidate_range(&host_maps[1], 0, 16));
   uint64_t written = 4;
-  IREE_ASSERT_OK(iree_hal_queue_write(queue_, Point(&deallocated),
-                                      Point(&written), reservation, 32, file, 0,
-                                      64, nullptr, IREE_HAL_WRITE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_write_linear(
+      queue_, Point(&deallocated), Point(&written), reservation, 32, file, 0,
+      64, nullptr, IREE_HAL_WRITE_FLAG_NONE));
   Wait(written);
   // The transient source has retired; the host mappings own its committed
   // storage. Whole-reservation detach needs no former source descriptor.

@@ -340,8 +340,8 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_transfer(
 }
 
 iree_status_t iree_hal_amd_gpu_pm4_submission_create_file(
-    iree_hal_amd_gpu_capture_pool_t* pool,
-    const iree_hal_amd_gpu_transfer_operation_t* operation,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t count,
+    const iree_hal_amd_gpu_transfer_operation_t* operations,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     const iree_hal_amd_gpu_pm4_barrier_t* before,
     const iree_hal_amd_gpu_pm4_barrier_t* after,
@@ -351,7 +351,7 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_file(
   // The file owner keeps native backing and host bytes live through retirement.
   const iree_host_size_t payload_size =
       iree_host_align(
-          operation ? sizeof(*operation) : 0,
+          count * sizeof(*operations),
           iree_alignof(iree_hal_amd_gpu_pm4_submission_retirement_t)) +
       sizeof(iree_hal_amd_gpu_pm4_submission_retirement_t);
   const iree_hal_barrier_list_t empty = {0};
@@ -362,14 +362,14 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_file(
       pool, false, iree_hal_semaphore_list_empty(),
       iree_hal_semaphore_list_empty(), payload_size, profile, &barriers,
       &submission, &payload));
-  if (operation) {
+  if (count) {
     submission->entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER;
-    iree_hal_amd_gpu_transfer_initialize_operation(
+    iree_hal_amd_gpu_transfer_initialize_operations(
         (iree_hal_amd_gpu_transfer_staging_limits_t){
             .upload_capacity = IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_UPLOAD_LENGTH,
             .download_capacity =
                 IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_DOWNLOAD_LENGTH},
-        operation, payload, &submission->transfer);
+        count, operations, payload, &submission->transfer);
   }
   *iree_hal_amd_gpu_pm4_submission_retirement(submission) =
       (iree_hal_amd_gpu_pm4_submission_retirement_t){.callback = callback};
@@ -380,7 +380,7 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_file(
   if (after) {
     submission->after = *after;
   }
-  if (operation) {
+  if (count) {
     // Internal file copies use CP DMA, not a shader-qualified program view.
     // Publish preceding shader writes before CP reads or overwrites these
     // bytes, then invalidate shader views before returning the copy to the

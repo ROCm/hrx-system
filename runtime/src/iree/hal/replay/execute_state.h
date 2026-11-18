@@ -234,6 +234,12 @@ iree_status_t iree_hal_replay_executor_make_buffer_ref(
     const iree_hal_replay_buffer_ref_payload_t* payload,
     iree_hal_buffer_ref_t* out_ref);
 
+// Resolves a required direct reference from an external queue payload.
+iree_status_t iree_hal_replay_executor_make_direct_buffer_ref(
+    iree_hal_replay_executor_t* executor,
+    const iree_hal_replay_buffer_ref_payload_t* payload,
+    iree_hal_buffer_ref_t* out_ref);
+
 void iree_hal_replay_semaphore_list_storage_deinitialize(
     iree_hal_replay_semaphore_list_storage_t* storage,
     iree_allocator_t host_allocator);
