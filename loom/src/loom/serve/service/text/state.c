@@ -44,10 +44,10 @@ static iree_status_t loom_serve_text_cache_ensure_available(
   uint64_t capacity = pool->capacity ? 2ull * pool->capacity : 16;
   capacity = iree_max(capacity, (uint64_t)minimum);
   capacity = iree_min(capacity, (uint64_t)maximum);
+  const uint32_t previous_capacity = pool->capacity;
   IREE_RETURN_IF_ERROR(loom_runtime_block_pool_grow(pool, (uint32_t)capacity));
-  if (state->memory.index) {
-    state->memory.trim.flags |= LOOM_SERVE_TEXT_TRIM_FLAG_PLACEMENT_PENDING;
-  }
+  loom_serve_text_state_backing_extend(state, previous_capacity,
+                                       state->recurrent.pool.capacity);
   *out_available = true;
   return iree_ok_status();
 }
@@ -191,19 +191,24 @@ static iree_status_t loom_serve_text_row_initialize(
   return status;
 }
 
-// Direct state users complete commitment synchronously. Preserve the mapping
-// change or denied placement before that native transaction is discarded.
+// Direct state users join publication before updating logical placement from
+// the native transaction's retained edits.
 static iree_status_t loom_serve_text_try_commit(
     loom_serve_text_state_t* state, iree_host_size_t range_count,
     const loom_runtime_memory_range_t* ranges, bool* out_admitted) {
-  const uint64_t committed_before = state->memory.statistics.committed_bytes;
-  iree_status_t status = loom_runtime_memory_pool_try_commit(
-      state->memory.pool, range_count, ranges, out_admitted);
-  if (iree_status_is_ok(status) &&
-      (!*out_admitted ||
-       state->memory.statistics.committed_bytes != committed_before)) {
-    state->memory.trim.flags |= LOOM_SERVE_TEXT_TRIM_FLAG_PLACEMENT_PENDING;
+  *out_admitted = false;
+  loom_runtime_memory_admission_t admission;
+  loom_runtime_memory_operation_t* operation = NULL;
+  IREE_RETURN_IF_ERROR(loom_runtime_memory_pool_commit_async(
+      state->memory.pool, range_count, ranges, NULL, 0, &admission,
+      &operation));
+  *out_admitted = admission == LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE;
+  loom_runtime_memory_operation_await(operation);
+  iree_status_t status = loom_runtime_memory_operation_query_status(operation);
+  if (iree_status_is_ok(status)) {
+    loom_serve_text_state_backing_update(state, operation);
   }
+  loom_runtime_memory_operation_free(operation);
   return status;
 }
 
@@ -1122,13 +1127,31 @@ iree_status_t loom_serve_text_state_reservation_submit(
   if (state->memory.pool &&
       admission == LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE) {
     ++state->memory.backing.value;
-  } else if (state->memory.pool) {
-    state->memory.trim.flags |= LOOM_SERVE_TEXT_TRIM_FLAG_PLACEMENT_PENDING;
   }
   // From here ordinary denial is impossible. Transfer/platform failure is
   // terminal and the installed owners retain every accepted-work resource.
   if (iree_status_is_ok(status) &&
       admission == LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE) {
+    // Admission established complete backing for these logical owners. Retain
+    // that placement fact instead of rediscovering it page by page when native
+    // publication completes. Execution readiness remains a separate contract.
+    if (state->memory.pool) {
+      for (uint32_t i = 0; i < count - preserved; ++i) {
+        loom_runtime_block_pool_set_preferred(&state->cache.pool, blocks[i],
+                                              true);
+      }
+      loom_runtime_block_pool_set_preferred(&state->recurrent.pool,
+                                            reservation->writer, true);
+      if (iree_any_bit_set(reservation->flags,
+                           LOOM_SERVE_TEXT_RESERVATION_COLD)) {
+        for (uint32_t i = 0; i < reservation->prefix; ++i) {
+          loom_runtime_block_pool_set_preferred(
+              &state->cache.pool, reservation->restored.blocks[i], true);
+        }
+        loom_runtime_block_pool_set_preferred(
+            &state->recurrent.pool, reservation->restored.recurrent_slot, true);
+      }
+    }
     uint32_t* row_blocks =
         state->cache.maps
             ? state->cache.maps + index * state->storage.blocks_per_row
@@ -1270,11 +1293,6 @@ void loom_serve_text_state_reservation_free(
   }
   if (!iree_any_bit_set(reservation->flags,
                         LOOM_SERVE_TEXT_RESERVATION_INSTALLED)) {
-    // Other owners may have released backed IDs while this plan held its
-    // uncertain additions. Returning those additions can change their order.
-    if (reservation->commitment_count) {
-      state->memory.trim.flags |= LOOM_SERVE_TEXT_TRIM_FLAG_PLACEMENT_PENDING;
-    }
     const uint32_t owned_count = reservation->count - reservation->preserved;
     const uint32_t owned_prefix =
         reservation->prefix -

@@ -117,8 +117,11 @@ static iree_status_t loom_serve_text_state_resize_directories(
   IREE_RETURN_IF_ERROR(loom_serve_text_resize_directory(
       state->host_allocator, state->recurrent.pool.capacity, slot_count,
       sizeof(*state->recurrent.buffers), (void**)&state->recurrent.buffers));
+  const uint32_t previous_slot_count = state->recurrent.pool.capacity;
   IREE_RETURN_IF_ERROR(
       loom_runtime_block_pool_grow(&state->recurrent.pool, slot_count));
+  loom_serve_text_state_backing_extend(state, state->cache.pool.capacity,
+                                       previous_slot_count);
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = state->row_count;
        i < row_count && iree_status_is_ok(status); ++i) {
@@ -194,11 +197,8 @@ iree_status_t loom_serve_text_state_resize(loom_serve_text_state_t* state,
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, loom_serve_text_state_validate_resize(state, row_count, storage));
-  const bool backed = loom_runtime_memory_operation_is_complete(
-      state->memory.backing.operation);
-  IREE_ASSERT(backed && !state->prepared_reservations);
-  loom_runtime_memory_operation_free(state->memory.backing.operation);
-  state->memory.backing.operation = NULL;
+  IREE_ASSERT(!state->prepared_reservations);
+  loom_serve_text_state_complete_backing(state);
   const iree_host_size_t previous_count = state->row_count;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, loom_serve_text_state_resize_directories(

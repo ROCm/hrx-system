@@ -458,6 +458,20 @@ void loom_runtime_memory_operation_await(
 iree_status_t loom_runtime_memory_operation_query_status(
     const loom_runtime_memory_operation_t* operation);
 
+// Number of coalesced mapping changes after successful publication. These are
+// actual native edits, not requested ranges. NULL and reservation growth have
+// no changes: growth preserves existing backing in the replacement address
+// reservation. The operation retains this result until destruction.
+iree_host_size_t loom_runtime_memory_operation_mapping_count(
+    const loom_runtime_memory_operation_t* operation);
+
+// Returns the change at an index below mapping_count. The target remains
+// borrowed from the caller-owned reservation. Physical source handles are not
+// exposed: an unbind may already have returned them to the allocator.
+iree_hal_memory_mapping_operation_t loom_runtime_memory_operation_mapping(
+    const loom_runtime_memory_operation_t* operation, iree_host_size_t index,
+    iree_hal_buffer_binding_t* out_range);
+
 // Releases a completed operation. Caller-owned reservations may then be trimmed
 // or destroyed. NULL is accepted; this never waits for native work.
 void loom_runtime_memory_operation_free(

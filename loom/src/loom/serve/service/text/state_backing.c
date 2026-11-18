@@ -251,7 +251,6 @@ iree_status_t loom_serve_text_state_backing_initialize(
     iree_allocator_free(state->host_allocator, previous);
   }
   state->memory.index = backing;
-  state->memory.trim.flags |= LOOM_SERVE_TEXT_TRIM_FLAG_PLACEMENT_PENDING;
   return iree_ok_status();
 }
 
@@ -479,9 +478,7 @@ void loom_serve_text_state_complete_backing(loom_serve_text_state_t* state) {
   const bool complete = loom_runtime_memory_operation_is_complete(
       state->memory.backing.operation);
   IREE_ASSERT(complete);
-  if (state->memory.backing.operation) {
-    state->memory.trim.flags |= LOOM_SERVE_TEXT_TRIM_FLAG_PLACEMENT_PENDING;
-  }
+  loom_serve_text_state_backing_update(state, state->memory.backing.operation);
   loom_runtime_memory_operation_free(state->memory.backing.operation);
   state->memory.backing.operation = NULL;
 }
@@ -493,9 +490,9 @@ static void loom_serve_text_backing_acknowledge(
   loom_serve_text_backing_t* backing = state->memory.index;
   loom_runtime_block_pool_acknowledge_releases(&state->cache.pool);
   loom_runtime_block_pool_acknowledge_releases(&state->recurrent.pool);
-  memset(backing->rows, 0, backing->row_layout.word_count * sizeof(uint64_t));
-  memset(backing->released_checkpoints, 0,
-         backing->checkpoint_layout.word_count * sizeof(uint64_t));
+  loom_index_set_clear(&backing->row_layout, backing->rows);
+  loom_index_set_clear(&backing->checkpoint_layout,
+                       backing->released_checkpoints);
 }
 
 // Selection wraps for normal allocation. Maintenance consumes each work item
@@ -543,28 +540,34 @@ static iree_status_t loom_serve_text_trim_backing(
         loom_serve_text_backing_next(&backing->row_layout, backing->rows,
                                      (uint32_t)state->row_count, row_index + 1);
   }
-  const uint32_t* released = NULL;
-  uint32_t count =
-      loom_runtime_block_pool_released(&state->recurrent.pool, &released);
-  for (uint32_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+  for (uint32_t block =
+           loom_runtime_block_pool_find_released(&state->recurrent.pool, 0);
+       block != UINT32_MAX && iree_status_is_ok(status);
+       block = loom_runtime_block_pool_find_released(&state->recurrent.pool,
+                                                     block + 1)) {
     status = loom_serve_text_backing_release(
         state, 1,
         state->storage.recurrent.origin +
-            released[i] * state->storage.recurrent.stride,
+            block * state->storage.recurrent.stride,
         state->storage.recurrent.length);
   }
-  count = loom_runtime_block_pool_released(&state->cache.pool, &released);
+  const uint32_t first =
+      loom_runtime_block_pool_find_released(&state->cache.pool, 0);
   for (iree_host_size_t i = 0;
-       count && i < state->storage.region_count && iree_status_is_ok(status);
+       first != UINT32_MAX && i < state->storage.region_count &&
+       iree_status_is_ok(status);
        ++i) {
     const loom_serve_text_cache_region_t* region = &state->storage.regions[i];
     for (iree_host_size_t plane = 0;
          plane < region->blocks.count && iree_status_is_ok(status); ++plane) {
-      for (uint32_t j = 0; j < count && iree_status_is_ok(status); ++j) {
+      for (uint32_t block = first;
+           block != UINT32_MAX && iree_status_is_ok(status);
+           block = loom_runtime_block_pool_find_released(&state->cache.pool,
+                                                         block + 1)) {
         status = loom_serve_text_backing_release(
             state, region->allocation,
             region->blocks.origin + plane * region->blocks.stride +
-                released[j] * region->blocks.block_bytes,
+                block * region->blocks.block_bytes,
             region->blocks.block_bytes);
       }
     }
@@ -583,6 +586,10 @@ static iree_status_t loom_serve_text_trim_backing(
         state->checkpoints.pool.capacity, checkpoint + 1);
   }
   IREE_ASSERT(!state->memory.backing.operation);
+  if (iree_status_is_ok(status) && !backing->range_count) {
+    loom_serve_text_backing_acknowledge(state);
+    IREE_RETURN_AND_END_ZONE(z0, status);
+  }
   if (iree_status_is_ok(status)) {
     status = loom_runtime_memory_pool_trim_async(
         state->memory.pool, backing->range_count, backing->ranges,
@@ -683,8 +690,6 @@ static iree_status_t loom_serve_text_try_back_compaction(
     *out_admitted = admission == LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE;
     if (*out_admitted) {
       ++state->memory.backing.value;
-    } else {
-      state->memory.trim.flags |= LOOM_SERVE_TEXT_TRIM_FLAG_PLACEMENT_PENDING;
     }
     if (iree_status_is_ok(status) && state->memory.backing.operation) {
       status = loom_runtime_execution_barrier(
@@ -849,17 +854,16 @@ static iree_status_t loom_serve_text_submit_compaction(
   return status;
 }
 
-static bool loom_serve_text_recurrent_is_backed(void* user_data,
-                                                uint32_t slot) {
-  const loom_serve_text_state_t* state = user_data;
+static bool loom_serve_text_recurrent_is_backed(
+    const loom_serve_text_state_t* state, uint32_t slot) {
   return loom_runtime_virtual_buffer_is_backed(
       state->memory.buffers[1],
       state->storage.recurrent.origin + slot * state->storage.recurrent.stride,
       state->storage.recurrent.length);
 }
 
-static bool loom_serve_text_block_is_backed(void* user_data, uint32_t block) {
-  const loom_serve_text_state_t* state = user_data;
+static bool loom_serve_text_block_is_backed(
+    const loom_serve_text_state_t* state, uint32_t block) {
   for (iree_host_size_t i = 0; i < state->storage.region_count; ++i) {
     const loom_serve_text_cache_region_t* region = &state->storage.regions[i];
     loom_runtime_virtual_buffer_t* buffer =
@@ -878,6 +882,107 @@ static bool loom_serve_text_block_is_backed(void* user_data, uint32_t block) {
     }
   }
   return true;
+}
+
+// Only a changed native range can change an established logical preference.
+// The interval index carries source geometry; native runs carry exact edits.
+static void loom_serve_text_backing_update_nodes(
+    loom_serve_text_state_t* state, const loom_serve_text_backing_node_t* nodes,
+    iree_host_size_t count, uint64_t begin, uint64_t end, bool binding) {
+  if (!count) {
+    return;
+  }
+  const iree_host_size_t middle = count / 2;
+  const loom_serve_text_backing_node_t* node = &nodes[middle];
+  if (node->maximum_end <= begin) {
+    return;
+  }
+  loom_serve_text_backing_update_nodes(state, nodes, middle, begin, end,
+                                       binding);
+  if (node->begin >= end) {
+    return;
+  }
+  loom_runtime_block_pool_t* pool = NULL;
+  uint64_t stride = 0, length = 0;
+  if (node->domain == LOOM_TEXT_BACKING_RECURRENT) {
+    pool = &state->recurrent.pool;
+    stride = state->storage.recurrent.stride;
+    length = state->storage.recurrent.length;
+  } else if (node->domain == LOOM_TEXT_BACKING_CACHE) {
+    pool = &state->cache.pool;
+    stride = length = state->storage.regions[node->ordinal].blocks.block_bytes;
+  }
+  if (pool && length) {
+    const uint64_t first_unbounded =
+        begin < node->begin + length
+            ? 0
+            : (begin - node->begin - length) / stride + 1;
+    const uint64_t last_unbounded = (end - node->begin - 1) / stride + 1;
+    const uint32_t first = (uint32_t)iree_min(first_unbounded, pool->capacity);
+    const uint32_t last = (uint32_t)iree_min(last_unbounded, pool->capacity);
+    for (uint32_t block = first; block < last; ++block) {
+      if (loom_runtime_block_pool_is_preferred(pool, block) == binding) {
+        continue;
+      }
+      const bool preferred =
+          binding && (node->domain == LOOM_TEXT_BACKING_RECURRENT
+                          ? loom_serve_text_recurrent_is_backed(state, block)
+                          : loom_serve_text_block_is_backed(state, block));
+      loom_runtime_block_pool_set_preferred(pool, block, preferred);
+    }
+  }
+  loom_serve_text_backing_update_nodes(state, nodes + middle + 1,
+                                       count - middle - 1, begin, end, binding);
+}
+
+void loom_serve_text_state_backing_update(
+    loom_serve_text_state_t* state,
+    const loom_runtime_memory_operation_t* operation) {
+  const loom_serve_text_backing_t* backing = state->memory.index;
+  const iree_host_size_t count =
+      loom_runtime_memory_operation_mapping_count(operation);
+  for (iree_host_size_t i = 0; backing && i < count; ++i) {
+    iree_hal_buffer_binding_t range;
+    const iree_hal_memory_mapping_operation_t kind =
+        loom_runtime_memory_operation_mapping(operation, i, &range);
+    for (iree_host_size_t allocation = 0;
+         allocation < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT; ++allocation) {
+      if (!state->memory.buffers[allocation] ||
+          loom_runtime_virtual_buffer_handle(
+              state->memory.buffers[allocation]) != range.buffer) {
+        continue;
+      }
+      const iree_host_size_t first = backing->starts[allocation];
+      loom_serve_text_backing_update_nodes(
+          state, backing->nodes + first,
+          backing->starts[allocation + 1] - first, range.offset,
+          range.offset + range.length,
+          kind == IREE_HAL_MEMORY_MAPPING_OPERATION_BIND);
+      break;
+    }
+  }
+}
+
+void loom_serve_text_state_backing_extend(
+    loom_serve_text_state_t* state, uint32_t previous_cache_capacity,
+    uint32_t previous_recurrent_capacity) {
+  if (!state->memory.index) {
+    return;
+  }
+  for (uint32_t block = previous_cache_capacity;
+       block < state->cache.pool.capacity; ++block) {
+    loom_runtime_block_pool_set_preferred(
+        &state->cache.pool, block,
+        loom_serve_text_block_is_backed(state, block));
+  }
+  if (state->memory.buffers[1]) {
+    for (uint32_t slot = previous_recurrent_capacity;
+         slot < state->recurrent.pool.capacity; ++slot) {
+      loom_runtime_block_pool_set_preferred(
+          &state->recurrent.pool, slot,
+          loom_serve_text_recurrent_is_backed(state, slot));
+    }
+  }
 }
 
 iree_status_t loom_serve_text_state_complete_trim(
@@ -912,19 +1017,6 @@ iree_status_t loom_serve_text_state_complete_trim(
   *out_complete = state->memory.trim.phase == LOOM_SERVICE_TEXT_TRIM_COMPLETE &&
                   !state->memory.backing.operation;
   if (*out_complete) {
-    if (iree_any_bit_set(state->memory.trim.flags,
-                         LOOM_SERVE_TEXT_TRIM_FLAG_PLACEMENT_PENDING)) {
-      // Releasing a tentative plan restores its selected IDs to the stack.
-      // Even with unchanged mappings, a denied placement must reconsider holes
-      // made reusable by eviction before retrying the same unavailable slab.
-      if (state->memory.buffers[1]) {
-        loom_runtime_block_pool_prioritize(
-            &state->recurrent.pool, loom_serve_text_recurrent_is_backed, state);
-      }
-      loom_runtime_block_pool_prioritize(
-          &state->cache.pool, loom_serve_text_block_is_backed, state);
-      state->memory.trim.flags &= ~LOOM_SERVE_TEXT_TRIM_FLAG_PLACEMENT_PENDING;
-    }
     result->released_bytes = state->memory.statistics.released_bytes -
                              state->memory.trim.released_before;
   }
