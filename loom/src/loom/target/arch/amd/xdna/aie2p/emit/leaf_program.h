@@ -61,6 +61,13 @@ typedef struct loom_aie2p_planned_slot_t {
 static_assert(sizeof(loom_aie2p_planned_slot_t) == 24,
               "planned AIE2P slots must remain 24 bytes");
 
+static inline bool loom_aie2p_planned_slot_is_nop(
+    const loom_aie2p_planned_slot_t* slot) {
+  return slot->encoded_slot.slot == LOOM_AIE2P_SLOT_NOP ||
+         iree_any_bit_set(slot->flags,
+                          LOOM_AIE2P_PLANNED_SLOT_FLAG_SYNTHETIC_NOP);
+}
+
 // One variable-width physical VLIW bundle.
 typedef struct loom_aie2p_planned_bundle_t {
   // Physical issue cycle in the core program, including implicit NOP gaps.
@@ -180,6 +187,34 @@ typedef struct loom_aie2p_leaf_resource_import_t {
   // Outer Loom type kind of the imported source value.
   loom_type_kind_t source_type_kind;
 } loom_aie2p_leaf_resource_import_t;
+
+// An architectural LS–LE region admitted after final bundle alignment.
+typedef struct loom_aie2p_issue_loop_t {
+  // Offset of the first repeated packet in this function's code.
+  uint32_t byte_offset;
+  // First repeated issue position in the function's final bundle plan.
+  uint32_t first_issue_cycle;
+  // Physical packets in the region, including implicit empty packets.
+  uint32_t packet_count;
+  // Exact LC value each time the setup runs.
+  uint32_t trip_count;
+  // Issue positions with no instruction other than NOP per iteration.
+  uint32_t empty_packet_count;
+} loom_aie2p_issue_loop_t;
+
+// Function-local packet evidence retained on a requested compile report.
+typedef struct loom_aie2p_function_issue_t {
+  // Function spelling from the source module retained with the compile report.
+  iree_string_view_t name;
+  // Admitted hardware loops in physical order.
+  loom_aie2p_issue_loop_t* loops;
+  // Number of populated records in |loops|.
+  iree_host_size_t loop_count;
+  // Number of physically encoded packets, including implicit NOP gaps.
+  uint32_t stored_packet_count;
+  // Whether native control can skip or replay packets outside the listed loops.
+  bool has_unaccounted_control;
+} loom_aie2p_function_issue_t;
 
 // Immutable physical AIE2P program produced for one Low leaf function.
 //

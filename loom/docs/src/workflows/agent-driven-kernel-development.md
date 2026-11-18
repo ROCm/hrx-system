@@ -107,8 +107,8 @@ the mathematical contract.
 
 ## Establish the oracle and data reuse policy
 
-The performance oracle establishes three prerequisites before kernel,
-pipeline, or schedule optimization starts:
+For a port, the performance oracle establishes three prerequisites before
+kernel, pipeline, or schedule optimization starts:
 
 | Prerequisite | Evidence retained |
 | --- | --- |
@@ -128,6 +128,23 @@ and baseline reproduction. The first performance candidate adopts the oracle's
 demonstrated strategy or an evidence-backed alternative with the same workload
 and numerical requirements. A naive numerical reference establishes truth; it
 does not establish an architecture worth optimizing.
+
+For a novel kernel with no measured whole-kernel implementation, build the
+comparison from measured primitives. For each representative request, count the
+useful operations and the input and output bytes that must cross external
+memory under the numerical contract. Record which operands the proposed
+schedule reuses and how long they stay resident. Measure the matching transfer
+pattern and compute primitive on the intended device partition at that
+precision, layout, and reuse depth. Keep their native instruction mixes.
+
+For example, if eight output rows consume the same 16 KiB weight panel,
+the compulsory input for that panel is 16 KiB. Reading it separately for
+each row requests 128 KiB. Compile a representative slice at one and eight
+rows, inspect issued transfers, and time completed outputs with the same
+quality gate. Dividing the work and bytes by the respective measured rates
+gives two time budgets. The larger budget describes ideal overlap at those
+rates. A device timeline shows how much overlap the slice actually achieves.
+That comparison can expose a wrong traversal before tuning its inner loop.
 
 ## Admit only optimization that can close the gap
 
@@ -150,6 +167,10 @@ When evidence invalidates that path, the design decision and dependent work
 reopen; accumulated implementation and passing tests confer no authority to
 continue. Correctness fixes remain correctness work, with no implied
 performance qualification.
+
+For an XDNA pipeline, the [completed-request procedure](../targets/xdna-pipelines.md#account-for-a-completed-request)
+works through the phase timers, native loop counts, DMA deliveries, and
+producer/consumer stalls needed to make this decision.
 
 ## Bound the performance regime before hill climbing
 
@@ -541,7 +562,8 @@ earns a benchmark experiment.
 `suggest` exposes static compiler findings. Their order and confidence do not
 rank runtime cost or optimization value: the tool receives no external oracle
 measurement or reuse policy. Its `guidance` keeps that boundary visible in both
-text and JSON. The oracle and opportunity gates precede acting on any finding.
+text and JSON. The measured reference or primitive budgets and the opportunity
+bound determine which finding to pursue.
 
 An empty suggestion list means only that registered target diagnostics found
 no issue. It does not prove that the schedule matches an external oracle or
@@ -559,8 +581,9 @@ before retaining the rewritten form.
 When the expected delta is absent, the candidate returns to source or becomes
 a standalone compiler reproducer. Repeated physical timing cannot make a
 missing compiler mechanism appear. Detailed reports, source-to-Low rows, IR
-snapshots, and deeper candidate disassembly follow the narrowed question;
-the initial oracle instruction audit remains a prerequisite. The
+snapshots, and deeper candidate disassembly follow the narrowed question.
+The initial instruction audit covers the selected reference or matched
+primitives. The
 [compile-report workflow](compile-reports.md)
 owns those evidence paths and the strict comparison identity.
 
@@ -721,8 +744,9 @@ the numerical, compiler, and physical gates around the answer.
 
 For each candidate:
 
-1. Name the production semantic cut and workload; establish the oracle's native
-   instructions, controlled machine performance, and complete data reuse policy.
+1. Name the production semantic cut and workload. Establish native instructions,
+   controlled machine performance, and complete data reuse policy using the
+   reference implementation or the matched primitives for a novel kernel.
 2. Bound the current compute, memory, and control costs against the oracle and
    relevant rooflines. Admit tuning only with a credible end-to-end opportunity
    and rejection condition; otherwise reopen the execution shape.

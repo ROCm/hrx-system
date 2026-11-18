@@ -27,6 +27,10 @@ typedef struct loom_aie2p_bundle_plan_options_t {
   iree_diagnostic_emitter_t diagnostic_emitter;
   // Incoming-link and caller-shadow preservation across nested native calls.
   loom_aie2p_return_address_t return_address;
+  // Optional report destination, populated only for accepted native regions.
+  loom_aie2p_function_issue_t* issue;
+  // Storage for loop evidence that outlives transient packet planning.
+  iree_arena_allocator_t* issue_arena;
 } loom_aie2p_bundle_plan_options_t;
 
 // Plans physical bundles for one successful, spill-free AIE2P Low frame. A

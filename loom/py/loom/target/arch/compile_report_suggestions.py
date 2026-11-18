@@ -22,6 +22,7 @@ from loom.reporting.compile_report_suggestions import (
     CompileReportSuggestionOptions,
     CompileReportSuggestionProvider,
     CompileReportSuggestionResult,
+    suggest_single_slot_ingress,
 )
 from loom.target.arch.amd.xdna.aie2p.compile_report_suggestions import (
     AIE2P_COMPILE_REPORT_SUGGESTION_PROVIDER,
@@ -48,14 +49,16 @@ def suggest_compile_report(
     if options is None:
         options = CompileReportSuggestionOptions()
     source_suggestions = (
-        suggest_expansions(document)
-        + suggest_scalarization(document)
+        suggest_scalarization(document)
         + suggest_loop_pipelines(document)
         + suggest_boundary_projections(document)
         + suggest_native_math_relaxations(document)
     )
+    if options.include_experimental and document.status_code == 0:
+        source_suggestions += suggest_single_slot_ingress(document)
     target_result = _suggest_target(document, options)
-    if not source_suggestions:
+    expansions = suggest_expansions(document)
+    if not source_suggestions and not expansions:
         return target_result
     return CompileReportSuggestionResult(
         provider_name=(
@@ -64,7 +67,7 @@ def suggest_compile_report(
             else "source"
         ),
         unavailable_reason=None,
-        suggestions=source_suggestions + target_result.suggestions,
+        suggestions=source_suggestions + target_result.suggestions + expansions,
         target_unavailable_reason=target_result.unavailable_reason,
     )
 

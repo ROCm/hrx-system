@@ -25,6 +25,7 @@ extern "C" {
 #endif
 
 typedef struct loom_target_environment_t loom_target_environment_t;
+typedef struct loom_target_compile_report_t loom_target_compile_report_t;
 
 // Capability type for loom_target_pass_capability_t.
 extern const loom_pass_environment_capability_type_t
@@ -48,6 +49,9 @@ typedef struct loom_target_pass_capability_t {
 
   // Target providers linked into the compiler session, or NULL.
   const loom_target_environment_t* target_environment;
+
+  // Optional invocation report receiving source facts before target rewrites.
+  loom_target_compile_report_t* compile_report;
 
   // Invocation-local concrete function versions, or NULL.
   const loom_function_version_list_t* function_versions;

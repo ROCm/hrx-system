@@ -349,8 +349,8 @@ static iree_status_t loom_aie2p_configuration_link(
   loom_aie2p_tile_link_layout_t layout = {0};
   bool fits = false;
   IREE_RETURN_IF_ERROR(loom_aie2p_configuration_storage_place(
-      tile->contribution, emitter->family, tile->coordinate, memory->packing,
-      arena, &layout, &fits));
+      &tile->program->contribution, emitter->family, tile->coordinate,
+      memory->packing, arena, &layout, &fits));
   const loom_xdna_tile_facts_t* facts =
       loom_xdna_array_tile_facts(emitter->family, tile->coordinate);
   if (!fits) {
@@ -375,17 +375,18 @@ static iree_status_t loom_aie2p_configuration_link(
   const iree_string_view_t name = loom_string_table_get(
       &emitter->request->module->strings,
       emitter->request->module->symbols.entries[symbol.symbol_id].name_id);
-  IREE_RETURN_IF_ERROR(
-      loom_aie2p_tile_link(tile->contribution, &layout, arena, linked),
-      "worker '@%.*s': code=%" PRIu64 " bytes, tile capacity=%u bytes",
-      (int)name.size, name.data,
-      tile->contribution->realization.code.byte_length,
-      facts->memory.program_capacity);
+  IREE_RETURN_IF_ERROR(loom_aie2p_tile_link(&tile->program->contribution,
+                                            &layout, arena, linked),
+                       "worker '@%.*s': code=%" PRIu64
+                       " bytes, tile capacity=%u bytes",
+                       (int)name.size, name.data,
+                       tile->program->contribution.realization.code.byte_length,
+                       facts->memory.program_capacity);
   tile->linked_tile = linked;
   if (emitter->report) {
     IREE_RETURN_IF_ERROR(loom_aie2p_configuration_report_worker(
-        emitter->report, name, tile->coordinate,
-        &tile->contribution->realization, &layout));
+        emitter->report, name, tile->coordinate, tile->program, &layout,
+        linked));
   }
   return iree_ok_status();
 }
@@ -1140,7 +1141,7 @@ iree_status_t loom_aie2p_configuration_plan_materialize(
     tiles[i] = (loom_aie2p_xdna_tile_t){
         .coordinate = load->coordinate,
         .program_name = entry_symbol->name,
-        .contribution = worker,
+        .program = program,
     };
     const iree_host_size_t memory_index =
         loom_xdna_array_physical_tile_index(plan->family, load->coordinate);

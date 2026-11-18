@@ -129,6 +129,26 @@ block envelope: data-dependent alternatives may both contribute. Whole-
 dispatch geometry belongs to a concrete benchmark launch unless the compiled
 artifact genuinely specializes it.
 
+For XDNA array and configuration programs, a summary report can show one
+native callable across its final worker placements.
+
+```shell
+loom-compile-report show kernel.report.json --function 'reduce_rows*'
+```
+
+Each row identifies the worker, tile, loaded code group, and address. Two
+names sharing all of those occupy one physical body and retain their own
+call counts. Stored packets describe the footprint once. Packets per call
+include empty issue slots and repetitions of admitted hardware loops, and
+exclude the work inside callees. The loop offset is relative to the function
+entry. If a remaining native branch needs taken-edge counts, the function
+total is unknown. Its admitted loops still report their packet and trip
+counts, including how many packets per trip issue only NOPs. Padding in an
+otherwise occupied packet contributes zero instructions to co-issue. Caller
+frequency is independent and can also be unknown. Both
+quantities use `unknown` in text and `null` in JSON. Device counters supply
+elapsed cycles and stalls.
+
 Register-move analysis includes compiler-classified causes. Summary reports
 preserve the aggregate packet and register-unit counts; detailed reports let
 `show` enumerate causes and let `diff` distinguish added, removed, changed, and
@@ -196,6 +216,31 @@ extent includes alignment gaps and unused space before the final allocation.
 These facts are available when compiling source or resuming from configuration
 IR. Logical channel counts are shown only when their ownership evidence is
 available; an unavailable count does not mean zero channels.
+
+Both `show` and `suggest` present planned external and routed on-array DMA
+bytes per activation ahead of per-entry findings. Their JSON paths are
+`.pipelines.rows[].external_dma_byte_count` and `.routed_dma_byte_count` in
+the same row. Each missing total is `null`. When a detailed plan has logical
+channels, `show` identifies both endpoints and gives record bytes times record
+count alongside slot capacity and storage. An external binding also has its
+own task size and execution count. Relate these counts to executed
+activations, useful outputs, and timestamps using the
+[XDNA completed-request procedure](../targets/xdna-pipelines.md#account-for-a-completed-request).
+
+When compiling a source pipeline, `suggest` also names the largest fully
+counted read and write of an external binding per phase call. For example,
+two ingress workers that each read four 16,640-byte partial results request
+133,120 bytes each time their phase runs. A phase inside a request-dependent
+loop can run thousands of times on one input and zero times on another.
+Multiply by the phase calls for each workload shape. When a later phase
+restores a range that an earlier phase saved, compare keeping that state on
+chip through its last use and count any inputs the new traversal rereads.
+
+`show --format=json` lists every group under `.pipeline_phase_copies[].groups`.
+Groups distinguish the phase call site, binding, direction, and record width.
+A group with an unproved width or execution count carries a null byte total
+unless its known width or count is zero. These bytes describe the authored
+copies. The selected transport can serve repeated reads from local storage.
 
 Explicit loop pipeline policies appear under **Source loop pipelines**. Each
 policy records its compiled function, loop ordinal, applied depth, queue shape,
@@ -527,20 +572,39 @@ report evidence:
 loom-compile-report suggest kernel.report.json
 ```
 
-Each finding names an action and cites the exact evidence paths and values that
-motivated it. Finding order and confidence describe static compiler evidence;
+The default shows one cited example per investigation and the number of
+matches in the report. For example, spill traffic on 32 workers appears once,
+with one worker's spill evidence and a count of 32. Each lowering stage shows
+its largest per-operation expansion. A proposed change to a numerical contract
+stays separate from one requiring different fast-math flags. In JSON,
+`finding_count` counts displayed findings and `match_count` counts their
+underlying matches. A match from a summary report can cover several source
+operations. Different rules can also match the same operation.
+
+```shell
+loom-compile-report suggest kernel.report.json --expand lowering.reduce_expansion
+loom-compile-report suggest kernel.report.json --expand all --format=json
+```
+
+Both commands use the captured report. Each expanded match carries its entry,
+action, and original evidence paths and values. `--include-experimental`
+controls eligibility independently of expansion.
+
+Finding order and confidence describe static compiler evidence;
 they do not rank runtime cost or optimization value. `status: available` means
 the relevant interpreter is available. An empty finding list cannot establish
 that the current execution shape is competitive.
 
-Optimization requires a known-good oracle's native instruction mix, controlled
-performance on the intended machine, and data reuse policy before acting on
-these findings. Paneling, tile and batch sizes, prefill chunks, resident
+For a port, establish the reference's native instruction mix, performance on
+the intended machine, and data reuse policy before acting on these findings.
+Paneling, tile and batch sizes, prefill chunks, resident
 operands, buffering, sharing, and complete-request traffic determine whether
 the schedule is worth tuning. Each experiment also needs an absolute target,
 the measured end-to-end gap, a bound on recoverable cost, and a rejection
 condition. An unexplained large oracle gap stops local tuning; repeated small
-wins over an inefficient baseline cannot qualify that architecture. The
+wins over an inefficient baseline cannot qualify that architecture. For a novel
+kernel, use compulsory bytes, useful operations, and matched primitive
+measurements on the intended partition to set the first comparison. The
 [agent authoring workflow](agent-driven-kernel-development.md#establish-the-oracle-and-data-reuse-policy)
 owns this evidence and admission gate.
 
@@ -565,6 +629,23 @@ banks, and local memory extents. The evidence names the worker or physical
 memory owner. Shared storage is counted once, including SRAM with no resident
 worker. These findings guide packing and lifetime experiments; they do not
 predict FIFO stalls or DMA overlap from static occupancy.
+
+`aie2p.empty_loop_packets` identifies repeated hardware loops where at least
+a quarter of the issue positions are empty and one loop entry executes at
+least 64 empty packets. For example, 11 empty packets in a 26-packet body
+repeated 256 times account for 2,816 empty packets each time control reaches
+the loop. The default example has the largest such count per entry. Use the
+function name and byte offset to inspect the dependencies, then measure how
+often the loop runs on a worker that determines completion. Parallel tiles,
+an infrequent branch, or mandatory latency can change the opportunity.
+
+For authored pipelines, `--include-experimental` also checks external reads
+into a FIFO freshly reserved in the copy's block. `pipeline.single_slot_ingress`
+reports a one-slot FIFO when a single producer repeats that reservation and
+reads at least 4 KiB across those visits per phase call. Four producers each
+filling one record once do not satisfy the repetition test. Time the producer's
+wait for credit before spending local memory on a second slot. Other FIFOs may
+already carry the next input, or the consumer may release this one early.
 
 On AMDGPU, `amdgpu.pipeline_copy_waits` identifies full global-load waits whose
 native consumers are materialized branch-payload copies. Its cited

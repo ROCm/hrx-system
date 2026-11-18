@@ -205,14 +205,9 @@ static uint8_t loom_aie2p_bundle_alignment_query_loop_packet_options(
 static bool loom_aie2p_bundle_alignment_bundle_is_nop(
     const loom_aie2p_bundle_alignment_storage_t* builder,
     const loom_aie2p_planned_bundle_t* bundle) {
-  if (bundle->slot_count == 1 &&
-      builder->slots[bundle->slot_start].encoded_slot.slot ==
-          LOOM_AIE2P_SLOT_NOP) {
-    return true;
-  }
   for (uint8_t i = 0; i < bundle->slot_count; ++i) {
-    if (!iree_any_bit_set(builder->slots[bundle->slot_start + i].flags,
-                          LOOM_AIE2P_PLANNED_SLOT_FLAG_SYNTHETIC_NOP)) {
+    if (!loom_aie2p_planned_slot_is_nop(
+            &builder->slots[bundle->slot_start + i])) {
       return false;
     }
   }

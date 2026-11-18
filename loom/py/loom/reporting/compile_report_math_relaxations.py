@@ -232,6 +232,7 @@ def suggest_native_math_relaxations(
             CompileReportSuggestion(
                 suggestion_id="math.use_native_fastmath",
                 entry_name=group.function,
+                variant=flag_names,
                 action=(
                     f"Target policy reports native forms for {motif_summary} when "
                     f"{flag_names} is permitted. "

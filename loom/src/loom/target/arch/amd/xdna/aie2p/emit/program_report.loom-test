@@ -47,6 +47,8 @@ low.func.def target<amd.xdna.aie2p.core>(@configuration_core_target) @duplicate_
 // ----
 CHECK: COMPILE-REPORT: emission instructions=40 code_bytes=136 storage_bytes=146 body_instructions=40 entry_instructions=0 coissued_instructions=0 coissued_components=0
 CHECK: COMPILE-REPORT: dynamic_instruction_mix descriptors=7 unknown=0 scalar_alu=6 * branch=4 *
+CHECK: COMPILE-REPORT: placed_function @configured_add_pair placement=0,2 worker_index=0 group=0 address=128 code_byte_count=18 stored_packet_count=7 packets_per_call=7 calls_per_entry=2
+CHECK: COMPILE-REPORT: placed_function @duplicate_add_pair placement=0,2 worker_index=0 group=0 address=128 code_byte_count=18 stored_packet_count=7 packets_per_call=7 calls_per_entry=1
 
 // ====
 // RUN: with-checks emit aie2p-xdna output=compile-report
@@ -110,3 +112,100 @@ low.func.def target<amd.xdna.aie2p.core>(@core) @double_row() asm {
 // ----
 CHECK: COMPILE-REPORT: static_instruction_mix * vector_alu=1 *
 CHECK: COMPILE-REPORT: dynamic_instruction_mix * unknown=0 * vector_alu=7 *
+CHECK: COMPILE-REPORT: placed_function @double_row * packets_per_call=14 calls_per_entry=7
+
+// ====
+// RUN: with-checks emit aie2p-xdna output=compile-report
+
+// A runtime selector controls whether the helper executes. Its local issue
+// stays exact even when the worker's path and the number of calls are unknown.
+aie2p.target<configuration> @device {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+aie2p.target<core> @core
+
+low.func.def public retain target<amd.xdna.aie2p.configuration>(@device) abi(array_program) @conditional_work() asm {
+  %columns = constant 1 : reg<aie2p.config.scalar : i64>
+  entry %columns, @initialize, @invoke
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@device) @initialize() asm {
+  %column = constant 0 : reg<aie2p.config.scalar : i64>
+  %row = constant 2 : reg<aie2p.config.scalar : i64>
+  program.load %column, %row, @worker
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@device) @invoke() asm {
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core) abi(object_function) @worker() asm {
+  %request = mov.local-address 458752
+  %condition = lda %request, 0
+  low.cond_br %condition, ^fill, ^exit : reg<aie2p.er>
+^fill:
+  low.func.call @fill(%request) : (reg<aie2p.ep>)
+  low.br ^exit
+^exit:
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core) @fill(%output: reg<aie2p.ep>) asm {
+  %one = mov.i32 1
+  st %one, %output, 0
+  return
+}
+
+// ----
+CHECK: COMPILE-REPORT: placed_function @worker * packets_per_call=unknown calls_per_entry=1
+CHECK: COMPILE-REPORT: placed_function @fill * calls_per_entry=unknown
+
+// ====
+// RUN: with-checks emit aie2p-xdna input=source-low output=compile-report
+
+// The caller initializes one tile. Its non-inlined mixer stores a 20-packet
+// body once and executes it 32 times. Its dependences leave ten issue
+// positions empty per trip. Alignment NOPs share packet formats with real
+// instructions; only three packets actually issue two instructions.
+aie2p.target<array> @device {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+func.def noinline @mix_rows(%values: view<32xi32>) {
+  %begin = index.constant 0 : index
+  %count = index.constant 32 : index
+  %step = index.constant 1 : index
+  %scale = scalar.constant 3 : i32
+  scf.for %i = [%begin to %count step %step] {
+    %value = view.load %values[%i] : view<32xi32> -> i32
+    %first = scalar.muli %value, %scale : i32
+    %second = scalar.muli %first, %first : i32
+    %third = scalar.muli %second, %scale : i32
+    %fourth = scalar.xori %third, %value : i32
+    %fifth = scalar.muli %fourth, %second : i32
+    view.store %fifth, %values[%i] : i32, view<32xi32>
+  }
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@device) @fill_rows() run() {
+  %pool = pipeline.memory<workgroup>[0, 2] : pool
+  %size = index.constant 128 : offset
+  %origin = index.constant 0 : offset
+  %buffer = buffer.alloca<workgroup> pool(%pool) align(64) %size : buffer
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %values = buffer.view %buffer[%origin] : buffer -> view<32xi32>
+    %begin = index.constant 0 : index
+    %count = index.constant 32 : index
+    %step = index.constant 1 : index
+    scf.for %i = [%begin to %count step %step] {
+      %seed = index.cast %i : index to i32
+      view.store %seed, %values[%i] : i32, view<32xi32>
+    }
+    func.call @mix_rows(%values) : (view<32xi32>)
+  }
+}
+
+// ----
+CHECK: COMPILE-REPORT: placed_function @mix_rows* stored_packet_count=32 packets_per_call=652 *
+CHECK: COMPILE-REPORT: packet_loop @mix_rows* byte_offset=32 packet_count=20 trip_count=32 empty_packet_count=10
+CHECK: COMPILE-REPORT: emission * coissued_instructions=3 coissued_components=6

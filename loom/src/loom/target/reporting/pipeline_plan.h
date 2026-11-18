@@ -63,6 +63,50 @@ typedef struct loom_target_compile_report_pipeline_placement_t {
   uint16_t z;
 } loom_target_compile_report_pipeline_placement_t;
 
+// Exact period and trip count per entry to a repeated native packet range.
+typedef struct loom_target_compile_report_packet_loop_t {
+  // First repeated packet, in bytes from the callable entry.
+  uint32_t byte_offset;
+  // Physical issue packets per iteration, including empty packets.
+  uint32_t packet_count;
+  // Iterations on each entry to this range.
+  uint32_t trip_count;
+  // Issue packets consisting entirely of NOPs in one iteration.
+  uint32_t empty_packet_count;
+} loom_target_compile_report_packet_loop_t;
+
+// A logical callable in a final worker image. Equal group and address on
+// the same worker identify shared storage even when call counts differ.
+typedef struct loom_target_compile_report_placed_function_t {
+  // Module-owned spelling of the compiled function.
+  iree_string_view_t name;
+  // Logical worker index in the owning pipeline plan.
+  uint32_t worker_index;
+  // Worker placement in this pipeline.
+  loom_target_compile_report_pipeline_placement_t placement;
+  // Loaded image group within the worker, with zero denoting the resident
+  // group.
+  uint32_t group;
+  // Worker-visible entry address while the group is loaded.
+  uint32_t address;
+  // Encoded bytes in the body alone, excluding inter-function padding.
+  uint32_t code_byte_count;
+  // Physical packets stored in the body once.
+  uint32_t stored_packet_count;
+  // Packets issued on a completed call, excluding all callee bodies.
+  uint64_t packets_per_call;
+  // Calls executed by one invocation of the worker entry.
+  uint64_t calls_per_entry;
+  // First repeated region in the enclosing plan's packet loop array.
+  iree_host_size_t first_loop;
+  // Number of consecutive loop records belonging to this function.
+  uint32_t loop_count;
+  // Whether the compiler accounted for the complete local control path.
+  bool has_packets_per_call;
+  // Whether all caller visits and their products are proven.
+  bool has_calls_per_entry;
+} loom_target_compile_report_placed_function_t;
+
 // One endpoint of a realized pipeline channel.
 typedef struct loom_target_compile_report_pipeline_endpoint_t {
   // Kind of entity owning the endpoint.
@@ -171,6 +215,36 @@ typedef struct loom_target_compile_report_pipeline_plan_summary_t {
   // Routed on-array DMA bytes moved per pipeline activation.
   uint64_t routed_dma_byte_count;
 } loom_target_compile_report_pipeline_plan_summary_t;
+
+// One authored asynchronous copy between a root buffer and a worker. Counts
+// are local to the containing construction, even when its caller is a loop.
+typedef struct loom_target_compile_report_pipeline_copy_t {
+  // Name of the pipeline that owns the external bindings.
+  iree_string_view_t root;
+  // Source construction containing the strand that issues this copy.
+  iree_string_view_t phase;
+  // Construction occurrence in this root; distinct call sites can bind the
+  // same source phase differently or occur on alternative paths.
+  iree_host_size_t occurrence;
+  // Index of the root buffer argument.
+  uint32_t binding;
+  // True for a read from the external binding, false for a write to it.
+  bool read;
+  // True when participant count times per-worker visits is known.
+  bool visits_known;
+  // True when the worker control-flow analysis proves its own block visits.
+  bool worker_visits_known;
+  // Payload bytes per copy, or a negative value when runtime-dependent.
+  int64_t bytes_per_copy;
+  // Copies from this site per invocation of its phase when visits_known.
+  uint64_t visits;
+  // Construction channel ordinal when the destination is freshly reserved.
+  iree_host_size_t fresh_fifo;
+  // Records in that FIFO, or zero without a same-block reservation proof.
+  uint64_t fresh_fifo_capacity;
+  // Times one participant visits this site when worker_visits_known.
+  uint64_t visits_per_worker;
+} loom_target_compile_report_pipeline_copy_t;
 
 // One realized pipeline worker.
 typedef struct loom_target_compile_report_pipeline_worker_row_t {
@@ -295,6 +369,14 @@ typedef struct loom_target_compile_report_pipeline_plan_t {
   const loom_target_compile_report_pipeline_memory_row_t* memory_rows;
   // Number of entries in |memory_rows|.
   iree_host_size_t memory_row_count;
+  // Final callable placements available independently of source-detail rows.
+  const loom_target_compile_report_placed_function_t* functions;
+  // Number of logical callable placements.
+  iree_host_size_t function_count;
+  // Repeated native ranges indexed by the placed functions.
+  const loom_target_compile_report_packet_loop_t* packet_loops;
+  // Total number of repeated native ranges across all placements.
+  iree_host_size_t packet_loop_count;
 } loom_target_compile_report_pipeline_plan_t;
 
 // Releases every plan owned by |list| and resets it to empty.

@@ -453,14 +453,14 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
   *out_compiled = false;
   *out_tiles = NULL;
   loom_aie2p_xdna_tile_t* tiles = NULL;
-  loom_aie2p_leaf_contribution_t* contributions = NULL;
+  loom_aie2p_program_object_t* programs = NULL;
   loom_aie2p_linked_tile_t* linked_tiles = NULL;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(request->scratch_arena, plan->worker_count,
                                 sizeof(*tiles), (void**)&tiles));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       request->scratch_arena, resident_program_set->program_count,
-      sizeof(*contributions), (void**)&contributions));
+      sizeof(*programs), (void**)&programs));
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(request->scratch_arena, plan->worker_count,
                                 sizeof(*linked_tiles), (void**)&linked_tiles));
@@ -468,7 +468,8 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
   for (iree_host_size_t i = 0; i < resident_program_set->program_count; ++i) {
     const loom_aie2p_array_resident_program_t* resident =
         &resident_program_set->programs[i];
-    loom_aie2p_leaf_contribution_t* contribution = &contributions[i];
+    loom_aie2p_program_object_t* program = &programs[i];
+    const loom_aie2p_leaf_contribution_t* contribution = &program->contribution;
     loom_target_compile_report_t worker_report;
     loom_target_compile_report_t* worker_report_ptr = NULL;
     if (request->compile_report != NULL) {
@@ -506,7 +507,6 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
       }
     }
     bool program_compiled = false;
-    loom_aie2p_program_object_t program = {0};
     iree_status_t status = loom_aie2p_program_compile(
         compiler, resident->function_op, /*may_return=*/false,
         (loom_aie2p_program_helper_list_t){
@@ -514,9 +514,8 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
             .count = resident->helper_count,
         },
         &resident->program_data, &worker_compile_options, NULL,
-        &program_compiled, &program);
+        &program_compiled, program);
     if (iree_status_is_ok(status) && program_compiled) {
-      *contribution = program.contribution;
       status = loom_aie2p_program_capacity_admit(
           resident_module, resident->function_op,
           contribution->realization.code.byte_length,
@@ -547,8 +546,9 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
     const uint32_t resident_program_index =
         plan->worker_plans[worker_index].resident_program_index;
     IREE_ASSERT_LT(resident_program_index, resident_program_set->program_count);
-    loom_aie2p_leaf_contribution_t* contribution =
-        &contributions[resident_program_index];
+    const loom_aie2p_program_object_t* program =
+        &programs[resident_program_index];
+    const loom_aie2p_leaf_contribution_t* contribution = &program->contribution;
     loom_aie2p_tile_storage_placement_t
         storage_placements[LOOM_STORAGE_SPACE_COUNT_];
     loom_aie2p_tile_read_only_data_placement_t* read_only_data_placements =
@@ -575,7 +575,7 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
     tiles[worker_index] = (loom_aie2p_xdna_tile_t){
         .coordinate = plan->worker_plans[worker_index].coordinate,
         .program_name = resident_program_set->instance_names[worker_index],
-        .contribution = contribution,
+        .program = program,
         .linked_tile = &linked_tiles[worker_index],
     };
   }

@@ -105,7 +105,8 @@ static iree_status_t loom_aie2p_xdna_encode_symbol_tables(
   iree_host_size_t string_offset = 1;
   for (iree_host_size_t i = 0; i < tile_count; ++i) {
     const loom_aie2p_xdna_tile_t* tile = tiles[i].tile;
-    const loom_aie2p_leaf_contribution_t* contribution = tile->contribution;
+    const loom_aie2p_leaf_contribution_t* contribution =
+        &tile->program->contribution;
     const loom_native_object_symbol_t* entry =
         &contribution->object
              .symbols[contribution->realization.entry_symbol_index];

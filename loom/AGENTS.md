@@ -32,6 +32,11 @@ tests cannot supply the missing performance evidence. The
 [agent authoring workflow](docs/src/workflows/agent-driven-kernel-development.md#establish-the-oracle-and-data-reuse-policy)
 owns the evidence record and admission gate.
 
+XDNA work follows the [completed-request procedure](docs/src/targets/xdna-pipelines.md#account-for-a-completed-request).
+The evidence record reconciles wall time, phase intervals, work and waits per
+tile, transfer multiplicities, and the producer of each material wait. Any
+residual that could change the design selects the next measurement.
+
 Optimization explores the performance/accuracy frontier against those oracles.
 The objective is the fastest implementation within the workload's acceptable
 error envelope, with the highest accuracy attainable at that performance.

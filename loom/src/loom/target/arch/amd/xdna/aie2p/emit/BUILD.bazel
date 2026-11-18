@@ -472,6 +472,7 @@ loom_cc_library(
     hdrs = ["xdna_product.h"],
     deps = [
         ":program",
+        ":program_object",
         ":tile_link",
         "//loom/src/loom/target/arch/amd/xdna/device:profile",
         "//loom/src/loom/target/emit/native:elf",
@@ -525,6 +526,8 @@ loom_cc_library(
         "configuration_report.h",
         "program_replacement.c",
         "program_replacement.h",
+        "program_report.c",
+        "program_report.h",
     ],
     hdrs = [
         "artifact.h",
@@ -544,6 +547,7 @@ loom_cc_library(
         ":program_compile",
         ":program_layout",
         ":program_loading",
+        ":program_object",
         ":tile_link",
         ":xdna_product",
         "//loom/src/loom/analysis:source_storage_packing",

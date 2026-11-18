@@ -1589,6 +1589,23 @@ static iree_status_t loom_aie2p_bundle_plan_append_packet(
       const uint32_t descriptor_ordinal =
           loom_aie2p_bundle_encoding_encode_packet(
               builder->frame, packet, &encoded_slot, &read_only_data_ordinal);
+      // Authored native transfers and loop-register writes bypass structural
+      // branch fixups. Their execution frequency needs separate evidence.
+      if (builder->options->issue) {
+        builder->options->issue->has_unaccounted_control |=
+            iree_any_bit_set(loom_low_descriptor_set_descriptor_view(
+                                 builder->descriptor_set, packet->descriptor)
+                                 ->instruction_class_flags,
+                             LOOM_LOW_INSTRUCTION_CLASS_FLAG_BRANCH) ||
+            descriptor_ordinal ==
+                AIE2P_CORE_DESCRIPTOR_REF_STATE_LOOP_COUNT_SHORT ||
+            descriptor_ordinal ==
+                AIE2P_CORE_DESCRIPTOR_REF_STATE_LOOP_COUNT_LONG ||
+            descriptor_ordinal ==
+                AIE2P_CORE_DESCRIPTOR_REF_STATE_LOOP_START_ADDRESS ||
+            descriptor_ordinal ==
+                AIE2P_CORE_DESCRIPTOR_REF_STATE_LOOP_END_ADDRESS;
+      }
       if (read_only_data_ordinal != UINT32_MAX) {
         loom_aie2p_bundle_plan_append_read_only_data_fixup(
             builder, packet_index, read_only_data_ordinal);
@@ -2144,6 +2161,18 @@ static iree_status_t loom_aie2p_bundle_plan_try_append_hardware_loop_impl(
     loom_aie2p_bundle_plan_restore_hardware_loop(builder, snapshot, loop);
     return iree_ok_status();
   }
+  loom_aie2p_function_issue_t* issue = builder->options->issue;
+  if (issue) {
+    const uint32_t period = builder->next_issue_cycle - body_issue_cycle;
+    issue->loops[issue->loop_count++] = (loom_aie2p_issue_loop_t){
+        .byte_offset = body_byte_offset,
+        .first_issue_cycle = body_issue_cycle,
+        .packet_count = period,
+        .trip_count = loop->trip_count,
+        // Final packet accounting subtracts each occupied issue position.
+        .empty_packet_count = period,
+    };
+  }
 
   IREE_ASSERT_LE(builder->code_address_fixup_count + 2u,
                  builder->code_address_fixup_capacity);
@@ -2374,6 +2403,11 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
     }
   }
   if (builder.code_address_fixup_capacity != 0) {
+    if (options->issue) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          options->issue_arena, analysis.hardware_loop_candidate_count,
+          sizeof(*options->issue->loops), (void**)&options->issue->loops));
+    }
     IREE_RETURN_IF_ERROR(
         iree_arena_allocate_array(arena, builder.code_address_fixup_capacity,
                                   sizeof(*builder.code_address_fixups),
@@ -2428,7 +2462,16 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
         &builder, block_index, block_analysis));
     IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_terminator(
         &builder, block_analysis, builder.execution_bundle_start));
+    if (options->issue &&
+        block_analysis->terminator == LOOM_AIE2P_BLOCK_TERMINATOR_RETURN &&
+        block_index + 1 < frame->schedule.block_count) {
+      options->issue->has_unaccounted_control = true;
+    }
     ++block_index;
+  }
+  if (options->issue) {
+    options->issue->stored_packet_count = builder.next_issue_cycle;
+    options->issue->has_unaccounted_control |= builder.branch_fixup_count != 0;
   }
   loom_aie2p_leaf_program_plan_t plan = {
       .register_writes = builder.register_writes,

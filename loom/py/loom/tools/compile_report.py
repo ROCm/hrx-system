@@ -34,13 +34,24 @@ for one compiler checkout. Start here before querying the complete report tree.
 
 ### Establish that the execution shape is worth optimizing
 
-Data reuse comes first. Before tuning, establish a known-good oracle's native
+Use `loom-compile-report show kernel.report.json --function 'reduce_rows*'` to
+see an XDNA callable's final tile and loaded group, stored packets, repeated
+native loops, and exclusive packets per call. Request-dependent visits require
+a request shape or device evidence.
+
+Data reuse comes first. For a port, establish a known-good oracle's native
 instruction mix, controlled performance on the intended machine, and data reuse
 policy: paneling, tile and batch sizes, prefill chunks, operand residency,
 buffering, sharing, and complete-request traffic. A numerical reference or a
 single-tile correctness example cannot qualify the performance architecture.
 
-Each optimization needs an absolute end-to-end target, the measured oracle gap,
+For a novel kernel, count the compulsory external bytes and useful operations
+for a completed request. Measure a transfer and compute primitive on the intended
+partition with the same operand layout and reuse. Compare a representative fused
+slice against those rates at two shapes that change reuse. Programmed workers
+measure placement. Per-worker events show which ones contribute on each shape.
+
+Each optimization needs an absolute end-to-end target, the measured gap,
 an upper bound on recoverable cost, and a rejection condition. An unexplained
 large gap stops local tuning and reopens the algorithm and reuse policy. Small
 percentage wins against our own slow baseline do not satisfy this gate.
@@ -70,9 +81,13 @@ identities with the experiment. `--comparison=target` admits target
 specialization changes within one target and backend family. `--force` retains
 identity mismatches for historical inspection; its result is observational.
 
-`show` and `suggest` flag individual source operations expanding beyond five
-operations, alongside explicit scalar lane expansion. Summary maxima cannot
-hide an expensive occurrence in an average. Counts belong to math legalization,
+`show` lists source operations expanding beyond five operations. The default
+`suggest` shows a cited example of each investigation and counts repeated
+matches. Each lowering stage shows its largest expansion. Specific fallbacks
+and resource findings precede these stage-wide warnings. Use
+`suggest kernel.report.json --expand ID` for every match to a rule, or
+`--expand all` for all matches at the selected confidence level. Summary maxima
+cannot hide an expensive occurrence in an average. Counts belong to math legalization,
 target legalization, or source-to-Low selection; they are not cumulative costs
 or final hardware instructions. Inspect the cited recipe for a compact lowering
 that preserves source semantics, then check final resources and runtime.
@@ -85,8 +100,16 @@ combines source policy evidence with the selected target provider's experiments.
 Pipeline depth advice keeps unrolling fixed and cites available final resources;
 a single report does not establish that pipelining increased register use.
 
-Resident pipeline inventories appear under `Pipeline` in `show`: distinct
-images, loaded worker copies, placement, and physical memory occupancy.
+Pipeline inventories in `show` and `suggest` give planned external and routed
+DMA bytes per activation before per-entry findings. A null total needs
+transfer counts from the executed request. For source pipelines, both views
+name the largest counted external read and write per phase call. Multiply by
+observed phase calls for each request shape. The XDNA completed-request procedure
+relates these bytes to native loop trips, phase timing, and producer waits.
+[XDNA authoring guide](https://rocm.github.io/hrx-system/loom/targets/xdna-pipelines/#account-for-a-completed-request)
+
+`show` also gives distinct images, loaded worker copies, placement, and
+physical memory occupancy.
 Occupied bytes and address extent are separate; shared reservations count
 once. AIE2P `suggest` uses this inventory for code headroom, bank pressure,
 and local memory pressure. Missing logical channel ownership is unavailable,
@@ -135,7 +158,7 @@ loom-compile-report diff baseline.report.json candidate.report.json \\
   --format=json | \\
   jq '{identity_mismatches, changed_entry_count, entries}'
 loom-compile-report suggest kernel.report.json --format=json | \\
-  jq '{status, guidance, provider, findings}'
+  jq '{status, finding_count, match_count, findings}'
 ```
 
 The JSON views are smaller and more stable than the complete compiler report.
@@ -168,8 +191,17 @@ def run(args: argparse.Namespace, *, stdout: TextIO) -> int:
     """Runs parsed CLI arguments and returns a process exit code."""
     if args.command == "show":
         document = load_compile_report(args.report)
-        view = build_compile_report_show(document)
-        text = format_compile_report_show_text(view)
+        if args.function is None:
+            view = build_compile_report_show(document)
+            format_text = format_compile_report_show_text
+        else:
+            from loom.reporting.compile_report_pipelines import (
+                format_placed_function_text,
+                placed_function_view,
+            )
+
+            view = placed_function_view(document, args.function)
+            format_text = format_placed_function_text
     elif args.command == "diff":
         baseline = load_compile_report(args.baseline)
         candidate = load_compile_report(args.candidate)
@@ -179,7 +211,7 @@ def run(args: argparse.Namespace, *, stdout: TextIO) -> int:
             CompileReportComparisonMode(args.comparison),
             force=args.force,
         )
-        text = format_compile_report_diff_text(view)
+        format_text = format_compile_report_diff_text
     elif args.command == "suggest":
         from loom.reporting.compile_report_suggestions import (
             CompileReportSuggestionOptions,
@@ -195,8 +227,8 @@ def run(args: argparse.Namespace, *, stdout: TextIO) -> int:
                 include_experimental=args.include_experimental,
             ),
         )
-        view = build_compile_report_suggestions(document, result)
-        text = format_compile_report_suggestions_text(view)
+        view = build_compile_report_suggestions(document, result, expand=args.expand)
+        format_text = format_compile_report_suggestions_text
     else:
         raise AssertionError(f"unhandled command: {args.command}")
 
@@ -204,7 +236,7 @@ def run(args: argparse.Namespace, *, stdout: TextIO) -> int:
         json.dump(view, stdout, sort_keys=True, separators=(",", ":"))
         stdout.write("\n")
     else:
-        stdout.write(text)
+        stdout.write(format_text(view))
     return 0
 
 
@@ -227,6 +259,11 @@ def _create_argument_parser() -> argparse.ArgumentParser:
         help="Renders emitted artifact facts and compiler analysis.",
     )
     show_parser.add_argument("report", type=Path, help="Compile report JSON path.")
+    show_parser.add_argument(
+        "--function",
+        metavar="GLOB",
+        help="Show placements, packet loops, and call counts for matching functions.",
+    )
     _add_output_format_argument(show_parser)
 
     diff_parser = subparsers.add_parser(
@@ -260,14 +297,21 @@ def _create_argument_parser() -> argparse.ArgumentParser:
         "suggest",
         help="Proposes experiments from static evidence, without runtime ranking.",
         description=(
-            "Interprets source policies and target evidence. Optimization requires "
-            "a known-good oracle's native instruction mix, controlled measurement "
-            "on the intended machine, data reuse policy, and an end-to-end "
-            "opportunity bound. Finding order and confidence do not rank "
-            "performance benefit."
+            "Interprets source policies and native evidence. For a port, compare "
+            "with a measured reference. For a novel kernel, compare compulsory "
+            "traffic and useful work against matched primitives. Finding order "
+            "and confidence do not rank performance benefit."
         ),
     )
     suggest_parser.add_argument("report", type=Path, help="Compile report JSON path.")
+    suggest_parser.add_argument(
+        "--expand",
+        metavar="ID|all",
+        help=(
+            "Show all matches and evidence for one suggestion ID, or use 'all' "
+            "for every ID. The default shows one example per investigation."
+        ),
+    )
     suggest_parser.add_argument(
         "--include-experimental",
         action="store_true",

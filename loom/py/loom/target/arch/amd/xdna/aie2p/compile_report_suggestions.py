@@ -13,6 +13,7 @@ from loom.reporting.compile_report import (
     CompileReportError,
     compile_report_entry_identity,
 )
+from loom.reporting.compile_report_pipelines import placed_packet_loops
 from loom.reporting.compile_report_suggestions import (
     CompileReportSuggestion,
     CompileReportSuggestionConfidence,
@@ -66,6 +67,7 @@ class Aie2pCompileReportSuggestionProvider:
             plan_path = f"pipeline_plans[{plan_index}]"
             pipeline_plan = _report_object(pipeline_plan_value, plan_path)
             root_name = _report_string(pipeline_plan.get("root"), f"{plan_path}.root")
+            suggestions.extend(_suggest_empty_loop_packets(pipeline_plan, plan_path))
             workers = _optional_indexed_rows(pipeline_plan, plan_path, "workers")
             memories = _optional_indexed_rows(pipeline_plan, plan_path, "memories")
             if workers:
@@ -111,6 +113,51 @@ class Aie2pCompileReportSuggestionProvider:
 AIE2P_COMPILE_REPORT_SUGGESTION_PROVIDER = Aie2pCompileReportSuggestionProvider()
 
 
+def _suggest_empty_loop_packets(plan: dict, path: str) -> list[CompileReportSuggestion]:
+    functions = plan.get("placed_functions", [])
+    if not isinstance(functions, list):
+        raise CompileReportError(f"{path}.placed_functions: expected array")
+    results = []
+    for index, value in enumerate(functions):
+        row_path = f"{path}.placed_functions[{index}]"
+        row = _report_object(value, row_path)
+        for ordinal, loop in enumerate(placed_packet_loops(row, row_path)):
+            empty = loop.get("empty_packet_count")
+            packets, trips = loop["packet_count"], loop["trip_count"]
+            if empty is None or trips < 2 or empty * 4 < packets or empty * trips < 64:
+                continue
+            name = _report_string(row.get("function"), f"{row_path}.function")
+            worker = _report_integer(
+                row.get("worker_index"), f"{row_path}.worker_index"
+            )
+            loop_path = f"{row_path}.packet_loops[{ordinal}]"
+            results.append(
+                CompileReportSuggestion(
+                    suggestion_id="aie2p.empty_loop_packets",
+                    entry_name=f"{name} +0x{loop['byte_offset']:x} (worker {worker})",
+                    example_magnitude=empty * trips,
+                    action=(
+                        f"{empty} of {packets} packets per trip are all NOPs. "
+                        f"{trips:,} trips issue {empty * trips:,} empty packets "
+                        "per loop entry. Measure entries on the critical path. "
+                        "Compare interleaving independent loads or accumulators "
+                        "at the same useful work and panel traffic."
+                    ),
+                    evidence=tuple(
+                        CompileReportSuggestionEvidence(
+                            f"{loop_path}.{field}", loop[field]
+                        )
+                        for field in (
+                            "packet_count",
+                            "empty_packet_count",
+                            "trip_count",
+                        )
+                    ),
+                )
+            )
+    return results
+
+
 def _suggest_spill_traffic(
     entry: dict[str, object], entry_name: str, path_prefix: str
 ) -> CompileReportSuggestion | None:
@@ -135,9 +182,10 @@ def _suggest_spill_traffic(
         suggestion_id="aie2p.spill_traffic",
         entry_name=entry_name,
         action=(
-            "Shorten live ranges, interleave fewer accumulators, or choose a "
-            "narrower native shape; then require all spill storage, stores, and "
-            "reloads to disappear before silicon benchmarking."
+            "Locate the native spill sites. Weight their transfers by visits per "
+            "completed request. If that cost can materially close the phase gap, "
+            "compare shorter live ranges or fewer live accumulators at the same "
+            "useful work and measure the completed request."
         ),
         evidence=evidence,
     )
@@ -177,10 +225,11 @@ def _suggest_vliw_coissue_density(
         suggestion_id="aie2p.vliw_coissue_density",
         entry_name=entry_name,
         action=(
-            "Expose more independent ALU, load/store, and control work by "
-            "interleaving accumulators or unrolling one bounded record step. "
-            "Recompile and require fewer physical bundles at equal semantics "
-            "without increasing register pressure before benchmarking."
+            "Compare issued bundles per useful output and dependency spacing in "
+            "the measured hot loop with the oracle. For matrix code, count MACs "
+            "that also load operands. "
+            "If issue cost explains the phase gap, compare interleaved "
+            "accumulators at fixed panel reuse and measure the completed request."
         ),
         evidence=(
             CompileReportSuggestionEvidence(

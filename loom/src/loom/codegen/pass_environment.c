@@ -36,6 +36,7 @@ loom_codegen_pass_environment_storage_initialize_with_target(
     loom_codegen_pass_environment_storage_t* out_storage) {
   *out_storage = (loom_codegen_pass_environment_storage_t){0};
   out_storage->target_capability = target_capability;
+  out_storage->target_capability.compile_report = options->compile_report;
   out_storage->low_capability = loom_low_pass_capability_make(
       options->descriptor_registry, options->lower_policy_registry,
       options->legality_provider_list, options->legalizer_registry,

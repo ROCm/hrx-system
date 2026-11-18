@@ -526,6 +526,7 @@ def _suggest_residency_cliff(
     return CompileReportSuggestion(
         suggestion_id="amdgpu.residency_cliff",
         entry_name=entry_name,
+        variant=" + ".join(sorted(str(row["name"]) for row in requirements)),
         action=action,
         evidence=tuple(evidence),
     )
@@ -1027,6 +1028,7 @@ def _suggest_fragment_packet_expansion(
                 "worsens dispersion unless hardware timing pays for it."
             )
             if operand_bank_materialization is not None:
+                variant = "operand-bank materialization"
                 action = (
                     "Inspect allocator placement before changing fragment "
                     f"storage: the {strategy} plan for {location} "
@@ -1044,6 +1046,7 @@ def _suggest_fragment_packet_expansion(
                     "memory hierarchy."
                 )
             else:
+                variant = "operand layout"
                 action = (
                     f"Run a bounded operand-layout and packing experiment for "
                     f"{location} "
@@ -1058,6 +1061,7 @@ def _suggest_fragment_packet_expansion(
                     suggestion_id="amdgpu.fragment_packet_expansion",
                     entry_name=_entry_name_for_function(document, function_name),
                     confidence=CompileReportSuggestionConfidence.EXPERIMENTAL,
+                    variant=variant,
                     action=action,
                     evidence=tuple(evidence),
                 )

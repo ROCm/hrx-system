@@ -37,6 +37,8 @@ static void loom_target_compile_report_pipeline_plan_deinitialize(
   iree_allocator_free(host_allocator, (void*)plan->worker_rows);
   iree_allocator_free(host_allocator, (void*)plan->channel_rows);
   iree_allocator_free(host_allocator, (void*)plan->memory_rows);
+  iree_allocator_free(host_allocator, (void*)plan->functions);
+  iree_allocator_free(host_allocator, (void*)plan->packet_loops);
   *plan = (loom_target_compile_report_pipeline_plan_t){0};
 }
 
@@ -112,9 +114,25 @@ iree_status_t loom_target_compile_report_record_pipeline_plan(
     IREE_RETURN_IF_ERROR(loom_target_compile_report_pipeline_plan_clone(
         plan, report->allocator, &copied_plan));
   }
-  iree_status_t status = loom_target_compile_report_row_list_append(
-      &report->pipeline_plans, sizeof(copied_plan), report->allocator,
-      &copied_plan);
+  void* functions = NULL;
+  iree_status_t status = loom_target_compile_report_pipeline_plan_copy_rows(
+      plan->functions, plan->function_count, sizeof(*plan->functions),
+      report->allocator, &functions);
+  if (iree_status_is_ok(status)) {
+    copied_plan.functions = functions;
+    copied_plan.function_count = plan->function_count;
+    void* loops = NULL;
+    status = loom_target_compile_report_pipeline_plan_copy_rows(
+        plan->packet_loops, plan->packet_loop_count,
+        sizeof(*plan->packet_loops), report->allocator, &loops);
+    if (iree_status_is_ok(status)) {
+      copied_plan.packet_loops = loops;
+      copied_plan.packet_loop_count = plan->packet_loop_count;
+      status = loom_target_compile_report_row_list_append(
+          &report->pipeline_plans, sizeof(copied_plan), report->allocator,
+          &copied_plan);
+    }
+  }
   if (!iree_status_is_ok(status)) {
     loom_target_compile_report_pipeline_plan_deinitialize(&copied_plan,
                                                           report->allocator);

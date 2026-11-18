@@ -980,6 +980,10 @@ iree_status_t loom_target_compile_report_format_text(
       report, options->mode, builder));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_format_loop_pipelines_text(
       report, options->mode, builder));
+  if (options->mode == LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_format_pipeline_copies_text(
+        &report->pipeline_copies, builder));
+  }
   if (iree_any_bit_set(report->detail_flags,
                        LOOM_TARGET_COMPILE_REPORT_DETAIL_PIPELINE_PLAN)) {
     for (const loom_target_compile_report_vec_t* block =

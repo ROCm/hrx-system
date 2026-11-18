@@ -11,6 +11,11 @@ from copy import deepcopy
 import pytest
 
 from loom.reporting.compile_report import CompileReportError, parse_compile_report
+from loom.reporting.compile_report_suggestions import (
+    CompileReportSuggestionResult,
+    build_compile_report_suggestions,
+    format_compile_report_suggestions_text,
+)
 from loom.reporting.compile_report_view import (
     build_compile_report_show,
     format_compile_report_show_text,
@@ -124,6 +129,131 @@ def test_summary_retains_counts_without_inventing_detail_rows() -> None:
     assert "physical memory owners: 3" in text
     assert "worker[" not in text
     assert "memory[" not in text
+
+
+def test_dma_traffic_distinguishes_unknown_from_zero_for_each_export() -> None:
+    report = _report()
+    report["pipeline_plans"].append(
+        {
+            "root": "weight_input",
+            "realization": "spatial-program",
+            "external_dma_byte_count": 4608,
+            "routed_dma_byte_count": 0,
+            "channel_storage_byte_count": 2304,
+            "channels": {
+                "count": 1,
+                "rows": [
+                    {
+                        "channel_index": 0,
+                        "transport": "external-dma",
+                        "sender": {"owner": "binding", "owner_index": 2, "port": 0},
+                        "receiver": {"owner": "worker", "owner_index": 0, "port": 1},
+                        "capacity": 2,
+                        "record_count": 4,
+                        "record_byte_count": 1152,
+                        "activation_byte_count": 4608,
+                        "local_storage_byte_count": 2304,
+                        "external_transfer": {
+                            "binding_ordinal": 2,
+                            "task_byte_count": 1152,
+                            "task_repeat_count": 4,
+                            "activation_byte_count": 4608,
+                        },
+                    }
+                ],
+            },
+        }
+    )
+    document = parse_compile_report(report)
+    show = build_compile_report_show(document)
+    suggest = build_compile_report_suggestions(
+        document, CompileReportSuggestionResult("test", None)
+    )
+    for view, render in (
+        (show, format_compile_report_show_text),
+        (suggest, format_compile_report_suggestions_text),
+    ):
+        resident, spatial = view["pipelines"]["rows"]
+        assert resident["external_dma_byte_count"] is None
+        assert resident["routed_dma_byte_count"] is None
+        assert spatial["external_dma_byte_count"] == 4608
+        assert spatial["routed_dma_byte_count"] == 0
+        text = render(view)
+        assert text.count("Programmed workers: 2") == 1
+        assert "Planned external DMA per activation: unavailable" in text
+        assert "Planned external DMA per activation: 4608 B" in text
+        assert "Planned routed on-array DMA per activation: 0 B" in text
+        assert text.count("Incomplete transfer evidence") == 1
+    assert "rows" not in suggest["pipelines"]["rows"][0]["workers"]
+    assert "channel_rows" not in suggest["pipelines"]["rows"][1]
+    text = format_compile_report_show_text(show)
+    assert (
+        "binding[2]:0 -> worker[0]:1: 4 records x 1152 B "
+        "= 4608 B per activation, 2 slots, 2304 B storage" in text
+    )
+    assert "binding[2] DMA: 4 tasks x 1152 B = 4608 B per activation" in text
+
+
+def test_phase_copies_rank_per_call_and_keep_runtime_counts_unknown() -> None:
+    report = _report()
+    read = dict(
+        root="stream",
+        phase="restore",
+        occurrence=2,
+        binding=4,
+        direction="read",
+        bytes_per_copy=1024,
+        copies_per_phase_call=4,
+    )
+    write = dict(read, phase="save", occurrence=3, direction="write")
+    report["pipeline_external_copies"] = [
+        read,
+        read,
+        write,
+        # The same child is also called with a different input binding.
+        dict(read, occurrence=7, binding=6),
+        dict(read, occurrence=7, binding=6, copies_per_phase_call=None),
+        # This site has a runtime-sized record but never executes.
+        dict(write, bytes_per_copy=None, copies_per_phase_call=0),
+        dict(write, bytes_per_copy=0, copies_per_phase_call=None),
+        dict(read, root="sink", bytes_per_copy=None),
+    ]
+    document = parse_compile_report(report)
+    show = build_compile_report_show(document)["pipeline_phase_copies"]
+    summary = build_compile_report_suggestions(
+        document, CompileReportSuggestionResult("test", None)
+    )
+    stream, sink = summary["pipeline_phase_copies"]
+    assert stream["group_count"] == 5
+    assert stream["unknown_group_count"] == 1
+    assert "groups" not in stream
+    assert [
+        (row["phase"], row["copies_per_phase_call"], row["bytes_per_phase_call"])
+        for row in stream["largest_counted"]
+    ] == [("restore", 8, 8192), ("save", 4, 4096)]
+    assert [row["bytes_per_phase_call"] for row in show[0]["groups"]] == [
+        8192,
+        4096,
+        None,
+        0,
+        0,
+    ]
+    assert sink["unknown_group_count"] == 1
+    assert sink["largest_counted"] == []
+    assert "range_check" not in sink
+    assert (
+        "Check whether they save and restore the same byte ranges"
+        in stream["range_check"]
+    )
+    text = format_compile_report_suggestions_text(summary)
+    assert "read binding[4] restore (call site 2): 8 x 1,024 B = 8,192 B" in text
+    assert "write binding[4] save (call site 3): 4 x 1,024 B = 4,096 B" in text
+    assert "1 of 5 groups lack a proven byte total" in text
+
+    # Ordinary streaming has independent input and output bindings.
+    write["binding"] = 1
+    independent = build_compile_report_show(parse_compile_report(report))
+    assert "range_check" not in independent["pipeline_phase_copies"][0]
 
 
 def test_show_keeps_exports_separate_and_preserves_placement_rank() -> None:

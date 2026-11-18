@@ -341,6 +341,178 @@ the native artifact's code, allocation and scheduling evidence. Successful
 compilation establishes target admission; it does not establish numerical
 correctness or measured device throughput.
 
+## Account for a completed request
+
+The unit of comparison is one completed request of a specified shape. Start
+with a full, heavily loaded request. For a port, run the working reference
+on the same NPU and follow the same inputs through both programs to the
+caller's final output.
+Keep a row for each unexplained difference. That row determines the next
+measurement whenever it could change the choice of schedule.
+
+For a novel operation, take the transfer and compute baselines from
+[matched primitives](../workflows/agent-driven-kernel-development.md#establish-the-oracle-and-data-reuse-policy)
+on the intended NPU partition. The first `suggest` output names the number
+of programmed workers. A single-tile correctness example on a larger
+partition makes the placement decision visible immediately. A larger worker
+count still needs per-tile measurements on the completed request.
+
+1. **Match the work.** Record the executable and weight identities, input
+   lengths before padding, batch composition, numerical acceptance, active
+   device partition, and power policy. Interleave *uninstrumented* runs and
+   record latency distributions and useful input tokens per second. Exercise a
+   second shape that holds one cost constant. For example, one 4,096-token
+   sequence and eight independent 512-token sequences have 4,096 dense rows
+   each. At a 32-token tile width, their causal prefixes have 8,256 and 1,088
+   contributing score tiles per head, respectively. Padded slots, entirely
+   skipped blocks, and finalization belong in the account.
+2. **Find the phase that owns the excess elapsed time.** Span tokenization,
+   submission, device work, and final output. Use device-clock intervals for
+   device phases. Count the union of overlapping intervals once. Keep mixed
+   submissions as mixed until markers separate them. Record uncovered time.
+   Compare an instrumented run with the ordinary invocation cadence and
+   quantify any perturbation. Summed tile cycles answer a separate question
+   about how the array spends its time.
+3. **Follow one operand through that phase.** For both programs record the
+   loop order, rows served per weight arrival, multicast destinations, buffer
+   depth, and where each accumulator lives until its last use. Count bytes per
+   transfer times actual executions at each boundary. For example, saving and
+   restoring a 1,024-byte partial result on each of seven window boundaries
+   contributes 14,336 external bytes. Count the input rereads required by the
+   alternative traversal too. Keep external payload, on-array deliveries, and
+   peak live storage in separate columns. To establish overlap, locate the
+   enqueue for panel *i+1*, the first use of its buffer, and the completion
+   that permits reuse. Two allocated slots alone establish only capacity.
+   On the first compile, run `loom-compile-report suggest model.report.json`.
+   Its source-phase copy rows name the external binding and give records and
+   bytes per call. Exercise inputs on both sides of the first panel boundary.
+   A save and restore on the same binding warrants checking whether the byte
+   ranges coincide, how often each phase runs, and what must be reread to
+   keep those partial results on chip. The complete group inventory is
+   available with `show --format=json` under `.pipeline_phase_copies[].groups`.
+   With `--include-experimental`, a repeated read into one freshly reserved
+   slot names the producer phase, input binding, copy width, and refill count
+   per worker. Measure the wait for that slot's credit and check available
+   local storage before comparing a two-slot schedule.
+4. **Count what every participating core executes.** Disassemble the native
+   loops in the measured images, including their callers. Count loop trips,
+   full and partial tiles, issue packets, empty packets, MACs with operand
+   loads, independent accumulators, conversions, masks, and spills per useful
+   output. Use the actual branch mix. A cheap fast path that the full request
+   never enters contributes zero. Compare the result against core events on
+   every participating tile. Preserve the collection window and event mask
+   for each counter.
+   The default `aie2p.empty_loop_packets` finding gives the function, byte
+   offset, and number of all-NOP packets executed each time a repeated loop
+   is entered. Multiply by visits on the worker that determines completion.
+   For a callable shared across workers, query its final native placements in
+   the summary report. Quote the glob to include specialized copies.
+
+   ```shell
+   loom-compile-report show model.report.json --function 'attention.mask*'
+   ```
+
+   A body with 145 stored packets and a 110-packet region executed four
+   times issues `145 + (4 - 1) × 110 = 475` packets per call. If a fully
+   visible score block takes that path four times, charge it 1,900 packets.
+   The report gives the tile, loaded group, and address for checking the native
+   image. A request-dependent call count appears as `unknown`. Obtain its
+   visits from the request geometry or a matched device capture.
+5. **Trace a wait to its owner.** A core stalled acquiring a record identifies
+   the consumer. Locate the matching publication, the producer or DMA that
+   performs it, and the event preventing that producer from progressing. A
+   full output ring can delay an input publication several stages away. Pair
+   the wait with a timestamp, a counted native site, or a controlled change
+   to that edge. Count overlapping stall reasons with a hardware union when
+   available. Keep unknown owners and unavailable events visible.
+
+   With AIE2P event counters, count `LOCK_STALL` directly and in combination
+   with a program-counter range on the same tile. A range covering the whole
+   program should reproduce the direct count. Disabled comparators should
+   give zero. Start with a range around one acquire and narrow it until the
+   stalled packet is identified. On Strix Halo, a straight-line capture of
+   query and key/value acquires counted zero through the third packet after
+   each acquire. The stall appeared at the fifth packet after it. Repeat
+   this calibration for the measured program. Check every code group that
+   can occupy the address and count a shared physical site once.
+
+   For a record relayed between tiles, follow the consumer's ready lock back
+   to the neighbor's publish. Count that wait separately from the neighbor's
+   wait for an empty slot and the ingress tile's wait for DMA completion.
+   To measure elapsed cost, time the enclosing call and return on one tile,
+   check their visit counts, and repeat with an input that skips the phase.
+   Summing simultaneous waits across tiles measures lost compute capacity.
+
+The static inventory for the gated-projection program is available in both views.
+
+```shell
+loom-compile-report show projection.report.json
+loom-compile-report suggest projection.report.json --format=json \
+  | jq '.pipelines.rows[] | {root, external_dma_byte_count, routed_dma_byte_count}'
+```
+
+These byte counts describe one planned activation. A zero is a reported zero.
+A `null` means the compiler lacks that transfer total. In particular, the
+resident configuration inventory can establish placement and SRAM occupancy
+while leaving transfer totals unknown. Account for those bytes from the
+executed transfer schedule and its repetition counts. Even an exact payload
+count requires a device observation to establish its cost on the critical
+path.
+
+With a HAL profile captured around the request and counters enabled, these
+commands identify the counter names, submission IDs, and sample values.
+
+```shell
+iree-profile summary --format=jsonl request.ireeprof
+iree-profile counter --format=jsonl --counter_samples request.ireeprof \
+  | jq 'select(.type == "counter_sample") | {submission_id, key, block, counter, flags, values}'
+```
+
+Check the summary for dropped records and match each sample to the submitted
+entry and request interval. The XDNA HAL exposes
+`partition_shim.invocation_cycles`, which times the invocation on the device.
+Attribution to core issue or stalls additionally needs per-tile event windows
+from a collector that exposes those events on the target. A shim timer alone
+leaves both quantities unknown.
+
+For a phase dominated by vector work, the following accounting also exposes
+three distinct costs. For each implementation measure elapsed cycles
+summed over its participating tiles (`T`), cycles in the union of selected
+stall events (`S`), and issued vector-instruction events (`V`). Count the same
+semantic unit of useful work (`U`) on both sides. When the denominators are
+nonzero the factors multiply to the measured cost.
+
+```text
+tile cycles / useful unit = (V / U) × ((T − S) / V) × (T / (T − S))
+```
+
+The factors show how many vector events each output takes, how many remaining
+tile cycles accompany each vector event, and how much the selected waits
+inflate elapsed tile cycles. The middle term includes scalar issue, bubbles,
+and idle time inside the window. A vector event can be a mask, a conversion,
+or a MAC. Disassembly and the executed dataflow determine which one. Record a
+missing counter as unavailable. Summing individual stall reasons can count
+the same cycle twice.
+
+A visibility mask illustrates why the caller matters. Suppose its native
+helper contains 146 packets, including a 110-packet hardware loop that runs
+four times. Each call issues `146 + 3 × 110 = 476` packets. A caller invoking
+it twice per query half across two halves spends 1,904 packets per score tile
+on masking alone. Count fully visible, boundary, and wholly masked tiles in
+the actual request. Multiply by the call count in each class and compare the
+fully visible case to the reference's unmasked **complete** tile. This exposes
+a traversal or dispatch choice that improving register allocation inside the
+mask cannot eliminate.
+
+**Admission to tuning requires a falsifiable prediction.** Name the source
+loop or channel, the difference from the reference, the phase and counter or
+byte count that should change, and the maximum recoverable request time
+consistent with measured overlap. Test that prediction at the original
+request boundary with the same output-quality gate. If the investigation
+leaves a material residual large enough to explain the loss, the next
+experiment measures that residual. A shorter leaf, a cleaner report, or a win
+on prepared inputs cannot close it.
+
 ## The caller owns the invocation lifetime
 
 The normal `loom-test` path can compile and execute buffer-bound XDNA

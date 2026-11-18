@@ -91,5 +91,7 @@ pipeline.def<kernel> public retain target(@device) @dma_copy() run(%input: buffe
 }
 
 // ----
+COMPILE-REPORT: pipeline.copy root=dma_copy phase=dma_copy occurrence=0 binding=0 direction=read bytes_per_copy=4 copies_per_phase_call=1 reserved_fifo=0 reserved_fifo_capacity=2 reservations_per_worker=1
+COMPILE-REPORT: pipeline.copy root=dma_copy phase=dma_copy occurrence=0 binding=1 direction=write bytes_per_copy=4 copies_per_phase_call=1
 COMPILE-REPORT: pipeline root=dma_copy realization=resident-configuration workers=0 binding_count=2 program_count=0 program_code_byte_count=0 memory_count=1 reserved_storage_byte_count=8 worker_code_byte_count=0 maximum_worker_code_byte_count=0 minimum_worker_code_headroom_byte_count=0 worker_storage_byte_count=0 maximum_tile_local_memory_byte_count=8 minimum_tile_local_memory_headroom_byte_count=65528 maximum_bank_storage_byte_count=8 bank_storage_capacity_byte_count=16384
 COMPILE-REPORT: pipeline.memory[0] placement=0,2 memory_index=0 reserved_byte_count=8 program_data_byte_count=0 occupied_byte_count=8 high_water_byte_count=8 capacity_byte_count=65536 maximum_bank_storage_byte_count=8 bank_storage_capacity_byte_count=16384

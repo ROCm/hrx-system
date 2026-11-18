@@ -14,6 +14,7 @@
 #include "iree/io/stream.h"
 #include "iree/schemas/xdna_executable.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/program.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/program_object.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/tile_link.h"
 #include "loom/target/arch/amd/xdna/device/profile.h"
 
@@ -27,8 +28,9 @@ typedef struct loom_aie2p_xdna_tile_t {
   loom_xdna_tile_coordinate_t coordinate;
   // Diagnostic symbol name for this physical program instance.
   iree_string_view_t program_name;
-  // Detached contribution from which symbols and sizes are retained.
-  const loom_aie2p_leaf_contribution_t* contribution;
+  // Selected program, including its logical functions and physical body
+  // sharing.
+  const loom_aie2p_program_object_t* program;
   // Fully placed and fixed-up native sections.
   const loom_aie2p_linked_tile_t* linked_tile;
 } loom_aie2p_xdna_tile_t;

@@ -74,7 +74,9 @@ from loom.reporting.compile_report_native_layout import (
     build_native_layout_show,
 )
 from loom.reporting.compile_report_pipelines import (
+    append_pipeline_phase_copies_text,
     append_pipeline_show_text,
+    build_pipeline_phase_copies,
     build_pipeline_show,
 )
 from loom.reporting.compile_report_residency import (
@@ -482,6 +484,9 @@ def build_compile_report_show(
     pipelines = build_pipeline_show(document)
     if pipelines is not None:
         view["pipelines"] = pipelines
+    phase_copies = build_pipeline_phase_copies(document, summary_only=False)
+    if phase_copies:
+        view["pipeline_phase_copies"] = phase_copies
     barriers = build_barrier_show(document)
     if barriers is not None:
         view["barriers"] = barriers
@@ -752,6 +757,13 @@ def format_compile_report_show_text(view: dict[str, object]) -> str:
     if commands is None or entries:
         lines.append("")
         append_workload_show_text(lines, _expect_dict(view["workload"]))
+    pipelines = view.get("pipelines")
+    if isinstance(pipelines, dict):
+        append_pipeline_show_text(lines, pipelines)
+    if "pipeline_phase_copies" in view:
+        append_pipeline_phase_copies_text(
+            lines, _expect_list(view["pipeline_phase_copies"])
+        )
     expansions = view.get("expansions")
     if isinstance(expansions, dict):
         append_expansion_show_text(lines, expansions)
@@ -798,9 +810,6 @@ def format_compile_report_show_text(view: dict[str, object]) -> str:
         append_loop_pipeline_show_text(lines, loop_pipelines)
     if isinstance(commands, dict):
         append_command_show_text(lines, commands)
-    pipelines = view.get("pipelines")
-    if isinstance(pipelines, dict):
-        append_pipeline_show_text(lines, pipelines)
     barriers = view.get("barriers")
     if isinstance(barriers, dict):
         append_barrier_show_text(lines, barriers)
