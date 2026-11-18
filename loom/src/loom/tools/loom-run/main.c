@@ -932,8 +932,9 @@ int loom_run_main(int argc, char** argv,
   loom_run_hal_dispatch_batch_options_t batch_options;
   loom_run_hal_dispatch_batch_options_initialize(&batch_options);
   if (retain_command_buffer_metadata) {
-    batch_options.command_buffer_mode &=
-        ~IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED;
+    batch_options.command_buffer_mode =
+        loom_run_hal_profile_command_buffer_mode(
+            batch_options.command_buffer_mode);
   }
   if (iree_status_is_ok(status) && exit_code == 0) {
     status = loom_run_hal_dispatch_batch_prepare(

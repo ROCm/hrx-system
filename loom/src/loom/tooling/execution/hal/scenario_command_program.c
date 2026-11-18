@@ -1070,9 +1070,7 @@ static iree_status_t loom_run_hal_command_scenario_calls_initialize(
             flags,
             LOOM_RUN_HAL_COMMAND_SCENARIO_CALL_FLAG_PROFILE_COMMAND_BUFFERS)) {
       const iree_hal_command_buffer_mode_t profile_mode =
-          (command_buffer_mode |
-           IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA) &
-          ~IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED;
+          loom_run_hal_profile_command_buffer_mode(command_buffer_mode);
       status = loom_cmd_program_hal_command_buffer_create(
           iree_hal_queue_family(context->runtime.dispatch_queue), profile_mode,
           &product->program,

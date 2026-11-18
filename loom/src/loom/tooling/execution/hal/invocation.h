@@ -276,6 +276,14 @@ void loom_run_hal_iteration_initialize(loom_run_hal_iteration_t* out_iteration);
 // Releases storage owned by |iteration|.
 void loom_run_hal_iteration_deinitialize(loom_run_hal_iteration_t* iteration);
 
+// Returns a recording mode that retains command metadata and its resources
+// for profiling.
+static inline iree_hal_command_buffer_mode_t
+loom_run_hal_profile_command_buffer_mode(iree_hal_command_buffer_mode_t mode) {
+  return (mode | IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA) &
+         ~IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED;
+}
+
 // Initializes batch options for one reusable unvalidated/unretained dispatch.
 void loom_run_hal_dispatch_batch_options_initialize(
     loom_run_hal_dispatch_batch_options_t* out_options);
