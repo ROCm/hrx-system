@@ -170,16 +170,16 @@ typedef struct loom_inline_component_entries_t {
 typedef struct loom_inline_execution_targets_t loom_inline_execution_targets_t;
 
 struct loom_inline_callables_plan_t {
-  // Active pass invocation.
-  loom_pass_t* pass;
+  // Borrowed resources and cleanup policy for this invocation.
+  const loom_inline_callables_environment_t* environment;
+  // Mutation and rejection observed during execution.
+  loom_inline_callables_result_flags_t result_flags;
   // Borrowed planning inputs and inline policy.
   loom_inline_callables_plan_options_t options;
   // Typed statistics storage for the current pass invocation.
   loom_inline_callables_statistics_t statistics;
   // Module being transformed.
   loom_module_t* module;
-  // Mutable compiler-version owner, or NULL outside target compilation.
-  loom_function_version_owner_t* version_owner;
   // Lazily allocated target projections for independent execution scopes.
   loom_inline_execution_targets_t* execution_targets;
   // Dense symbol summaries indexed by module symbol id.

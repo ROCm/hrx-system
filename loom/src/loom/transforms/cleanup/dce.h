@@ -21,6 +21,20 @@ typedef struct loom_dce_deadness_query_callback_t {
   void* user_data;
 } loom_dce_deadness_query_callback_t;
 
+typedef struct loom_dce_result_t {
+  // Operations erased, including unobserved managed lifetimes.
+  iree_host_size_t removed_operation_count;
+  // Unused region arguments erased with their managed lifetimes.
+  iree_host_size_t removed_argument_count;
+} loom_dce_result_t;
+
+// Eliminates dead code using the same worklist and lifetime analysis as the
+// pass. The caller owns scratch storage and accounts for the returned changes.
+iree_status_t loom_dce_eliminate(
+    loom_module_t* module, loom_func_like_t function,
+    loom_dce_deadness_query_callback_t deadness_query,
+    iree_arena_allocator_t* scratch_arena, loom_dce_result_t* out_result);
+
 #define LOOM_DCE_STATISTICS(V, statistics_type)        \
   V(statistics_type, ops_eliminated, "ops-eliminated", \
     "Number of dead operations removed.")

@@ -1561,7 +1561,9 @@ iree_status_t loom_template_selection_run(loom_pass_t* pass,
     status = loom_template_selection_compute(&state, /*origin_count=*/0);
   }
 
+  loom_inline_callables_environment_t inline_environment;
   if (iree_status_is_ok(status) && state.inline_calls) {
+    inline_environment = loom_inline_callables_environment_from_pass(pass);
     const loom_inline_callables_plan_options_t options = {
         .references = &state.references,
         .target_versions = &target_versions,
@@ -1575,8 +1577,8 @@ iree_status_t loom_template_selection_run(loom_pass_t* pass,
             },
         .additional_call_capacity = state.statistics->selected_sites,
     };
-    status = loom_inline_callables_plan_allocate(pass, module, &options,
-                                                 &state.inline_plan);
+    status = loom_inline_callables_plan_allocate(&inline_environment, module,
+                                                 &options, &state.inline_plan);
   } else if (iree_status_is_ok(status)) {
     status = loom_template_selection_analyze_exact_calls(&state);
   }
@@ -1592,7 +1594,12 @@ iree_status_t loom_template_selection_run(loom_pass_t* pass,
 
   IREE_RETURN_IF_ERROR(loom_template_selection_execute_rewrites(&state));
   if (state.inline_plan) {
-    IREE_RETURN_IF_ERROR(loom_inline_callables_plan_execute(state.inline_plan));
+    loom_inline_callables_result_flags_t flags = 0;
+    IREE_RETURN_IF_ERROR(
+        loom_inline_callables_plan_execute(state.inline_plan, &flags));
+    if (iree_any_bit_set(flags, LOOM_INLINE_CALLABLES_RESULT_CHANGED)) {
+      loom_pass_mark_changed(pass);
+    }
     if (loom_pass_has_error_diagnostics(pass)) {
       return iree_ok_status();
     }

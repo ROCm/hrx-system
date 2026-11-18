@@ -24,12 +24,15 @@
 #include "loom/ops/op_defs.h"
 #include "loom/pass/options.h"
 #include "loom/pass/pipeline.h"
+#include "loom/pass/value_facts.h"
 #include "loom/rewrite/callable.h"
 #include "loom/target/execution_scope.h"
 #include "loom/target/facts.h"
 #include "loom/target/function_version.h"
 #include "loom/target/pass_environment.h"
 #include "loom/target/provider.h"
+#include "loom/transforms/cleanup/canonicalizer.h"
+#include "loom/transforms/cleanup/pass_environment.h"
 #include "loom/transforms/symbol/inline_execution.h"
 #include "loom/transforms/symbol/inline_frontier.h"
 #include "loom/transforms/symbol/inline_plan.h"
@@ -255,14 +258,13 @@ static iree_status_t loom_inline_prepare_execution_target(
     const loom_inline_plan_entry_t* entry) {
   if (state->execution_targets == NULL) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate(
-        state->pass->arena, sizeof(*state->execution_targets),
+        state->environment->arena, sizeof(*state->execution_targets),
         (void**)&state->execution_targets));
     *state->execution_targets = (loom_inline_execution_targets_t){
-        .environment = loom_target_pass_capability_target_environment(
-            loom_target_pass_capability_from_pass(state->pass)),
+        .environment = state->environment->targets,
     };
     loom_symbol_fact_table_initialize(&state->execution_targets->symbol_facts,
-                                      state->pass->arena);
+                                      state->environment->arena);
   }
   const loom_target_function_version_t* caller_version =
       loom_target_function_version_snapshot_at(state->options.target_versions,
@@ -281,8 +283,8 @@ static iree_status_t loom_inline_prepare_execution_target(
       &state->execution_targets->scopes, state->options.references,
       entry->execution_scope, state->module,
       &state->execution_targets->symbol_facts,
-      state->execution_targets->environment, inherited, state->pass->arena,
-      &scope);
+      state->execution_targets->environment, inherited,
+      state->environment->arena, &scope);
 }
 
 static bool loom_inline_policy_is_inline(loom_inline_policy_t policy) {
@@ -374,7 +376,7 @@ static void loom_inline_mark_blocker(loom_inline_plan_entry_t* entry,
 
 static iree_status_t loom_inline_allocate_state(
     loom_inline_callables_plan_t* state) {
-  loom_pass_t* pass = state->pass;
+  iree_arena_allocator_t* arena = state->environment->arena;
   loom_module_t* module = state->module;
   iree_host_size_t entry_capacity = 0;
   if (!iree_host_size_checked_add(state->options.references->calls.count,
@@ -386,17 +388,16 @@ static iree_status_t loom_inline_allocate_state(
                             "uint32_t range");
   }
   if (module->symbols.count > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        pass->arena, module->symbols.count, sizeof(*state->symbols),
-        (void**)&state->symbols));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, module->symbols.count,
+                                                   sizeof(*state->symbols),
+                                                   (void**)&state->symbols));
     memset(state->symbols, 0, module->symbols.count * sizeof(*state->symbols));
 
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(pass->arena, module->symbols.count,
-                                  sizeof(*state->first_graph_by_source),
-                                  (void**)&state->first_graph_by_source));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        pass->arena, module->symbols.count, sizeof(*state->component_by_symbol),
+        arena, module->symbols.count, sizeof(*state->first_graph_by_source),
+        (void**)&state->first_graph_by_source));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, module->symbols.count, sizeof(*state->component_by_symbol),
         (void**)&state->component_by_symbol));
     for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
       state->first_graph_by_source[i] = LOOM_INLINE_PLAN_ENTRY_INVALID;
@@ -405,7 +406,7 @@ static iree_status_t loom_inline_allocate_state(
   }
 
   if (entry_capacity > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(pass->arena, entry_capacity,
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, entry_capacity,
                                                    sizeof(*state->entries),
                                                    (void**)&state->entries));
   }
@@ -848,8 +849,8 @@ static iree_status_t loom_inline_prepare_leaf_bodies(
   }
   uint32_t* worklist = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->pass->arena, state->module->symbols.count, sizeof(*worklist),
-      (void**)&worklist));
+      state->environment->arena, state->module->symbols.count,
+      sizeof(*worklist), (void**)&worklist));
   uint32_t count = 0;
   for (uint32_t i = 0; i < state->entry_count; ++i) {
     const loom_inline_plan_entry_t* entry = &state->entries[i];
@@ -1010,8 +1011,8 @@ static iree_status_t loom_inline_compute_sccs(
       .visit_successors =
           loom_scc_visit_successors_callback_make(visit_successors, state),
   };
-  IREE_RETURN_IF_ERROR(
-      loom_scc_compute(&graph, /*options=*/NULL, state->pass->arena, out_sccs));
+  IREE_RETURN_IF_ERROR(loom_scc_compute(&graph, /*options=*/NULL,
+                                        state->environment->arena, out_sccs));
   for (iree_host_size_t component_index = 0; component_index < out_sccs->count;
        ++component_index) {
     const loom_scc_t* component = &out_sccs->values[component_index];
@@ -1034,8 +1035,8 @@ static iree_status_t loom_inline_index_required_entries_by_component(
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->pass->arena, state->sccs.count, sizeof(*state->component_entries),
-      (void**)&state->component_entries));
+      state->environment->arena, state->sccs.count,
+      sizeof(*state->component_entries), (void**)&state->component_entries));
   for (iree_host_size_t component_index = 0;
        component_index < state->sccs.count; ++component_index) {
     state->component_entries[component_index] =
@@ -1186,9 +1187,10 @@ static iree_status_t loom_inline_emit_blockers(
     if (entry->action != LOOM_INLINE_PLAN_ACTION_ERROR) {
       continue;
     }
+    state->result_flags |= LOOM_INLINE_CALLABLES_RESULT_REJECTED;
     loom_diagnostic_param_t params[] = {
         loom_param_string(loom_op_name(state->module, entry->call_op)),
-        loom_param_string(state->pass->info->name),
+        loom_param_string(state->environment->diagnostic_name),
         loom_param_string(
             loom_inline_symbol_name(state->module, entry->target_symbol_id)),
         loom_param_string(loom_inline_blocker_code(entry->blocker)),
@@ -1209,7 +1211,7 @@ static iree_status_t loom_inline_emit_blockers(
         .related_op_count = entry->callee.op ? 1 : 0,
     };
     IREE_RETURN_IF_ERROR(
-        iree_diagnostic_emit(state->pass->diagnostic_emitter, &emission));
+        iree_diagnostic_emit(state->environment->diagnostics, &emission));
   }
   return iree_ok_status();
 }
@@ -1246,9 +1248,10 @@ static iree_status_t loom_inline_initialize_profitability(
   }
   const iree_host_size_t symbol_count = state->module->symbols.count;
   if (symbol_count > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->pass->arena, symbol_count, sizeof(*state->profitability_symbols),
-        (void**)&state->profitability_symbols));
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(state->environment->arena, symbol_count,
+                                  sizeof(*state->profitability_symbols),
+                                  (void**)&state->profitability_symbols));
     for (iree_host_size_t i = 0; i < symbol_count; ++i) {
       state->profitability_symbols[i] = (loom_inline_profitability_symbol_t){
           .expanded_body_cost = UINT32_MAX,
@@ -1263,7 +1266,7 @@ static iree_status_t loom_inline_initialize_profitability(
   }
   if (state->entry_count > 0) {
     IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(state->pass->arena, state->entry_count,
+        iree_arena_allocate_array(state->environment->arena, state->entry_count,
                                   sizeof(*state->next_candidate_by_target),
                                   (void**)&state->next_candidate_by_target));
     for (uint32_t i = 0; i < state->entry_count; ++i) {
@@ -1453,9 +1456,10 @@ static iree_status_t loom_inline_prepare_selection_graph(
 
   const iree_host_size_t symbol_count = state->module->symbols.count;
   iree_host_size_t* combined_component_by_symbol = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->pass->arena, symbol_count, sizeof(*combined_component_by_symbol),
-      (void**)&combined_component_by_symbol));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(state->environment->arena, symbol_count,
+                                sizeof(*combined_component_by_symbol),
+                                (void**)&combined_component_by_symbol));
   for (iree_host_size_t i = 0; i < symbol_count; ++i) {
     combined_component_by_symbol[i] = IREE_HOST_SIZE_MAX;
   }
@@ -1479,7 +1483,7 @@ static iree_status_t loom_inline_select_profitable_entries(
   const iree_host_size_t symbol_count = state->module->symbols.count;
   uint32_t* next_symbol = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(state->pass->arena, symbol_count,
+      iree_arena_allocate_array(state->environment->arena, symbol_count,
                                 sizeof(*next_symbol), (void**)&next_symbol));
   uint32_t worklist_count = 0;
   for (iree_host_size_t symbol_id = 0; symbol_id < symbol_count; ++symbol_id) {
@@ -1521,11 +1525,11 @@ static iree_status_t loom_inline_select_profitable_entries(
   uint32_t* first_symbol_by_component = NULL;
   uint32_t* last_symbol_by_component = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->pass->arena, state->sccs.count, sizeof(*first_symbol_by_component),
-      (void**)&first_symbol_by_component));
+      state->environment->arena, state->sccs.count,
+      sizeof(*first_symbol_by_component), (void**)&first_symbol_by_component));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->pass->arena, state->sccs.count, sizeof(*last_symbol_by_component),
-      (void**)&last_symbol_by_component));
+      state->environment->arena, state->sccs.count,
+      sizeof(*last_symbol_by_component), (void**)&last_symbol_by_component));
   for (iree_host_size_t i = 0; i < state->sccs.count; ++i) {
     first_symbol_by_component[i] = LOOM_INLINE_PLAN_ENTRY_INVALID;
     last_symbol_by_component[i] = LOOM_INLINE_PLAN_ENTRY_INVALID;
@@ -1575,16 +1579,60 @@ static iree_status_t loom_inline_select_profitable_entries(
 // Plan and pass entry points
 //===----------------------------------------------------------------------===//
 
+static iree_status_t loom_inline_refine_source_closure(
+    void* user_data, loom_module_t* module, loom_func_like_t function) {
+  loom_pass_t* pass = user_data;
+  const loom_cleanup_pass_capability_t* capability =
+      loom_cleanup_pass_capability_from_pass(pass);
+  const loom_cleanup_pattern_registry_t* registry =
+      loom_cleanup_pass_capability_pattern_registry(capability);
+  loom_cleanup_canonicalizer_context_t context = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_cleanup_pass_capability_resolve_canonicalizer_context(
+          capability, pass, module, function, &context));
+  const loom_canonicalizer_options_t options = {
+      .patterns =
+          loom_canonicalizer_pattern_registries_from_cleanup_registry(registry),
+      .target_facts = context.target_facts,
+      .math_policy = context.math_policy,
+  };
+  loom_pass_value_fact_owner_invalidate(pass->value_facts);
+  loom_canonicalizer_t canonicalizer;
+  IREE_RETURN_IF_ERROR(loom_canonicalizer_initialize(
+      module, pass->arena, pass->value_facts,
+      registry ? registry->special_value_policy : NULL,
+      registry ? registry->fact_refinement_policy : NULL, &canonicalizer));
+  loom_canonicalizer_result_t result;
+  iree_status_t status = loom_canonicalizer_run_function(
+      &canonicalizer, function, &options, &result);
+  loom_canonicalizer_deinitialize(&canonicalizer);
+  loom_pass_value_fact_owner_invalidate(pass->value_facts);
+  return status;
+}
+
+loom_inline_callables_environment_t loom_inline_callables_environment_from_pass(
+    loom_pass_t* pass) {
+  const loom_target_pass_capability_t* target =
+      loom_target_pass_capability_from_pass(pass);
+  return (loom_inline_callables_environment_t){
+      .arena = pass->arena,
+      .targets = loom_target_pass_capability_target_environment(target),
+      .version_owner =
+          loom_target_pass_capability_function_version_owner(target),
+      .diagnostics = pass->diagnostic_emitter,
+      .diagnostic_name = pass->info->name,
+      .refinement = {loom_inline_refine_source_closure, pass},
+  };
+}
+
 static iree_status_t loom_inline_callables_plan_initialize(
-    loom_pass_t* pass, loom_module_t* module,
-    const loom_inline_callables_plan_options_t* options,
+    const loom_inline_callables_environment_t* environment,
+    loom_module_t* module, const loom_inline_callables_plan_options_t* options,
     loom_inline_callables_plan_t* state) {
   *state = (loom_inline_callables_plan_t){
-      .pass = pass,
+      .environment = environment,
       .options = *options,
       .module = module,
-      .version_owner = loom_target_pass_capability_function_version_owner(
-          loom_target_pass_capability_from_pass(pass)),
   };
   // Non-call references only affect transfer policy when calls are present.
   if (options->references->calls.count == 0 &&
@@ -1597,19 +1645,19 @@ static iree_status_t loom_inline_callables_plan_initialize(
 }
 
 iree_status_t loom_inline_callables_plan_allocate(
-    loom_pass_t* pass, loom_module_t* module,
-    const loom_inline_callables_plan_options_t* options,
+    const loom_inline_callables_environment_t* environment,
+    loom_module_t* module, const loom_inline_callables_plan_options_t* options,
     loom_inline_callables_plan_t** out_plan) {
   loom_inline_callables_plan_t* state = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_arena_allocate(pass->arena, sizeof(*state), (void**)&state));
-  IREE_RETURN_IF_ERROR(
-      loom_inline_callables_plan_initialize(pass, module, options, state));
+      iree_arena_allocate(environment->arena, sizeof(*state), (void**)&state));
+  IREE_RETURN_IF_ERROR(loom_inline_callables_plan_initialize(
+      environment, module, options, state));
   *out_plan = state;
   return iree_ok_status();
 }
 
-iree_status_t loom_inline_callables_plan_execute(
+static iree_status_t loom_inline_callables_execute(
     loom_inline_callables_plan_t* state) {
   IREE_RETURN_IF_ERROR(loom_inline_prepare_leaf_bodies(state));
   // Unconstrained kept calls have no cycle or rewrite obligations. Leaf-only
@@ -1623,7 +1671,8 @@ iree_status_t loom_inline_callables_plan_execute(
   loom_inline_propagate_required_bodies(state);
   loom_inline_preflight_required_entries(state);
   IREE_RETURN_IF_ERROR(loom_inline_emit_blockers(state));
-  if (loom_pass_has_error_diagnostics(state->pass)) {
+  if (iree_any_bit_set(state->result_flags,
+                       LOOM_INLINE_CALLABLES_RESULT_REJECTED)) {
     return iree_ok_status();
   }
   if (state->candidate_count != 0 || state->has_native_constraints) {
@@ -1655,7 +1704,8 @@ iree_status_t loom_inline_callables_plan_execute(
     }
     loom_inline_preflight_required_entries(state);
     IREE_RETURN_IF_ERROR(loom_inline_emit_blockers(state));
-    if (loom_pass_has_error_diagnostics(state->pass)) {
+    if (iree_any_bit_set(state->result_flags,
+                         LOOM_INLINE_CALLABLES_RESULT_REJECTED)) {
       return iree_ok_status();
     }
   }
@@ -1665,6 +1715,14 @@ iree_status_t loom_inline_callables_plan_execute(
   }
   IREE_RETURN_IF_ERROR(loom_inline_index_required_entries_by_component(state));
   return loom_inline_execute_plan(state);
+}
+
+iree_status_t loom_inline_callables_plan_execute(
+    loom_inline_callables_plan_t* plan,
+    loom_inline_callables_result_flags_t* out_flags) {
+  iree_status_t status = loom_inline_callables_execute(plan);
+  *out_flags = plan->result_flags;
+  return status;
 }
 
 iree_status_t loom_inline_callables_run(loom_pass_t* pass,
@@ -1728,11 +1786,17 @@ iree_status_t loom_inline_callables_run(loom_pass_t* pass,
       .defer_callable_exits = options->stage == LOOM_INLINE_STAGE_PREPARE,
       .profitability = options->profitability,
   };
+  const loom_inline_callables_environment_t environment =
+      loom_inline_callables_environment_from_pass(pass);
   loom_inline_callables_plan_t state;
   IREE_RETURN_IF_ERROR(loom_inline_callables_plan_initialize(
-      pass, module, &plan_options, &state));
+      &environment, module, &plan_options, &state));
 
-  iree_status_t status = loom_inline_callables_plan_execute(&state);
+  loom_inline_callables_result_flags_t flags = 0;
+  iree_status_t status = loom_inline_callables_plan_execute(&state, &flags);
+  if (iree_any_bit_set(flags, LOOM_INLINE_CALLABLES_RESULT_CHANGED)) {
+    loom_pass_mark_changed(pass);
+  }
   *loom_inline_callables_statistics(pass) = state.statistics;
   if (iree_status_is_ok(status) && !loom_pass_has_error_diagnostics(pass) &&
       options->stage == LOOM_INLINE_STAGE_PREPARE &&
