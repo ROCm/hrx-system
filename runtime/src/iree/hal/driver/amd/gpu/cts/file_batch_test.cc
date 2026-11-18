@@ -176,11 +176,14 @@ class GpuNativeFileBatchTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
                                            IREE_HAL_MEMORY_ACCESS_WRITE,
                                            output_storage, output_file.out()));
     }
-    Ref<iree_hal_buffer_t> payload, consumer, metadata;
+    Ref<iree_hal_buffer_t> payload, consumer, metadata, independent;
+    std::array<uint32_t, 4> independent_values = {};
     ASSERT_NO_FATAL_FAILURE(
         Allocate(payload_pool, kBufferLength, payload.out()));
     ASSERT_NO_FATAL_FAILURE(
         Allocate(payload_pool, kBufferLength, consumer.out()));
+    ASSERT_NO_FATAL_FAILURE(
+        Allocate(payload_pool, sizeof(independent_values), independent.out()));
     ASSERT_NO_FATAL_FAILURE(
         Allocate(metadata_pool, kMetadataLength, metadata.out()));
 
@@ -211,7 +214,7 @@ class GpuNativeFileBatchTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
     words[0] = kCount;
 
     Ref<iree_hal_semaphore_t> initialized, gate, requests_ready, rows_ready;
-    Ref<iree_hal_semaphore_t> consumed, written, completed;
+    Ref<iree_hal_semaphore_t> consumed, written, completed, independent_done;
     ASSERT_NO_FATAL_FAILURE(CreateSemaphore(initialized.out()));
     ASSERT_NO_FATAL_FAILURE(CreateSemaphore(gate.out()));
     ASSERT_NO_FATAL_FAILURE(CreateSemaphore(requests_ready.out()));
@@ -219,6 +222,7 @@ class GpuNativeFileBatchTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
     ASSERT_NO_FATAL_FAILURE(CreateSemaphore(consumed.out()));
     ASSERT_NO_FATAL_FAILURE(CreateSemaphore(written.out()));
     ASSERT_NO_FATAL_FAILURE(CreateSemaphore(completed.out()));
+    ASSERT_NO_FATAL_FAILURE(CreateSemaphore(independent_done.out()));
     auto* initialized_handle = initialized.get();
     auto* requests_handle = requests_ready.get();
     auto* rows_handle = rows_ready.get();
@@ -301,6 +305,36 @@ class GpuNativeFileBatchTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
     }
     if (iree_status_is_ok(status)) {
       tail = completed_handle;
+    }
+    // An accepted file operation waiting on its producer cannot occupy the
+    // native FIFO ahead of unrelated work, including work on this exact queue.
+    auto* independent_handle = independent_done.get();
+    uint64_t independent_value = 0, next = 1;
+    const uint32_t pattern = 0x23A56BCD;
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_queue_fill(
+          io_queue, {}, {1, &independent_handle, &next}, independent, 0,
+          sizeof(independent_values), &pattern, sizeof(pattern), nullptr, 0);
+    }
+    if (iree_status_is_ok(status)) {
+      independent_value = next++;
+      status = iree_hal_queue_download(
+          io_queue, {1, &independent_handle, &independent_value},
+          {1, &independent_handle, &next}, independent, 0,
+          independent_values.data(), sizeof(independent_values), nullptr);
+      if (iree_status_is_ok(status)) {
+        independent_value = next;
+      }
+    }
+    if (independent_value) {
+      status = iree_status_join(
+          status, iree_hal_semaphore_wait(independent_done, independent_value,
+                                          iree_infinite_timeout(), 0));
+    }
+    if (iree_status_is_ok(status)) {
+      for (auto value : independent_values) {
+        EXPECT_EQ(value, pattern);
+      }
     }
     // Captures own the tables and objects. The caller owns the pools and the
     // upload/download host spans until the accepted tail retires.
