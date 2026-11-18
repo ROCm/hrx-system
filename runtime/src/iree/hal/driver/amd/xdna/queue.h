@@ -26,6 +26,16 @@ iree_status_t iree_hal_amd_xdna_queue_create(
     iree_async_proactor_t* proactor, iree_allocator_t host_allocator,
     iree_hal_queue_t** out_queue);
 
+// Captures a finite file operation through private host execution bindings.
+// Descriptions are captured now; indirect contents wait for producer readiness.
+iree_status_t iree_hal_amd_xdna_queue_file_transfer(
+    iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_file_binding_table_t files,
+    iree_hal_buffer_binding_table_t buffers,
+    const iree_hal_file_transfer_list_t* transfers,
+    iree_hal_memory_access_t file_access,
+    const iree_hal_queue_barriers_t* barriers);
+
 // Returns the immutable native array limit, bounded by HAL pending capacity.
 uint32_t iree_hal_amd_xdna_queue_maximum_command_count(iree_hal_queue_t* queue);
 

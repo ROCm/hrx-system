@@ -598,8 +598,6 @@ iree_status_t iree_hal_amd_xdna_operation_allocate(
         operation);
     iree_atomic_store(&operation->wait_count, 0, iree_memory_order_relaxed);
     iree_atomic_store(&operation->wait_status, 0, iree_memory_order_relaxed);
-    iree_atomic_store(&operation->continuation_status, 0,
-                      iree_memory_order_relaxed);
     *out_operation = operation;
   } else {
     iree_hal_semaphore_list_release(operation->signals);

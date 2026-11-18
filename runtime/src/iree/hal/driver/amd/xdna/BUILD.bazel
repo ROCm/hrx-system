@@ -241,6 +241,7 @@ iree_runtime_cc_library(
     srcs = [
         "queue.c",
         "queue_admission.c",
+        "queue_file.c",
         "queue_memory.c",
         "queue_operation.c",
         "queue_profile.c",
@@ -267,6 +268,7 @@ iree_runtime_cc_library(
         "//libamdf:headers",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/driver/amd:status",
@@ -275,6 +277,9 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/driver/amd/fabric:file_transfer",
         "//runtime/src/iree/hal/driver/amd/fabric:transient_buffer",
         "//runtime/src/iree/hal/driver/amd/fabric:transient_buffer_pool",
+        "//runtime/src/iree/hal/utils:file_request",
+        "//runtime/src/iree/hal/utils:file_transfer",
+        "//runtime/src/iree/hal/utils:files",
     ],
 )
 

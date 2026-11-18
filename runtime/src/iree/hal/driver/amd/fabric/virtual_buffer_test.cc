@@ -11,9 +11,6 @@
 
 #include "iree/hal/driver/amd/fabric/file_transfer.h"
 #include "iree/hal/driver/amd/fabric/memory_backend_test_base.h"
-#include "iree/hal/utils/fd_file.h"
-#include "iree/hal/utils/memory_file.h"
-#include "iree/testing/temp_file.h"
 
 namespace iree::hal::amd::fabric {
 
@@ -767,56 +764,19 @@ TEST_F(MemoryBackendTest, FileTransfersUseExplicitPhysicalSources) {
   iree_hal_buffer_t* target = nullptr;
   IREE_ASSERT_OK(
       CreateReservation(pool, IREE_HAL_BUFFER_USAGE_TRANSFER, &target));
-  iree::testing::TempFilePath path("iree_fabric_file_sources");
-  iree_io_file_handle_t* handle = nullptr;
-  IREE_ASSERT_OK(iree_io_file_handle_create(
-      IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_WRITE |
-          IREE_IO_FILE_MODE_ASYNC,
-      path.path_view(), 16384, allocator_, &handle));
-  iree_async_proactor_t* proactor = nullptr;
-  IREE_ASSERT_OK(iree_async_proactor_pool_get(proactor_pool_, 0, &proactor));
-  std::array<iree_hal_file_t*, 2> files = {};
-  iree_status_t status = iree_hal_fd_file_from_handle(
-      IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE, handle,
-      proactor, allocator_, &files[0]);
-  iree_io_file_handle_release(handle);
-  IREE_ASSERT_OK(status);
-  std::vector<uint8_t> contents(16384);
-  IREE_ASSERT_OK(iree_io_file_handle_wrap_host_allocation(
-      IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE,
-      iree_make_byte_span(contents.data(), contents.size()), {}, allocator_,
-      &handle));
-  status = iree_hal_memory_file_wrap(
-      nullptr, IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
-      handle, IREE_HAL_MEMORY_FILE_FLAG_NONE, allocator_, &files[1]);
-  iree_io_file_handle_release(handle);
-  IREE_ASSERT_OK(status);
-
   for (auto* buffer : {backing, target}) {
-    for (auto* file : files) {
-      iree_hal_amd_fabric_file_transfer_t transfer = {};
-      IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_initialize(
-          file, IREE_HAL_MEMORY_ACCESS_READ, 0, buffer, 0, 16384, allocator_,
-          &transfer));
-      iree_hal_memory_effects_t before, after;
-      IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_prepare_source(
-          &transfer, &native_.api, families_[0],
-          native_families_[0].queue_family_ordinal, &before, &after));
-      const bool physical =
-          buffer == backing && iree_hal_file_async_handle(file);
-      EXPECT_EQ(transfer.source.contents.data_length, physical ? 16384u : 0u);
-      EXPECT_EQ(transfer.source.contents.data, nullptr);
-      if (physical) {
-        EXPECT_NE(transfer.source.storage, nullptr);
-      }
-      EXPECT_EQ(native_.map_count, 0);
-      iree_hal_amd_fabric_file_transfer_deinitialize(&transfer);
-    }
+    iree_hal_amd_fabric_file_source_t source;
+    iree_hal_memory_effects_t before, after;
+    IREE_ASSERT_OK(iree_hal_amd_fabric_file_source_initialize(
+        &native_.api, families_[0], native_families_[0].queue_family_ordinal,
+        IREE_HAL_MEMORY_ACCESS_READ, {buffer, 0, 16384}, &source, &before,
+        &after));
+    const bool physical = buffer == backing;
+    EXPECT_EQ(source.contents.data_length, physical ? 16384u : 0u);
+    EXPECT_EQ(source.contents.data, nullptr);
+    EXPECT_EQ(source.storage != nullptr, physical);
+    EXPECT_EQ(native_.map_count, 0);
   }
-  for (auto* file : files) {
-    iree_hal_file_release(file);
-  }
-  EXPECT_TRUE(path.Remove());
   iree_hal_buffer_release(target);
   iree_hal_buffer_release(backing);
   iree_hal_pool_release(pool);
