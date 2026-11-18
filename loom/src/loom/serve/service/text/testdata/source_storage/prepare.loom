@@ -1,0 +1,13 @@
+func.decl import("prepare", "storage") @declare_storage(%bytes: i64, %alignment: i64) -> (i32)
+
+func.decl @fixture_prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64, %draft_depth: i32, %shapes: buffer, %shape_count: i64, %weights: buffer, %options: buffer) -> (i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+
+// Preserve the ordinary fixture's complete source ABI while declaring one
+// independent output root before its stage and protocol-storage preparation.
+func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64, %draft_depth: i32, %shapes: buffer, %shape_count: i64, %weights: buffer, %options: buffer) -> (i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer) {
+  %bytes = scalar.constant 64 : i64
+  %alignment = scalar.constant 64 : i64
+  %ordinal = func.call @declare_storage(%bytes, %alignment) : (i64, i64) -> (i32)
+  %effective, %stages, %state, %terminal, %allocations, %views, %origins, %draft, %geometry = func.call @fixture_prepare(%prefill, %context, %pool, %rows, %pins, %draft_depth, %shapes, %shape_count, %weights, %options) : (i64, i64, i64, i64, i64, i32, buffer, i64, buffer, buffer) -> (i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  func.return %effective, %stages, %state, %terminal, %allocations, %views, %origins, %draft, %geometry : i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer
+}

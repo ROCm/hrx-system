@@ -4,6 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <cstdlib>
+#include <filesystem>
+#include <vector>
+
 #include "loom/runtime/execution/workspace.h"
 #include "loom/serve/service/text/model_instance.h"
 #include "loom/serve/service/text/service_test_fixture.h"
@@ -18,57 +22,39 @@ class SourceStorageTest : public SourceTextServiceTest {
   bool NeedsStandaloneModel() const override { return false; }
 
   void Prepare(bool reject_after_copy) {
-    const auto prepare =
+    const char* source_path = std::getenv("LOOM_SERVE_TEST_STORAGE_SOURCE");
+    ASSERT_NE(source_path, nullptr);
+    const auto prepare = std::filesystem::absolute(source_path).string();
+    const auto feedback_source =
+        std::filesystem::path(prepare).parent_path() / "feedback.loom";
+    const auto fixture_prepare =
         iree::testing::MakeTempFilePath("text_storage_prepare", ".loom");
     const auto control =
         iree::testing::MakeTempFilePath("text_storage_control", ".loom");
-    ASSERT_NO_FATAL_FAILURE(
-        EditNativeProvider(directory_ + "/prepare.loom", prepare,
-                           "config.def @fixture.card = false : i1", R"(
-func.decl import("prepare", "storage") @declare_storage(%bytes: i64, %alignment: i64) -> (i32)
-func.def @declare_output_storage() {
-  %bytes = scalar.constant 64 : i64
-  %alignment = scalar.constant 64 : i64
-  %ordinal = func.call @declare_storage(%bytes, %alignment) : (i64, i64) -> (i32)
-  func.return
-}
-config.def @fixture.card = false : i1
-)"));
+    const auto feedback =
+        iree::testing::MakeTempFilePath("text_storage_feedback", ".loom");
+    // The checked-in providers compose the ordinary fixture's preparation and
+    // replace its feedback dependency. Only symbol wiring and a configuration
+    // value change here; the programs themselves remain authored source.
+    ASSERT_NO_FATAL_FAILURE(EditNativeProvider(directory_ + "/prepare.loom",
+                                               fixture_prepare, "@prepare(",
+                                               "@fixture_prepare("));
     ASSERT_NO_FATAL_FAILURE(EditNativeProvider(
-        prepare, prepare, "%c0_source = scalar.constant 0 : i32",
-        "func.call @declare_output_storage() : ()\n"
-        "  %c0_source = scalar.constant 0 : i32"));
-    const std::string declaration =
-        "func.decl import(\"input\") @require(%condition: i32, "
-        "%diagnostic: buffer)";
+        directory_ + "/control.loom", control,
+        "func.decl import(\"runner\") @feedback", "func.decl @feedback"));
     ASSERT_NO_FATAL_FAILURE(EditNativeProvider(
-        directory_ + "/control.loom", control, declaration, declaration + R"(
-func.decl import("storage", "buffer") @stored_buffer(%ordinal: i32) -> (ref<@HalBuffer>)
-func.decl import("storage", "copy") @stored_copy(%source: ptr<@HalBuffer>, %source_offset: i64, %target: ptr<@HalBuffer>, %target_offset: i64, %length: i64) -> (i64)
-)"));
-    const std::string feedback =
-        "%feedback = func.call @feedback(%c0, %outputs, %c0_i64, %length) : "
-        "(i32, ptr<@HalBuffer>, i64, i64) -> (i64)";
-    std::string replacement = R"(
-  %retained_owner = func.call @stored_buffer(%c0) : (i32) -> (ref<@HalBuffer>)
-  %retained = ref.borrow %retained_owner : ref<@HalBuffer> -> ptr<@HalBuffer>
-  %copy = func.call @stored_copy(%outputs, %c0_i64, %retained, %c0_i64, %length) : (ptr<@HalBuffer>, i64, ptr<@HalBuffer>, i64, i64) -> (i64)
-)";
-    if (reject_after_copy) {
-      replacement += R"(
-  %error = buffer.constant utf8("rejected after retained output copy") : buffer
-  func.call @require(%c0, %error) : (i32, buffer)
-)";
-    }
-    replacement +=
-        "%feedback = func.call @feedback(%c0, %retained, %c0_i64, %length) : "
-        "(i32, ptr<@HalBuffer>, i64, i64) -> (i64)";
-    replacement += "\n  ref.release %retained_owner : ref<@HalBuffer>";
-    ASSERT_NO_FATAL_FAILURE(
-        EditNativeProvider(control, control, feedback, replacement));
+        feedback_source.string(), feedback, "@source_storage.reject = false",
+        reject_after_copy ? "@source_storage.reject = true"
+                          : "@source_storage.reject = false"));
     auto options = ModelOptions();
+    std::vector<iree_string_view_t> providers(
+        options.sources.values, options.sources.values + options.sources.count);
+    providers.push_back(iree_make_cstring_view(fixture_prepare.c_str()));
+    providers.push_back(iree_make_cstring_view(feedback.c_str()));
     options.sources.prepare = iree_make_cstring_view(prepare.c_str());
     options.sources.control = iree_make_cstring_view(control.c_str());
+    options.sources.count = providers.size();
+    options.sources.values = providers.data();
     IREE_ASSERT_OK(loom_serve_text_model_allocate(
         device_, storage_owner_, &options, host_allocator_, &model_));
   }
