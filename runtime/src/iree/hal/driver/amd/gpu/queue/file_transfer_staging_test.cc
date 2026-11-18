@@ -656,7 +656,8 @@ TEST_P(FileTransferStagingTest, HealthyCopyPublishesBytesBeforeCompletion) {
 
 TEST_P(FileTransferStagingTest, GroupsCapturedRowsAndPreservesPadding) {
   ASSERT_NO_FATAL_FAILURE(PrepareFile(8192));
-  std::vector<iree_hal_file_transfer_t> rows(64);
+  constexpr size_t kRowCount = 64;
+  std::vector<iree_hal_file_transfer_t> rows(kRowCount);
   for (size_t i = 0; i < rows.size(); ++i) {
     rows[i] = {
         .file_offset = i * 128,
@@ -689,20 +690,16 @@ TEST_P(FileTransferStagingTest, GroupsCapturedRowsAndPreservesPadding) {
   rows.clear();
   rows.shrink_to_fit();
   IREE_ASSERT_OK(iree_hal_semaphore_signal(ready, 1, nullptr));
-  PumpUntil([&] { return submitted_ == 2 || queue_.host_owners == 0; });
-  ASSERT_EQ(submitted_, 2u);
-  ASSERT_EQ(queue_.copies.size(), 2u);
+  ASSERT_NO_FATAL_FAILURE(RunToCompletion());
+  // Every row is copied once, with multiple rows sharing native submissions.
+  // Drive all windows instead of assuming one particular batching geometry.
+  size_t copied_rows = 0;
   for (const auto& copy : queue_.copies) {
-    EXPECT_EQ(copy->words.size(), 32 * 7u);
+    EXPECT_EQ(copy->words.size() % 7, 0u);
+    copied_rows += copy->words.size() / 7;
   }
-  const auto publication =
-      iree_hal_amd_gpu_sdma_native_queue_publication_source(sdma_);
-  while (publication.publish(publication.user_data)) {
-  }
-  ASSERT_NO_FATAL_FAILURE(ExecuteAcceptedCopy());
-  retired_ = submitted_;
-  PollCopies();
-  PumpUntil([&] { return queue_.host_owners == 0; });
+  EXPECT_EQ(copied_rows, kRowCount);
+  EXPECT_LT(queue_.copies.size(), kRowCount);
   ExpectCompletion(IREE_STATUS_OK);
   iree_io_file_contents_t* contents = nullptr;
   const uint8_t* actual = buffer_contents_;
