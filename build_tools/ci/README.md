@@ -113,8 +113,28 @@ HIP code-object fixtures; native execution is provided by libamdf.
 The [profile definitions](../devtools/ci_config.py) specify the package scope
 and resources for each.
 
-Linux GPU preflight correlates the assigned ROCr agent with its KFD/DRM
-identity and emits both native consumer inputs from that one verified choice:
+Linux GPU jobs take their assignment from the runner. A controller can pass
+physical identities in `HAL_AMD_GPU_ASSIGNMENT` or render paths in
+`PARENT_GPU_DEVICES` and `CHILD_GPU_DEVICES`. On shared hosts each job needs
+an explicit grant. The Azure GPU scale set leases an entire single-GPU VM
+to each job, so CI checks that its inventory contains exactly one AMD render
+node before using it.
+
+For example, a parent can own `renderD128,renderD144` and give the child only
+`renderD144`. Both libamdf and Vulkan then check `renderD144`. If the runner
+also sets `ROCR_VISIBLE_DEVICES`, its selection must overlap that grant.
+CI resolves these ordinals or GPU UUIDs once using KFD's compute-node order
+and render minors. Partitions on the same PCI function keep separate identities.
+If a hidden render node makes an ordinal ambiguous between the host and
+container, the controller must supply a render path or physical identity.
+An empty or conflicting assignment stops the job before device activation.
+
+Native jobs build the checkout's `amdf-info` with their test configuration.
+The tool opens and releases the first compatible assigned GPU by its exact
+URI under the hardware watchdog. Vulkan jobs select the assigned PCI device
+with Mesa's `DRI_PRIME` and verify the render major and minor reported by
+`vulkaninfo`. After a successful check, the HAL and standalone CTS receive
+the same physical identity.
 
 ```sh
 HAL_AMD_GPU_ASSIGNMENT=linux_device:226:144

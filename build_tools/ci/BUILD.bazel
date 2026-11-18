@@ -229,18 +229,26 @@ py_test(
     ],
 )
 
+py_library(
+    name = "gpu_assignment",
+    srcs = ["gpu_assignment.py"],
+)
+
 py_test(
-    name = "rocm_environment_test",
+    name = "amdgpu_environment_test",
     size = "small",
     srcs = [
-        "rocm_environment.py",
-        "rocm_environment_test.py",
+        "amdgpu_environment.py",
+        "amdgpu_environment_test.py",
     ],
-    main = "rocm_environment_test.py",
+    main = "amdgpu_environment_test.py",
     # The changed-path-aware Linux presubmit owns these hardware-free checks.
     tags = ["manual"],
     target_compatible_with = ["@platforms//os:linux"],
-    deps = ["//build_tools/amdgpu:target_map"],
+    deps = [
+        ":gpu_assignment",
+        "//build_tools/amdgpu:target_map",
+    ],
 )
 
 py_test(
@@ -267,6 +275,7 @@ py_test(
     # The changed-path-aware Linux presubmit owns these hardware-free checks.
     tags = ["manual"],
     target_compatible_with = ["@platforms//os:linux"],
+    deps = [":gpu_assignment"],
 )
 
 py_test(
@@ -324,6 +333,7 @@ test_suite(
     name = "presubmit_tests",
     tests = [
         ":amdf_info_archive_test",
+        ":amdgpu_environment_test",
         ":bazel_test_reproducers_test",
         ":change_scope_test",
         ":ci_core_common_test",
@@ -338,7 +348,6 @@ test_suite(
         ":loom_server_test",
         ":loom_wheel_test",
         ":native_artifact_security_test",
-        ":rocm_environment_test",
         ":vulkan_environment_test",
         ":windows_diagnostics_test",
         ":windows_file_access_test",

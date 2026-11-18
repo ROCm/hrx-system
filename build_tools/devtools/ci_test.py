@@ -49,6 +49,36 @@ from runtime.build_tools.bazel import configure as runtime_configure
 
 
 class CiTest(unittest.TestCase):
+    def test_gpu_build_target_uses_suite_configuration_before_hardware_access(self):
+        for profile in ("iree-bazel-amdgpu", "iree-bazel-amdgpu-asan"):
+            with (
+                self.subTest(profile=profile),
+                mock.patch.dict(os.environ, {"IREE_CI_PLATFORM_COVERAGE": "1"}),
+                mock.patch.object(
+                    ci_config, "AMDGPU_BAZEL_TARGET_EXCLUDES", ("-//excluded/...",)
+                ),
+            ):
+                options = [
+                    profile,
+                    "--amdgpu-target",
+                    "gfx120X-all",
+                    "--loom-importer",
+                    "cxx",
+                ]
+                configure, suite_build, _ = ci.steps_from_args(
+                    ci.parse_arguments(options + ["--target", "//suite/..."])
+                )
+                with mock.patch.object(ci, "amd_test_env", side_effect=AssertionError):
+                    probe_configure, probe_build = ci.steps_from_args(
+                        ci.parse_arguments(options + ["--build-target", "//tool:probe"])
+                    )
+                self.assertEqual(probe_configure, configure)
+                self.assertEqual(
+                    probe_build.argv,
+                    suite_build.argv[: suite_build.argv.index("--")]
+                    + ("//tool:probe",),
+                )
+
     def test_repository_compilation_mode_overrides_build_defaults_only(self):
         for mode in (None, "fastbuild", "dbg", "opt"):
             with self.subTest(mode=mode):
@@ -1815,6 +1845,7 @@ class CiTest(unittest.TestCase):
     def test_vulkan_commands_preserve_explicit_mesa_device_selection(self):
         selection = {
             "DRI_PRIME": "1!",
+            "HAL_AMD_GPU_ASSIGNMENT": "linux_device:226:144",
             "AMDF_CTS_GPU_NATIVE_IDENTITY": "linux_device:226:144",
         }
         with mock.patch.dict(os.environ, selection):

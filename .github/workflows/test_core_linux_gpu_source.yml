@@ -182,23 +182,28 @@ jobs:
           bash .github/scripts/check_rocm_device_toolchain.sh
           test -d "${HRX_ROCM_ROOT}/include"
 
-      - name: Report ROCm environment
-        id: rocm_environment
-        timeout-minutes: 1
-        continue-on-error: ${{ inputs.experimental }}
-        run: bash .github/scripts/check_rocm_environment.sh
-
-      - name: Configure HRX
-        if: ${{ steps.rocm_environment.outcome == 'success' }}
+      - name: Configure HRX and build native GPU discovery tool
         run: |
           "${HRX_PYTHON}" build_tools/ci/ci_core_linux.py build
+          cmake --build "${HRX_BUILD_DIR}" --target libamdf/tool/amdf-info/amdf-info
+
+      - name: Check assigned native GPU
+        id: gpu_preflight
+        timeout-minutes: 1
+        continue-on-error: ${{ inputs.experimental }}
+        env:
+          AMD_TARGETS: ${{ inputs.amdgpu_targets }}
+        run: >-
+          python3 -u -m build_tools.ci.amdgpu_environment
+          --native "${HRX_BUILD_DIR}/libamdf/tool/amdf-info/amdf-info" "${AMD_TARGETS}"
 
       - name: Build and run GPU tests
         id: core_tests
-        if: ${{ steps.rocm_environment.outcome == 'success' }}
+        if: ${{ steps.gpu_preflight.outcome == 'success' }}
         continue-on-error: ${{ inputs.experimental }}
         run: |
-          "${HRX_PYTHON}" build_tools/ci/ci_core_linux.py test
+          env -u ROCR_VISIBLE_DEVICES -u HIP_VISIBLE_DEVICES -u CUDA_VISIBLE_DEVICES -u GPU_DEVICE_ORDINAL \
+            "${HRX_PYTHON}" build_tools/ci/ci_core_linux.py test
 
       - name: Upload native test results
         if: ${{ always() && (steps.core_tests.outcome == 'success' || steps.core_tests.outcome == 'failure') }}

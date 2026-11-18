@@ -23,7 +23,7 @@ printf 'Checking Vulkan hardware on runner %s (timeout: %ss).\n' \
 
 probe_status=0
 timeout --kill-after="${probe_kill_after_seconds}s" \
-  "${probe_timeout_seconds}s" python3 -u build_tools/ci/vulkan_environment.py "$@" \
+  "${probe_timeout_seconds}s" python3 -u -m build_tools.ci.vulkan_environment "$@" \
   || probe_status=$?
 
 case "${probe_status}" in
