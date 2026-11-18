@@ -85,8 +85,14 @@ combines source policy evidence with the selected target provider's experiments.
 Pipeline depth advice keeps unrolling fixed and cites available final resources;
 a single report does not establish that pipelining increased register use.
 
-Resident pipeline inventories appear under `Pipeline` in `show`: distinct
-images, loaded worker copies, placement, and physical memory occupancy.
+Pipeline inventories in `show` and `suggest` give planned external and routed
+DMA bytes per activation before per-entry findings. A null total needs
+transfer counts from the executed request. The XDNA completed-request procedure
+relates these bytes to native loop trips, phase timing, and producer waits.
+[XDNA authoring guide](https://rocm.github.io/hrx-system/loom/targets/xdna-pipelines/#account-for-a-completed-request)
+
+`show` also gives distinct images, loaded worker copies, placement, and
+physical memory occupancy.
 Occupied bytes and address extent are separate; shared reservations count
 once. AIE2P `suggest` uses this inventory for code headroom, bank pressure,
 and local memory pressure. Missing logical channel ownership is unavailable,

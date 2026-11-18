@@ -197,6 +197,16 @@ These facts are available when compiling source or resuming from configuration
 IR. Logical channel counts are shown only when their ownership evidence is
 available; an unavailable count does not mean zero channels.
 
+Both `show` and `suggest` present planned external and routed on-array DMA
+bytes per activation ahead of per-entry findings. Their JSON paths are
+`.pipelines.rows[].external_dma_byte_count` and `.routed_dma_byte_count` in
+the same row. Each missing total is `null`. When a detailed plan has logical
+channels, `show` identifies both endpoints and gives record bytes times record
+count alongside slot capacity and storage. An external binding also has its
+own task size and execution count. Relate these counts to executed
+activations, useful outputs, and timestamps using the
+[XDNA completed-request procedure](../targets/xdna-pipelines.md#account-for-a-completed-request).
+
 Explicit loop pipeline policies appear under **Source loop pipelines**. Each
 policy records its compiled function, loop ordinal, applied depth, queue shape,
 and ordinary read count. Detailed reports include each source operation's

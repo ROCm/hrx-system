@@ -135,9 +135,10 @@ def _suggest_spill_traffic(
         suggestion_id="aie2p.spill_traffic",
         entry_name=entry_name,
         action=(
-            "Shorten live ranges, interleave fewer accumulators, or choose a "
-            "narrower native shape; then require all spill storage, stores, and "
-            "reloads to disappear before silicon benchmarking."
+            "Locate the native spill sites. Weight their transfers by visits per "
+            "completed request. If that cost can materially close the phase gap, "
+            "compare shorter live ranges or fewer live accumulators at the same "
+            "useful work and measure the completed request."
         ),
         evidence=evidence,
     )
@@ -177,10 +178,11 @@ def _suggest_vliw_coissue_density(
         suggestion_id="aie2p.vliw_coissue_density",
         entry_name=entry_name,
         action=(
-            "Expose more independent ALU, load/store, and control work by "
-            "interleaving accumulators or unrolling one bounded record step. "
-            "Recompile and require fewer physical bundles at equal semantics "
-            "without increasing register pressure before benchmarking."
+            "Compare issued bundles per useful output and dependency spacing in "
+            "the measured hot loop with the oracle. For matrix code, count MACs "
+            "that also load operands. "
+            "If issue cost explains the phase gap, compare interleaved "
+            "accumulators at fixed panel reuse and measure the completed request."
         ),
         evidence=(
             CompileReportSuggestionEvidence(

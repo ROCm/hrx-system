@@ -143,6 +143,10 @@ reopen; accumulated implementation and passing tests confer no authority to
 continue. Correctness fixes remain correctness work, with no implied
 performance qualification.
 
+For an XDNA pipeline, the [completed-request procedure](../targets/xdna-pipelines.md#account-for-a-completed-request)
+works through the phase timers, native loop counts, DMA deliveries, and
+producer/consumer stalls needed to make this decision.
+
 ## Bound the performance regime before hill climbing
 
 Tile and provider searches become useful only after the experiment has a

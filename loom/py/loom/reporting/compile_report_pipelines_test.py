@@ -11,6 +11,11 @@ from copy import deepcopy
 import pytest
 
 from loom.reporting.compile_report import CompileReportError, parse_compile_report
+from loom.reporting.compile_report_suggestions import (
+    CompileReportSuggestionResult,
+    build_compile_report_suggestions,
+    format_compile_report_suggestions_text,
+)
 from loom.reporting.compile_report_view import (
     build_compile_report_show,
     format_compile_report_show_text,
@@ -124,6 +129,68 @@ def test_summary_retains_counts_without_inventing_detail_rows() -> None:
     assert "physical memory owners: 3" in text
     assert "worker[" not in text
     assert "memory[" not in text
+
+
+def test_dma_traffic_distinguishes_unknown_from_zero_for_each_export() -> None:
+    report = _report()
+    report["pipeline_plans"].append(
+        {
+            "root": "weight_input",
+            "realization": "spatial-program",
+            "external_dma_byte_count": 4608,
+            "routed_dma_byte_count": 0,
+            "channel_storage_byte_count": 2304,
+            "channels": {
+                "count": 1,
+                "rows": [
+                    {
+                        "channel_index": 0,
+                        "transport": "external-dma",
+                        "sender": {"owner": "binding", "owner_index": 2, "port": 0},
+                        "receiver": {"owner": "worker", "owner_index": 0, "port": 1},
+                        "capacity": 2,
+                        "record_count": 4,
+                        "record_byte_count": 1152,
+                        "activation_byte_count": 4608,
+                        "local_storage_byte_count": 2304,
+                        "external_transfer": {
+                            "binding_ordinal": 2,
+                            "task_byte_count": 1152,
+                            "task_repeat_count": 4,
+                            "activation_byte_count": 4608,
+                        },
+                    }
+                ],
+            },
+        }
+    )
+    document = parse_compile_report(report)
+    show = build_compile_report_show(document)
+    suggest = build_compile_report_suggestions(
+        document, CompileReportSuggestionResult("test", None)
+    )
+    for view, render in (
+        (show, format_compile_report_show_text),
+        (suggest, format_compile_report_suggestions_text),
+    ):
+        resident, spatial = view["pipelines"]["rows"]
+        assert resident["external_dma_byte_count"] is None
+        assert resident["routed_dma_byte_count"] is None
+        assert spatial["external_dma_byte_count"] == 4608
+        assert spatial["routed_dma_byte_count"] == 0
+        text = render(view)
+        assert "Planned external DMA per activation: unavailable" in text
+        assert "Planned external DMA per activation: 4608 B" in text
+        assert "Planned routed on-array DMA per activation: 0 B" in text
+        assert text.count("Incomplete transfer evidence") == 1
+    assert "rows" not in suggest["pipelines"]["rows"][0]["workers"]
+    assert "channel_rows" not in suggest["pipelines"]["rows"][1]
+    text = format_compile_report_show_text(show)
+    assert (
+        "binding[2]:0 -> worker[0]:1: 4 records x 1152 B "
+        "= 4608 B per activation, 2 slots, 2304 B storage" in text
+    )
+    assert "binding[2] DMA: 4 tasks x 1152 B = 4608 B per activation" in text
 
 
 def test_show_keeps_exports_separate_and_preserves_placement_rank() -> None:

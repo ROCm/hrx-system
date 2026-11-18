@@ -752,6 +752,9 @@ def format_compile_report_show_text(view: dict[str, object]) -> str:
     if commands is None or entries:
         lines.append("")
         append_workload_show_text(lines, _expect_dict(view["workload"]))
+    pipelines = view.get("pipelines")
+    if isinstance(pipelines, dict):
+        append_pipeline_show_text(lines, pipelines)
     expansions = view.get("expansions")
     if isinstance(expansions, dict):
         append_expansion_show_text(lines, expansions)
@@ -798,9 +801,6 @@ def format_compile_report_show_text(view: dict[str, object]) -> str:
         append_loop_pipeline_show_text(lines, loop_pipelines)
     if isinstance(commands, dict):
         append_command_show_text(lines, commands)
-    pipelines = view.get("pipelines")
-    if isinstance(pipelines, dict):
-        append_pipeline_show_text(lines, pipelines)
     barriers = view.get("barriers")
     if isinstance(barriers, dict):
         append_barrier_show_text(lines, barriers)

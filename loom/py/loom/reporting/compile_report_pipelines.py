@@ -21,6 +21,10 @@ _STORAGE_FIELDS = {
     "worker_storage_byte_count": "program data bytes",
     "channel_storage_byte_count": "channel bytes",
 }
+_TRAFFIC_FIELDS = {
+    "external_dma_byte_count": "external DMA",
+    "routed_dma_byte_count": "routed on-array DMA",
+}
 _WORKER_FIELDS = (
     "code_byte_count",
     "code_capacity_byte_count",
@@ -37,9 +41,18 @@ _MEMORY_FIELDS = (
     "maximum_bank_storage_byte_count",
     "bank_storage_capacity_byte_count",
 )
+_CHANNEL_FIELDS = (
+    "capacity",
+    "record_count",
+    "record_byte_count",
+    "activation_byte_count",
+    "local_storage_byte_count",
+)
 
 
-def build_pipeline_show(document: CompileReportDocument) -> dict[str, object] | None:
+def build_pipeline_show(
+    document: CompileReportDocument, *, summary_only: bool = False
+) -> dict[str, object] | None:
     """Selects bounded physical facts, preserving absent logical provenance."""
     if "pipeline_plans" not in document.report:
         return None
@@ -57,39 +70,79 @@ def build_pipeline_show(document: CompileReportDocument) -> dict[str, object] | 
         for field in (*_CODE_FIELDS, *_STORAGE_FIELDS):
             if field in source:
                 plan[field] = _count(source[field], f"{path}.{field}")
-        for name, fields in (("workers", _WORKER_FIELDS), ("memories", _MEMORY_FIELDS)):
-            if name in source:
-                plan[name] = _inventory(source[name], f"{path}.{name}", name, fields)
-        if "channels" in source:
-            channels = _object(source["channels"], f"{path}.channels")
-            plan["channel_count"] = _count(
-                channels.get("count"), f"{path}.channels.count"
+        for field in _TRAFFIC_FIELDS:
+            plan[field] = (
+                _count(source[field], f"{path}.{field}") if field in source else None
             )
+        for name, index_field, fields in (
+            ("workers", "worker_index", _WORKER_FIELDS),
+            ("memories", "memory_index", _MEMORY_FIELDS),
+            ("channels", "channel_index", _CHANNEL_FIELDS),
+        ):
+            if name in source:
+                inventory = _inventory(
+                    source[name], f"{path}.{name}", index_field, fields, summary_only
+                )
+                if name == "channels":
+                    plan["channel_count"] = inventory["count"]
+                    if "rows" in inventory:
+                        plan["channel_rows"] = inventory["rows"]
+                else:
+                    plan[name] = inventory
         plans.append(plan)
     return {"count": len(plans), "rows": plans}
 
 
 def _inventory(
-    value: object, path: str, name: str, fields: tuple[str, ...]
+    value: object,
+    path: str,
+    index_field: str,
+    fields: tuple[str, ...],
+    summary_only: bool,
 ) -> dict[str, object]:
     source = _object(value, path)
     count = _count(source.get("count"), f"{path}.count")
     result: dict[str, object] = {"count": count}
-    if "rows" not in source:
+    if summary_only or "rows" not in source:
         return result
     values = source["rows"]
     if not isinstance(values, list) or len(values) != count:
         raise CompileReportError(f"{path}.rows: expected {count} rows")
     rows = []
-    index_field = "worker_index" if name == "workers" else "memory_index"
     for index, value in enumerate(values):
         row_path = f"{path}.rows[{index}]"
         source_row = _object(value, row_path)
         if _count(source_row.get(index_field), f"{row_path}.{index_field}") != index:
             raise CompileReportError(f"{row_path}.{index_field}: expected {index}")
         row: dict[str, object] = {index_field: index}
-        if name == "workers":
+        if index_field == "worker_index":
             row["entry"] = _string(source_row.get("entry"), f"{row_path}.entry")
+        if index_field == "channel_index":
+            row["transport"] = _string(
+                source_row.get("transport"), f"{row_path}.transport"
+            )
+            for end in ("sender", "receiver"):
+                endpoint_path = f"{row_path}.{end}"
+                endpoint = _object(source_row.get(end), endpoint_path)
+                row[end] = {
+                    "owner": _string(endpoint.get("owner"), f"{endpoint_path}.owner"),
+                    "owner_index": _count(
+                        endpoint.get("owner_index"), f"{endpoint_path}.owner_index"
+                    ),
+                    "port": _count(endpoint.get("port"), f"{endpoint_path}.port"),
+                }
+            if "external_transfer" in source_row:
+                transfer_path = f"{row_path}.external_transfer"
+                transfer = _object(source_row["external_transfer"], transfer_path)
+                row["external_transfer"] = {
+                    key: _count(transfer.get(key), f"{transfer_path}.{key}")
+                    for key in (
+                        "binding_ordinal",
+                        "task_byte_count",
+                        "task_repeat_count",
+                        "activation_byte_count",
+                    )
+                }
         if "placement" in source_row:
             placement = _object(source_row["placement"], f"{row_path}.placement")
             rank = _count(placement.get("rank"), f"{row_path}.placement.rank")
@@ -112,6 +165,14 @@ def append_pipeline_show_text(lines: list[str], view: dict[str, object]) -> None
     """Formats the selected inventory without inferring channels from addresses."""
     for plan in view["rows"]:
         lines.extend(("", f"Pipeline {plan['root']} ({plan['realization']})"))
+        for field, label in _TRAFFIC_FIELDS.items():
+            amount = f"{plan[field]} B" if plan[field] is not None else "unavailable"
+            lines.append(f"  Planned {label} per activation: {amount}")
+        if any(plan[field] is None for field in _TRAFFIC_FIELDS):
+            lines.append(
+                "  Incomplete transfer evidence. Count records crossing each missing "
+                "boundary for the request shape, including repeats and checkpoints."
+            )
         if "workers" in plan:
             lines.append(f"  workers: {plan['workers']['count']}")
         if "memories" in plan:
@@ -128,6 +189,25 @@ def append_pipeline_show_text(lines: list[str], view: dict[str, object]) -> None
         lines.append(
             f"  logical channels: {channels if channels is not None else 'unavailable'}"
         )
+        for channel in plan.get("channel_rows", []):
+            sender, receiver = channel["sender"], channel["receiver"]
+            lines.append(
+                f"  channel[{channel['channel_index']}] {channel['transport']} "
+                f"{sender['owner']}[{sender['owner_index']}]:{sender['port']} -> "
+                f"{receiver['owner']}[{receiver['owner_index']}]:{receiver['port']}: "
+                f"{channel['record_count']} records x {channel['record_byte_count']} B "
+                f"= {channel['activation_byte_count']} B per activation, "
+                f"{channel['capacity']} slots, "
+                f"{channel['local_storage_byte_count']} B storage"
+            )
+            transfer = channel.get("external_transfer")
+            if transfer is not None:
+                lines.append(
+                    f"    binding[{transfer['binding_ordinal']}] DMA: "
+                    f"{transfer['task_repeat_count']} tasks x "
+                    f"{transfer['task_byte_count']} B "
+                    f"= {transfer['activation_byte_count']} B per activation"
+                )
         for worker in plan.get("workers", {}).get("rows", []):
             placement = _placement_text(worker)
             lines.append(

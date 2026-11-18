@@ -17,6 +17,10 @@ from loom.reporting.compile_report import (
     COMPILE_REPORT_SCHEMA_VERSION,
     CompileReportDocument,
 )
+from loom.reporting.compile_report_pipelines import (
+    append_pipeline_show_text,
+    build_pipeline_show,
+)
 
 SUGGEST_KIND = "loom.compile_report.suggest"
 SUGGEST_GUIDANCE = (
@@ -131,6 +135,9 @@ def build_compile_report_suggestions(
         view["reason"] = result.unavailable_reason
     if result.target_unavailable_reason is not None:
         view["target_unavailable_reason"] = result.target_unavailable_reason
+    pipelines = build_pipeline_show(document, summary_only=True)
+    if pipelines is not None:
+        view["pipelines"] = pipelines
     return view
 
 
@@ -166,6 +173,8 @@ def format_compile_report_suggestions_text(view: dict[str, object]) -> str:
             ),
         )
     )
+    if "pipelines" in view:
+        append_pipeline_show_text(lines, _expect_dict(view["pipelines"]))
     findings = _expect_list(view["findings"])
     if not findings:
         lines.append("  findings: none")
