@@ -176,17 +176,28 @@ TEST_F(LinkOptionsTest, PlanReportOwnsItsBytesAfterLinkInputsAreReleased) {
 TEST_F(LinkOptionsTest, OlderDescriptorsNeverReadAppendedStorage) {
   constexpr size_t prefix_size = offsetof(loomc_link_options_t, target_profile);
   const size_t declared_sizes[] = {
-      0, prefix_size,
+      0,
+      prefix_size,
       prefix_size + sizeof(loomc_link_options_t::target_profile) - 1,
       offsetof(loomc_link_options_t, artifact_flags),
       offsetof(loomc_link_options_t, artifact_flags) +
-          sizeof(loomc_link_artifact_flags_t) - 1};
+          sizeof(loomc_link_artifact_flags_t) - 1,
+      offsetof(loomc_link_options_t, test_provider_ordinals),
+      offsetof(loomc_link_options_t, test_provider_count),
+      offsetof(loomc_link_options_t, test_provider_count) +
+          sizeof(loomc_host_size_t) - 1};
   for (const size_t declared_size : declared_sizes) {
     SCOPED_TRACE(declared_size);
     loomc_link_options_t options = {
         .structure_size = declared_size,
         .link_index = index_.get(),
-        .artifact_flags = UINT32_MAX,
+        .artifact_flags = declared_size < offsetof(loomc_link_options_t,
+                                                   test_provider_ordinals)
+                              ? UINT32_MAX
+                              : 0,
+        .test_provider_ordinals =
+            reinterpret_cast<const loomc_host_size_t*>(0x1),
+        .test_provider_count = 1,
     };
     const size_t allocated_size = declared_size ? declared_size : prefix_size;
     auto storage = std::make_unique<uint8_t[]>(allocated_size);
@@ -219,6 +230,18 @@ TEST_F(LinkOptionsTest, RejectsInvalidPoliciesAtInvocationBoundary) {
                                            &options, &module, &result));
   EXPECT_EQ(module, nullptr);
   EXPECT_EQ(result, nullptr);
+  options.flags = 0;
+  options.mode = LOOMC_LINK_MODE_LINK;
+  options.test_provider_count = 1;
+  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT,
+                         loomc_link_module(linker_.get(), workspace_.get(),
+                                           &options, &module, &result));
+  const loomc_host_size_t invalid_provider =
+      loomc_link_index_provider_count(index_.get());
+  options.test_provider_ordinals = &invalid_provider;
+  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_OUT_OF_RANGE,
+                         loomc_link_module(linker_.get(), workspace_.get(),
+                                           &options, &module, &result));
 }
 
 }  // namespace

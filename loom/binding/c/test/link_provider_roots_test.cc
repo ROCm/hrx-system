@@ -110,16 +110,11 @@ class LinkProviderRootsTest : public ::testing::Test {
     *out_provider_ordinal = slot.ordinal;
   }
 
-  ModulePtr Link(const loomc_host_size_t* root_provider_ordinals,
-                 loomc_host_size_t root_provider_count, ResultPtr* out_result) {
-    loomc_link_options_t options = {
-        .type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
-        .structure_size = sizeof(options),
-        .link_index = link_index_.get(),
-        .mode = LOOMC_LINK_MODE_LINK,
-        .root_provider_ordinals = root_provider_ordinals,
-        .root_provider_count = root_provider_count,
-    };
+  ModulePtr Link(loomc_link_options_t options, ResultPtr* out_result) {
+    options.type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS;
+    options.structure_size = sizeof(options);
+    options.link_index = link_index_.get();
+    options.mode = LOOMC_LINK_MODE_LINK;
 
     loomc_module_t* module = nullptr;
     loomc_result_t* result = nullptr;
@@ -156,7 +151,12 @@ class LinkProviderRootsTest : public ::testing::Test {
 
 TEST_F(LinkProviderRootsTest, SelectsDirectExportsAndReachableClosure) {
   ResultPtr result;
-  ModulePtr module = Link(&direct_provider_ordinal_, 1, &result);
+  ModulePtr module = Link(
+      {
+          .root_provider_ordinals = &direct_provider_ordinal_,
+          .root_provider_count = 1,
+      },
+      &result);
   ASSERT_NE(result, nullptr);
   ASSERT_TRUE(loomc_result_succeeded(result.get()));
   ASSERT_NE(module, nullptr);
@@ -171,6 +171,31 @@ TEST_F(LinkProviderRootsTest, SelectsDirectExportsAndReachableClosure) {
   EXPECT_THAT(text,
               ::testing::Not(::testing::HasSubstr("unreachable_private")));
   EXPECT_THAT(text, ::testing::Not(::testing::HasSubstr("unused_export")));
+}
+
+TEST_F(LinkProviderRootsTest, SelectsLibraryTestsWithoutTransitiveTests) {
+  const loomc_host_size_t providers[] = {direct_provider_ordinal_,
+                                         unused_provider_ordinal_,
+                                         direct_provider_ordinal_};
+  ResultPtr result;
+  ModulePtr module = Link(
+      {
+          .test_provider_ordinals = providers,
+          .test_provider_count = IREE_ARRAYSIZE(providers),
+      },
+      &result);
+  ASSERT_TRUE(loomc_result_succeeded(result.get()));
+  ASSERT_NE(module, nullptr);
+  const std::string text = SerializeText(module.get());
+  for (std::string_view name : {"@direct_case", "@secondary_case",
+                                "@alternate_case", "@alternate_export_case"}) {
+    const auto position = text.find(name);
+    ASSERT_NE(position, std::string::npos);
+    EXPECT_EQ(text.find(name, position + name.size()), std::string::npos);
+  }
+  EXPECT_THAT(text, ::testing::Not(::testing::HasSubstr("@transitive_case")));
+  EXPECT_THAT(text,
+              ::testing::Not(::testing::HasSubstr("@unreachable_private")));
 }
 
 TEST_F(LinkProviderRootsTest, RejectsOutOfRangeProviderOrdinal) {

@@ -263,6 +263,15 @@ typedef struct loomc_link_options_t {
   /// module, index, and workspace. Zero performs no report formatting.
   /// Requires `structure_size` to include this field.
   loomc_link_artifact_flags_t artifact_flags;
+
+  /// Provider ordinals whose test/benchmark symbols are roots in link mode.
+  /// Selection preserves private symbol ownership and does not select tests
+  /// owned by dependencies. With STRIP_TEST_SYMBOLS, retain callable subjects.
+  /// Borrowed for the call. Requires structure_size to include both fields.
+  const loomc_host_size_t* test_provider_ordinals;
+
+  /// Number of entries in test_provider_ordinals.
+  loomc_host_size_t test_provider_count;
 } loomc_link_options_t;
 
 /// Request-linking options.

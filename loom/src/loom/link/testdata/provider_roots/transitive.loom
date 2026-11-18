@@ -11,3 +11,10 @@ func.def public pure @transitive_unused(%value: i32) -> (i32) {
 func.def @direct_helper(%value: i32) -> (i32) {
   func.return %value : i32
 }
+
+check.case @transitive_case {
+  %actual = check.literal value(0) : i32
+  %expected = check.literal value(1) : i32
+  check.expect.equal actual(%actual) expected(%expected) : i32
+  check.return
+}
