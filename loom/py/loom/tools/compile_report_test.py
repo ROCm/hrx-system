@@ -677,11 +677,77 @@ def test_scalarization_stands_out_in_show_and_suggest(
     view = json.loads(capsys.readouterr().out)
     assert view["provider"] == "source"
     assert view["target_unavailable_reason"] == "unsupported_target_family"
-    expansion, finding = view["findings"]
+    finding, expansion = view["findings"]
     assert expansion["id"] == "lowering.reduce_expansion"
     assert expansion["evidence"]["target_legalization.rows[0].created_op_count"] == 81
     assert finding["id"] == "vector.eliminate_scalarization"
     assert finding["evidence"]["target_legalization.rows[0].created_op_count"] == 81
+
+
+def test_suggest_keeps_stage_peaks_and_drills_down_to_every_site(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    report_path = tmp_path / "workers.json"
+    _write_report(
+        report_path,
+        target_family="spirv",
+        target_key="vulkan",
+        target_record="vulkan",
+        scalarized=True,
+    )
+    report = json.loads(report_path.read_text())
+    rows = [
+        {
+            "index": index,
+            "function": f"worker_{index}",
+            "source_op": "vector.load",
+            "selection": "rule",
+            "emitted_low_op_count": count,
+        }
+        for index, count in enumerate((7, 83, 12, 83))
+    ]
+    report["source_low"] = {"count": len(rows), "rows": rows}
+    report_path.write_text(json.dumps(report))
+    command = ["suggest", str(report_path)]
+
+    assert main(command) == 0
+    text = capsys.readouterr().out
+    assert "3 investigations cover 6 matches" in text
+    assert "4 matches" in text
+    assert "worker_1" in text
+    assert "worker_0" not in text
+
+    assert main([*command, "--format=json"]) == 0
+    view = json.loads(capsys.readouterr().out)
+    assert (view["finding_count"], view["match_count"]) == (3, 6)
+    fallback, low, legalization = view["findings"]
+    assert fallback["id"] == "vector.eliminate_scalarization"
+    assert (low["variant"], low["match_count"], low["entry"]) == (
+        "source_to_low",
+        4,
+        "worker_1",
+    )
+    assert low["evidence"] == {"source_low.rows[1].emitted_low_op_count": 83}
+    assert legalization["variant"] == "target_legalization"
+
+    assert (
+        main([*command, "--expand", "lowering.reduce_expansion", "--format=json"]) == 0
+    )
+    expanded = json.loads(capsys.readouterr().out)
+    assert (expanded["finding_count"], expanded["match_count"]) == (5, 5)
+    assert [row["evidence"] for row in expanded["findings"]] == [
+        {
+            f"source_low.rows[{row['index']}].emitted_low_op_count": row[
+                "emitted_low_op_count"
+            ]
+        }
+        for row in rows
+    ] + [legalization["evidence"]]
+
+    assert main([*command, "--expand", "all", "--format=json"]) == 0
+    all_matches = json.loads(capsys.readouterr().out)
+    assert all_matches["finding_count"] == view["match_count"]
+    assert all_matches["findings"][1:] == expanded["findings"]
 
 
 def test_boundary_projection_show_and_suggest_explain_source_experiment(

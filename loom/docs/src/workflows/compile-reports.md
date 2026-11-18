@@ -537,8 +537,25 @@ report evidence:
 loom-compile-report suggest kernel.report.json
 ```
 
-Each finding names an action and cites the exact evidence paths and values that
-motivated it. Finding order and confidence describe static compiler evidence;
+The default shows one cited example per investigation and the number of
+matches in the report. For example, spill traffic on 32 workers appears once,
+with one worker's spill evidence and a count of 32. Each lowering stage shows
+its largest per-operation expansion. A proposed change to a numerical contract
+stays separate from one requiring different fast-math flags. In JSON,
+`finding_count` counts displayed findings and `match_count` counts their
+underlying matches. A match from a summary report can cover several source
+operations. Different rules can also match the same operation.
+
+```shell
+loom-compile-report suggest kernel.report.json --expand lowering.reduce_expansion
+loom-compile-report suggest kernel.report.json --expand all --format=json
+```
+
+Both commands use the captured report. Each expanded match carries its entry,
+action, and original evidence paths and values. `--include-experimental`
+controls eligibility independently of expansion.
+
+Finding order and confidence describe static compiler evidence;
 they do not rank runtime cost or optimization value. `status: available` means
 the relevant interpreter is available. An empty finding list cannot establish
 that the current execution shape is competitive.

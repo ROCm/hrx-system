@@ -161,18 +161,23 @@ def _inventory(
     return result
 
 
+def append_pipeline_transfer_text(lines: list[str], plan: dict[str, object]) -> None:
+    """Shows the root's transfer costs and the evidence needed to resolve a gap."""
+    lines.extend(("", f"Pipeline {plan['root']} ({plan['realization']})"))
+    for field, label in _TRAFFIC_FIELDS.items():
+        amount = f"{plan[field]} B" if plan[field] is not None else "unavailable"
+        lines.append(f"  Planned {label} per activation: {amount}")
+    if any(plan[field] is None for field in _TRAFFIC_FIELDS):
+        lines.append(
+            "  Incomplete transfer evidence. Count records crossing each missing "
+            "boundary for the request shape, including repeats and checkpoints."
+        )
+
+
 def append_pipeline_show_text(lines: list[str], view: dict[str, object]) -> None:
     """Formats the selected inventory without inferring channels from addresses."""
     for plan in view["rows"]:
-        lines.extend(("", f"Pipeline {plan['root']} ({plan['realization']})"))
-        for field, label in _TRAFFIC_FIELDS.items():
-            amount = f"{plan[field]} B" if plan[field] is not None else "unavailable"
-            lines.append(f"  Planned {label} per activation: {amount}")
-        if any(plan[field] is None for field in _TRAFFIC_FIELDS):
-            lines.append(
-                "  Incomplete transfer evidence. Count records crossing each missing "
-                "boundary for the request shape, including repeats and checkpoints."
-            )
+        append_pipeline_transfer_text(lines, plan)
         if "workers" in plan:
             lines.append(f"  workers: {plan['workers']['count']}")
         if "memories" in plan:

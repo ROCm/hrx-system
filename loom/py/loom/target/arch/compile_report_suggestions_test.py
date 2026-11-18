@@ -222,6 +222,7 @@ def test_keeps_distinct_permission_experiments_separate() -> None:
     assert "`afn`" not in result.suggestions[0].action
     assert "`afn`" in result.suggestions[1].action
     assert "`arcp`" not in result.suggestions[1].action
+    assert result.suggestions[0].variant != result.suggestions[1].variant
 
 
 def test_keeps_distinct_math_semantics_separate() -> None:

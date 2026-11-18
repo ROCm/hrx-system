@@ -228,6 +228,8 @@ def suggest_expansions(
             CompileReportSuggestion(
                 suggestion_id="lowering.reduce_expansion",
                 entry_name=str(warning.get("function", "<report>")),
+                variant=str(warning["stage"]),
+                example_magnitude=int(warning["maximum_op_count"]),
                 action=(
                     f"WARNING: {_describe(warning)}.{details} "
                     "Inspect this lowering for a compact native or vector "
@@ -243,23 +245,20 @@ def suggest_expansions(
                 ),
             )
         )
-    if document.expansion_inventory.missing_evidence:
-        suggestions.append(
-            CompileReportSuggestion(
-                suggestion_id="lowering.inspect_expansion",
-                entry_name="<report>",
-                action=(
-                    "Per-operation expansion counts are unavailable for part of "
-                    "this report. Regenerate with --compile-report=details; "
-                    "aggregate totals or averages "
-                    "cannot rule out a single expensive operation."
-                ),
-                evidence=tuple(
-                    CompileReportSuggestionEvidence(path, "unavailable")
-                    for path in document.expansion_inventory.missing_evidence
-                ),
-            )
+    suggestions.extend(
+        CompileReportSuggestion(
+            suggestion_id="lowering.inspect_expansion",
+            entry_name="<report>",
+            action=(
+                "Per-operation expansion counts are unavailable for part of "
+                "this report. Regenerate with --compile-report=details; "
+                "aggregate totals or averages "
+                "cannot rule out a single expensive operation."
+            ),
+            evidence=(CompileReportSuggestionEvidence(path, "unavailable"),),
         )
+        for path in document.expansion_inventory.missing_evidence
+    )
     return tuple(suggestions)
 
 

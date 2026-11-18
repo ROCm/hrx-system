@@ -292,6 +292,7 @@ def suggest_scalarization(
             CompileReportSuggestion(
                 suggestion_id="vector.eliminate_scalarization",
                 entry_name=event.function,
+                variant=event.source_op,
                 action=(
                     f"The rewrite rooted at {event.source_op} in "
                     f"{event.function} created {event.created_op_count} "

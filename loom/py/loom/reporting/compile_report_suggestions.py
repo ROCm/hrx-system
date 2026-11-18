@@ -18,7 +18,7 @@ from loom.reporting.compile_report import (
     CompileReportDocument,
 )
 from loom.reporting.compile_report_pipelines import (
-    append_pipeline_show_text,
+    append_pipeline_transfer_text,
     build_pipeline_show,
 )
 
@@ -65,6 +65,10 @@ class CompileReportSuggestion:
     confidence: CompileReportSuggestionConfidence = (
         CompileReportSuggestionConfidence.HIGH
     )
+    # Distinct intervention or measurement domain within this rule, if any.
+    variant: str = ""
+    # Comparable static magnitude within this variant. Ties keep provider order.
+    example_magnitude: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,8 +100,10 @@ class CompileReportSuggestionProvider(Protocol):
 def build_compile_report_suggestions(
     document: CompileReportDocument,
     result: CompileReportSuggestionResult,
+    *,
+    expand: str | None = None,
 ) -> dict[str, object]:
-    """Builds a compact deterministic suggestion view."""
+    """Shows one cited example per investigation, or the requested site evidence."""
     target = {}
     target_family = document.report.get("target_family")
     target_key = document.report.get("target_key")
@@ -105,6 +111,34 @@ def build_compile_report_suggestions(
         target["family"] = target_family
     if target_key is not None:
         target["key"] = target_key
+
+    if expand is None:
+        groups: dict[
+            tuple[str, CompileReportSuggestionConfidence, str],
+            tuple[CompileReportSuggestion, int],
+        ] = {}
+        for suggestion in result.suggestions:
+            key = suggestion.suggestion_id, suggestion.confidence, suggestion.variant
+            example, count = groups.get(key, (suggestion, 0))
+            if suggestion.example_magnitude > example.example_magnitude:
+                example = suggestion
+            groups[key] = example, count + 1
+        findings = []
+        for example, count in groups.values():
+            finding = _finding(example)
+            if example.variant:
+                finding["variant"] = example.variant
+            if count > 1:
+                finding["match_count"] = count
+            findings.append(finding)
+        match_count = len(result.suggestions)
+    else:
+        findings = [
+            _finding(suggestion)
+            for suggestion in result.suggestions
+            if expand == "all" or suggestion.suggestion_id == expand
+        ]
+        match_count = len(findings)
 
     view: dict[str, object] = {
         "kind": SUGGEST_KIND,
@@ -115,20 +149,12 @@ def build_compile_report_suggestions(
             "unavailable" if result.unavailable_reason is not None else "available"
         ),
         "guidance": SUGGEST_GUIDANCE,
-        "finding_count": len(result.suggestions),
-        "findings": [
-            {
-                "id": suggestion.suggestion_id,
-                "entry": suggestion.entry_name,
-                "confidence": suggestion.confidence.value,
-                "action": suggestion.action,
-                "evidence": {
-                    evidence.path: evidence.value for evidence in suggestion.evidence
-                },
-            }
-            for suggestion in result.suggestions
-        ],
+        "finding_count": len(findings),
+        "match_count": match_count,
+        "findings": findings,
     }
+    if expand is not None:
+        view["expanded"] = expand
     if result.provider_name is not None:
         view["provider"] = result.provider_name
     if result.unavailable_reason is not None:
@@ -139,6 +165,16 @@ def build_compile_report_suggestions(
     if pipelines is not None:
         view["pipelines"] = pipelines
     return view
+
+
+def _finding(suggestion: CompileReportSuggestion) -> dict[str, object]:
+    return {
+        "id": suggestion.suggestion_id,
+        "entry": suggestion.entry_name,
+        "confidence": suggestion.confidence.value,
+        "action": suggestion.action,
+        "evidence": {evidence.path: evidence.value for evidence in suggestion.evidence},
+    }
 
 
 def format_compile_report_suggestions_text(view: dict[str, object]) -> str:
@@ -174,16 +210,29 @@ def format_compile_report_suggestions_text(view: dict[str, object]) -> str:
         )
     )
     if "pipelines" in view:
-        append_pipeline_show_text(lines, _expect_dict(view["pipelines"]))
+        for plan in _expect_dict(view["pipelines"])["rows"]:
+            append_pipeline_transfer_text(lines, plan)
     findings = _expect_list(view["findings"])
+    if view["match_count"] != view["finding_count"]:
+        lines.append(
+            f"\n{len(findings)} investigations cover {view['match_count']:,} matches. "
+            "Use --expand ID for every match to one rule."
+        )
+    if "expanded" in view:
+        lines.append(f"  expanded: {view['expanded']}")
     if not findings:
         lines.append("  findings: none")
     for finding_value in findings:
         finding = _expect_dict(finding_value)
+        heading = f"[{finding['id']}]"
+        if "variant" in finding:
+            heading += f" {finding['variant']}"
+        if "match_count" in finding:
+            heading += f" ({finding['match_count']:,} matches) — example"
         lines.extend(
             (
                 "",
-                f"[{finding['id']}] {finding['entry']}",
+                f"{heading} {finding['entry']}",
                 f"  confidence: {finding['confidence']}",
                 fill(
                     f"action: {finding['action']}",

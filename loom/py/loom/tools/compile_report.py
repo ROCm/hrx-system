@@ -70,9 +70,13 @@ identities with the experiment. `--comparison=target` admits target
 specialization changes within one target and backend family. `--force` retains
 identity mismatches for historical inspection; its result is observational.
 
-`show` and `suggest` flag individual source operations expanding beyond five
-operations, alongside explicit scalar lane expansion. Summary maxima cannot
-hide an expensive occurrence in an average. Counts belong to math legalization,
+`show` lists source operations expanding beyond five operations. The default
+`suggest` shows a cited example of each investigation and counts repeated
+matches. Each lowering stage shows its largest expansion. Specific fallbacks
+and resource findings precede these stage-wide warnings. Use
+`suggest kernel.report.json --expand ID` for every match to a rule, or
+`--expand all` for all matches at the selected confidence level. Summary maxima
+cannot hide an expensive occurrence in an average. Counts belong to math legalization,
 target legalization, or source-to-Low selection; they are not cumulative costs
 or final hardware instructions. Inspect the cited recipe for a compact lowering
 that preserves source semantics, then check final resources and runtime.
@@ -141,7 +145,7 @@ loom-compile-report diff baseline.report.json candidate.report.json \\
   --format=json | \\
   jq '{identity_mismatches, changed_entry_count, entries}'
 loom-compile-report suggest kernel.report.json --format=json | \\
-  jq '{status, guidance, provider, findings}'
+  jq '{status, finding_count, match_count, findings}'
 ```
 
 The JSON views are smaller and more stable than the complete compiler report.
@@ -175,7 +179,7 @@ def run(args: argparse.Namespace, *, stdout: TextIO) -> int:
     if args.command == "show":
         document = load_compile_report(args.report)
         view = build_compile_report_show(document)
-        text = format_compile_report_show_text(view)
+        format_text = format_compile_report_show_text
     elif args.command == "diff":
         baseline = load_compile_report(args.baseline)
         candidate = load_compile_report(args.candidate)
@@ -185,7 +189,7 @@ def run(args: argparse.Namespace, *, stdout: TextIO) -> int:
             CompileReportComparisonMode(args.comparison),
             force=args.force,
         )
-        text = format_compile_report_diff_text(view)
+        format_text = format_compile_report_diff_text
     elif args.command == "suggest":
         from loom.reporting.compile_report_suggestions import (
             CompileReportSuggestionOptions,
@@ -201,8 +205,8 @@ def run(args: argparse.Namespace, *, stdout: TextIO) -> int:
                 include_experimental=args.include_experimental,
             ),
         )
-        view = build_compile_report_suggestions(document, result)
-        text = format_compile_report_suggestions_text(view)
+        view = build_compile_report_suggestions(document, result, expand=args.expand)
+        format_text = format_compile_report_suggestions_text
     else:
         raise AssertionError(f"unhandled command: {args.command}")
 
@@ -210,7 +214,7 @@ def run(args: argparse.Namespace, *, stdout: TextIO) -> int:
         json.dump(view, stdout, sort_keys=True, separators=(",", ":"))
         stdout.write("\n")
     else:
-        stdout.write(text)
+        stdout.write(format_text(view))
     return 0
 
 
@@ -274,6 +278,14 @@ def _create_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     suggest_parser.add_argument("report", type=Path, help="Compile report JSON path.")
+    suggest_parser.add_argument(
+        "--expand",
+        metavar="ID|all",
+        help=(
+            "Show all matches and evidence for one suggestion ID, or use 'all' "
+            "for every ID. The default shows one example per investigation."
+        ),
+    )
     suggest_parser.add_argument(
         "--include-experimental",
         action="store_true",
