@@ -6,6 +6,8 @@
 
 #include "libamdf/tool/amdf-info/activation.h"
 
+#include "libamdf/tool/amdf-info/memory.h"
+
 static amdf_status_t amdf_info_device_create(
     const amdf_info_library_t* library, const amdf_info_endpoint_t* endpoint,
     amdf_device_t** out_device) {
@@ -89,6 +91,9 @@ void amdf_info_activate(const amdf_info_library_t* library,
     }
     if (output->format == AMDF_INFO_FORMAT_JSON) {
       amdf_info_json_end(output, ']');
+    }
+    if (!output->failed) {
+      amdf_info_query_memory_pools(library->api, NULL, device, output, result);
     }
     const amdf_status_t destroy_status = library->api->device_destroy(device);
     endpoint->retain_on_exit =

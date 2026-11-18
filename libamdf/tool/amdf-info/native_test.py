@@ -79,6 +79,25 @@ class NativeTest(unittest.TestCase):
         live = activated["endpoints"][0]
         self.assertEqual(live["native_identity"], endpoint["native_identity"])
         self.assertTrue(live["activation"]["device_destroyed"])
+        pools = live["activation"]["memory_pools"]
+        self.assertIsInstance(pools, list)
+        if ENGINE == "gpu":
+            features = live["activation"]["device"]["features"]["names"]
+            if "local_memory" in features:
+                self.assertTrue(pools, live)
+        for pool in pools:
+            self.assertNotIn("error", pool, pool)
+            self.assertEqual(pool["physical_endpoint_id"], live["id"])
+            self.assertGreater(pool["memory_profile_count"], 0)
+            if "system_backed" in pool["flags"]["names"]:
+                system_pools = activated["memory_pools"]
+                self.assertTrue(
+                    any(
+                        system["capacity_bytes"] == pool["capacity_bytes"]
+                        for system in system_pools
+                    ),
+                    pool,
+                )
         self.assertEqual(
             len(live["activation"]["queue_placements"]), len(endpoint["queue_families"])
         )
