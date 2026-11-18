@@ -17,6 +17,19 @@
 #include "loom/ops/signature_flags.h"
 #include "loom/util/walk.h"
 
+typedef struct loom_storage_return_path_t {
+  // Reference whose backing storage can reach this result.
+  loom_storage_reference_t* reference;
+  // Result ordinal in the enclosing callable's signature.
+  uint16_t result_index;
+  // Already delivered to existing origins; a later edge must replay it.
+  bool propagated;
+  // Other result ordinals reached from this reference.
+  struct loom_storage_return_path_t* next;
+  // Next newly discovered reference/result pair.
+  struct loom_storage_return_path_t* next_pending;
+} loom_storage_return_path_t;
+
 typedef struct loom_storage_access_caller_t {
   // Reached caller receiving unbounded-memory effects from this callee.
   struct loom_storage_access_function_record_t* function;
@@ -75,6 +88,8 @@ typedef struct loom_storage_access_state_t {
   loom_storage_reference_t* first_effect;
   // Last reference awaiting monotone effect propagation.
   loom_storage_reference_t* last_effect;
+  // Worklist of newly discovered reference returns, empty for numeric results.
+  loom_storage_return_path_t* pending_returns;
   // Function whose source is currently being interpreted.
   loom_storage_access_function_record_t* current;
   // Reusable direct-operand classification scratch.
@@ -239,7 +254,7 @@ static iree_status_t loom_storage_access_enqueue_function(
                                : LOOM_ARGUMENT_ACCESS_UNSPECIFIED;
         record->graph.arguments[i]->effects =
             bound == LOOM_ARGUMENT_ACCESS_UNSPECIFIED
-                ? LOOM_STORAGE_ACCESS_ESCAPE
+                ? LOOM_STORAGE_ACCESS_CAPTURE
                 : bound & LOOM_ARGUMENT_ACCESS_READ_WRITE;
         record->graph.arguments[i]->footprint =
             LOOM_STORAGE_ACCESS_FOOTPRINT_STORAGE;
@@ -320,15 +335,30 @@ static void loom_storage_access_include_origin(
       iree_max(destination->footprint, destination->origin_footprint));
 }
 
-enum loom_storage_reference_edge_flag_bits_e {
-  LOOM_STORAGE_REFERENCE_EDGE_LOCAL_TRANSPORT = 1u << 0,
-};
-typedef uint8_t loom_storage_reference_edge_flags_t;
+static iree_status_t loom_storage_access_add_return(
+    loom_storage_access_state_t* state, loom_storage_reference_t* reference,
+    uint16_t result_index) {
+  for (loom_storage_return_path_t* path = reference->returns; path;
+       path = path->next) {
+    if (path->result_index == result_index) {
+      return iree_ok_status();
+    }
+  }
+  loom_storage_return_path_t* path = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(state->scope->arena, sizeof(*path), (void**)&path));
+  *path = (loom_storage_return_path_t){.reference = reference,
+                                       .result_index = result_index,
+                                       .next = reference->returns,
+                                       .next_pending = state->pending_returns};
+  reference->returns = path;
+  state->pending_returns = path;
+  return iree_ok_status();
+}
 
-static iree_status_t loom_storage_access_add_edge(
+static iree_status_t loom_storage_access_add_alias(
     loom_storage_access_state_t* state, loom_storage_reference_t* origin,
-    loom_storage_reference_t* destination,
-    loom_storage_reference_edge_flags_t flags) {
+    loom_storage_reference_t* destination) {
   if (origin == destination) {
     return iree_ok_status();
   }
@@ -338,16 +368,63 @@ static iree_status_t loom_storage_access_add_edge(
   *edge = (loom_storage_reference_edge_t){
       .origin = origin,
       .destination = destination,
+      .next_destination = origin->destinations,
       .next_origin = destination->origins,
   };
   destination->origins = edge;
-  if (iree_any_bit_set(flags, LOOM_STORAGE_REFERENCE_EDGE_LOCAL_TRANSPORT)) {
-    edge->next_destination = origin->destinations;
-    origin->destinations = edge;
-  }
-  // A new caller can depend on an already completed callee. Retain its current
-  // effects as well as the edge carrying any remaining construction updates.
+  origin->destinations = edge;
   loom_storage_access_include_origin(state, origin, destination);
+  for (const loom_storage_return_path_t* path = destination->returns; path;
+       path = path->next) {
+    if (path->propagated) {
+      IREE_RETURN_IF_ERROR(
+          loom_storage_access_add_return(state, origin, path->result_index));
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_storage_access_add_call_argument(
+    loom_storage_access_state_t* state, loom_storage_reference_t* actual,
+    loom_storage_reference_t* formal, loom_storage_reference_t** results) {
+  loom_storage_reference_edge_t* edge = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(state->scope->arena, sizeof(*edge), (void**)&edge));
+  *edge = (loom_storage_reference_edge_t){.origin = actual,
+                                          .call_results = results,
+                                          .next_origin = formal->origins};
+  formal->origins = edge;
+  loom_storage_access_include_origin(state, actual, formal);
+  // A caller discovered in a later query can use a completed callee directly.
+  for (const loom_storage_return_path_t* path = formal->returns; path;
+       path = path->next) {
+    if (path->propagated) {
+      IREE_RETURN_IF_ERROR(loom_storage_access_add_alias(
+          state, actual, results[path->result_index]));
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_storage_access_call_results(
+    loom_storage_access_state_t* state, const loom_op_t* op,
+    loom_storage_reference_t*** out_results) {
+  loom_storage_reference_t** results = NULL;
+  const loom_value_id_t* values = loom_op_const_results(op);
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    if (loom_storage_access_is_reference(state->scope->module, values[i])) {
+      if (!results) {
+        IREE_RETURN_IF_ERROR(
+            iree_arena_allocate_array(state->scope->arena, op->result_count,
+                                      sizeof(*results), (void**)&results));
+      }
+      IREE_RETURN_IF_ERROR(
+          loom_storage_access_reference(state, values[i], &results[i]));
+      // A returned view may describe a different window into its backing.
+      results[i]->origin_footprint = LOOM_STORAGE_ACCESS_FOOTPRINT_STORAGE;
+    }
+  }
+  *out_results = results;
   return iree_ok_status();
 }
 
@@ -380,7 +457,7 @@ static iree_status_t loom_storage_access_record_use(
   state->current->use_tail = use;
   if (iree_any_bit_set(effects, LOOM_STORAGE_ACCESS_ASYNC)) {
     effects =
-        (effects & ~LOOM_STORAGE_ACCESS_ASYNC) | LOOM_STORAGE_ACCESS_ESCAPE;
+        (effects & ~LOOM_STORAGE_ACCESS_ASYNC) | LOOM_STORAGE_ACCESS_CAPTURE;
   }
   loom_storage_access_include(state, reference, effects,
                               LOOM_STORAGE_ACCESS_FOOTPRINT_REFERENCE);
@@ -468,7 +545,7 @@ static iree_status_t loom_storage_access_visit(
         (void**)&state->operand_effects));
   }
   if (op->operand_count) {
-    memset(state->operand_effects, LOOM_STORAGE_ACCESS_ESCAPE,
+    memset(state->operand_effects, LOOM_STORAGE_ACCESS_CAPTURE,
            op->operand_count * sizeof(*state->operand_effects));
   }
   const loom_call_like_t call = loom_call_like_cast(module, op);
@@ -496,6 +573,11 @@ static iree_status_t loom_storage_access_visit(
     }
     const loom_value_slice_t arguments = loom_call_like_operands(call);
     const uint16_t argument_offset = loom_call_like_operand_offset(call);
+    loom_storage_reference_t** results = NULL;
+    if (op->result_count && loom_func_like_body(function)) {
+      IREE_RETURN_IF_ERROR(
+          loom_storage_access_call_results(state, op, &results));
+    }
     for (uint16_t i = 0; i < arguments.count; ++i) {
       loom_storage_reference_t* formal = callee_record->graph.arguments[i];
       if (!formal) {
@@ -504,8 +586,8 @@ static iree_status_t loom_storage_access_visit(
       loom_storage_reference_t* actual = NULL;
       IREE_RETURN_IF_ERROR(
           loom_storage_access_reference(state, arguments.values[i], &actual));
-      IREE_RETURN_IF_ERROR(
-          loom_storage_access_add_edge(state, actual, formal, 0));
+      IREE_RETURN_IF_ERROR(loom_storage_access_add_call_argument(
+          state, actual, formal, results));
       IREE_RETURN_IF_ERROR(loom_storage_access_record_use(
           state, op, arguments.values[i], 0, formal));
       state->operand_effects[argument_offset + i] = 0;
@@ -595,18 +677,28 @@ static iree_status_t loom_storage_access_visit(
           relation.kind == LOOM_VALUE_RELATION_TIED_RESULT) {
         destination->origin_footprint = LOOM_STORAGE_ACCESS_FOOTPRINT_STORAGE;
       }
-      IREE_RETURN_IF_ERROR(loom_storage_access_add_edge(
-          state, origin, destination,
-          LOOM_STORAGE_REFERENCE_EDGE_LOCAL_TRANSPORT));
+      IREE_RETURN_IF_ERROR(
+          loom_storage_access_add_alias(state, origin, destination));
       if (relation.source_operand_index !=
           LOOM_VALUE_RELATION_OPERAND_INDEX_NONE) {
         state->operand_effects[relation.source_operand_index] &=
-            ~LOOM_STORAGE_ACCESS_ESCAPE;
+            ~LOOM_STORAGE_ACCESS_CAPTURE;
       }
     }
   }
+  const bool is_return =
+      op->operand_count && iree_any_bit_set(traits, LOOM_TRAIT_TERMINATOR) &&
+      loom_func_like_op_is_body_exit(module, state->current->function, op);
   for (uint16_t i = 0; i < op->operand_count; ++i) {
     if (loom_storage_access_is_reference(module, operands[i])) {
+      if (is_return) {
+        loom_storage_reference_t* reference = NULL;
+        IREE_RETURN_IF_ERROR(
+            loom_storage_access_reference(state, operands[i], &reference));
+        IREE_RETURN_IF_ERROR(
+            loom_storage_access_add_return(state, reference, i));
+        state->operand_effects[i] = LOOM_STORAGE_ACCESS_RETURN;
+      }
       IREE_RETURN_IF_ERROR(loom_storage_access_record_use(
           state, op, operands[i], state->operand_effects[i], NULL));
     }
@@ -648,7 +740,7 @@ static iree_status_t loom_storage_access_build_pending(
       for (uint16_t i = 0; i < entry->arg_count; ++i) {
         if (state->current->graph.arguments[i]) {
           loom_storage_access_include(state, state->current->graph.arguments[i],
-                                      LOOM_STORAGE_ACCESS_ESCAPE,
+                                      LOOM_STORAGE_ACCESS_CAPTURE,
                                       LOOM_STORAGE_ACCESS_FOOTPRINT_STORAGE);
         }
       }
@@ -664,7 +756,27 @@ static iree_status_t loom_storage_access_build_pending(
   return status;
 }
 
-static void loom_storage_access_solve(loom_storage_access_state_t* state) {
+static iree_status_t loom_storage_access_solve(
+    loom_storage_access_state_t* state) {
+  while (state->pending_returns) {
+    loom_storage_return_path_t* path = state->pending_returns;
+    state->pending_returns = path->next_pending;
+    path->propagated = true;
+    for (const loom_storage_reference_edge_t* edge = path->reference->origins;
+         edge; edge = edge->next_origin) {
+      if (edge->destination) {
+        IREE_RETURN_IF_ERROR(loom_storage_access_add_return(
+            state, edge->origin, path->result_index));
+      } else {
+        // Match the callee's result column to this call alone. The returned
+        // reference may describe a different window into the same storage.
+        loom_storage_reference_t* result =
+            edge->call_results[path->result_index];
+        IREE_RETURN_IF_ERROR(
+            loom_storage_access_add_alias(state, edge->origin, result));
+      }
+    }
+  }
   while (state->first_unbounded) {
     loom_storage_access_function_record_t* function = state->first_unbounded;
     state->first_unbounded = function->next_unbounded;
@@ -691,6 +803,7 @@ static void loom_storage_access_solve(loom_storage_access_state_t* state) {
       loom_storage_access_include_origin(state, edge->origin, reference);
     }
   }
+  return iree_ok_status();
 }
 
 void loom_storage_access_scope_initialize(
@@ -722,7 +835,7 @@ iree_status_t loom_storage_access_require_function(
       loom_local_value_domain_restore(value_domain);
     }
     if (iree_status_is_ok(status)) {
-      loom_storage_access_solve(scope->state);
+      status = loom_storage_access_solve(scope->state);
     }
   }
   if (iree_status_is_ok(status)) {

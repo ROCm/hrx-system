@@ -42,7 +42,7 @@ func.def @test(%limit: index) {
 unused: accessed=no single_instance=yes
 source: accessed=yes single_instance=yes
 target: accessed=yes single_instance=yes
-returned: accessed=yes single_instance=unproven
+returned: accessed=no single_instance=yes
 unused / source: workgroup_nonoverlap=unproven
 unused / target: workgroup_nonoverlap=unproven
 unused / returned: workgroup_nonoverlap=unproven
@@ -160,7 +160,7 @@ local: accessed=yes single_instance=yes
 
 // ====
 
-// Returning one argument cannot make an unused sibling escape.
+// Ignoring an identity result touches neither the returned root nor its sibling.
 func.def @identity(%unused: buffer, %returned: buffer) -> (buffer) {
   func.return %returned : buffer
 }
@@ -179,7 +179,7 @@ func.def @test(%limit: index) {
 
 // ----
 unused: accessed=no single_instance=yes
-returned: accessed=yes single_instance=unproven
+returned: accessed=no single_instance=yes
 unused / returned: workgroup_nonoverlap=unproven
 
 // ====
@@ -231,7 +231,7 @@ initial / local: workgroup_nonoverlap=unproven
 
 // ====
 
-// A reference returned through a conditional region still escapes its call.
+// Reading a conditional result touches each possible origin in this iteration.
 func.def @select(%first: view<1xi32>, %second: view<1xi32>, %condition: i1) -> (view<1xi32>) {
   %result = scf.if %condition -> (view<1xi32>) {
     scf.yield %first : view<1xi32>
@@ -250,12 +250,13 @@ func.def @test(%other: view<1xi32>, %limit: index, %condition: i1) {
     %local = buffer.alloca<private> align(4) %bytes : buffer
     %slot = buffer.view %local[%origin] : buffer -> view<1xi32>
     %selected = func.call @select(%slot, %other, %condition) : (view<1xi32>, view<1xi32>, i1) -> (view<1xi32>)
+    %value = view.load %selected[0] : view<1xi32> -> i32
   }
   func.return
 }
 
 // ----
-local: accessed=yes single_instance=unproven
+local: accessed=yes single_instance=yes
 
 // ====
 
@@ -425,3 +426,101 @@ func.def @test(%limit: index) {
 unpassed: accessed=no single_instance=yes
 passed: accessed=yes single_instance=unproven
 unpassed / passed: workgroup_nonoverlap=unproven
+
+// ====
+
+// Each call has its own results, and each result has its own formal origins.
+// Publishing one result cannot expose another root, even at the same call.
+func.decl @publish(%value: buffer)
+
+func.def @swap(%a: buffer, %b: buffer) -> (buffer, buffer) {
+  func.return %b, %a : buffer, buffer
+}
+
+func.def @test(%limit: index) {
+  %origin = index.constant 0 : index
+  %bytes = index.constant 4 : offset
+  %step = index.constant 1 : index
+  scf.for %i = [%origin to %limit step %step] {
+    %consumed = buffer.alloca<private> align(4) %bytes : buffer
+    %published = buffer.alloca<private> align(4) %bytes : buffer
+    %ignored = buffer.alloca<private> align(4) %bytes : buffer
+    %a, %b = func.call @swap(%consumed, %published) : (buffer, buffer) -> (buffer, buffer)
+    %c, %d = func.call @swap(%ignored, %consumed) : (buffer, buffer) -> (buffer, buffer)
+    func.call @publish(%a) : (buffer)
+    %slot = buffer.view %c[%origin] : buffer -> view<1xi32>
+    %v = view.load %slot[0] : view<1xi32> -> i32
+  }
+  func.return
+}
+
+// ----
+consumed: accessed=yes single_instance=yes
+published: accessed=yes single_instance=unproven
+ignored: accessed=no single_instance=yes
+consumed / published: workgroup_nonoverlap=unproven
+consumed / ignored: workgroup_nonoverlap=unproven
+published / ignored: workgroup_nonoverlap=unproven
+
+// ====
+
+// The same returned subview is reusable when consumed immediately, and live
+// across allocations when the caller carries it to the next iteration.
+func.def @first(%root: buffer) -> (view<1xi32>) {
+  %origin = index.constant 0 : index
+  %whole = buffer.view %root[%origin] : buffer -> view<2xi32>
+  %part = view.subview %whole[1] : view<2xi32> -> view<1xi32>
+  func.return %part : view<1xi32>
+}
+
+func.def @test(%initial: view<1xi32>, %limit: index) {
+  %origin = index.constant 0 : index
+  %bytes = index.constant 8 : offset
+  %step = index.constant 1 : index
+  %last = scf.for %i = [%origin to %limit step %step](%previous = %initial : view<1xi32>) -> (view<1xi32>) {
+    %local = buffer.alloca<private> align(4) %bytes : buffer
+    %carried = buffer.alloca<private> align(4) %bytes : buffer
+    %now = func.call @first(%local) : (buffer) -> (view<1xi32>)
+    %next = func.call @first(%carried) : (buffer) -> (view<1xi32>)
+    %x = view.load %previous[0] : view<1xi32> -> i32
+    view.store %x, %now[0] : i32, view<1xi32>
+    scf.yield %next : view<1xi32>
+  }
+  func.return
+}
+
+// ----
+local: accessed=yes single_instance=yes
+carried: accessed=yes single_instance=unproven
+local / carried: workgroup_nonoverlap=unproven
+
+// ====
+
+// Both a recursive call and a direct return may supply the same result. The
+// caller's use stays bounded, including when the recursive call passes its
+// argument to the very same formal reference.
+func.def @choose(%value: buffer, %condition: i1) -> (buffer) {
+  cfg.cond_br %condition, ^base, ^recursive
+^base:
+  func.return %value : buffer
+^recursive:
+  %stop = scalar.constant 1 : i1
+  %result = func.call @choose(%value, %stop) : (buffer, i1) -> (buffer)
+  func.return %result : buffer
+}
+
+func.def @test(%limit: index, %condition: i1) {
+  %origin = index.constant 0 : index
+  %bytes = index.constant 4 : offset
+  %step = index.constant 1 : index
+  scf.for %i = [%origin to %limit step %step] {
+    %local = buffer.alloca<private> align(4) %bytes : buffer
+    %alias = func.call @choose(%local, %condition) : (buffer, i1) -> (buffer)
+    %slot = buffer.view %alias[%origin] : buffer -> view<1xi32>
+    %read = view.load %slot[0] : view<1xi32> -> i32
+  }
+  func.return
+}
+
+// ----
+local: accessed=yes single_instance=yes

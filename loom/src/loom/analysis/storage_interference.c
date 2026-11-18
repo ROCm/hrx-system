@@ -442,7 +442,7 @@ static iree_status_t loom_storage_interference_record_value_accesses(
        use; use = use->next) {
     const loom_op_t* user_op = use->operation;
     const loom_storage_access_effects_t effects =
-        loom_storage_access_use_effects(use);
+        loom_storage_access_graph_use_effects(use);
     if (iree_any_bit_set(effects, LOOM_STORAGE_ACCESS_ESCAPE)) {
       loom_storage_interference_mark_memberships_incomplete(analysis,
                                                             memberships);
