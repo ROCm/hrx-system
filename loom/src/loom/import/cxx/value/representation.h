@@ -147,6 +147,11 @@ class ValueArena {
  public:
   Value capture(const Partition& partition,
                 std::span<const loom_value_id_t> components);
+  // Joins native specialization and binding slices in their final arena
+  // storage. The number of columns in a value is independent of its rank.
+  Value capture(const Partition& partition,
+                std::span<const loom_value_id_t> first,
+                std::span<const loom_value_id_t> last);
   Value replace(Value original, size_t component_offset, Value replacement);
   // Releases all large bindings after the function's binding maps are cleared.
   void reset() { storage_.release(); }

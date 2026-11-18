@@ -237,12 +237,24 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "evaluation",
+    hdrs = ["evaluation.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        ":representation",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_library(
     name = "initialization",
     srcs = ["initialization.cc"],
     hdrs = ["initialization.h"],
     cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [
+        ":evaluation",
         ":objects",
         ":representation",
         ":scalar",

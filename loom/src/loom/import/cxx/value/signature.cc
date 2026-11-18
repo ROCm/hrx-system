@@ -6,6 +6,9 @@
 
 #include "loom/import/cxx/value/signature.h"
 
+#include <algorithm>
+#include <utility>
+
 #include "loom/import/cxx/source/error.h"
 
 namespace loom::cxx_import {
@@ -45,7 +48,41 @@ void append_bound(Types& types, std::span<const cxx::Type* const> sources,
   }
 }
 
+// The caller writes and the callee reads these same two native slices.
+template <typename T>
+auto argument_slices(const StagedParameterProjection& parameter,
+                     std::span<T> specializations, std::span<T> bindings) {
+  return std::pair{
+      specializations.subspan(parameter.specialization_offset,
+                              parameter.specialization_count),
+      bindings.subspan(parameter.binding_offset, parameter.binding_count)};
+}
+
 }  // namespace
+
+void StagedParameterProjection::write_argument(
+    std::span<const loom_value_id_t> components,
+    std::span<loom_value_id_t> specializations,
+    std::span<loom_value_id_t> bindings) const {
+  IREE_ASSERT_EQ(components.size(), component_count);
+  const auto [first, last] = argument_slices(*this, specializations, bindings);
+  const auto split = components.begin() + specialization_count;
+  std::copy(components.begin(), split, first.begin());
+  std::copy(split, components.end(), last.begin());
+}
+
+Value StagedSignatureProjection::entry_argument(size_t ordinal,
+                                                loom_region_t* region,
+                                                const Partition& partition,
+                                                ValueArena& arena) const {
+  auto* block = loom_region_entry_block(region);
+  auto native =
+      std::span<const loom_value_id_t>(block->arg_ids, block->arg_count);
+  const auto [first, last] =
+      argument_slices(parameters[ordinal], native.first(specialization_count),
+                      native.subspan(specialization_count));
+  return arena.capture(partition, first, last);
+}
 
 void StagedSignatureProjection::append(const cxx::Type* source_type,
                                        size_t component_count,
@@ -117,18 +154,19 @@ BoundStagedSignature bind_staged_signature(
     check(loom_builder_reserve_values(builder, component_count,
                                       result.destination_identities.data()));
     result.source_identities.resize(component_count);
+    auto native =
+        std::span<const loom_value_id_t>(result.destination_identities);
     for (const auto& parameter : projection.parameters) {
-      for (size_t index = 0; index < parameter.specialization_count; ++index) {
-        result.source_identities[parameter.source_component_offset + index] =
-            result.destination_identities[parameter.specialization_offset +
-                                          index];
-      }
-      for (size_t index = 0; index < parameter.binding_count; ++index) {
-        result.source_identities[parameter.source_component_offset +
-                                 parameter.specialization_count + index] =
-            result.destination_identities[projection.specialization_count +
-                                          parameter.binding_offset + index];
-      }
+      const auto [specializations, bindings] = argument_slices(
+          parameter, native.first(projection.specialization_count),
+          native.subspan(projection.specialization_count));
+      auto output = std::span(result.source_identities)
+                        .subspan(parameter.source_component_offset,
+                                 parameter.component_count)
+                        .begin();
+      output =
+          std::copy(specializations.begin(), specializations.end(), output);
+      std::copy(bindings.begin(), bindings.end(), output);
     }
   }
 

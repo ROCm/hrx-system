@@ -76,6 +76,11 @@ enum class SignatureIdentityRequirement {
 // Source components are permuted into one leading specialization group and
 // one trailing binding group without losing the parameter's source identity.
 struct StagedParameterProjection {
+  // Places one evaluated C++ argument in the two caller operand groups.
+  void write_argument(std::span<const loom_value_id_t> components,
+                      std::span<loom_value_id_t> specializations,
+                      std::span<loom_value_id_t> bindings) const;
+
   // Offset in source-component order across all source parameters.
   size_t source_component_offset;
   // Total flattened source components reconstructed for the C++ parameter.
@@ -98,6 +103,10 @@ struct StagedSignatureProjection {
   // count, retaining all remaining components as launch bindings.
   void append(const cxx::Type* source_type, size_t component_count,
               size_t specialization_count);
+
+  // Reassembles one source parameter from the native entry block arguments.
+  Value entry_argument(size_t ordinal, loom_region_t* region,
+                       const Partition& partition, ValueArena& arena) const;
 
   // Source ordinal of the first parameter after the launch boundary.
   size_t launch_parameter_ordinal = 0;
