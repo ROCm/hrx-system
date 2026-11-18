@@ -18,15 +18,31 @@
 #define IREE_HAL_AMD_GPU_FILE_DRAINING (INT64_C(1) << 32)
 #define IREE_HAL_AMD_GPU_FILE_METADATA_READY (INT64_C(1) << 33)
 
+typedef enum iree_hal_amd_gpu_file_binding_kind_e {
+  IREE_HAL_AMD_GPU_FILE_BINDING_ASYNC,
+  IREE_HAL_AMD_GPU_FILE_BINDING_HOST,
+  IREE_HAL_AMD_GPU_FILE_BINDING_DEVICE,
+} iree_hal_amd_gpu_file_binding_kind_t;
+
 // File handles and registrations are independent of row traversal. A file's
 // bucket use spans all of its loans, including gaps between successive rows.
+// Imported execution storage uses its native address without a host copy.
 typedef struct iree_hal_amd_gpu_file_binding_t {
-  // Borrowed native handle, or NULL for an imported memory file.
-  iree_async_file_t* native;
-  // Borrowed memory-file contents, empty for native files.
-  iree_byte_span_t contents;
-  // Acquired lazily for staged I/O and released after every window retires.
-  iree_hal_amd_gpu_file_staging_bucket_t* bucket;
+  // Qualified representation retained by the enclosing file capture.
+  iree_hal_amd_gpu_file_binding_kind_t kind;
+  union {
+    // Native I/O ownership; never used for either memory representation.
+    struct {
+      // Borrowed native handle and its owning proactor.
+      iree_async_file_t* handle;
+      // Acquired for staged I/O and released after every window retires.
+      iree_hal_amd_gpu_file_staging_bucket_t* bucket;
+    } async;
+    // Borrowed host-only memory contents, starting at the file binding origin.
+    iree_byte_span_t host;
+    // Qualified execution storage at the file binding origin, owned by file.
+    iree_hal_amd_gpu_buffer_reference_t device;
+  };
 } iree_hal_amd_gpu_file_binding_t;
 
 typedef struct iree_hal_amd_gpu_file_buffer_t {
@@ -403,7 +419,8 @@ static iree_status_t iree_hal_amd_gpu_file_buffer_prepare(
 static iree_hal_amd_gpu_file_window_kind_t iree_hal_amd_gpu_file_window_kind(
     const iree_hal_amd_gpu_file_transfer_t* operation,
     iree_hal_file_transfer_range_t range) {
-  return !operation->files[range.file_binding].native
+  return operation->files[range.file_binding].kind !=
+                 IREE_HAL_AMD_GPU_FILE_BINDING_ASYNC
              ? IREE_HAL_AMD_GPU_FILE_WINDOW_MEMORY
          : operation->buffers[range.buffer_binding].source.contents.data
              ? IREE_HAL_AMD_GPU_FILE_WINDOW_DIRECT
@@ -551,13 +568,14 @@ static iree_status_t iree_hal_amd_gpu_file_window_fill(
     }
     iree_hal_amd_gpu_file_binding_t* file =
         &operation->files[range.file_binding];
+    const bool native_file = file->kind == IREE_HAL_AMD_GPU_FILE_BINDING_ASYNC;
     status = iree_hal_amd_gpu_file_buffer_prepare(
-        operation, range.buffer_binding, file->native != NULL);
+        operation, range.buffer_binding, native_file);
     if (!iree_status_is_ok(status)) {
       break;
     }
     if (iree_hal_amd_gpu_file_window_kind(operation, range) != window->kind ||
-        (file->native && file->native->proactor != window->proactor)) {
+        (native_file && file->async.handle->proactor != window->proactor)) {
       break;
     }
     iree_hal_amd_gpu_file_buffer_t* buffer =
@@ -567,20 +585,25 @@ static iree_status_t iree_hal_amd_gpu_file_window_fill(
     const iree_hal_file_binding_t binding =
         operation->batch.files.bindings[range.file_binding];
     uint64_t length = range.length;
-    if (!file->native) {
+    if (!native_file) {
       iree_hal_amd_gpu_buffer_reference_t reference = buffer->reference;
       reference.offset += range.buffer_offset;
       const bool reading = operation->access == IREE_HAL_MEMORY_ACCESS_READ;
-      void* host = file->contents.data + binding.offset + range.file_offset;
       piece->copy = (iree_hal_amd_gpu_transfer_operation_t){.length = length};
-      if (reading) {
+      if (file->kind == IREE_HAL_AMD_GPU_FILE_BINDING_DEVICE) {
+        iree_hal_amd_gpu_buffer_reference_t storage = file->device;
+        storage.offset += range.file_offset;
+        piece->copy.type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
+        piece->copy.source.device = reading ? storage : reference;
+        piece->copy.target.device = reading ? reference : storage;
+      } else if (reading) {
         piece->copy.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
-        piece->copy.source.host = host;
+        piece->copy.source.host = file->host.data + range.file_offset;
         piece->copy.target.device = reference;
       } else {
         piece->copy.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
         piece->copy.source.device = reference;
-        piece->copy.target.host = host;
+        piece->copy.target.host = file->host.data + range.file_offset;
       }
     } else {
       iree_async_span_t span;
@@ -606,7 +629,7 @@ static iree_status_t iree_hal_amd_gpu_file_window_fill(
       } else {
         const iree_hal_amd_fabric_file_source_t* source = &buffer->source;
         if (source->region &&
-            source->region->proactor != file->native->proactor) {
+            source->region->proactor != file->async.handle->proactor) {
           status = iree_make_status(
               IREE_STATUS_FAILED_PRECONDITION,
               "registered buffer and file use different I/O proactors");
@@ -806,8 +829,10 @@ static void iree_hal_amd_gpu_file_pipeline_drain(
       }
       iree_hal_amd_gpu_file_binding_t* file =
           &operation->files[range.file_binding];
+      const bool native_file =
+          file->kind == IREE_HAL_AMD_GPU_FILE_BINDING_ASYNC;
       status = iree_hal_amd_gpu_file_buffer_prepare(
-          operation, range.buffer_binding, file->native != NULL);
+          operation, range.buffer_binding, native_file);
       if (!iree_status_is_ok(status)) {
         iree_hal_amd_gpu_file_pipeline_fail(pipeline, status);
         break;
@@ -818,7 +843,7 @@ static void iree_hal_amd_gpu_file_pipeline_drain(
       iree_hal_amd_gpu_file_window_t* window = &pipeline->windows[index];
       window->count = 0;
       window->before.bits = 0;
-      window->proactor = file->native ? file->native->proactor : NULL;
+      window->proactor = native_file ? file->async.handle->proactor : NULL;
       window->kind = iree_hal_amd_gpu_file_window_kind(operation, range);
       if (window->kind == IREE_HAL_AMD_GPU_FILE_WINDOW_STAGED) {
         const iree_async_file_requirements_t* requirements =
@@ -829,9 +854,10 @@ static void iree_hal_amd_gpu_file_pipeline_drain(
                                        : requirements->write.buffer_alignment;
         status = iree_hal_amd_gpu_file_staging_prepare(
             operation->executor->staging, alignment);
-        if (iree_status_is_ok(status) && !file->bucket) {
+        if (iree_status_is_ok(status) && !file->async.bucket) {
           status = iree_hal_amd_gpu_file_staging_acquire(
-              operation->executor->staging, window->proactor, &file->bucket);
+              operation->executor->staging, window->proactor,
+              &file->async.bucket);
         }
         if (iree_status_is_ok(status)) {
           const uint64_t capacity = iree_hal_amd_gpu_file_staging_capacity(
@@ -843,7 +869,7 @@ static void iree_hal_amd_gpu_file_pipeline_drain(
           pipeline->active |= bit;
           pipeline->admission_pending = true;
           iree_hal_amd_gpu_file_staging_reserve(
-              file->bucket, desired, alignment,
+              file->async.bucket, desired, alignment,
               (iree_hal_file_transfer_callback_t){
                   iree_hal_amd_gpu_file_window_complete, window},
               &window->staging);
@@ -864,8 +890,13 @@ static void iree_hal_amd_gpu_file_pipeline_drain(
         (pipeline->exhausted ||
          iree_atomic_load(&pipeline->failure, iree_memory_order_acquire))) {
       pipeline->releasing = true;
-      while (pipeline->release_index < operation->batch.files.count &&
-             !operation->files[pipeline->release_index].bucket) {
+      while (pipeline->release_index < operation->batch.files.count) {
+        const iree_hal_amd_gpu_file_binding_t* file =
+            &operation->files[pipeline->release_index];
+        if (file->kind == IREE_HAL_AMD_GPU_FILE_BINDING_ASYNC &&
+            file->async.bucket) {
+          break;
+        }
         ++pipeline->release_index;
       }
       if (pipeline->release_index == operation->batch.files.count) {
@@ -876,7 +907,8 @@ static void iree_hal_amd_gpu_file_pipeline_drain(
       window->phase = IREE_HAL_AMD_GPU_FILE_WINDOW_RELEASE;
       pipeline->active = 1;
       iree_hal_amd_gpu_file_staging_release(
-          operation->files[pipeline->release_index++].bucket, iree_ok_status(),
+          operation->files[pipeline->release_index++].async.bucket,
+          iree_ok_status(),
           (iree_hal_file_transfer_callback_t){
               iree_hal_amd_gpu_file_window_complete, window},
           &window->staging);
@@ -949,8 +981,8 @@ static void iree_hal_amd_gpu_file_pipeline_begin(void* user_data,
     // producer boundary. Indirect lists consumed that boundary while acquiring
     // their count, before any record was available to inspect.
     const iree_hal_amd_gpu_file_executor_t* executor = operation->executor;
-    const bool native_file =
-        operation->files[first.file_binding].native != NULL;
+    const bool native_file = operation->files[first.file_binding].kind ==
+                             IREE_HAL_AMD_GPU_FILE_BINDING_ASYNC;
     status = iree_hal_amd_gpu_file_buffer_prepare(
         operation, first.buffer_binding, native_file);
     iree_hal_amd_gpu_file_buffer_t* buffer =
@@ -1089,6 +1121,56 @@ static void iree_hal_amd_gpu_file_transfer_start(void* user_data,
   }
 }
 
+// Classifies and qualifies each file once. A device-visible import follows the
+// same family/access contract as queue_copy and remains owned by its file.
+// The address itself is resolved by native submission after producer waits.
+static iree_status_t iree_hal_amd_gpu_file_binding_initialize(
+    const iree_hal_amd_gpu_file_executor_t* executor,
+    iree_hal_memory_access_t access, iree_hal_file_binding_t binding,
+    iree_hal_amd_gpu_file_binding_t* out_binding) {
+  *out_binding = (iree_hal_amd_gpu_file_binding_t){0};
+  iree_hal_buffer_t* storage = iree_hal_file_storage_buffer(binding.file);
+  if (storage && iree_all_bits_set(iree_hal_buffer_memory_type(storage),
+                                   IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE)) {
+    const uint64_t storage_length = iree_hal_buffer_byte_length(storage);
+    if (binding.offset > storage_length ||
+        binding.length > storage_length - binding.offset) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "file binding exceeds its execution storage");
+    }
+    IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_access(
+        iree_hal_buffer_allowed_access(storage), access));
+    IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_family_usage(
+        storage, executor->queue->queue_family,
+        access == IREE_HAL_MEMORY_ACCESS_READ
+            ? IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE
+            : IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET));
+    out_binding->kind = IREE_HAL_AMD_GPU_FILE_BINDING_DEVICE;
+    return iree_hal_amd_gpu_buffer_reference_initialize(
+        executor->queue->queue_family, executor->transfer_site, storage,
+        (iree_device_size_t)binding.offset, &out_binding->device);
+  }
+  iree_async_file_t* native = iree_hal_file_async_handle(binding.file);
+  if (native) {
+    out_binding->kind = IREE_HAL_AMD_GPU_FILE_BINDING_ASYNC;
+    out_binding->async.handle = native;
+    return iree_ok_status();
+  }
+  if (iree_hal_memory_file_isa(binding.file)) {
+    out_binding->kind = IREE_HAL_AMD_GPU_FILE_BINDING_HOST;
+    IREE_RETURN_IF_ERROR(
+        iree_hal_memory_file_contents(binding.file, &out_binding->host));
+    if (binding.offset) {
+      out_binding->host.data += binding.offset;
+    }
+    out_binding->host.data_length = (iree_host_size_t)binding.length;
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                          "AMD queue file transfers require execution "
+                          "storage, host memory, or an async file handle");
+}
+
 iree_status_t iree_hal_amd_gpu_file_transfer_submit_batch(
     const iree_hal_amd_gpu_file_executor_t* executor,
     iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
@@ -1155,18 +1237,11 @@ iree_status_t iree_hal_amd_gpu_file_transfer_submit_batch(
       storage.data + batch_offset, &operation->batch);
   for (iree_host_size_t i = 0; i < files.count && iree_status_is_ok(status);
        ++i) {
-    iree_hal_file_t* file = files.bindings[i].file;
     iree_hal_amd_gpu_file_binding_t* binding = &operation->files[i];
-    *binding = (iree_hal_amd_gpu_file_binding_t){
-        .native = iree_hal_file_async_handle(file)};
-    if (binding->native) {
+    status = iree_hal_amd_gpu_file_binding_initialize(
+        executor, file_access, files.bindings[i], binding);
+    if (binding->kind == IREE_HAL_AMD_GPU_FILE_BINDING_ASYNC) {
       operation->has_native_files = true;
-    } else if (iree_hal_memory_file_isa(file)) {
-      status = iree_hal_memory_file_contents(file, &binding->contents);
-    } else {
-      status = iree_make_status(IREE_STATUS_UNAVAILABLE,
-                                "AMD queue file transfers require a memory "
-                                "file or an async file handle");
     }
   }
   if (!iree_status_is_ok(status)) {

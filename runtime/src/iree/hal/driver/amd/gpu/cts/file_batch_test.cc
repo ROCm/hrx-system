@@ -44,6 +44,15 @@ FileTransfer SelectFileTransfer(iree_hal_queue_t* queue) {
 }
 
 enum class Descriptions { kHost, kIndirectHost, kIndirectPrivate };
+enum class FileStorage { kNative, kHost, kDevice };
+
+struct HostStorage {
+  ~HostStorage() { iree_allocator_free_aligned(iree_allocator_system(), data); }
+  // Borrowed by memory-file handles through the accepted queue completion.
+  uint8_t* data = nullptr;
+  // Full imported extent, including untouched allocation-granularity padding.
+  iree_host_size_t length = 0;
+};
 
 class GpuNativeFileBatchTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
  protected:
@@ -78,11 +87,58 @@ class GpuNativeFileBatchTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
         iree_infinite_timeout(), out_buffer));
   }
 
+  void ImportMemory(iree_hal_pool_t* pool, const std::vector<uint8_t>& contents,
+                    iree_hal_memory_access_t access, HostStorage& storage,
+                    iree_hal_file_t** out_file) {
+    iree_hal_pool_import_requirements_t requirements = {
+        .min_byte_length = 1,
+        .base_alignment = 64,
+        .byte_length_granularity = 1,
+    };
+    if (pool) {
+      ASSERT_TRUE(iree_hal_pool_query_import_requirements(
+          pool,
+          iree_hal_make_external_storage_class(
+              IREE_HAL_EXTERNAL_STORAGE_TYPE_HOST_POINTER),
+          &requirements));
+    }
+    uint64_t length = 0;
+    ASSERT_TRUE(iree_checked_add_u64(
+        iree_max(contents.size(), requirements.min_byte_length),
+        requirements.byte_length_granularity - 1, &length));
+    length -= length % requirements.byte_length_granularity;
+    ASSERT_LE(length, IREE_HOST_SIZE_MAX);
+    storage.length = static_cast<iree_host_size_t>(length);
+    IREE_ASSERT_OK(iree_allocator_malloc_aligned(
+        iree_allocator_system(), storage.length,
+        iree_max(iree_host_size_t{64}, requirements.base_alignment), 0,
+        reinterpret_cast<void**>(&storage.data)));
+    std::memset(storage.data, 0xCD, storage.length);
+    std::memcpy(storage.data, contents.data(), contents.size());
+    iree_io_file_handle_t* handle = nullptr;
+    IREE_ASSERT_OK(iree_io_file_handle_wrap_host_allocation(
+        access == IREE_HAL_MEMORY_ACCESS_READ ? IREE_IO_FILE_ACCESS_READ
+                                              : IREE_IO_FILE_ACCESS_WRITE,
+        iree_make_byte_span(storage.data, storage.length), {},
+        iree_allocator_system(), &handle));
+    iree_status_t status =
+        iree_hal_file_import(device_, pool, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+                             access, handle, 0, out_file);
+    iree_io_file_handle_release(handle);
+    IREE_ASSERT_OK(status);
+    if (pool) {
+      ASSERT_NE(iree_hal_file_storage_buffer(*out_file), nullptr);
+      EXPECT_TRUE(iree_all_bits_set(
+          iree_hal_buffer_memory_type(iree_hal_file_storage_buffer(*out_file)),
+          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE));
+    }
+  }
+
   void RoundTrip(iree_hal_queue_t* io_queue, iree_hal_pool_t* payload_pool,
-                 iree_hal_pool_t* metadata_pool, Descriptions descriptions,
-                 bool memory_source) {
+                 iree_hal_pool_t* metadata_pool, iree_hal_pool_t* import_pool,
+                 Descriptions descriptions, FileStorage storage) {
     SCOPED_TRACE(static_cast<int>(descriptions));
-    SCOPED_TRACE(memory_source);
+    SCOPED_TRACE(static_cast<int>(storage));
     const auto transfer = SelectFileTransfer(io_queue);
     ASSERT_NE(transfer, nullptr);
     // Cross both native request-group and private metadata-page boundaries.
@@ -98,6 +154,7 @@ class GpuNativeFileBatchTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
     constexpr size_t kMetadataLength = 64 + kCapacity * 64;
     std::vector<uint8_t> source(kFileLength);
     std::vector<uint8_t> output(kFileLength, 0xCD);
+    std::vector<uint8_t> expected_output = output;
     std::vector<uint8_t> expected_buffer(kBufferLength, 0xCD);
     std::vector<uint8_t> observed(kBufferLength, 0xFF);
     for (size_t i = 0; i < source.size(); ++i) {
@@ -105,24 +162,20 @@ class GpuNativeFileBatchTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
     }
     iree::testing::TempFilePath source_path("iree_file_batch_source");
     iree::testing::TempFilePath output_path("iree_file_batch_output");
+    HostStorage source_storage, output_storage;
     Ref<iree_hal_file_t> source_file, output_file;
-    if (memory_source) {
-      // Memory files require native upload copies even when the physical
-      // payload happens to offer a direct host file-I/O mapping.
-      iree_io_file_handle_t* handle = nullptr;
-      IREE_ASSERT_OK(iree_io_file_handle_wrap_host_allocation(
-          IREE_IO_FILE_ACCESS_READ,
-          iree_make_byte_span(source.data(), source.size()), {},
-          iree_allocator_system(), &handle));
-      iree_status_t status = iree_hal_file_import(
-          device_, nullptr, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
-          IREE_HAL_MEMORY_ACCESS_READ, handle, 0, source_file.out());
-      iree_io_file_handle_release(handle);
-      IREE_ASSERT_OK(status);
-    } else {
+    if (storage == FileStorage::kNative) {
       ASSERT_NO_FATAL_FAILURE(Import(source_path, source, source_file.out()));
+      ASSERT_NO_FATAL_FAILURE(Import(output_path, output, output_file.out()));
+    } else {
+      auto* pool = storage == FileStorage::kDevice ? import_pool : nullptr;
+      ASSERT_NO_FATAL_FAILURE(ImportMemory(pool, source,
+                                           IREE_HAL_MEMORY_ACCESS_READ,
+                                           source_storage, source_file.out()));
+      ASSERT_NO_FATAL_FAILURE(ImportMemory(pool, output,
+                                           IREE_HAL_MEMORY_ACCESS_WRITE,
+                                           output_storage, output_file.out()));
     }
-    ASSERT_NO_FATAL_FAILURE(Import(output_path, output, output_file.out()));
     Ref<iree_hal_buffer_t> payload, consumer, metadata;
     ASSERT_NO_FATAL_FAILURE(
         Allocate(payload_pool, kBufferLength, payload.out()));
@@ -152,7 +205,7 @@ class GpuNativeFileBatchTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
       };
       std::memcpy(expected_buffer.data() + kBufferOrigin + buffer_offset,
                   source.data() + kFileOrigin + file_offset, kRowLength);
-      std::memcpy(output.data() + kFileOrigin + file_offset,
+      std::memcpy(expected_output.data() + kFileOrigin + file_offset,
                   source.data() + kFileOrigin + file_offset, kRowLength);
     }
     words[0] = kCount;
@@ -267,19 +320,27 @@ class GpuNativeFileBatchTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
         status, iree_hal_semaphore_wait(tail, one, iree_infinite_timeout(), 0));
     IREE_ASSERT_OK(status);
     EXPECT_EQ(observed, expected_buffer);
-    iree_io_file_contents_t* actual = nullptr;
-    IREE_ASSERT_OK(iree_io_file_contents_read(
-        output_path.path_view(), iree_allocator_system(), &actual));
-    EXPECT_EQ(actual->buffer.data_length, output.size());
-    if (actual->buffer.data_length == output.size()) {
-      EXPECT_EQ(std::memcmp(actual->buffer.data, output.data(), output.size()),
-                0);
-    }
-    iree_io_file_contents_free(actual);
-    if (!memory_source) {
+    if (storage == FileStorage::kNative) {
+      iree_io_file_contents_t* actual = nullptr;
+      IREE_ASSERT_OK(iree_io_file_contents_read(
+          output_path.path_view(), iree_allocator_system(), &actual));
+      EXPECT_EQ(actual->buffer.data_length, expected_output.size());
+      if (actual->buffer.data_length == expected_output.size()) {
+        EXPECT_EQ(std::memcmp(actual->buffer.data, expected_output.data(),
+                              expected_output.size()),
+                  0);
+      }
+      iree_io_file_contents_free(actual);
       EXPECT_TRUE(source_path.Remove());
+      EXPECT_TRUE(output_path.Remove());
+    } else {
+      EXPECT_EQ(std::memcmp(output_storage.data, expected_output.data(),
+                            expected_output.size()),
+                0);
+      for (size_t i = expected_output.size(); i < output_storage.length; ++i) {
+        ASSERT_EQ(output_storage.data[i], 0xCD) << i;
+      }
     }
-    EXPECT_TRUE(output_path.Remove());
   }
 };
 
@@ -325,21 +386,42 @@ TEST_F(GpuNativeFileBatchTest, ProducerAndConsumerShareOrForkNativeQueues) {
   };
   IREE_ASSERT_OK(iree_hal_slab_pool_create(
       group_, scope, &options, iree_allocator_system(), host_pool.out()));
+  const iree_hal_pool_import_class_t import_class = {
+      .storage_class = iree_hal_make_external_storage_class(
+          IREE_HAL_EXTERNAL_STORAGE_TYPE_HOST_POINTER),
+  };
+  options.owned.mode = IREE_HAL_SLAB_POOL_IMPORT_ONLY;
+  options.imports = {1, &import_class};
+  Ref<iree_hal_pool_t> import_pool;
+  auto import_status = iree_hal_slab_pool_create(
+      group_, scope, &options, iree_allocator_system(), import_pool.out());
+  if (iree_status_is_unavailable(import_status) ||
+      iree_status_is_unimplemented(import_status)) {
+    // Some native platforms only support staged host memory files.
+    iree_status_free(import_status);
+  } else {
+    IREE_ASSERT_OK(import_status);
+  }
   std::vector<iree_hal_queue_t*> io_queues = {queues_[0], queues_[1]};
   if (dma) {
     io_queues.push_back(dma);
   }
   RecordProperty("sdma_queue", dma ? 1 : 0);
+  RecordProperty("imported_memory_file", import_pool ? 1 : 0);
   for (size_t i = 0; i < io_queues.size(); ++i) {
     SCOPED_TRACE(i);
     for (auto descriptions : {Descriptions::kHost, Descriptions::kIndirectHost,
                               Descriptions::kIndirectPrivate}) {
-      for (bool memory_source : {false, true}) {
+      for (auto storage :
+           {FileStorage::kNative, FileStorage::kHost, FileStorage::kDevice}) {
+        if (storage == FileStorage::kDevice && !import_pool) {
+          continue;
+        }
         ASSERT_NO_FATAL_FAILURE(RoundTrip(
             io_queues[i], private_pool,
             descriptions == Descriptions::kIndirectPrivate ? private_pool.get()
                                                            : host_pool.get(),
-            descriptions, memory_source));
+            import_pool, descriptions, storage));
       }
     }
   }
