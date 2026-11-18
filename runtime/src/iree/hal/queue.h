@@ -223,27 +223,27 @@ static inline bool iree_hal_semaphore_list_is_empty(
   return semaphore_list.count == 0;
 }
 
-// Describes a subrange of a buffer bound to a command-buffer binding slot.
+// Describes a subrange of a buffer bound to an operation binding slot.
 typedef struct iree_hal_buffer_binding_t {
-  // Buffer bound to the slot. Unowned. May be NULL when the slot is unused by
-  // the submitted command buffer.
+  // Buffer bound to the slot. Unowned. Command-buffer execution permits NULL
+  // for unused slots; file transfers require every provided binding to be
+  // valid.
   iree_hal_buffer_t* buffer;
 
   // Byte offset into |buffer| where the binding begins.
   iree_device_size_t offset;
 
-  // Byte length of the buffer range available to the command buffer.
+  // Byte length of the buffer range available to the operation.
   // May be IREE_HAL_WHOLE_BUFFER.
   iree_device_size_t length;
 } iree_hal_buffer_binding_t;
 
-// Binding table provided when executing an indirect command buffer.
-// The table storage is captured before iree_hal_queue_execute returns.
+// Binding table captured before the queue operation returns.
 typedef struct iree_hal_buffer_binding_table_t {
   // Number of entries in |bindings|.
   iree_host_size_t count;
 
-  // Binding entries indexed by command-buffer binding slot. Unowned.
+  // Binding entries indexed by operation binding slot. Unowned.
   const iree_hal_buffer_binding_t* bindings;
 } iree_hal_buffer_binding_table_t;
 
@@ -608,6 +608,115 @@ typedef uint64_t iree_hal_write_flags_t;
 enum iree_hal_write_flag_bits_t {
   IREE_HAL_WRITE_FLAG_NONE = 0,
 };
+
+typedef struct iree_hal_transfer_strides_t {
+  // Byte displacement between consecutive rows.
+  uint64_t row_stride;
+  // Byte displacement between consecutive slices.
+  uint64_t slice_stride;
+} iree_hal_transfer_strides_t;
+
+typedef struct iree_hal_file_binding_t {
+  // Borrowed file; an accepted operation retains this resource through use.
+  iree_hal_file_t* file;
+  // Byte origin within the file's existing logical range.
+  uint64_t offset;
+  // Accessible bytes beginning at offset; explicit, without a whole-file
+  // sentinel.
+  uint64_t length;
+} iree_hal_file_binding_t;
+
+typedef struct iree_hal_file_binding_table_t {
+  // Number of entries in bindings.
+  iree_host_size_t count;
+  // Borrowed table storage, copied before the enqueue call returns.
+  const iree_hal_file_binding_t* bindings;
+} iree_hal_file_binding_table_t;
+
+// One host-authored file/buffer region. All geometry is full-width. Offsets
+// are relative to the selected bindings. File and buffer roles do not change
+// when the same description is used with queue_read versus queue_write.
+// Transfers in one list are unordered siblings. Intersecting writes are a
+// caller data race; no quadratic overlap search is performed.
+typedef struct iree_hal_file_transfer_t {
+  // Index into the call's file binding table.
+  uint32_t file_binding;
+  // Index into the call's buffer binding table.
+  uint32_t buffer_binding;
+  // First useful byte relative to the selected file binding.
+  uint64_t file_offset;
+  // First useful byte relative to the selected buffer binding.
+  iree_device_size_t buffer_offset;
+  // Useful contiguous bytes in each row.
+  uint64_t row_length;
+  // Number of rows in each slice.
+  uint64_t row_count;
+  // Number of slices.
+  uint64_t slice_count;
+  // Byte displacements between rows and slices in the file.
+  iree_hal_transfer_strides_t file_strides;
+  // Byte displacements between rows and slices in the buffer.
+  iree_hal_transfer_strides_t buffer_strides;
+} iree_hal_file_transfer_t;
+
+// Fixed 64-byte device-authored encoding, in little-endian 64-bit words.
+// Word | low 48 bits                   | high 16 bits
+//   0  | binding-relative file offset  | file binding index
+//   1  | binding-relative buffer offset| buffer binding index
+//   2  | row length                    | form: 0 linear, 1 strided
+//   3  | file row stride               | row count bits 0-15
+//   4  | buffer row stride             | row count bits 16-31
+//   5  | file slice stride             | slice count bits 0-15
+//   6  | buffer slice stride           | slice count bits 16-31
+//   7  | ignored by finite operations; available to a transport envelope
+//
+// LINEAR implies one row and one slice and never inspects words 3-7. STRIDED
+// decodes words 0-6 and never inspects word 7. Zero row length is a no-op and
+// ignores all other fields. Other zero extents are also no-ops. For nonempty
+// records, forms other than 0/1 are invalid. The enqueue entry point supplies
+// direction, so the same records describe reads and writes unchanged.
+//
+// This defines the payload, not a resident ring's publication protocol. The
+// finite operation's waits publish both records and live count as one group.
+typedef struct iree_hal_file_transfer_record_t {
+  // Aligned wire words; producers construct complete words before storing.
+  uint64_t words[8];
+} iree_hal_file_transfer_record_t;
+
+typedef enum iree_hal_file_transfer_list_type_e {
+  // Host records are copied before enqueue returns, independently of waits.
+  IREE_HAL_FILE_TRANSFER_LIST_TYPE_HOST = 0,
+  // Buffer contents are consumed only after the enqueue waits are satisfied.
+  IREE_HAL_FILE_TRANSFER_LIST_TYPE_INDIRECT = 1,
+} iree_hal_file_transfer_list_type_t;
+
+// Call-time value selecting one metadata acquisition contract. Contains no
+// owned resource or new resource lifetime. The call captures this descriptor.
+typedef struct iree_hal_file_transfer_list_t {
+  // Selects the active member of the union.
+  iree_hal_file_transfer_list_type_t type;
+  union {
+    // Immediately readable host descriptions, borrowed only during enqueue.
+    struct {
+      // Number of values in transfers; zero permits a NULL pointer.
+      iree_host_size_t count;
+      // Full-width descriptions copied during enqueue, never retained by
+      // pointer.
+      const iree_hal_file_transfer_t* transfers;
+    } host;
+    // Deferred record bytes and a runtime-produced count, retained through use.
+    struct {
+      // Direct buffer window of 64-byte records. Resolved length is a multiple
+      // of 64 and defines capacity; the byte offset is at least 8-byte aligned.
+      // A 64-byte-aligned base keeps each record within one 64-byte cache line.
+      iree_hal_buffer_binding_t records;
+      // Buffer containing an aligned little-endian u64 live record count.
+      iree_hal_buffer_t* count_buffer;
+      // Byte offset of that count. The eight-byte access must fit count_buffer.
+      iree_device_size_t count_offset;
+    } indirect;
+  };
+} iree_hal_file_transfer_list_t;
 
 // Identifies the payload active in an iree_hal_transfer_operation_t.
 typedef enum iree_hal_transfer_operation_type_t {

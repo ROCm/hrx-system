@@ -154,6 +154,28 @@ IREE_API_EXPORT iree_status_t iree_hal_file_validate_access(
 IREE_API_EXPORT iree_status_t iree_hal_file_validate_range(
     iree_hal_file_t* file, uint64_t byte_offset, uint64_t byte_length);
 
+// Decodes one published little-endian device record. LINEAR ignores the suffix
+// words, and zero row length ignores all other fields. Empty records only set
+// out_transfer->row_length to zero; all remaining fields are unspecified.
+// Nonempty records initialize every field. Invalid forms or offsets that the
+// host's iree_device_size_t cannot represent fail without producing a transfer.
+// Record storage must be readable for the fields selected by its form.
+IREE_API_EXPORT iree_status_t iree_hal_file_transfer_record_decode(
+    const iree_hal_file_transfer_record_t* record,
+    iree_hal_file_transfer_t* out_transfer);
+
+// Validates binding indices and addressed extents without querying resources.
+// The enclosing operation first qualifies each binding's resource and window
+// and resolves all buffer lengths (no WHOLE_BUFFER). This checks only the
+// transfer's relative geometry against those windows, in constant time without
+// expanding rows. Empty transfers ignore indices, offsets, and strides. Unused
+// dimensions ignore their strides. Overlapping regions remain the caller's
+// synchronization responsibility.
+IREE_API_EXPORT iree_status_t
+iree_hal_file_transfer_validate(iree_hal_file_binding_table_t files,
+                                iree_hal_buffer_binding_table_t buffers,
+                                const iree_hal_file_transfer_t* transfer);
+
 // Validates a remaining native transfer and selects its next request length.
 // |requirements| must come from a successful requirements query.
 // |remaining_length| is the logical transfer remainder, which may exceed the
