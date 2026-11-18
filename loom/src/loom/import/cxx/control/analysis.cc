@@ -528,6 +528,11 @@ bool ControlFlow::require_storage_member(ObjectInterval interval,
       found != pointer_aliases_.end() && found->second.parameter_object_type) {
     type = found->second.parameter_object_type;
   }
+  if (unit_.typeTraits().is_reference(type)) {
+    if (auto* origin = reference_materialization(interval.binding)) {
+      type = origin->type;
+    }
+  }
   auto group =
       types_.storage_member(type, interval.begin, interval.end, source);
   if (!group) {
@@ -4920,6 +4925,9 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
                              : retain_destination(referent);
       auto identity = retain_call_argument(referent);
       if (materialization) {
+        if (object_identity_) {
+          object_identity_->own_members(variable, materialization);
+        }
         identity = {.source = referent, .write_binding = variable};
         append_identity(destination.value_or(Destination{variable, 0, nullptr}),
                         identity);

@@ -173,3 +173,59 @@ func.def public @array_members() -> (i32) {
   %1105 = scalar.constant 13228 : i32
   func.return %1105 : i32
 }
+
+// ====
+// A reference extends the complete temporary. Its array has one identity
+// through a second reference, a pointer argument, and the owner's destructor.
+struct Bounds { int lo[3]; };
+struct View { float* data; Bounds bounds; };
+
+static View make(float* p, int n) { return {p, {{n, n + 1, n + 2}}}; }
+static int first(const int* p) { return p[0]; }
+static int read(const View& v) { return first(v.bounds.lo); }
+
+int extended_bounds() {
+  const auto& v = make(nullptr, 7);
+  return first(v.bounds.lo) + read(v);
+}
+
+struct Observed {
+  int* output;
+  Bounds bounds;
+  ~Observed() { *output = bounds.lo[1]; }
+};
+
+static void set(int* x, int value) { x[1] = value; }
+int lifetime() {
+  int observed = 0;
+  {
+    auto&& v = Observed{&observed, {{1, 2, 3}}};
+    auto& coordinates = v.bounds;
+    set(coordinates.lo, 19);
+  }
+  return observed;
+}
+
+int subobject_lifetime() {
+  int observed = 0;
+  {
+    auto&& bounds = Observed{&observed, {{1, 2, 3}}}.bounds;
+    set(bounds.lo, 23);
+  }
+  return observed;
+}
+// ----
+func.def public @extended_bounds() -> (i32) {
+  %218 = scalar.constant 14 : i32
+  func.return %218 : i32
+}
+
+func.def public @lifetime() -> (i32) {
+  %83 = scalar.constant 19 : i32
+  func.return %83 : i32
+}
+
+func.def public @subobject_lifetime() -> (i32) {
+  %147 = scalar.constant 23 : i32
+  func.return %147 : i32
+}

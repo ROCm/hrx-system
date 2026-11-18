@@ -212,12 +212,17 @@ void ObjectIdentity::bind(cxx::Symbol* binding, cxx::ExpressionAST* initializer,
       types_.unqualified(source->type) ==
           types_.unqualified(source_object_type(binding))) {
     join(binding, source);
-    if (members_ && types_.requires_value_transport(source->type)) {
-      members_->bindings.emplace_back(add(binding), binding);
-    }
+    own_members(binding, source);
   }
   if (storage || types_.has_volatile_subobject(source_object_type(binding))) {
     require_storage(binding);
+  }
+}
+
+void ObjectIdentity::own_members(cxx::Symbol* binding,
+                                 cxx::ExpressionAST* origin) {
+  if (members_ && types_.requires_value_transport(origin->type)) {
+    members_->bindings.emplace_back(add(origin), binding);
   }
 }
 

@@ -42,6 +42,9 @@ class ObjectIdentity {
   // initialization copies a distinct object or constructs this one directly.
   void bind(cxx::Symbol* binding, cxx::ExpressionAST* initializer,
             bool storage);
+  // The reference declaration owns the complete lifetime-extended temporary,
+  // even when the reference itself denotes one of its subobjects.
+  void own_members(cxx::Symbol* binding, cxx::ExpressionAST* origin);
   // A same-type prvalue return initializes this function's result object.
   void returned(cxx::FunctionSymbol* function, cxx::ExpressionAST* expression);
   // Compresses construction groups before interprocedural demand propagation.

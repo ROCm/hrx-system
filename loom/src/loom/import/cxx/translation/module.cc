@@ -1796,7 +1796,8 @@ class Translator final : private Initialization::Evaluation,
                            : variable->type();
       if (auto* materialization =
               control_->reference_materialization(variable)) {
-        if (control_->reference_requires_storage(variable)) {
+        if (control_->reference_requires_storage(variable) &&
+            control_->storage_members(variable).empty()) {
           fail(initializer,
                "lifetime-extended semantic objects cannot provide physical "
                "storage identity");
@@ -3492,13 +3493,23 @@ class Translator final : private Initialization::Evaluation,
       if (access == LvalueAccess::Write) {
         types_.require_mutable(projected->type, owner);
       }
-      auto value = this->expression(projected);
-      values_.set(materialized_reference_->binding,
-                  name(value, cxx::to_string(
-                                  materialized_reference_->binding->name())));
-      return {ObjectLvalue{
-          projected->type,
-          Destination{materialized_reference_->binding, 0, nullptr}}};
+      auto* binding = materialized_reference_->binding;
+      auto groups = control_->storage_members(binding);
+      member_storage_.allocate(binding, groups, owner);
+      if (!groups.empty()) {
+        values_.declare(binding, types_.partition(projected->type, owner));
+      }
+      auto value =
+          name(this->expression(projected), cxx::to_string(binding->name()));
+      Destination destination{binding, 0, nullptr};
+      if (groups.empty()) {
+        values_.set(binding, value);
+      } else {
+        member_storage_.write(member_storage_.lookup(binding), values_,
+                              destination, value, projected->type, owner,
+                              /*initializing=*/true);
+      }
+      return {ObjectLvalue{projected->type, destination}};
     }
     if (materialized_reference_) {
       if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(projected);

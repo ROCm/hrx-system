@@ -1208,6 +1208,9 @@ keeps its buffer identity and signed displacement. Copying the record copies
 its coordinates. Assigning to the record updates the coordinates seen through
 a pointer taken before the assignment. Inlining and private-storage promotion
 can eliminate the array storage when the pointer stays within the function.
+Binding a returned record to `const auto&` or `auto&&` extends the same member
+storage through the reference's scope. A destructor that reads the coordinates
+observes writes made through the borrowed pointer.
 
 Export emits the explicit leaf signature as ordinary C++ parameters. The
 grouping into the original record or lambda is not required to reimport the
