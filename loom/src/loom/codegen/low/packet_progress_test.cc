@@ -152,17 +152,6 @@ void EmitEvent(loom_low_packet_progress_emit_fn_t emit, void* emit_user_data,
   emit(emit_user_data, &event);
 }
 
-loom_low_packet_progress_record_t MakeProgressRecord(
-    iree_host_size_t packet_index, uint16_t progress_class_id,
-    loom_low_packet_progress_action_t action, uint32_t units) {
-  return {
-      .packet_index = packet_index,
-      .progress_class_id = progress_class_id,
-      .action = action,
-      .units = units,
-  };
-}
-
 void SyntheticProgressQuery(void* user_data,
                             const loom_low_schedule_table_t* schedule,
                             const loom_low_allocation_table_t* allocation,
@@ -312,169 +301,6 @@ TEST_F(LowPacketProgressTest, QueriesProviderExactlyOncePerPacket) {
   EXPECT_EQ(audit.queried_packet_mask, 0b11u);
 }
 
-TEST_F(LowPacketProgressTest, IndexesRecordsByProgressClass) {
-  const loom_low_packet_progress_provider_t provider = {
-      .user_data = {},
-      .event_count = 3,
-      .query = SyntheticProgressQuery,
-      .class_name = SyntheticProgressClassName,
-  };
-  loom_low_packet_progress_table_t table = {};
-  IREE_ASSERT_OK(loom_low_packet_progress_build(
-      &state_.schedule, &state_.allocation, &provider, &arena_, &table));
-
-  loom_low_packet_progress_class_chain_index_t index = {};
-  IREE_ASSERT_OK(loom_low_packet_progress_class_chain_index_build(
-      &table, &arena_, &index));
-
-  const loom_low_packet_progress_class_chain_entry_t* pipe =
-      loom_low_packet_progress_class_chain_index_lookup(&index,
-                                                        kSyntheticProgressPipe);
-  ASSERT_NE(pipe, nullptr);
-  EXPECT_EQ(pipe->first_record_index, 0u);
-  EXPECT_EQ(pipe->record_count, 2u);
-  ASSERT_NE(index.next_record_indices, nullptr);
-  EXPECT_EQ(index.next_record_indices[0], 2u);
-  EXPECT_EQ(index.next_record_indices[2],
-            LOOM_LOW_PACKET_PROGRESS_RECORD_INDEX_NONE);
-
-  const loom_low_packet_progress_class_chain_entry_t* scoreboard =
-      loom_low_packet_progress_class_chain_index_lookup(
-          &index, kSyntheticProgressScoreboard);
-  ASSERT_NE(scoreboard, nullptr);
-  EXPECT_EQ(scoreboard->first_record_index, 1u);
-  EXPECT_EQ(scoreboard->record_count, 1u);
-  EXPECT_EQ(index.next_record_indices[1],
-            LOOM_LOW_PACKET_PROGRESS_RECORD_INDEX_NONE);
-
-  EXPECT_EQ(loom_low_packet_progress_class_chain_index_lookup(&index, 99),
-            nullptr);
-}
-
-TEST_F(LowPacketProgressTest, QueriesObservedProgressForClassRange) {
-  InitializePacketProgressTestState(&state_, 7);
-  const loom_low_packet_progress_record_t records[] = {
-      MakeProgressRecord(0, kSyntheticProgressPipe,
-                         LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE, 5),
-      MakeProgressRecord(1, kSyntheticProgressScoreboard,
-                         LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE, 99),
-      MakeProgressRecord(2, kSyntheticProgressPipe,
-                         LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE, 3),
-      MakeProgressRecord(3, kSyntheticProgressPipe,
-                         LOOM_LOW_PACKET_PROGRESS_ACTION_RESET, 0),
-      MakeProgressRecord(4, kSyntheticProgressPipe,
-                         LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE, 7),
-      MakeProgressRecord(5, kSyntheticProgressPipe,
-                         LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE, UINT32_MAX),
-      MakeProgressRecord(6, kSyntheticProgressPipe,
-                         LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE, 1),
-  };
-  const loom_low_packet_progress_table_t table = {
-      .schedule = &state_.schedule,
-      .allocation = &state_.allocation,
-      .records = records,
-      .record_count = IREE_ARRAYSIZE(records),
-      .class_name = SyntheticProgressClassName,
-  };
-  loom_low_packet_progress_class_chain_index_t chain_index = {};
-  IREE_ASSERT_OK(loom_low_packet_progress_class_chain_index_build(
-      &table, &arena_, &chain_index));
-  loom_low_packet_progress_class_range_index_t range_index = {};
-  IREE_ASSERT_OK(loom_low_packet_progress_class_range_index_build(
-      &chain_index, &arena_, &range_index));
-
-  const auto expect_observed_progress = [&](iree_host_size_t start_packet_index,
-                                            iree_host_size_t end_packet_index,
-                                            uint16_t progress_class_id,
-                                            uint32_t expected_progress) {
-    EXPECT_EQ(loom_low_packet_progress_class_chain_index_observed_progress(
-                  &chain_index, start_packet_index, end_packet_index,
-                  progress_class_id),
-              expected_progress);
-    EXPECT_EQ(loom_low_packet_progress_class_range_index_observed_progress(
-                  &range_index, start_packet_index, end_packet_index,
-                  progress_class_id),
-              expected_progress);
-  };
-  expect_observed_progress(/*start_packet_index=*/0,
-                           /*end_packet_index=*/3, kSyntheticProgressPipe, 3);
-  expect_observed_progress(/*start_packet_index=*/0,
-                           /*end_packet_index=*/5, kSyntheticProgressPipe,
-                           UINT32_MAX);
-  expect_observed_progress(/*start_packet_index=*/4,
-                           /*end_packet_index=*/7, kSyntheticProgressPipe,
-                           UINT32_MAX);
-  expect_observed_progress(/*start_packet_index=*/0,
-                           /*end_packet_index=*/7, kSyntheticProgressScoreboard,
-                           99);
-  expect_observed_progress(/*start_packet_index=*/0,
-                           /*end_packet_index=*/7,
-                           /*progress_class_id=*/99, 0);
-  expect_observed_progress(/*start_packet_index=*/5,
-                           /*end_packet_index=*/5, kSyntheticProgressPipe, 0);
-
-  const loom_low_packet_progress_class_range_entry_t* pipe =
-      loom_low_packet_progress_class_range_index_lookup(&range_index,
-                                                        kSyntheticProgressPipe);
-  ASSERT_NE(pipe, nullptr);
-  EXPECT_EQ(pipe->record_start, 0u);
-  EXPECT_EQ(pipe->record_count, 6u);
-  const uint32_t expected_pipe_progress_record_indices[] = {0, 2, 3, 4, 5, 6};
-  for (uint32_t i = 0; i < pipe->record_count; ++i) {
-    EXPECT_EQ(range_index.records[pipe->record_start + i].progress_record_index,
-              expected_pipe_progress_record_indices[i]);
-  }
-
-  // Building the range index cannot repurpose or invalidate the source chain.
-  const loom_low_packet_progress_class_chain_entry_t* chain_pipe =
-      loom_low_packet_progress_class_chain_index_lookup(&chain_index,
-                                                        kSyntheticProgressPipe);
-  ASSERT_NE(chain_pipe, nullptr);
-  EXPECT_EQ(chain_pipe->first_record_index, 0u);
-  EXPECT_EQ(chain_pipe->record_count, 6u);
-  EXPECT_EQ(chain_index.next_record_indices[0], 2u);
-}
-
-TEST_F(LowPacketProgressTest, BoundsDoNotAdvanceOrResetElapsedProgress) {
-  InitializePacketProgressTestState(&state_, 5);
-  const loom_low_packet_progress_record_t records[] = {
-      MakeProgressRecord(0, kSyntheticProgressPipe,
-                         LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE, 1),
-      MakeProgressRecord(1, kSyntheticProgressPipe,
-                         LOOM_LOW_PACKET_PROGRESS_ACTION_BOUND, 2),
-      MakeProgressRecord(2, kSyntheticProgressPipe,
-                         LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE, 3),
-      MakeProgressRecord(3, kSyntheticProgressPipe,
-                         LOOM_LOW_PACKET_PROGRESS_ACTION_BOUND, 1),
-      MakeProgressRecord(4, kSyntheticProgressPipe,
-                         LOOM_LOW_PACKET_PROGRESS_ACTION_RESET, 0),
-  };
-  const loom_low_packet_progress_table_t table = {
-      .schedule = &state_.schedule,
-      .allocation = &state_.allocation,
-      .records = records,
-      .record_count = IREE_ARRAYSIZE(records),
-      .class_name = SyntheticProgressClassName,
-  };
-  loom_low_packet_progress_class_chain_index_t chain_index = {};
-  IREE_ASSERT_OK(loom_low_packet_progress_class_chain_index_build(
-      &table, &arena_, &chain_index));
-  loom_low_packet_progress_class_range_index_t range_index = {};
-  IREE_ASSERT_OK(loom_low_packet_progress_class_range_index_build(
-      &chain_index, &arena_, &range_index));
-
-  const uint32_t expected_progress[] = {0, 0, 0, 3, 3, UINT32_MAX};
-  for (iree_host_size_t end = 1; end < IREE_ARRAYSIZE(expected_progress);
-       ++end) {
-    EXPECT_EQ(loom_low_packet_progress_class_chain_index_observed_progress(
-                  &chain_index, 0, end, kSyntheticProgressPipe),
-              expected_progress[end]);
-    EXPECT_EQ(loom_low_packet_progress_class_range_index_observed_progress(
-                  &range_index, 0, end, kSyntheticProgressPipe),
-              expected_progress[end]);
-  }
-}
-
 TEST_F(LowPacketProgressTest, RecordsReusePoolBlocksAcrossEpochs) {
   constexpr uint32_t kPacketCount = 1500;
   InitializePacketProgressTestState(&state_, kPacketCount);
@@ -508,19 +334,6 @@ TEST_F(LowPacketProgressTest, RecordsReusePoolBlocksAcrossEpochs) {
       EXPECT_EQ(record.action, LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE);
       EXPECT_EQ(record.units, i + 1);
     }
-    loom_low_packet_progress_class_chain_index_t chain = {};
-    IREE_ASSERT_OK(loom_low_packet_progress_class_chain_index_build(
-        &table, &arena_, &chain));
-    loom_low_packet_progress_class_range_index_t range = {};
-    IREE_ASSERT_OK(loom_low_packet_progress_class_range_index_build(
-        &chain, &arena_, &range));
-    const uint32_t expected_units = kPacketCount * (kPacketCount + 1) / 2 - 1;
-    EXPECT_EQ(loom_low_packet_progress_class_chain_index_observed_progress(
-                  &chain, 0, kPacketCount, kSyntheticProgressPipe),
-              expected_units);
-    EXPECT_EQ(loom_low_packet_progress_class_range_index_observed_progress(
-                  &range, 0, kPacketCount, kSyntheticProgressPipe),
-              expected_units);
     iree_arena_block_pool_statistics_t statistics = {};
     iree_arena_block_pool_query_statistics(&block_pool_, &statistics);
     EXPECT_EQ(statistics.oversized_allocation_count, 0u);

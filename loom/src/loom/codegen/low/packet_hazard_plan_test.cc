@@ -22,12 +22,10 @@ enum SyntheticHazardReason {
   kSyntheticHazardMissingData = 4,
   kSyntheticHazardRequiresAllocation = 5,
   kSyntheticHazardImpossible = 6,
-  kSyntheticHazardStorageRelease = 7,
 };
 
 enum SyntheticHazardAction {
   kSyntheticHazardActionPadding = 1,
-  kSyntheticHazardActionReleaseStorage = 2,
 };
 
 struct PacketHazardPlanTestState {
@@ -107,18 +105,6 @@ class LowPacketHazardPlanTest : public ::testing::Test {
     state->allocation.target.descriptor_set = &state->descriptor_set;
   }
 
-  void SetStorageReleaseActions(loom_low_storage_release_action_t* actions,
-                                iree_host_size_t action_count) {
-    state_.allocation.storage_release_actions = actions;
-    state_.allocation.storage_release_action_count = action_count;
-    uint32_t* first_action_indices = nullptr;
-    IREE_ASSERT_OK(loom_low_storage_release_action_index_build(
-        actions, action_count, state_.schedule.node_count, &arena_,
-        &first_action_indices));
-    state_.allocation.first_storage_release_action_by_node =
-        first_action_indices;
-  }
-
   iree_arena_block_pool_t block_pool_;
   iree_arena_allocator_t arena_;
   PacketHazardPlanTestState state_;
@@ -128,7 +114,8 @@ void EmitHazardEvent(loom_low_packet_hazard_plan_emit_fn_t emit,
                      void* emit_user_data,
                      loom_low_packet_hazard_plan_record_kind_t kind,
                      uint16_t reason_id, iree_string_view_t reason_name,
-                     uint32_t producer_node_index, uint16_t progress_class_id,
+                     uint32_t consumer_node_index, uint32_t producer_node_index,
+                     uint16_t progress_class_id,
                      iree_string_view_t progress_class_name,
                      uint32_t required_progress, uint32_t observed_progress,
                      uint32_t residual_progress) {
@@ -147,6 +134,7 @@ void EmitHazardEvent(loom_low_packet_hazard_plan_emit_fn_t emit,
       .reason_id = reason_id,
       .reason_name = reason_name,
       .producer_node_index = producer_node_index,
+      .consumer_node_index = consumer_node_index,
       .progress_class_id = progress_class_id,
       .progress_class_name = progress_class_name,
       .required_progress = required_progress,
@@ -183,22 +171,6 @@ void SyntheticProgressQuery(void* user_data,
   if (packet->node_index == 1) {
     EmitProgressEvent(emit, emit_user_data, 1);
   }
-}
-
-void EmptyResidualHazardQuery(void* user_data,
-                              const loom_low_schedule_table_t* schedule,
-                              const loom_low_allocation_table_t* allocation,
-                              const loom_low_packet_progress_table_t* progress,
-                              const loom_low_packet_view_t* packet,
-                              loom_low_packet_hazard_plan_emit_fn_t emit,
-                              void* emit_user_data) {
-  (void)user_data;
-  (void)schedule;
-  (void)allocation;
-  (void)progress;
-  (void)packet;
-  (void)emit;
-  (void)emit_user_data;
 }
 
 struct HazardQueryAudit {
@@ -248,12 +220,12 @@ void SyntheticResidualHazardQuery(
     }
   }
   const uint32_t required_progress = 3;
-  EmitHazardEvent(emit, emit_user_data,
-                  LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION,
-                  kSyntheticHazardLatency, IREE_SV("synthetic.latency"),
-                  /*producer_node_index=*/0, kSyntheticProgressPipe,
-                  IREE_SV("synthetic.pipe"), required_progress,
-                  observed_progress, required_progress - observed_progress);
+  EmitHazardEvent(
+      emit, emit_user_data, LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION,
+      kSyntheticHazardLatency, IREE_SV("synthetic.latency"), packet->node_index,
+      /*producer_node_index=*/0, kSyntheticProgressPipe,
+      IREE_SV("synthetic.pipe"), required_progress, observed_progress,
+      required_progress - observed_progress);
 }
 
 TEST_F(LowPacketHazardPlanTest, RecordsResidualActionsWithPacketIdentity) {
@@ -305,316 +277,6 @@ TEST_F(LowPacketHazardPlanTest, RecordsResidualActionsWithPacketIdentity) {
   EXPECT_EQ(record.residual_progress, 2u);
 }
 
-TEST_F(LowPacketHazardPlanTest,
-       EmitsAllocatorStorageReleaseActionsWithObservedProgress) {
-  const loom_low_packet_progress_provider_t progress_provider = {
-      .user_data = {},
-      .event_count = 1,
-      .query = SyntheticProgressQuery,
-      .class_name = SyntheticProgressClassName,
-  };
-  loom_low_packet_progress_table_t progress = {};
-  IREE_ASSERT_OK(
-      loom_low_packet_progress_build(&state_.schedule, &state_.allocation,
-                                     &progress_provider, &arena_, &progress));
-
-  const loom_low_storage_lease_record_t storage_leases[1] = {
-      {
-          .packet_index = 0,
-          .node_index = 0,
-          .block_index = 0,
-          .scheduled_ordinal = 0,
-          .kind = {},
-          .attachment = {},
-          .attachment_index = {},
-          .unit_offset = {},
-          .unit_count = {},
-          .release_scope = {},
-          .release_class_id = kSyntheticProgressPipe,
-          .release_group_id = LOOM_LOW_STORAGE_LEASE_RELEASE_GROUP_DEFAULT,
-          .release_class_name = IREE_SV("synthetic.pipe"),
-          .release_action_id = kSyntheticHazardActionReleaseStorage,
-          .release_action_name = IREE_SV("synthetic.release-storage"),
-          .release_reason_id = kSyntheticHazardStorageRelease,
-          .release_reason_name = IREE_SV("synthetic.storage-release"),
-      },
-  };
-  loom_low_storage_release_action_t storage_release_actions[1] = {
-      {
-          .insertion_packet_index = 2,
-          .insertion_node_index = 2,
-          .block_index = 0,
-          .scheduled_ordinal = 2,
-          .release_class_id = kSyntheticProgressPipe,
-          .release_class_name = IREE_SV("synthetic.pipe"),
-          .release_action_id = kSyntheticHazardActionReleaseStorage,
-          .next_same_insertion_node_action_index =
-              LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE,
-          .release_action_name = IREE_SV("synthetic.release-storage"),
-          .release_reason_id = kSyntheticHazardStorageRelease,
-          .release_reason_name = IREE_SV("synthetic.storage-release"),
-          .required_progress = 3,
-          .lease_record_index = 0,
-      },
-  };
-  state_.allocation.storage_leases = {
-      .schedule = &state_.schedule,
-      .records = storage_leases,
-      .record_count = IREE_ARRAYSIZE(storage_leases),
-  };
-  SetStorageReleaseActions(storage_release_actions,
-                           IREE_ARRAYSIZE(storage_release_actions));
-
-  const loom_low_packet_hazard_plan_provider_t hazard_provider = {
-      .user_data = {},
-      .event_count = 0,
-      .query = EmptyResidualHazardQuery,
-  };
-  loom_low_packet_hazard_plan_t plan = {};
-  IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
-      &state_.schedule, &state_.allocation, &progress, &hazard_provider,
-      &arena_, &plan));
-
-  ASSERT_EQ(plan.record_count, 1u);
-  const loom_low_packet_hazard_plan_record_t& record = plan.records[0];
-  EXPECT_EQ(record.kind, LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION);
-  EXPECT_EQ(record.action_id, kSyntheticHazardActionReleaseStorage);
-  EXPECT_TRUE(iree_string_view_equal(record.action_name,
-                                     IREE_SV("synthetic.release-storage")));
-  EXPECT_EQ(record.reason_id, kSyntheticHazardStorageRelease);
-  EXPECT_TRUE(iree_string_view_equal(record.reason_name,
-                                     IREE_SV("synthetic.storage-release")));
-  EXPECT_EQ(record.producer_node_index, 0u);
-  EXPECT_EQ(record.producer_packet_index, 0u);
-  EXPECT_EQ(record.consumer_node_index, 2u);
-  EXPECT_EQ(record.insertion_packet_index, 2u);
-  EXPECT_EQ(record.progress_class_id, kSyntheticProgressPipe);
-  EXPECT_EQ(record.required_progress, 3u);
-  EXPECT_EQ(record.observed_progress, 1u);
-  EXPECT_EQ(record.residual_progress, 2u);
-}
-
-TEST_F(LowPacketHazardPlanTest, SatisfiedStorageReleaseRetainsNoPlanStorage) {
-  const loom_low_packet_progress_provider_t progress_provider = {
-      .user_data = {},
-      .event_count = 1,
-      .query = SyntheticProgressQuery,
-      .class_name = SyntheticProgressClassName,
-  };
-  loom_low_packet_progress_table_t progress = {};
-  IREE_ASSERT_OK(
-      loom_low_packet_progress_build(&state_.schedule, &state_.allocation,
-                                     &progress_provider, &arena_, &progress));
-
-  const loom_low_storage_lease_record_t storage_leases[1] = {
-      {
-          .packet_index = 0,
-          .node_index = 0,
-          .block_index = 0,
-          .scheduled_ordinal = 0,
-          .kind = {},
-          .attachment = {},
-          .attachment_index = {},
-          .unit_offset = {},
-          .unit_count = {},
-          .release_scope = {},
-          .release_class_id = kSyntheticProgressPipe,
-          .release_group_id = LOOM_LOW_STORAGE_LEASE_RELEASE_GROUP_DEFAULT,
-          .release_class_name = IREE_SV("synthetic.pipe"),
-          .release_action_id = kSyntheticHazardActionReleaseStorage,
-          .release_action_name = IREE_SV("synthetic.release-storage"),
-          .release_reason_id = kSyntheticHazardStorageRelease,
-          .release_reason_name = IREE_SV("synthetic.storage-release"),
-      },
-  };
-  loom_low_storage_release_action_t storage_release_actions[1] = {
-      {
-          .insertion_packet_index = 2,
-          .insertion_node_index = 2,
-          .block_index = 0,
-          .scheduled_ordinal = 2,
-          .release_class_id = kSyntheticProgressPipe,
-          .release_class_name = IREE_SV("synthetic.pipe"),
-          .release_action_id = kSyntheticHazardActionReleaseStorage,
-          .next_same_insertion_node_action_index =
-              LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE,
-          .release_action_name = IREE_SV("synthetic.release-storage"),
-          .release_reason_id = kSyntheticHazardStorageRelease,
-          .release_reason_name = IREE_SV("synthetic.storage-release"),
-          .required_progress = 1,
-          .lease_record_index = 0,
-      },
-  };
-  state_.allocation.storage_leases = {
-      .schedule = &state_.schedule,
-      .records = storage_leases,
-      .record_count = IREE_ARRAYSIZE(storage_leases),
-  };
-  SetStorageReleaseActions(storage_release_actions,
-                           IREE_ARRAYSIZE(storage_release_actions));
-
-  const loom_low_packet_hazard_plan_provider_t hazard_provider = {
-      .user_data = {},
-      .event_count = 0,
-      .query = EmptyResidualHazardQuery,
-  };
-  const iree_host_size_t retained_used_bytes_before =
-      arena_.used_allocation_size;
-  const iree_host_size_t retained_owned_bytes_before =
-      arena_.total_allocation_size;
-  loom_low_packet_hazard_plan_t plan = {};
-  IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
-      &state_.schedule, &state_.allocation, &progress, &hazard_provider,
-      &arena_, &plan));
-
-  EXPECT_EQ(plan.record_count, 0u);
-  EXPECT_EQ(plan.records, nullptr);
-  EXPECT_EQ(arena_.used_allocation_size, retained_used_bytes_before);
-  EXPECT_EQ(arena_.total_allocation_size, retained_owned_bytes_before);
-}
-
-TEST_F(LowPacketHazardPlanTest,
-       PreservesStorageReleaseRowsWhenRangeIndexAmortizes) {
-  const loom_low_packet_progress_provider_t progress_provider = {
-      .user_data = {},
-      .event_count = 1,
-      .query = SyntheticProgressQuery,
-      .class_name = SyntheticProgressClassName,
-  };
-  loom_low_packet_progress_table_t progress = {};
-  IREE_ASSERT_OK(
-      loom_low_packet_progress_build(&state_.schedule, &state_.allocation,
-                                     &progress_provider, &arena_, &progress));
-
-  const loom_low_storage_lease_record_t storage_leases[1] = {
-      {
-          .packet_index = 0,
-          .node_index = 0,
-          .block_index = 0,
-          .scheduled_ordinal = 0,
-          .kind = {},
-          .attachment = {},
-          .attachment_index = {},
-          .unit_offset = {},
-          .unit_count = {},
-          .release_scope = {},
-          .release_class_id = kSyntheticProgressPipe,
-          .release_group_id = LOOM_LOW_STORAGE_LEASE_RELEASE_GROUP_DEFAULT,
-          .release_class_name = IREE_SV("synthetic.pipe"),
-          .release_action_id = kSyntheticHazardActionReleaseStorage,
-          .release_action_name = IREE_SV("synthetic.release-storage"),
-          .release_reason_id = kSyntheticHazardStorageRelease,
-          .release_reason_name = IREE_SV("synthetic.storage-release"),
-      },
-  };
-  loom_low_storage_release_action_t storage_release_actions[6] = {};
-  for (uint32_t i = 0; i < IREE_ARRAYSIZE(storage_release_actions); ++i) {
-    storage_release_actions[i] = {
-        .insertion_packet_index = 2,
-        .insertion_node_index = 2,
-        .block_index = 0,
-        .scheduled_ordinal = 2,
-        .release_class_id = kSyntheticProgressPipe,
-        .release_class_name = IREE_SV("synthetic.pipe"),
-        .release_action_id = kSyntheticHazardActionReleaseStorage,
-        .next_same_insertion_node_action_index =
-            LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE,
-        .release_action_name = IREE_SV("synthetic.release-storage"),
-        .release_reason_id = kSyntheticHazardStorageRelease,
-        .release_reason_name = IREE_SV("synthetic.storage-release"),
-        .required_progress = i + 2,
-        .lease_record_index = 0,
-    };
-  }
-  state_.allocation.storage_leases = {
-      .schedule = &state_.schedule,
-      .records = storage_leases,
-      .record_count = IREE_ARRAYSIZE(storage_leases),
-  };
-  SetStorageReleaseActions(storage_release_actions,
-                           IREE_ARRAYSIZE(storage_release_actions));
-
-  const loom_low_packet_hazard_plan_provider_t hazard_provider = {
-      .user_data = {},
-      .event_count = 0,
-      .query = EmptyResidualHazardQuery,
-  };
-  loom_low_packet_hazard_plan_t plan = {};
-  IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
-      &state_.schedule, &state_.allocation, &progress, &hazard_provider,
-      &arena_, &plan));
-
-  ASSERT_EQ(plan.record_count, IREE_ARRAYSIZE(storage_release_actions));
-  for (uint32_t i = 0; i < plan.record_count; ++i) {
-    EXPECT_EQ(plan.records[i].consumer_node_index, 2u);
-    EXPECT_EQ(plan.records[i].insertion_packet_index, 2u);
-    EXPECT_EQ(plan.records[i].required_progress, i + 2);
-    EXPECT_EQ(plan.records[i].observed_progress, 1u);
-    EXPECT_EQ(plan.records[i].residual_progress, i + 1);
-  }
-}
-
-TEST_F(LowPacketHazardPlanTest, RejectsCombinedEventCountOverflow) {
-  const loom_low_storage_lease_record_t storage_leases[1] = {
-      {
-          .packet_index = 0,
-          .node_index = 0,
-          .block_index = 0,
-          .scheduled_ordinal = 0,
-          .kind = {},
-          .attachment = {},
-          .attachment_index = {},
-          .unit_offset = {},
-          .unit_count = {},
-          .release_scope = {},
-          .release_class_id = kSyntheticProgressPipe,
-          .release_group_id = LOOM_LOW_STORAGE_LEASE_RELEASE_GROUP_DEFAULT,
-          .release_class_name = IREE_SV("synthetic.pipe"),
-          .release_action_id = kSyntheticHazardActionReleaseStorage,
-          .release_action_name = IREE_SV("synthetic.release-storage"),
-          .release_reason_id = kSyntheticHazardStorageRelease,
-          .release_reason_name = IREE_SV("synthetic.storage-release"),
-      },
-  };
-  loom_low_storage_release_action_t storage_release_actions[1] = {
-      {
-          .insertion_packet_index = 2,
-          .insertion_node_index = 2,
-          .block_index = 0,
-          .scheduled_ordinal = 2,
-          .release_class_id = kSyntheticProgressPipe,
-          .release_class_name = IREE_SV("synthetic.pipe"),
-          .release_action_id = kSyntheticHazardActionReleaseStorage,
-          .next_same_insertion_node_action_index =
-              LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE,
-          .release_action_name = IREE_SV("synthetic.release-storage"),
-          .release_reason_id = kSyntheticHazardStorageRelease,
-          .release_reason_name = IREE_SV("synthetic.storage-release"),
-          .required_progress = 1,
-          .lease_record_index = 0,
-      },
-  };
-  state_.allocation.storage_leases = {
-      .schedule = &state_.schedule,
-      .records = storage_leases,
-      .record_count = IREE_ARRAYSIZE(storage_leases),
-  };
-  SetStorageReleaseActions(storage_release_actions,
-                           IREE_ARRAYSIZE(storage_release_actions));
-
-  const loom_low_packet_hazard_plan_provider_t hazard_provider = {
-      .user_data = {},
-      .event_count = IREE_HOST_SIZE_MAX,
-      .query = EmptyResidualHazardQuery,
-  };
-  loom_low_packet_hazard_plan_t plan = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_RESOURCE_EXHAUSTED,
-      loom_low_packet_hazard_plan_build(&state_.schedule, &state_.allocation,
-                                        /*progress=*/nullptr, &hazard_provider,
-                                        &arena_, &plan));
-}
-
 void SyntheticAggregateResidualHazardQuery(
     void* user_data, const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
@@ -637,12 +299,12 @@ void SyntheticAggregateResidualHazardQuery(
     }
   }
   const uint32_t required_progress = 3;
-  EmitHazardEvent(emit, emit_user_data,
-                  LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION,
-                  kSyntheticHazardLatency, IREE_SV("synthetic.latency"),
-                  LOOM_LOW_SCHEDULE_NODE_NONE, kSyntheticProgressPipe,
-                  IREE_SV("synthetic.pipe"), required_progress,
-                  observed_progress, required_progress - observed_progress);
+  EmitHazardEvent(
+      emit, emit_user_data, LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION,
+      kSyntheticHazardLatency, IREE_SV("synthetic.latency"), packet->node_index,
+      LOOM_LOW_SCHEDULE_NODE_NONE, kSyntheticProgressPipe,
+      IREE_SV("synthetic.pipe"), required_progress, observed_progress,
+      required_progress - observed_progress);
 }
 
 TEST_F(LowPacketHazardPlanTest,
@@ -701,8 +363,8 @@ void SyntheticScheduleOnlyDiagnosticQuery(
         emit, emit_user_data,
         LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_MISSING_TARGET_DATA,
         kSyntheticHazardMissingData, IREE_SV("synthetic.missing-data"),
-        LOOM_LOW_SCHEDULE_NODE_NONE, LOOM_LOW_PACKET_PROGRESS_CLASS_NONE,
-        iree_string_view_empty(), 0, 0, 0);
+        packet->node_index, LOOM_LOW_SCHEDULE_NODE_NONE,
+        LOOM_LOW_PACKET_PROGRESS_CLASS_NONE, iree_string_view_empty(), 0, 0, 0);
     return;
   }
   if (packet->node_index == 1 && allocation == NULL) {
@@ -710,16 +372,17 @@ void SyntheticScheduleOnlyDiagnosticQuery(
         emit, emit_user_data,
         LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_UNSUPPORTED_PRE_ALLOCATION,
         kSyntheticHazardRequiresAllocation,
-        IREE_SV("synthetic.requires-allocation"), LOOM_LOW_SCHEDULE_NODE_NONE,
-        LOOM_LOW_PACKET_PROGRESS_CLASS_NONE, iree_string_view_empty(), 0, 0, 0);
+        IREE_SV("synthetic.requires-allocation"), packet->node_index,
+        LOOM_LOW_SCHEDULE_NODE_NONE, LOOM_LOW_PACKET_PROGRESS_CLASS_NONE,
+        iree_string_view_empty(), 0, 0, 0);
     return;
   }
   if (packet->node_index == 2) {
     EmitHazardEvent(emit, emit_user_data,
                     LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_IMPOSSIBLE_SATISFACTION,
                     kSyntheticHazardImpossible, IREE_SV("synthetic.impossible"),
-                    /*producer_node_index=*/0, kSyntheticProgressPipe,
-                    IREE_SV("synthetic.pipe"), 4, 1, 3);
+                    packet->node_index, /*producer_node_index=*/0,
+                    kSyntheticProgressPipe, IREE_SV("synthetic.pipe"), 4, 1, 3);
   }
 }
 
@@ -804,8 +467,8 @@ void LoopCarriedProducerHazardQuery(
   EmitHazardEvent(emit, emit_user_data,
                   LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION,
                   kSyntheticHazardLatency, IREE_SV("synthetic.latency"),
-                  /*producer_node_index=*/2, kSyntheticProgressPipe,
-                  IREE_SV("synthetic.pipe"), 3, 1, 2);
+                  packet->node_index, /*producer_node_index=*/2,
+                  kSyntheticProgressPipe, IREE_SV("synthetic.pipe"), 3, 1, 2);
 }
 
 TEST_F(LowPacketHazardPlanTest, RecordsLoopCarriedProducerAfterInsertion) {

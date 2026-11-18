@@ -51,15 +51,9 @@ TEST_F(AmdgpuWaitActionsTest, FinalSequenceSurvivesTransientSegments) {
   iree_host_size_t expected_hazard_count = 0;
   for (uint32_t i = 0; i < kActionCount; ++i) {
     const bool is_planned = i % 3 == 0;
-    const bool is_storage_release = i % 5 == 0;
     const loom_amdgpu_wait_plan_action_t action = {
         /*kind=*/is_planned ? LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED
                             : LOOM_AMDGPU_WAIT_PLAN_ACTION_EXPLICIT,
-        /*flags=*/
-        static_cast<loom_amdgpu_wait_plan_action_flags_t>(
-            is_storage_release
-                ? LOOM_AMDGPU_WAIT_PLAN_ACTION_FLAG_STORAGE_RELEASE
-                : 0),
         /*reason=*/LOOM_AMDGPU_WAIT_PLAN_REASON_SSA_USE,
         /*counter_id=*/LOOM_AMDGPU_WAIT_COUNTER_VMEM_LOAD,
         /*target_count=*/static_cast<uint16_t>(i),
@@ -70,7 +64,7 @@ TEST_F(AmdgpuWaitActionsTest, FinalSequenceSurvivesTransientSegments) {
         /*consumer_node=*/i + 2,
         /*outstanding_before=*/i + 3,
     };
-    if (is_planned && !is_storage_release) {
+    if (is_planned) {
       ++expected_hazard_count;
     }
     IREE_ASSERT_OK(

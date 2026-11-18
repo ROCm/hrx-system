@@ -2336,6 +2336,7 @@ static void loom_amdgpu_wait_state_hazard_query(
         .reason_id = (uint16_t)wait_state->reason,
         .reason_name = loom_amdgpu_wait_state_reason_name(wait_state->reason),
         .producer_node_index = wait_state->producer_node,
+        .consumer_node_index = wait_state->consumer_node,
         .progress_class_id = progress_class_id,
         .progress_class_name =
             loom_amdgpu_wait_state_progress_class_name(progress_class_id),

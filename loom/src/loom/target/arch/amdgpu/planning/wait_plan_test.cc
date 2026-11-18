@@ -820,6 +820,9 @@ TEST_P(AmdgpuResultReuseWaitTest, ReplacementRetiresTheWholePendingLease) {
   allocation_.first_storage_release_action_by_node = release_indices;
   IREE_ASSERT_OK(BuildPlan());
   ASSERT_EQ(plan_.action_count, test_case.requires_wait ? 1u : 0u);
+  // The target can release an ordered full-width replacement without a
+  // packet. Only a wait actually required by this target belongs in the report.
+  ASSERT_EQ(plan_.hazard_plan.record_count, plan_.action_count);
   if (test_case.requires_wait) {
     const auto& action = plan_.actions[0];
     EXPECT_EQ(action.node_index, 1u);

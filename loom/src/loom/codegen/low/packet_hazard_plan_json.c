@@ -210,8 +210,10 @@ iree_status_t loom_low_packet_hazard_plan_write_json_array(
     IREE_RETURN_IF_ERROR(loom_low_packet_hazard_plan_write_nullable_u32(
         record->producer_scheduled_ordinal,
         LOOM_LOW_PACKET_HAZARD_PLAN_ORDINAL_NONE, stream));
-    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-        &object, IREE_SV("consumer_node"), record->consumer_node_index));
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(&object, IREE_SV("consumer_node")));
+    IREE_RETURN_IF_ERROR(loom_low_packet_hazard_plan_write_nullable_u32(
+        record->consumer_node_index, LOOM_LOW_SCHEDULE_NODE_NONE, stream));
     IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
         &object, IREE_SV("insertion_packet"), record->insertion_packet_index));
     IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(

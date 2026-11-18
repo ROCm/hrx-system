@@ -51,13 +51,6 @@ typedef struct loom_amdgpu_wait_action_publication_t {
   iree_host_size_t next_hazard_packet_index;
 } loom_amdgpu_wait_action_publication_t;
 
-static bool loom_amdgpu_wait_action_is_residual_hazard(
-    const loom_amdgpu_wait_plan_action_t* action) {
-  return action->kind == LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED &&
-         !iree_any_bit_set(action->flags,
-                           LOOM_AMDGPU_WAIT_PLAN_ACTION_FLAG_STORAGE_RELEASE);
-}
-
 void loom_amdgpu_wait_actions_initialize(loom_amdgpu_wait_actions_t* actions) {
   *actions = (loom_amdgpu_wait_actions_t){0};
   loom_segmented_storage_initialize(
@@ -81,7 +74,7 @@ iree_status_t loom_amdgpu_wait_actions_append(
       (loom_amdgpu_wait_action_segment_t*)actions->tail;
   tail->actions[actions->tail_count++] = *action;
   ++actions->action_count;
-  if (loom_amdgpu_wait_action_is_residual_hazard(action)) {
+  if (action->kind == LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED) {
     ++actions->hazard_event_count;
   }
   return iree_ok_status();
@@ -216,6 +209,7 @@ static void loom_amdgpu_wait_actions_emit_hazard(
       .reason_id = (uint16_t)action->reason,
       .reason_name = loom_amdgpu_wait_plan_reason_name(action->reason),
       .producer_node_index = action->producer_node,
+      .consumer_node_index = action->consumer_node,
       .progress_class_id = action->counter_id,
       .progress_class_name =
           loom_amdgpu_wait_counter_progress_class_name(action->counter_id),
@@ -232,7 +226,7 @@ static void loom_amdgpu_wait_actions_advance_hazard(
   while (publication->hazard_action_cursor < actions->action_count) {
     const loom_amdgpu_wait_plan_action_t* action =
         &actions->actions[publication->hazard_action_cursor];
-    if (loom_amdgpu_wait_action_is_residual_hazard(action)) {
+    if (action->kind == LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED) {
       const loom_low_schedule_block_t* block =
           &publication->schedule->blocks[action->block_index];
       publication->next_hazard_packet_index =

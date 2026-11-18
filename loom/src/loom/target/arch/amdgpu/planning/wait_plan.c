@@ -1693,7 +1693,6 @@ static void loom_amdgpu_wait_plan_note_vmem_order(
 static iree_status_t loom_amdgpu_wait_plan_wait_counter_at(
     loom_amdgpu_wait_plan_builder_t* builder,
     loom_amdgpu_wait_plan_action_kind_t kind,
-    loom_amdgpu_wait_plan_action_flags_t flags,
     loom_amdgpu_wait_plan_reason_t reason, uint32_t insertion_node,
     uint32_t producer_node, uint32_t consumer_node, uint16_t counter_id,
     uint16_t target_count) {
@@ -1711,7 +1710,6 @@ static iree_status_t loom_amdgpu_wait_plan_wait_counter_at(
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_append_action(
       builder, (loom_amdgpu_wait_plan_action_t){
                    .kind = kind,
-                   .flags = flags,
                    .reason = reason,
                    .counter_id = counter_id,
                    .target_count = target_count,
@@ -1746,7 +1744,6 @@ static iree_status_t loom_amdgpu_wait_plan_wait_counter_at(
 static iree_status_t loom_amdgpu_wait_plan_wait_counter(
     loom_amdgpu_wait_plan_builder_t* builder,
     loom_amdgpu_wait_plan_action_kind_t kind,
-    loom_amdgpu_wait_plan_action_flags_t flags,
     loom_amdgpu_wait_plan_reason_t reason, uint32_t node_index,
     uint32_t producer_node, uint16_t counter_id, uint16_t target_count) {
   const uint32_t consumer_node =
@@ -1754,7 +1751,7 @@ static iree_status_t loom_amdgpu_wait_plan_wait_counter(
           ? node_index
           : LOOM_LOW_SCHEDULE_NODE_NONE;
   return loom_amdgpu_wait_plan_wait_counter_at(
-      builder, kind, flags, reason, node_index, producer_node, consumer_node,
+      builder, kind, reason, node_index, producer_node, consumer_node,
       counter_id, target_count);
 }
 
@@ -1763,9 +1760,9 @@ static iree_status_t loom_amdgpu_wait_plan_drain_counter(
     loom_amdgpu_wait_plan_action_kind_t kind,
     loom_amdgpu_wait_plan_reason_t reason, uint32_t node_index,
     uint32_t producer_node, uint16_t counter_id) {
-  return loom_amdgpu_wait_plan_wait_counter(
-      builder, kind, /*flags=*/0, reason, node_index, producer_node, counter_id,
-      /*target_count=*/0);
+  return loom_amdgpu_wait_plan_wait_counter(builder, kind, reason, node_index,
+                                            producer_node, counter_id,
+                                            /*target_count=*/0);
 }
 
 static iree_status_t loom_amdgpu_wait_plan_drain_mask(
@@ -1936,8 +1933,8 @@ static iree_status_t loom_amdgpu_wait_plan_handle_loop_entry_dependencies(
             ? LOOM_AMDGPU_WAIT_PLAN_REASON_LOOP_ENTRY_DERIVED_SSA_USE
             : LOOM_AMDGPU_WAIT_PLAN_REASON_LOOP_ENTRY_CONSERVATIVE_SSA_USE;
     IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_wait_counter_at(
-        builder, LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED, /*flags=*/0, reason,
-        node_index, strictest_producer, strictest_consumer, counter_id,
+        builder, LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED, reason, node_index,
+        strictest_producer, strictest_consumer, counter_id,
         strictest_target_count));
   }
   return iree_ok_status();
@@ -2061,27 +2058,6 @@ static bool loom_amdgpu_wait_plan_storage_release_is_satisfied(
              builder, lease_record->node_index, counter_mask) ||
          !loom_amdgpu_wait_frontier_storage_lease_is_active(
              &builder->frontier, action->lease_record_index);
-}
-
-static loom_amdgpu_wait_plan_action_flags_t
-loom_amdgpu_wait_plan_storage_release_action_flags(
-    const loom_amdgpu_wait_plan_builder_t* builder,
-    const loom_low_storage_release_action_t* action) {
-  const loom_low_allocation_storage_lease_t* lease =
-      &builder->allocation->storage_lease_instances[action->lease_record_index];
-  if (lease->release_action_index ==
-      LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE) {
-    return 0;
-  }
-  const loom_low_storage_release_action_t* indexed_action =
-      &builder->allocation
-           ->storage_release_actions[lease->release_action_index];
-  // The allocator retains exactly one action per lease and rewrites it when an
-  // earlier physical conflict wins. A matching insertion point is therefore
-  // the same action that the generic packet-hazard builder will report.
-  return indexed_action->insertion_node_index == action->insertion_node_index
-             ? LOOM_AMDGPU_WAIT_PLAN_ACTION_FLAG_STORAGE_RELEASE
-             : 0;
 }
 
 static loom_amdgpu_wait_xcnt_group_t loom_amdgpu_wait_plan_node_xcnt_group(
@@ -2216,9 +2192,8 @@ static iree_status_t loom_amdgpu_wait_plan_handle_storage_release_action(
     return iree_ok_status();
   }
   return loom_amdgpu_wait_plan_wait_counter(
-      builder, LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED,
-      loom_amdgpu_wait_plan_storage_release_action_flags(builder, action),
-      reason, action->insertion_node_index, lease_record->node_index,
+      builder, LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED, reason,
+      action->insertion_node_index, lease_record->node_index,
       action->release_class_id, target_count);
 }
 
@@ -2377,9 +2352,8 @@ static iree_status_t loom_amdgpu_wait_plan_handle_physical_write_range(
       // Other incoming counts remain path-dependent. Full completion protects
       // the concrete lease on every predecessor path.
       IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_wait_counter(
-          builder, LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED,
-          loom_amdgpu_wait_plan_storage_release_action_flags(builder, &action),
-          reason, node_index, record->node_index, record->release_class_id,
+          builder, LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED, reason, node_index,
+          record->node_index, record->release_class_id,
           /*target_count=*/0));
       continue;
     }
@@ -2588,9 +2562,17 @@ static iree_status_t loom_amdgpu_wait_plan_handle_consumer(
   }
   for (uint32_t link_index =
            builder->first_dependency_link_by_consumer[node_index];
-       link_index != LOOM_LOW_SCHEDULE_NODE_NONE;) {
+       link_index != LOOM_LOW_SCHEDULE_NODE_NONE;
+       link_index = builder->dependency_links[link_index].next_dependency) {
     const loom_amdgpu_wait_dependency_t* link =
         &builder->dependency_links[link_index];
+    const loom_amdgpu_wait_plan_reason_t dependency_reason =
+        (loom_amdgpu_wait_plan_reason_t)link->reason_id;
+    // Storage links participate in loop completion analysis. The physical
+    // write checks below own their execution, including implicit releases.
+    if (loom_amdgpu_wait_plan_reason_is_storage_release(dependency_reason)) {
+      continue;
+    }
     for (uint32_t slot = 0; slot < LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT;
          ++slot) {
       const uint32_t counter_mask =
@@ -2606,8 +2588,7 @@ static iree_status_t loom_amdgpu_wait_plan_handle_consumer(
           builder->schedule->nodes[link->producer_node].scheduled_ordinal <
           builder->schedule->nodes[node_index].scheduled_ordinal;
       uint16_t target_count = 0;
-      loom_amdgpu_wait_plan_reason_t reason =
-          (loom_amdgpu_wait_plan_reason_t)link->reason_id;
+      loom_amdgpu_wait_plan_reason_t reason = dependency_reason;
       if (producer_block == consumer_block && producer_precedes_consumer) {
         // Epochs are block-local because outstanding counts reset at block
         // entry. Within one block, a newer epoch or drained producer marker
@@ -2705,7 +2686,6 @@ static iree_status_t loom_amdgpu_wait_plan_handle_consumer(
         target_counts[slot] = target_count;
       }
     }
-    link_index = link->next_dependency;
   }
 
   for (uint32_t slot = 0; slot < LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT; ++slot) {
@@ -2714,8 +2694,8 @@ static iree_status_t loom_amdgpu_wait_plan_handle_consumer(
       continue;
     }
     IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_wait_counter(
-        builder, LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED, /*flags=*/0,
-        active_reasons[slot], node_index, active_producers[slot],
+        builder, LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED, active_reasons[slot],
+        node_index, active_producers[slot],
         loom_amdgpu_wait_counter_id_from_slot(slot), target_counts[slot]));
   }
   return iree_ok_status();
@@ -3209,6 +3189,11 @@ static iree_status_t loom_amdgpu_wait_plan_process_node(
   // whether those packet-local writes overlap retained source storage.
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_wait_plan_handle_xcnt_pre_dependencies(builder, node_index));
+  // The packet reads its inputs before writing its results. Credit completion
+  // required by those reads before charging a wait to register reuse. A write
+  // overlapping a different, still-pending request can require a tighter bound.
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_wait_plan_handle_consumer(builder, node_index));
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_handle_materialized_result_writes(
       builder, node_index));
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_handle_storage_release_actions(
@@ -3216,8 +3201,6 @@ static iree_status_t loom_amdgpu_wait_plan_process_node(
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_wait_plan_handle_cross_block_memory_dependencies(builder,
                                                                    node_index));
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_wait_plan_handle_consumer(builder, node_index));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_wait_plan_handle_trans_result_use(builder, node_index));
   IREE_RETURN_IF_ERROR(
