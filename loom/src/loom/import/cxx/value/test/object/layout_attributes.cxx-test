@@ -189,3 +189,14 @@ struct Bits { unsigned value : 3 __attribute__((packed(1))); };
 // INPUT: cxx
 // ERROR@+1: PARSE/036 "requested alignment is not a power of 2"
 struct Bits { unsigned value : 3 __attribute__((aligned(3))); };
+
+// ====
+// INPUT: cxx
+// WARNING@+1: PARSE/036 "'gnu::vector_size' ignored on a type specifier; place it on the declaration"
+typedef int [[gnu::vector_size(16)]] Word;
+// WARNING@+1: PARSE/036 "'gnu::vector_size' ignored on a type specifier; place it on the declaration"
+using Scalar = int [[gnu::vector_size(16)]];
+using Lanes [[gnu::vector_size(16)]] = int;
+static_assert(sizeof(Word) == 4);
+static_assert(__is_same(Scalar, Word));
+static_assert(sizeof(Lanes) == 16);

@@ -3339,7 +3339,10 @@ tail and ordinary pointer reinterpretation.
 
 GNU `vector_size` and Clang `ext_vector_type` forms admit arithmetic, bitwise
 operations, shifts, scalar splats, brace initialization, and indexed lane reads
-and writes.
+and writes. In `using Words [[gnu::vector_size(16)]] = unsigned;`, the
+attribute on the alias name makes `Words` a 16-byte vector. Writing
+`[[gnu::vector_size(16)]]` after `unsigned` leaves the alias scalar and
+produces a warning.
 Named brace initializers and typed temporaries such as `u32x16{1u, 2u}` use
 the same lane conversions and zero the remaining lanes. Typed temporaries can
 appear in returns, call arguments and larger expressions. Vector comparisons
