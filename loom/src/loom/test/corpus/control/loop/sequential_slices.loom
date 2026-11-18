@@ -1,3 +1,4 @@
+// Each device loop has an independent 64-iteration limit. Offset 2 records the raw input.
 // Separate loops keep an address slice live in a later loop region whose
 // program points precede the slice definition. Allocation must tolerate that
 // lifetime order and preserve every transfer left after optional coalescing.
@@ -49,9 +50,15 @@ kernel.def @sequential_loop_slices() {
     %record_width = scalar.constant 10 : i32
     %base = scalar.muli %lane, %record_width : i32
     %c0 = scalar.constant 0 : i32
+    %probe_limit = scalar.constant 64 : i32
+    %probe_slot_offset = scalar.constant 2 : i32
+    %probe_slot = scalar.addi %base, %probe_slot_offset : i32
+    func.call @sequential_loop_store(%output, %output_byte_offset, %probe_slot, %count) : (buffer, offset, i32, i32)
     %triangular_sum, %final_index = scf.while(%total = %c0 : i32, %index = %c0 : i32) -> (i32, i32) {
       %has_next = scalar.cmpi ult, %index, %count : i32
-      scf.condition %has_next, %total, %index : i1, i32, i32
+      %first_within_limit = scalar.cmpi ult, %index, %probe_limit : i32
+      %first_step = scalar.andi %has_next, %first_within_limit : i1
+      scf.condition %first_step, %total, %index : i1, i32, i32
     } do(%partial_sum: i32, %index: i32) {
       %c1 = scalar.constant 1 : i32
       %next_index = scalar.addi %index, %c1 : i32
@@ -67,7 +74,9 @@ kernel.def @sequential_loop_slices() {
     func.call @sequential_loop_store(%output, %output_byte_offset, %condition_slot, %c0) : (buffer, offset, i32, i32)
     %iterations = scf.while(%total = %c0 : i32) -> (i32) {
       %has_next = func.call @sequential_loop_condition(%output, %output_byte_offset, %condition_slot, %count) : (buffer, offset, i32, i32) -> (i1)
-      scf.condition %has_next, %total : i1, i32
+      %second_within_limit = scalar.cmpi ult, %total, %probe_limit : i32
+      %second_step = scalar.andi %has_next, %second_within_limit : i1
+      scf.condition %second_step, %total : i1, i32
     } do(%partial_count: i32) {
       %next_count = scalar.addi %partial_count, %c1 : i32
       scf.yield %next_count : i32
@@ -106,6 +115,9 @@ func.def @sequential_loop_slices_oracle(%counts: buffer, %output: buffer, %lengt
     %index_slot_delta = index.constant 1 : index
     %condition_slot_delta = index.constant 6 : index
     %body_slot_delta = index.constant 7 : index
+    %probe_slot_delta = index.constant 2 : index
+    %probe_slot = index.add %record, %probe_slot_delta : index
+    view.store %count, %output_view[%probe_slot] : i32, view<640xi32>
     %final_index_slot = index.add %record, %index_slot_delta : index
     %condition_slot = index.add %record, %condition_slot_delta : index
     %body_slot = index.add %record, %body_slot_delta : index

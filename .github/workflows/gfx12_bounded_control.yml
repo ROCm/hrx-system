@@ -1,0 +1,58 @@
+# Copyright 2026 The IREE Authors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+name: Gfx12 bounded loop control
+
+on:
+  push:
+    branches: [users/benvanik/gfx12-bounded-control]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  control:
+    runs-on: linux-gfx120X-gpu-rocm
+    timeout-minutes: 10
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --device /dev/dri --user 0:0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the Vulkan runtime
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends python3 libvulkan1 mesa-vulkan-drivers vulkan-tools
+          dpkg-query -W mesa-vulkan-drivers libvulkan1
+      - name: Select the allocated GPU
+        run: bash .github/scripts/check_vulkan_hardware_environment.sh
+      - name: Download the exact test package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          github-token: ${{ github.token }}
+          run-id: '44370230177'
+          artifact-ids: '14458663334'
+          path: ${{ runner.temp }}/original
+          merge-multiple: true
+      - name: Run the bounded scenario once
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          launcher=bazel-out/k8-fastbuild/bin/loom/target/spirv/test/corpus/control_loop_sequential_slices_test_execute_spirv_vulkan_hardware_test
+          tar -xOzf original/test-iree-vulkan.tar.gz "$launcher.runfiles/_main/loom/src/loom/tools/loom-test/loom-test" > loom-test
+          echo 'ca6b625448969b63019c6c0df99e85800ffbe9ec6db6973ca85f2eb062c55819  loom-test' | sha256sum -c
+          chmod 700 loom-test
+          timeout --kill-after=5s 30s ./loom-test "$GITHUB_WORKSPACE/loom/src/loom/test/corpus/control/loop/sequential_slices.loom" --device=vulkan --vulkan_validation_layers=false --execution-progress > trials.json
+          python3 -c 'import json; d=json.load(open("trials.json")); print({k:d[k] for k in ("trial_count","failed_trial_count","skipped_scenario_count")}); assert (d["trial_count"], d["failed_trial_count"], d["skipped_scenario_count"]) == (65,0,0)'
+      - name: Preserve per-trial results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bounded-loop-results
+          path: ${{ runner.temp }}/trials.json
+          if-no-files-found: warn
+          retention-days: 7
