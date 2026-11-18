@@ -380,6 +380,10 @@ class RocmEnvironmentTest(unittest.TestCase):
                 self.assertNotIn("capturing process state", result.stdout)
 
     def test_timeout_captures_native_wait_state_before_termination(self):
+        # Source checkouts in CI import build_tools from the working directory.
+        # Bazel supplies PYTHONPATH, which would mask a broken child invocation.
+        environment = os.environ.copy()
+        environment.pop("PYTHONPATH", None)
         result = subprocess.run(
             self.probe_command(
                 "import os, signal; print(f'NATIVE_PID={os.getpid()}', flush=True); "
@@ -389,6 +393,7 @@ class RocmEnvironmentTest(unittest.TestCase):
                 diagnostic_delay_seconds=1,
             ),
             capture_output=True,
+            env=environment,
             text=True,
             check=False,
         )
@@ -452,7 +457,8 @@ class RocmEnvironmentTest(unittest.TestCase):
             result = subprocess.run(
                 [
                     sys.executable,
-                    "build_tools/ci/rocm_environment.py",
+                    "-m",
+                    "build_tools.ci.rocm_environment",
                     "--diagnose",
                     str(os.getpid()),
                 ],
