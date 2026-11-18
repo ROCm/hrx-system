@@ -1,0 +1,20 @@
+func.def @write_value(%output: buffer) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %output[%origin] : buffer -> view<1xi32>
+  %value = scalar.constant 42 : i32
+  view.store %value, %view[0] : i32, view<1xi32>
+  func.return
+}
+
+check.scenario @capture {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %output = check.generate.fill value(0) : tensor<1xi32>
+    check.compare<@write_value>(%output) : (tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<1xi32>
+      check.file.write.npy value(%output) path("value.npy") mode(always) : tensor<1xi32>
+    }
+  }
+  check.return
+}
+
+check.benchmark<@capture> @capture_latency

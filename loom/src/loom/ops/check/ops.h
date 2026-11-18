@@ -286,7 +286,7 @@ iree_status_t loom_check_file_path_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_CHECK_FILE_WRITE_NPY: Writes a typed value to an NPY file according to a static output policy.
+// LOOM_OP_CHECK_FILE_WRITE_NPY: Writes a typed value to an NPY file according to a static output policy. In a check.compare region, writes occur after the comparison, under directories identifying the scenario, configuration, trial, and actual or expected realization. Captured values save both realizations; result bindings save their own realization.
 // check.file.write.npy value(%actual) path("outputs/layer_norm.actual.npy") mode(on_failure) : tensor<1024xf32>
 LOOM_DEFINE_ISA(loom_check_file_write_npy_isa, LOOM_OP_CHECK_FILE_WRITE_NPY)
 LOOM_DEFINE_OPERAND(loom_check_file_write_npy_value, 0)

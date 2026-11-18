@@ -463,7 +463,7 @@ func.decl @comparison_subject() -> (i32)
 check.scenario @computed_comparison {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     check.compare<@comparison_subject>() : () -> [actual(%actual: i32), expected(%expected: i32)] {
-      // ERROR@+1: STRUCTURE/031 "check.literal" "explicit check.expect.* operation" "check.compare body"
+      // ERROR@+1: STRUCTURE/031 "check.literal" "check.expect.* or check.file.write.npy operation" "check.compare body"
       %computed = check.literal value(1) : i32
       check.expect.equal actual(%actual) expected(%expected) : i32
     }
@@ -503,6 +503,22 @@ check.scenario @unobserved_result {
     // ERROR@+1: STRUCTURE/032 "check.compare" "result pair 0" "explicit paired check.expect operation"
     check.compare<@unobserved_subject>() : () -> [actual(%actual: i32), expected(%expected: i32)] {
       check.return
+    }
+  }
+  check.return
+}
+
+// ====
+
+// Capturing returned values does not replace their equivalence expectation.
+func.decl @captured_subject() -> (view<4xf32>)
+
+check.scenario @captured_unchecked_result {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    // ERROR@+1: STRUCTURE/032 "check.compare" "result pair 0" "explicit paired check.expect operation"
+    check.compare<@captured_subject>() : () -> [actual(%actual: view<4xf32>), expected(%expected: view<4xf32>)] {
+      check.file.write.npy value(%actual) path("result.npy") mode(always) : view<4xf32>
+      check.file.write.npy value(%expected) path("result.npy") mode(always) : view<4xf32>
     }
   }
   check.return

@@ -143,6 +143,59 @@ both sides because they are valuable workload buckets, but do not reproduce
 the threshold unless Loom's own compiler and physical evidence select it. A
 single specialized Loom family may cover the entire domain more smoothly.
 
+## Capture model values before storage reuse
+
+A model-level golden starts from values observed at the selected semantic
+boundary. GGUF supplies persistent parameter bytes; it does not supply the
+runtime activations, routing decisions, or KV-cache state needed to reproduce
+that boundary.
+
+GGML's scheduler evaluation callback has a selection phase (`ask=true`) and a
+collection phase (`ask=false`). The
+[callback contract](https://github.com/ggml-org/llama.cpp/blob/master/ggml/include/ggml-backend.h)
+and llama.cpp's
+[evaluation-callback example](https://github.com/ggml-org/llama.cpp/blob/master/examples/eval-callback/eval-callback.cpp)
+provide the interception point. Select the relevant tensors during the query
+phase, then copy or write their completed contents during collection, before
+the graph can reuse the storage. The upstream
+[debug callback](https://github.com/ggml-org/llama.cpp/blob/master/common/debug.cpp)
+illustrates backend readback, but its formatted value preview is not a complete
+binary fixture. Preserve the instrumentation patch at the pinned source
+revision used for the witness.
+
+An export records the tensor name and invocation ordinal, GGML type, `ne[]`,
+`nb[]`, byte extent, and content hash. Repeated names across layers, tokens, or
+graph executions need distinct identities. Export each selected observation
+as it becomes available; retaining pointers until graph completion can observe
+overwritten scratch, while retaining every full tensor unnecessarily grows host
+memory. For device buffers, the selected backend owns synchronization and
+readback; a tensor's data pointer alone does not establish host accessibility.
+
+Dense GGML tensors place `ne[0]` along the contiguous dimension. A row-major NPY
+view of the same dense bytes therefore lists dimensions in reverse order.
+Non-dense `nb[]` requires an explicit logical-value packing step or a raw storage
+fixture with retained strides. Packed quantization bytes remain their physical
+carrier, with their type and block metadata; interpreting them as ordinary
+floating-point elements changes the contract.
+
+The [capture-and-replay example](pytorch.md#run-the-capture-and-replay-example)
+demonstrates the maintained Loom side: typed `check.file.read.npy` operands,
+an authored scenario, exact or approximate acceptance, and completed target and
+oracle outputs written for inspection. Its PyTorch hook is specific to that
+reference; the NPY replay and scenario contracts also apply to values exported
+from a GGML callback. BF16 uses an explicit integer bit carrier and typed view,
+as described in [physical carriers](pytorch.md#preserve-bf16-and-other-physical-carriers-explicitly).
+
+The replay source states which values are inputs, outputs, mutable state, and
+aliases. It also includes dynamic control data such as positions and route
+indices. A serialized launch list or a compile report cannot infer those
+semantics. A captured kernel argument set is useful evidence for an agent
+authoring a benchmark, not an automatic description of the right workload.
+
+Instrumentation can serialize execution and add transfers. Collect the
+performance score separately from an uninstrumented reference with the same
+selection state and semantic boundary.
+
 ## Use numerical fixtures that exercise the representation
 
 Small correctness cases use distinct, finite, nonuniform values for every

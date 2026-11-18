@@ -1,0 +1,111 @@
+// Each trial mutates its own storage and returns a dynamically shaped subview.
+func.def @write_coordinate(%configuration: index, %trial: index, %storage: buffer) -> (%length: index, view<[%length]xi32>) {
+  %origin = index.constant 0 : offset
+  %values = buffer.view %storage[%origin] : buffer -> view<8xi32>
+  %begin = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %slice_begin = index.constant 2 : index
+  %length_count = index.constant 3 : index
+  %storage_length = index.constant 8 : index
+  %configuration_stride = index.constant 100 : index
+  %configuration_base = index.mul %configuration, %configuration_stride : index
+  %trial_base = index.add %configuration_base, %trial : index
+  scf.for %i = [%begin to %storage_length step %c1] {
+    %position = index.add %trial_base, %i : index
+    %value = index.cast %position : index to i32
+    view.store %value, %values[%i] : i32, view<8xi32>
+  }
+  %remainder = index.rem %trial, %length_count : index
+  %length = index.add %remainder, %c1 : index
+  %middle = view.subview %values[%slice_begin] : view<8xi32> -> view<[%length]xi32>
+  func.return %length, %middle : index, view<[%length]xi32>
+}
+
+// A capture campaign larger than an ordinary batch retains every coordinate.
+check.scenario public @coordinates configure[2](%configuration: index, %configuration_entropy: check.entropy) {
+  check.trial[65](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(-1) : tensor<8xi32>
+    %matrix = check.tensor.view %storage offset(4) : tensor<8xi32> -> tensor<2x3xi32>
+    check.compare<@write_coordinate>(%configuration, %trial, %storage) : (index, index, tensor<8xi32>) -> [actual(%actual_length: index, %actual: view<[%actual_length]xi32>), expected(%expected_length: index, %expected: view<[%expected_length]xi32>)] {
+      check.expect.equal actual(%actual_length) expected(%expected_length) : index
+      check.expect.bitwise actual(%actual) expected(%expected) : view<[%actual_length]xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<8xi32>
+      check.file.write.npy value(%storage) path("storage.npy") mode(always) : tensor<8xi32>
+      check.file.write.npy value(%matrix) path("nested/matrix.npy") mode(always) : tensor<2x3xi32>
+      check.file.write.npy value(%actual) path("result.npy") mode(always) : view<[%actual_length]xi32>
+      check.file.write.npy value(%expected) path("result.npy") mode(always) : view<[%expected_length]xi32>
+      check.file.write.npy value(%storage) path("failure.npy") : tensor<8xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(-1) : tensor<8xi32>
+    check.compare<@write_coordinate>(%configuration, %trial, %storage) : (index, index, tensor<8xi32>) -> [actual(%actual_length: index, %actual: view<[%actual_length]xi32>), expected(%expected_length: index, %expected: view<[%expected_length]xi32>)] {
+      check.expect.equal actual(%actual_length) expected(%expected_length) : index
+      check.expect.bitwise actual(%actual) expected(%expected) : view<[%actual_length]xi32>
+      check.file.write.npy value(%actual) path("result.npy") mode(always) : view<[%actual_length]xi32>
+    }
+  }
+  check.return
+}
+
+func.def @write_trial(%trial: index, %storage: buffer) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %storage[%origin] : buffer -> view<1xi32>
+  %value = index.cast %trial : index to i32
+  view.store %value, %view[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def @write_changed_trial(%trial: index, %storage: buffer) {
+  %c1 = index.constant 1 : index
+  %changed = index.constant 42 : index
+  %selected = index.cmp eq, %trial, %c1 : index
+  %value = scf.select %selected, %changed, %trial : index
+  func.call @write_trial(%value, %storage) : (index, buffer)
+  func.return
+}
+
+check.scenario public @failure {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(-1) : tensor<1xi32>
+    check.compare<@write_trial, @write_changed_trial>(%trial, %storage) : (index, tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<1xi32>
+      check.file.write.npy value(%storage) path("state.npy") : tensor<1xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @passing {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(-1) : tensor<1xi32>
+    check.compare<@write_trial>(%trial, %storage) : (index, tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<1xi32>
+      check.file.write.npy value(%storage) path("state.npy") : tensor<1xi32>
+    }
+  }
+  check.return
+}
+
+// Symbol spelling cannot create path components or collide through escaping.
+check.scenario public @a.b {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(-1) : tensor<1xi32>
+    check.compare<@write_trial>(%trial, %storage) : (index, tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<1xi32>
+      check.file.write.npy value(%storage) path("state.npy") mode(always) : tensor<1xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @a_2Eb {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(-1) : tensor<1xi32>
+    check.compare<@write_trial>(%trial, %storage) : (index, tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<1xi32>
+      check.file.write.npy value(%storage) path("state.npy") mode(always) : tensor<1xi32>
+    }
+  }
+  check.return
+}

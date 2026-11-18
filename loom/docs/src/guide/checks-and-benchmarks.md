@@ -257,11 +257,38 @@ check.scenario public @advance_sweep {
     %state = check.generate.iota offset(0.0) step(0.25) : tensor<64xf32>
     check.compare<@advance>(%state, %word) : (tensor<64xf32>, i64) -> () {
       check.expect.approximate actual(%state) expected(%state) atol(1.0e-6) rtol(1.0e-5) nan(same) : tensor<64xf32>, tensor<64xf32>
+      check.file.write.npy value(%state) path("state.npy") : tensor<64xf32>
     }
   }
   check.return
 }
 ```
+
+The write captures a failed trial's completed state from both executions.
+For trial 7, `--file-output-root=artifacts` produces:
+
+```text
+artifacts/scenario-advance_sweep/configuration-0/trial-0-7/actual/state.npy
+artifacts/scenario-advance_sweep/configuration-0/trial-0-7/expected/state.npy
+```
+
+`trial-0-7` identifies trial domain 0 and its ordinal 7. Configuration ordinals
+distinguish `configure[...]` realizations. The scenario component percent-encodes
+bytes other than lowercase ASCII letters, digits, `_`, and `-`, preserving
+distinct names on case-insensitive filesystems. A fresh output root separates
+campaigns; repeating a coordinate in the same root replaces its files.
+
+Writes in the comparison region observe values after both subjects complete
+and all expectations are evaluated. A captured value such as `%state` saves
+both realizations. An `actual(...)` or `expected(...)` result binding saves only
+its own side, including its runtime shape. Capture-enabled correctness checks
+execute one trial at a time and write each selected value directly to its file,
+without retaining completed trial payloads. Ordinary checks keep their normal
+batching. Benchmark captures occur only in the separate correctness phase,
+outside the timed repetitions.
+`mode(always)` saves passing trials too. Runtime execution errors that prevent
+completed observations do not produce a capture. Capturing a returned value
+does not replace its required paired expectation.
 
 Built-in `check.generate.*` operations cover compact synthetic data. An
 authored [`check.generate`](../reference/dialects/check/ops/generate.md) call

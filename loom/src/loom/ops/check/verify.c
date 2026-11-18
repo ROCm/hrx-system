@@ -791,12 +791,14 @@ static iree_status_t loom_check_verify_compare_body(
   loom_block_for_each_op(block, nested_op) {
     if (loom_check_expectation_classify(nested_op) !=
             LOOM_CHECK_EXPECTATION_NONE ||
+        loom_check_file_write_npy_isa(nested_op) ||
         loom_check_return_isa(nested_op)) {
       continue;
     }
     const loom_diagnostic_param_t params[] = {
         loom_param_string(loom_op_name(module, nested_op)),
-        loom_param_string(IREE_SV("an explicit check.expect.* operation")),
+        loom_param_string(
+            IREE_SV("a check.expect.* or check.file.write.npy operation")),
         loom_param_string(IREE_SV("a check.compare body")),
     };
     return loom_check_emit(emitter, nested_op, LOOM_ERR_STRUCTURE_031, params,

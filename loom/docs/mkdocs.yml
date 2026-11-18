@@ -96,6 +96,7 @@ nav:
           - Vulkan native-code inspection: workflows/oracles/radv.md
           - LLVM MC instruction encoding: workflows/oracles/llvm-mc.md
           - GGML and llama.cpp: workflows/oracles/ggml-llama-cpp.md
+          - PyTorch capture and replay: workflows/oracles/pytorch.md
   - Integration:
       - Integration map: integration/index.md
       - Construct importer output in Python: integration/python-importer.md

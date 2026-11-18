@@ -54,10 +54,23 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "output",
+    srcs = ["output.c"],
+    hdrs = ["output.h"],
+    deps = [
+        ":values",
+        "//loom/src/loom/tooling/testbench:api",
+        "//loom/src/loom/tooling/testbench:value_materializer",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "executor",
     srcs = ["executor.c"],
     hdrs = ["executor.h"],
     deps = [
+        ":output",
         ":values",
         "//loom/src/loom/tooling/execution:benchmark",
         "//loom/src/loom/tooling/testbench",

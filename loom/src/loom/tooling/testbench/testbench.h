@@ -285,6 +285,14 @@ typedef struct loom_testbench_value_source_plan_t {
   };
 } loom_testbench_value_source_plan_t;
 
+// Realizations observed by one authored file output. Cases have one actual
+// realization; captured scenario values exist independently on both sides.
+typedef uint8_t loom_testbench_file_write_realizations_t;
+enum loom_testbench_file_write_realization_bits_e {
+  LOOM_TESTBENCH_FILE_WRITE_ACTUAL = 1u << 0,
+  LOOM_TESTBENCH_FILE_WRITE_EXPECTED = 1u << 1,
+};
+
 typedef struct loom_testbench_file_write_plan_t {
   // Operation that declared the file output.
   const loom_op_t* op;
@@ -298,6 +306,8 @@ typedef struct loom_testbench_file_write_plan_t {
   iree_string_view_t path;
   // Static write policy. Absent IR spelling defaults to ON_FAILURE.
   loom_check_file_write_npy_mode_t mode;
+  // Scenario sides owning this value; case outputs use ACTUAL.
+  loom_testbench_file_write_realizations_t realizations;
 } loom_testbench_file_write_plan_t;
 
 // Canonical authored storage identity for a shaped SSA value.
@@ -476,6 +486,10 @@ typedef struct loom_testbench_scenario_action_plan_t {
   const loom_testbench_expectation_plan_t* expectations;
   // Number of entries in |expectations|.
   iree_host_size_t expectation_count;
+  // Authored outputs over completed target and oracle observations.
+  const loom_testbench_file_write_plan_t* file_writes;
+  // Number of entries in |file_writes|.
+  iree_host_size_t file_write_count;
   // True when an expectation consumes target device events.
   bool expects_device_events;
 } loom_testbench_scenario_action_plan_t;
@@ -668,6 +682,11 @@ bool loom_testbench_is_value_source_op(const loom_op_t* op);
 bool loom_testbench_plan_value_source(
     const loom_module_t* module, const loom_op_t* op,
     loom_testbench_value_source_plan_t* out_source);
+
+// Plans one authored file output, initially selecting the actual realization.
+bool loom_testbench_plan_file_write(
+    const loom_module_t* module, const loom_op_t* op,
+    loom_testbench_file_write_plan_t* out_file_write);
 
 // Returns true when |op| is an explicit check expectation.
 bool loom_testbench_is_expectation_op(const loom_op_t* op);

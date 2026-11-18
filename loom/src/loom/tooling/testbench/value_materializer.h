@@ -273,6 +273,14 @@ iree_status_t loom_testbench_materialize_case_sample(
     const loom_testbench_case_plan_t* case_plan,
     loom_testbench_case_sample_t sample, loom_testbench_value_table_t* table);
 
+// Writes one already-completed value to |path|, borrowing its storage only for
+// this call. Applies no output policy; the caller selects the observation and
+// destination before invoking this operation. Flush errors propagate to caller.
+iree_status_t loom_testbench_write_file(
+    const loom_testbench_value_materializer_options_t* options,
+    const loom_testbench_file_write_plan_t* file_write,
+    const loom_testbench_value_table_t* table, iree_string_view_t path);
+
 // Writes planned case file outputs. ON_FAILURE outputs are written only when
 // |case_failed| is true; ALWAYS outputs are written in both states.
 iree_status_t loom_testbench_write_case_files(

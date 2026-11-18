@@ -366,7 +366,7 @@ check_compare = Op(
     regions=[
         RegionDef(
             "comparison",
-            doc="Explicit expectations over target and oracle result values.",
+            doc="Explicit expectations and NPY outputs over completed target and oracle values. Outputs over captured values save both realizations; a result binding selects its own realization. Saving a result does not replace its paired expectation.",
             single_block=True,
             terminator="check.return",
         )
@@ -770,7 +770,7 @@ check_file_read_npy = Op(
 check_file_write_npy = Op(
     "check.file.write.npy",
     group=check_ops,
-    doc="Writes a typed value to an NPY file according to a static output policy.",
+    doc="Writes a typed value to an NPY file according to a static output policy. In a check.compare region, writes occur after the comparison, under directories identifying the scenario, configuration, trial, and actual or expected realization. Captured values save both realizations; result bindings save their own realization.",
     operands=[Operand("value", ANY)],
     attrs=[
         AttrDef("path", "string"),

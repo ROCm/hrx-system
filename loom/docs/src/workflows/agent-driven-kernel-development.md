@@ -51,6 +51,14 @@ optimized runtime supplies the performance reference. Agreement between two
 backends that share the same graph or quantization mistake is not an
 independent numerical proof.
 
+The [PyTorch capture workflow](oracles/pytorch.md) illustrates a path from
+selected module observations to NPY fixtures and authored Loom scenarios,
+including in-place inputs and BF16 carriers. The
+[GGML workflow](oracles/ggml-llama-cpp.md#capture-model-values-before-storage-reuse)
+locates the corresponding graph-evaluation boundary. Captures preserve observed
+values; the authored workload still defines aliasing, dynamic state, numerical
+acceptance, and the semantic cut being timed.
+
 Several workload buckets normally share the witness. Decode, small prefill,
 large prefill, non-multiple tails, and both sides of a routing or algorithm
 cliff expose different physical schedules. The first optimization bucket

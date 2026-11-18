@@ -26,6 +26,8 @@ typedef struct loom_testbench_scenario_plan_counts_t {
   iree_host_size_t recipe_step_count;
   // Number of expectations nested under check.compare actions.
   iree_host_size_t expectation_count;
+  // Number of file outputs nested under check.compare actions.
+  iree_host_size_t file_write_count;
   // Maximum number of structured issues scenario planning can emit.
   iree_host_size_t issue_capacity;
 } loom_testbench_scenario_plan_counts_t;
