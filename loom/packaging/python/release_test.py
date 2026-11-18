@@ -22,6 +22,7 @@ from release import (
     PROFILES,
     STANDALONE_TOOLS,
     ReleaseChannel,
+    advance_development_identity,
     checksum_document,
     inspect_standalone_archive,
     inspect_wheel,
@@ -185,6 +186,52 @@ class ReleaseTest(unittest.TestCase):
                         0,
                     )
                 self.assertEqual(output.getvalue(), channel.value + "\n")
+
+    def test_post_release_advances_matching_main_development_line(self):
+        identity = parse_identity(
+            {
+                "package-version": "1.2.3.dev0",
+                "model-catalog": "github:fixture/library@qualified-commit",
+            }
+        )
+        advanced = advance_development_identity(identity, "v1.2.3")
+        self.assertEqual(advanced.version, "1.2.4.dev0")
+        self.assertEqual(advanced.catalog, identity.catalog)
+
+    def test_post_release_preserves_an_explicitly_selected_future_line(self):
+        for version in ("1.2.4.dev0", "1.3.0.dev0", "2.0.0.dev0"):
+            with self.subTest(version=version):
+                identity = parse_identity(
+                    dict(self.identity.document(), **{"package-version": version})
+                )
+                self.assertEqual(
+                    advance_development_identity(identity, "v1.2.3"), identity
+                )
+
+    def test_post_release_rejects_ambiguous_or_regressed_main_identity(self):
+        for version, tag in (
+            ("1.2.2.dev0", "v1.2.3"),
+            ("1.2.3.dev1", "v1.2.3"),
+            ("1.2.3", "v1.2.3"),
+            ("1.2.3rc1.dev0", "v1.2.3"),
+            ("1.2.3.dev0", "v1.2.3rc1"),
+        ):
+            with self.subTest(version=version, tag=tag):
+                identity = parse_identity(
+                    dict(self.identity.document(), **{"package-version": version})
+                )
+                with self.assertRaises(ValueError):
+                    advance_development_identity(identity, tag)
+
+    def test_post_release_command_edits_a_matching_identity(self):
+        identity = parse_identity(
+            dict(self.identity.document(), **{"package-version": "1.2.3.dev0"})
+        )
+        self.version_file.write_text(json.dumps(identity.document()))
+        self.assertEqual(
+            self.command("advance-development", "--released-tag=v1.2.3"), 0
+        )
+        self.assertEqual(read_identity(self.version_file).version, "1.2.4.dev0")
 
     def test_release_requires_public_catalog(self):
         for catalog in (

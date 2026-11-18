@@ -191,3 +191,92 @@ jobs:
           packages-dir: pypi-assets
           attestations: true
           print-hash: true
+
+  advance_development:
+    name: Complete / Advance main development
+    needs: [identity, pypi]
+    if: needs.identity.outputs.release_channel == 'stable'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Prepare the next development identity
+        id: advance
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          identity=loom/packaging/python/version.json
+          python3 loom/packaging/python/release.py \
+            --identity="$identity" advance-development \
+            --released-tag="$RELEASE_TAG"
+          if git diff --quiet -- "$identity"; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          next_version=$(python3 -c \
+            'import json, sys; print(json.load(open(sys.argv[1]))["package-version"])' \
+            "$identity")
+          {
+            echo "changed=true"
+            echo "next_version=$next_version"
+            echo "branch=automation/loom-sdk-$RELEASE_TAG-post-release"
+          } >> "$GITHUB_OUTPUT"
+      - name: Open the post-release development pull request
+        if: steps.advance.outputs.changed == 'true'
+        env:
+          BRANCH: ${{ steps.advance.outputs.branch }}
+          GH_TOKEN: ${{ github.token }}
+          NEXT_VERSION: ${{ steps.advance.outputs.next_version }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          identity=loom/packaging/python/version.json
+          pull_request=$(gh pr list --repo "$GITHUB_REPOSITORY" --state all \
+            --head "$BRANCH" --json state,url \
+            --jq '.[0] | select(. != null) | [.state, .url] | @tsv')
+          if [[ -n "$pull_request" ]]; then
+            read -r state url <<< "$pull_request"
+            if [[ "$state" == OPEN ]]; then
+              echo "Post-release pull request already exists: $url"
+              exit 0
+            fi
+            echo "Reserved branch already has a closed pull request: $url" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null; then
+            git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+            changed_paths=$(git diff --name-only "origin/main...origin/$BRANCH")
+            if [[ "$changed_paths" != "$identity" ]] || \
+                ! cmp -s <(git show "origin/$BRANCH:$identity") "$identity"; then
+              echo "Reserved branch does not contain the expected identity-only change" >&2
+              exit 1
+            fi
+          else
+            next_release=${NEXT_VERSION%.dev0}
+            released_version=${RELEASE_TAG#v}
+            git switch -c "$BRANCH"
+            git config user.name "github-actions[bot]"
+            git config user.email \
+              "41898282+github-actions[bot]@users.noreply.github.com"
+            git add "$identity"
+            git commit -m \
+              "[Loom] Advance SDK development identity to $next_release" \
+              -m "Advance main beyond the published $released_version SDK.
+          Preserve the independently qualified model catalog."
+            git push origin "HEAD:refs/heads/$BRANCH"
+          fi
+          next_release=${NEXT_VERSION%.dev0}
+          released_version=${RELEASE_TAG#v}
+          body=$(printf '%s\n\n%s\n\n%s' \
+            "Advances the main-branch SDK identity to \`$NEXT_VERSION\` after the immutable $released_version release completed." \
+            "Post-release development artifacts therefore identify a new version instead of reusing published version metadata for different bytes." \
+            "The independently qualified model catalog remains unchanged. This draft neither selects a release source nor begins another publication.")
+          gh pr create --repo "$GITHUB_REPOSITORY" --draft --base main \
+            --head "$BRANCH" \
+            --title "[Loom] Advance SDK development identity to $next_release" \
+            --body "$body"

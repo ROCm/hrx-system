@@ -99,6 +99,15 @@ published version for different bytes. Its catalog remains an immutable commit
 and can advance independently as model changes qualify. A frozen release line
 replaces the development version with its first candidate version.
 
+After a stable release reaches PyPI, the release workflow compares that version
+with the current main-branch development identity. If main still carries the
+released `X.Y.Z.dev0` line, the workflow opens a draft pull request advancing it
+to `X.Y.(Z+1).dev0` while preserving main's catalog association. A main branch
+that already names a later patch, minor, or major line is left unchanged. The
+patch increment is a collision-free default rather than a decision about the
+next feature release; the release owner reviews that choice before merging the
+draft and approves its automation-created CI runs.
+
 The catalog supplies the default `loom-fetch --list` and picker contents.
 Several SDK versions may share a catalog reference when its models are qualified
 for those consumers. The identity checker validates the reference's syntax; it
@@ -189,6 +198,11 @@ normal GitHub release, and publishes its two Release wheels to PyPI. Promoting
 GitHub metadata or reusing candidate artifacts cannot substitute for the stable
 build: the stable version has its own library association, tag, wheel metadata,
 checksums, and attestations.
+
+Successful PyPI publication concludes by opening the main-branch development
+identity pull request described above. Prerelease publication never proposes a
+main-branch change. Retrying a stable publication reuses an open proposal, or
+does nothing once main has advanced, rather than opening duplicate pull requests.
 
 ## Publish the reviewed tag
 
