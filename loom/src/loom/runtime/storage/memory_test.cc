@@ -936,12 +936,21 @@ TEST_F(MemoryTest, WeightTailAndStateMappingsShareOnePhysicalParent) {
                                                       ranges, &footprint));
   EXPECT_EQ(footprint.total_bytes, initial_logical_bytes);
   EXPECT_EQ(footprint.missing_bytes, initial_logical_bytes);
+  loom_runtime_memory_commit_t prepared = {};
+  IREE_ASSERT_OK(loom_runtime_memory_pool_prepare_commit(
+      pool, IREE_ARRAYSIZE(ranges), ranges, &prepared));
+  const auto demand = prepared.demand;
+  EXPECT_EQ(demand.weight_bytes, bulk.mapping_size);
+  EXPECT_EQ(demand.packed_bytes, 2 * state.mapping_size);
+  EXPECT_EQ(demand.packed_count, 2u);
+  EXPECT_EQ(demand.dedicated_bytes, 0u);
+  EXPECT_EQ(loom_runtime_memory_demand_total(demand), initial_logical_bytes);
   deferred_backing->defer = true;
   loom_runtime_memory_admission_t commit_admission;
   loom_runtime_memory_operation_t* operation = nullptr;
-  IREE_ASSERT_OK(loom_runtime_memory_pool_commit_async(
-      pool, IREE_ARRAYSIZE(ranges), ranges, nullptr, 0, &commit_admission,
-      &operation));
+  IREE_ASSERT_OK(loom_runtime_memory_pool_commit_prepared_async(
+      pool, &prepared, {}, nullptr, 0, &commit_admission, &operation));
+  EXPECT_EQ(prepared.ranges, nullptr);
   ASSERT_EQ(commit_admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
   deferred_backing->WaitForAcquisition();
   EXPECT_EQ(statistics[0].pending_bytes, first_bytes);

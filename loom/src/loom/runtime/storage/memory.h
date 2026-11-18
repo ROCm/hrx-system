@@ -45,6 +45,9 @@ typedef struct loom_runtime_memory_demand_t {
 void loom_runtime_memory_demand_add(loom_runtime_memory_demand_t* demand,
                                     loom_runtime_memory_demand_t additional);
 
+// Logical bytes represented by this demand, excluding native source padding.
+uint64_t loom_runtime_memory_demand_total(loom_runtime_memory_demand_t demand);
+
 // Retains the mapping-source pool and copies the exact virtual-target scope.
 // The sealed group and selected transfer queue outlive this pool. Geometries
 // have been qualified by query_geometry for this source and scope. limit_bytes
@@ -349,16 +352,48 @@ iree_status_t loom_runtime_memory_pool_commit_async(
     uint64_t value, loom_runtime_memory_admission_t* out_admission,
     loom_runtime_memory_operation_t** out_operation);
 
-// Commits the same range union while admitting additional immediate demand
-// owned by the caller (such as parameters loaded after mutable-state growth).
-// The demand excludes these ranges and existing committed or pending backing.
-// Denial submits neither ranges nor additional demand. Success publishes range
-// ownership before returning; the caller commits additional demand in the same
-// serialized owner turn, before another admission can consume that headroom.
-// This checks the serving owner's ledger, not available device memory.
-iree_status_t loom_runtime_memory_pool_commit_with_demand_async(
+// One serialized commitment selection. The caller owns this stack record and
+// borrows validated ranges until submission or cancellation. Missing mappings
+// remain marked in their existing directories; no native operation or physical
+// capacity is allocated by preparation. A zero-initialized record is inactive.
+typedef struct loom_runtime_memory_commit_t {
+  // Borrowed range descriptors retained until this preparation is consumed.
+  const loom_runtime_memory_range_t* ranges;
+  // Prefix of borrowed descriptors containing selected mappings.
+  iree_host_size_t range_count;
+  // Exclusive last selected mapping index in the final descriptor.
+  iree_host_size_t last_mapping;
+  // Exact number of distinct selected missing mappings.
+  iree_host_size_t mapping_count;
+  // Exact additional backing, excluding all already accepted ownership.
+  loom_runtime_memory_demand_t demand;
+} loom_runtime_memory_commit_t;
+
+// Selects missing mappings and retains their count/demand for one admission.
+// Sparse directory growth can allocate. The caller joins prior operations on
+// these buffers and excludes another selection or backing edit until consuming
+// this preparation. Preparation, admission, and submission share one serialized
+// owner turn; the record cannot survive a yield. On failure it is cancelled.
+iree_status_t loom_runtime_memory_pool_prepare_commit(
     loom_runtime_memory_pool_t* pool, iree_host_size_t range_count,
     const loom_runtime_memory_range_t* ranges,
+    loom_runtime_memory_commit_t* out_commit);
+
+// Cancels the selection and clears the record without submitting native work.
+// Cancelling an inactive record succeeds. Shrinking temporary sparse-directory
+// storage may fail; all selection marks are cleared even on that failure.
+iree_status_t loom_runtime_memory_pool_cancel_commit(
+    loom_runtime_memory_commit_t* commit);
+
+// Consumes the selection and clears the record on every return. Admits its
+// retained demand together with the caller's immediate demand, then constructs
+// one exact native operation from the selected directory entries. Immediate
+// demand excludes the selected mappings and existing backing. Denial submits
+// neither. Accepted operations follow commit_async's retirement contract; a
+// non-NULL output must retire even when another part of admission fails. The
+// caller commits immediate demand before yielding this owner turn.
+iree_status_t loom_runtime_memory_pool_commit_prepared_async(
+    loom_runtime_memory_pool_t* pool, loom_runtime_memory_commit_t* commit,
     loom_runtime_memory_demand_t immediate, iree_hal_semaphore_t* readiness,
     uint64_t value, loom_runtime_memory_admission_t* out_admission,
     loom_runtime_memory_operation_t** out_operation);

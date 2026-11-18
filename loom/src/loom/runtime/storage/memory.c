@@ -265,8 +265,7 @@ void loom_runtime_memory_demand_add(loom_runtime_memory_demand_t* demand,
   demand->dedicated_cost += additional.dedicated_cost;
 }
 
-static uint64_t loom_runtime_memory_demand_total(
-    loom_runtime_memory_demand_t demand) {
+uint64_t loom_runtime_memory_demand_total(loom_runtime_memory_demand_t demand) {
   return demand.packed_bytes + demand.weight_bytes + demand.dedicated_bytes;
 }
 
@@ -740,7 +739,8 @@ iree_status_t loom_runtime_memory_ranges_footprint(
           loom_runtime_backing_directory_find(&buffer->backing, i);
       if (entry && entry->counted) {
         entry->counted = false;
-        if (!entry->physical && !entry->in_flight && !entry->keep) {
+        if (!entry->physical && !entry->in_flight && !entry->keep &&
+            !entry->pending_commit) {
           loom_runtime_backing_directory_remove(&buffer->backing, entry);
         }
       }
@@ -1379,15 +1379,17 @@ static iree_status_t loom_runtime_memory_operation_allocate(
   operation->pool = pool;
   operation->count = count;
   operation->mappings = (iree_hal_memory_mapping_t*)(operation->edits + count);
-  operation->mapping_waits.semaphores =
-      (iree_hal_semaphore_t**)(operation->mappings + count);
+  // Keep 64-bit payloads before pointer arrays so 32-bit hosts preserve their
+  // alignment for both odd and even mapping counts.
   operation->mapping_waits.payload_values =
-      (uint64_t*)(operation->mapping_waits.semaphores + count + 1);
-  operation->allocation_waits.semaphores =
-      (iree_hal_semaphore_t**)(operation->mapping_waits.payload_values + count +
-                               1);
+      (uint64_t*)(operation->mappings + count);
   operation->allocation_waits.payload_values =
-      (uint64_t*)(operation->allocation_waits.semaphores + count);
+      operation->mapping_waits.payload_values + count + 1;
+  operation->mapping_waits.semaphores =
+      (iree_hal_semaphore_t**)(operation->allocation_waits.payload_values +
+                               count);
+  operation->allocation_waits.semaphores =
+      operation->mapping_waits.semaphores + count + 1;
   iree_slim_mutex_initialize(&operation->mutex);
   iree_notification_initialize(&operation->notification);
   iree_hal_device_t* device =
@@ -1654,76 +1656,25 @@ iree_status_t loom_runtime_virtual_buffer_grow_async(
   return iree_ok_status();
 }
 
-iree_status_t loom_runtime_memory_pool_commit_async(
-    loom_runtime_memory_pool_t* pool, iree_host_size_t range_count,
-    const loom_runtime_memory_range_t* ranges, iree_hal_semaphore_t* readiness,
-    uint64_t value, loom_runtime_memory_admission_t* out_admission,
-    loom_runtime_memory_operation_t** out_operation) {
-  return loom_runtime_memory_pool_commit_with_demand_async(
-      pool, range_count, ranges, (loom_runtime_memory_demand_t){0}, readiness,
-      value, out_admission, out_operation);
-}
-
-iree_status_t loom_runtime_memory_pool_commit_with_demand_async(
-    loom_runtime_memory_pool_t* pool, iree_host_size_t range_count,
-    const loom_runtime_memory_range_t* ranges,
-    loom_runtime_memory_demand_t immediate, iree_hal_semaphore_t* readiness,
-    uint64_t value, loom_runtime_memory_admission_t* out_admission,
-    loom_runtime_memory_operation_t** out_operation) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-  *out_admission = LOOM_RUNTIME_MEMORY_ADMISSION_CAPACITY;
-  *out_operation = NULL;
-  loom_runtime_memory_pool_collect(pool);
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t r = 0; r < range_count && iree_status_is_ok(status);
-       ++r) {
-    IREE_ASSERT(!ranges[r].buffer->target->detached);
-    status = iree_status_clone(ranges[r].buffer->target->failure);
-  }
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
-  iree_host_size_t count = 0;
-  loom_runtime_memory_demand_t additional = {0};
-  for (iree_host_size_t r = 0; r < range_count && iree_status_is_ok(status);
-       ++r) {
-    loom_runtime_virtual_buffer_t* buffer = ranges[r].buffer;
-    const iree_device_size_t slab_size = buffer->geometry.mapping_size;
-    const iree_host_size_t end =
-        (ranges[r].offset + ranges[r].length - 1) / slab_size + 1;
-    for (iree_host_size_t i = ranges[r].offset / slab_size;
-         i < end && iree_status_is_ok(status); ++i) {
-      loom_runtime_backing_entry_t* entry = NULL;
-      status =
-          loom_runtime_backing_directory_insert(&buffer->backing, i, &entry);
-      if (!iree_status_is_ok(status)) {
-        break;
-      }
-      IREE_ASSERT(!entry->in_flight);
-      if (!entry->physical && !entry->pending_commit) {
-        entry->pending_commit = true;
-        ++count;
-        loom_runtime_memory_slab_add_demand(&additional, buffer, i);
-      }
-    }
-  }
-  loom_runtime_memory_demand_t demand = additional;
-  loom_runtime_memory_demand_add(&demand, immediate);
-  loom_runtime_memory_admission_t admission =
-      LOOM_RUNTIME_MEMORY_ADMISSION_CAPACITY;
-  if (iree_status_is_ok(status)) {
-    status = loom_runtime_memory_pool_prepare(pool, demand, &admission);
-  }
-  const bool admitted = admission == LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE;
-  loom_runtime_memory_operation_t* operation = NULL;
-  if (iree_status_is_ok(status) && admitted && count) {
-    status = loom_runtime_memory_operation_allocate(pool, count, &operation);
+// Consumes selection marks established by preparation. The exact demand and
+// missing/ready classification are never re-evaluated during submission.
+static iree_status_t loom_runtime_memory_commit_finish(
+    loom_runtime_memory_commit_t* commit,
+    loom_runtime_memory_operation_t* operation) {
+  if (!commit->mapping_count) {
+    *commit = (loom_runtime_memory_commit_t){0};
+    return iree_ok_status();
   }
   iree_host_size_t edit_index = 0;
-  for (iree_host_size_t r = 0; r < range_count; ++r) {
-    loom_runtime_virtual_buffer_t* buffer = ranges[r].buffer;
+  for (iree_host_size_t r = 0; r < commit->range_count; ++r) {
+    const loom_runtime_memory_range_t* range = &commit->ranges[r];
+    loom_runtime_virtual_buffer_t* buffer = range->buffer;
     const iree_device_size_t slab_size = buffer->geometry.mapping_size;
     const iree_host_size_t end =
-        (ranges[r].offset + ranges[r].length - 1) / slab_size + 1;
-    for (iree_host_size_t i = ranges[r].offset / slab_size; i < end; ++i) {
+        r + 1 == commit->range_count
+            ? commit->last_mapping
+            : (range->offset + range->length - 1) / slab_size + 1;
+    for (iree_host_size_t i = range->offset / slab_size; i < end; ++i) {
       loom_runtime_backing_entry_t* entry =
           loom_runtime_backing_directory_find(&buffer->backing, i);
       if (!entry || !entry->pending_commit) {
@@ -1731,7 +1682,7 @@ iree_status_t loom_runtime_memory_pool_commit_with_demand_async(
       }
       entry->pending_commit = false;
       if (operation) {
-        operation->edits[edit_index++] =
+        operation->edits[edit_index] =
             (loom_runtime_memory_edit_t){.buffer = buffer, .index = i};
         entry->in_flight = true;
         const uint64_t length = loom_runtime_memory_slab_length(buffer, i);
@@ -1739,26 +1690,110 @@ iree_status_t loom_runtime_memory_pool_commit_with_demand_async(
         if (length == buffer->geometry.mapping_size) {
           ++buffer->backed_regular_count;
         }
-      } else if (!entry->physical && !entry->keep) {
+      } else if (!entry->keep) {
         loom_runtime_backing_directory_remove(&buffer->backing, entry);
       }
+      ++edit_index;
     }
   }
-  IREE_ASSERT(!operation || edit_index == count);
-  if (!operation && iree_status_is_ok(status)) {
-    for (iree_host_size_t r = 0; r < range_count && iree_status_is_ok(status);
-         ++r) {
+  IREE_ASSERT(edit_index == commit->mapping_count);
+  iree_status_t status = iree_ok_status();
+  if (!operation) {
+    for (iree_host_size_t r = 0;
+         r < commit->range_count && iree_status_is_ok(status); ++r) {
+      status = loom_runtime_backing_directory_shrink(
+          &commit->ranges[r].buffer->backing);
+    }
+  }
+  *commit = (loom_runtime_memory_commit_t){0};
+  return status;
+}
+
+iree_status_t loom_runtime_memory_pool_prepare_commit(
+    loom_runtime_memory_pool_t* pool, iree_host_size_t range_count,
+    const loom_runtime_memory_range_t* ranges,
+    loom_runtime_memory_commit_t* out_commit) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  *out_commit = (loom_runtime_memory_commit_t){
+      .ranges = ranges,
+  };
+  loom_runtime_memory_pool_collect(pool);
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t r = 0; r < range_count && iree_status_is_ok(status);
+       ++r) {
+    IREE_ASSERT(!ranges[r].buffer->target->detached);
+    status = iree_status_clone(ranges[r].buffer->target->failure);
+  }
+  for (iree_host_size_t r = 0; r < range_count && iree_status_is_ok(status);
+       ++r) {
+    loom_runtime_virtual_buffer_t* buffer = ranges[r].buffer;
+    const iree_device_size_t slab_size = buffer->geometry.mapping_size;
+    const iree_host_size_t end =
+        (ranges[r].offset + ranges[r].length - 1) / slab_size + 1;
+    iree_host_size_t last_mapping = 0;
+    for (iree_host_size_t i = ranges[r].offset / slab_size;
+         i < end && iree_status_is_ok(status); ++i) {
+      loom_runtime_backing_entry_t* entry = NULL;
       status =
-          loom_runtime_backing_directory_shrink(&ranges[r].buffer->backing);
+          loom_runtime_backing_directory_insert(&buffer->backing, i, &entry);
+      if (iree_status_is_ok(status)) {
+        IREE_ASSERT(!entry->in_flight);
+        if (!entry->physical && !entry->pending_commit) {
+          entry->pending_commit = true;
+          ++out_commit->mapping_count;
+          last_mapping = i + 1;
+          loom_runtime_memory_slab_add_demand(&out_commit->demand, buffer, i);
+        }
+      }
+    }
+    if (last_mapping) {
+      out_commit->range_count = r + 1;
+      out_commit->last_mapping = last_mapping;
     }
   }
+  if (!iree_status_is_ok(status)) {
+    status = iree_status_join(
+        status, loom_runtime_memory_commit_finish(out_commit, NULL));
+  }
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+iree_status_t loom_runtime_memory_pool_cancel_commit(
+    loom_runtime_memory_commit_t* commit) {
+  return loom_runtime_memory_commit_finish(commit, NULL);
+}
+
+iree_status_t loom_runtime_memory_pool_commit_prepared_async(
+    loom_runtime_memory_pool_t* pool, loom_runtime_memory_commit_t* commit,
+    loom_runtime_memory_demand_t immediate, iree_hal_semaphore_t* readiness,
+    uint64_t value, loom_runtime_memory_admission_t* out_admission,
+    loom_runtime_memory_operation_t** out_operation) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  *out_admission = LOOM_RUNTIME_MEMORY_ADMISSION_CAPACITY;
+  *out_operation = NULL;
+  const loom_runtime_memory_demand_t additional = commit->demand;
+  loom_runtime_memory_demand_t demand = additional;
+  loom_runtime_memory_demand_add(&demand, immediate);
+  loom_runtime_memory_admission_t admission =
+      LOOM_RUNTIME_MEMORY_ADMISSION_CAPACITY;
+  iree_status_t status =
+      loom_runtime_memory_pool_prepare(pool, demand, &admission);
+  const bool admitted = admission == LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE;
+  loom_runtime_memory_operation_t* operation = NULL;
+  if (iree_status_is_ok(status) && admitted && commit->mapping_count) {
+    status = loom_runtime_memory_operation_allocate(pool, commit->mapping_count,
+                                                    &operation);
+  }
+  status = iree_status_join(
+      status, loom_runtime_memory_commit_finish(commit, operation));
   if (operation) {
     operation->readiness = readiness;
     operation->value = value;
     iree_hal_semaphore_retain(readiness);
+    loom_runtime_memory_demand_add(&pool->demand, additional);
     pool->statistics.pending_bytes +=
         loom_runtime_memory_demand_total(additional);
-    loom_runtime_memory_demand_add(&pool->demand, additional);
     *out_operation = operation;
     loom_runtime_memory_operation_enqueue(
         pool, operation,
@@ -1771,6 +1806,21 @@ iree_status_t loom_runtime_memory_pool_commit_with_demand_async(
   }
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+iree_status_t loom_runtime_memory_pool_commit_async(
+    loom_runtime_memory_pool_t* pool, iree_host_size_t range_count,
+    const loom_runtime_memory_range_t* ranges, iree_hal_semaphore_t* readiness,
+    uint64_t value, loom_runtime_memory_admission_t* out_admission,
+    loom_runtime_memory_operation_t** out_operation) {
+  *out_admission = LOOM_RUNTIME_MEMORY_ADMISSION_CAPACITY;
+  *out_operation = NULL;
+  loom_runtime_memory_commit_t commit;
+  IREE_RETURN_IF_ERROR(loom_runtime_memory_pool_prepare_commit(
+      pool, range_count, ranges, &commit));
+  return loom_runtime_memory_pool_commit_prepared_async(
+      pool, &commit, (loom_runtime_memory_demand_t){0}, readiness, value,
+      out_admission, out_operation);
 }
 
 iree_status_t loom_runtime_memory_pool_trim_async(

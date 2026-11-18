@@ -1298,10 +1298,12 @@ void loom_runtime_residency_set_private_peak(
 // Borrowed for one serialized admission, before either state or parameters
 // submit work. The state owner retains the resulting native operation.
 typedef struct loom_runtime_residency_state_t {
-  // Exact mutable-state ranges produced by the caller's logical planner.
+  // Uncertain mutable-state ranges borrowed from the logical planner.
   const loom_runtime_memory_range_t* ranges;
   // Number of ranges, including zero for fixed backing.
   iree_host_size_t range_count;
+  // Indexed native selection made after fairness checks and consumed once.
+  loom_runtime_memory_commit_t prepared;
   // Optional producer projection including legal re-placement after denial.
   const loom_runtime_residency_forecast_t* forecast;
   // State-owned mapping timeline, or NULL for fixed backing.
@@ -1313,17 +1315,16 @@ typedef struct loom_runtime_residency_state_t {
 } loom_runtime_residency_state_t;
 
 static iree_status_t loom_runtime_residency_commit_state(
-    loom_runtime_residency_t* residency,
-    const loom_runtime_residency_state_t* state,
+    loom_runtime_residency_t* residency, loom_runtime_residency_state_t* state,
     loom_runtime_memory_demand_t immediate,
     loom_runtime_memory_admission_t* out_admission) {
   *out_admission = LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE;
   if (!residency->cache->pool) {
     return iree_ok_status();
   }
-  return loom_runtime_memory_pool_commit_with_demand_async(
-      residency->cache->pool, state->range_count, state->ranges, immediate,
-      state->readiness, state->value, out_admission, state->operation);
+  return loom_runtime_memory_pool_commit_prepared_async(
+      residency->cache->pool, &state->prepared, immediate, state->readiness,
+      state->value, out_admission, state->operation);
 }
 
 // A cold necessary bound, not a reservation or a claim that compaction will
@@ -1361,18 +1362,16 @@ static iree_status_t loom_runtime_residency_request_history(
 }
 
 static iree_status_t loom_runtime_residency_acquire_parameters(
-    loom_runtime_residency_t* residency,
-    const loom_runtime_residency_state_t* state,
+    loom_runtime_residency_t* residency, loom_runtime_residency_state_t* state,
     loom_runtime_residency_admission_t* out_admission) {
   *out_admission = LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY;
-  IREE_RETURN_IF_ERROR(
-      loom_runtime_residency_cache_query_status(residency->cache));
-  loom_runtime_memory_footprint_t footprint = {0};
-  if (state) {
-    IREE_RETURN_IF_ERROR(loom_runtime_memory_ranges_footprint(
-        state->range_count, state->ranges, &footprint));
+  if (state && residency->cache->pool) {
+    IREE_RETURN_IF_ERROR(loom_runtime_memory_pool_prepare_commit(
+        residency->cache->pool, state->range_count, state->ranges,
+        &state->prepared));
   }
-  const uint64_t additional_state = footprint.missing_bytes;
+  const uint64_t additional_state =
+      state ? loom_runtime_memory_demand_total(state->prepared.demand) : 0;
   if (!loom_runtime_residency_fits(residency, additional_state,
                                    residency->private_bytes)) {
     // A readiness query can publish failed or retired backing. Recalculate
@@ -1537,6 +1536,9 @@ static iree_status_t loom_runtime_residency_acquire_parameters(
 
 iree_status_t loom_runtime_residency_try_acquire(
     loom_runtime_residency_t* residency, bool* out_admitted) {
+  *out_admitted = false;
+  IREE_RETURN_IF_ERROR(
+      loom_runtime_residency_cache_query_status(residency->cache));
   loom_runtime_residency_admission_t admission;
   iree_status_t status =
       loom_runtime_residency_acquire_parameters(residency, NULL, &admission);
@@ -1545,8 +1547,7 @@ iree_status_t loom_runtime_residency_try_acquire(
 }
 
 static iree_status_t loom_runtime_residency_admit(
-    loom_runtime_residency_t* residency,
-    const loom_runtime_residency_state_t* state,
+    loom_runtime_residency_t* residency, loom_runtime_residency_state_t* state,
     loom_runtime_residency_admission_t* out_admission) {
   *out_admission = LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY;
   loom_runtime_residency_cache_t* cache = residency->cache;
@@ -1585,8 +1586,9 @@ iree_status_t loom_runtime_residency_try_admit_state(
     iree_hal_semaphore_t* readiness, uint64_t value,
     loom_runtime_residency_admission_t* out_admission,
     loom_runtime_memory_operation_t** out_operation) {
+  *out_admission = LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY;
   *out_operation = NULL;
-  const loom_runtime_residency_state_t state = {
+  loom_runtime_residency_state_t state = {
       .ranges = ranges,
       .range_count = range_count,
       .forecast = forecast,
@@ -1594,7 +1596,10 @@ iree_status_t loom_runtime_residency_try_admit_state(
       .value = value,
       .operation = out_operation,
   };
-  return loom_runtime_residency_admit(residency, &state, out_admission);
+  iree_status_t status =
+      loom_runtime_residency_admit(residency, &state, out_admission);
+  return iree_status_join(
+      status, loom_runtime_memory_pool_cancel_commit(&state.prepared));
 }
 
 iree_status_t loom_runtime_residency_acquire(

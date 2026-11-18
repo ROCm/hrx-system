@@ -13,6 +13,158 @@ namespace {
 
 using loom_runtime::testing::memory::MemoryTest;
 
+TEST_F(MemoryTest, PreparedCommitCanBeCancelledAndDeniedWithoutBacking) {
+  const auto geometry = loom_runtime_pool_state_geometry(storage_owner);
+  const uint64_t page = geometry.mapping_size;
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool, geometry, 3 * page, 256, &statistics[0], &first));
+  const loom_runtime_memory_range_t ranges[] = {
+      {first, page, 2 * page}, {first, page - 4, 8}, {first, 2 * page, 256}};
+  loom_runtime_memory_commit_t prepared = {};
+  IREE_ASSERT_OK(loom_runtime_memory_pool_prepare_commit(
+      pool, IREE_ARRAYSIZE(ranges), ranges, &prepared));
+  ASSERT_GT(prepared.mapping_count, 0u);
+  EXPECT_EQ(loom_runtime_memory_demand_total(prepared.demand), 3 * page);
+  EXPECT_EQ(statistics[0].pending_bytes, 0u);
+  EXPECT_EQ(statistics[0].committed_bytes, 0u);
+  EXPECT_EQ(loom_runtime_memory_pool_retained_bytes(pool), 0u);
+  // Admission queries can read the footprint while selection is retained.
+  // Their temporary marks cannot discard the prepared transaction's entries.
+  loom_runtime_memory_footprint_t footprint;
+  IREE_ASSERT_OK(loom_runtime_memory_ranges_footprint(IREE_ARRAYSIZE(ranges),
+                                                      ranges, &footprint));
+  EXPECT_EQ(footprint.total_bytes, 3 * page);
+  EXPECT_EQ(footprint.missing_bytes, 3 * page);
+  IREE_ASSERT_OK(loom_runtime_memory_pool_cancel_commit(&prepared));
+
+  // Cancellation neither keeps capacity nor leaves marks affecting a retry.
+  IREE_ASSERT_OK(loom_runtime_memory_pool_prepare_commit(
+      pool, IREE_ARRAYSIZE(ranges), ranges, &prepared));
+  EXPECT_EQ(loom_runtime_memory_demand_total(prepared.demand), 3 * page);
+  loom_runtime_memory_admission_t admission;
+  loom_runtime_memory_operation_t* operation = nullptr;
+  // Required parameters already fill the budget, leaving no room for state.
+  const loom_runtime_memory_demand_t parameters = {
+      .weight_bytes = 3 * kSlabSize,
+  };
+  IREE_ASSERT_OK(loom_runtime_memory_pool_commit_prepared_async(
+      pool, &prepared, parameters, nullptr, 0, &admission, &operation));
+  EXPECT_EQ(prepared.ranges, nullptr);
+  EXPECT_EQ(operation, nullptr);
+  EXPECT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_CAPACITY);
+  EXPECT_EQ(statistics[0].pending_bytes, 0u);
+  EXPECT_EQ(statistics[0].committed_bytes, 0u);
+  EXPECT_EQ(loom_runtime_memory_pool_retained_bytes(pool), 0u);
+
+  IREE_ASSERT_OK(loom_runtime_memory_pool_commit_async(
+      pool, IREE_ARRAYSIZE(ranges), ranges, nullptr, 0, &admission,
+      &operation));
+  ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
+  loom_runtime_memory_operation_await(operation);
+  IREE_ASSERT_OK(loom_runtime_memory_operation_query_status(operation));
+  loom_runtime_memory_operation_free(operation);
+  EXPECT_EQ(statistics[0].committed_bytes, 3 * page);
+  RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
+  RoundTrip(loom_runtime_virtual_buffer_handle(first), 2 * page, 0x87654321);
+
+  // Fully backed requests need neither edit storage nor native synchronization.
+  native.ResetAllocationMetrics();
+  IREE_ASSERT_OK(loom_runtime_memory_pool_prepare_commit(
+      pool, IREE_ARRAYSIZE(ranges), ranges, &prepared));
+  EXPECT_EQ(prepared.mapping_count, 0u);
+  EXPECT_EQ(loom_runtime_memory_demand_total(prepared.demand), 0u);
+  IREE_ASSERT_OK(loom_runtime_memory_pool_commit_prepared_async(
+      pool, &prepared, {}, nullptr, 0, &admission, &operation));
+  EXPECT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
+  EXPECT_EQ(operation, nullptr);
+  EXPECT_EQ(native.allocation_metrics().request_count, 0u);
+}
+
+TEST_F(MemoryTest, FailedPreparedCommitAllocationLeavesRetryIntact) {
+  const auto geometry = loom_runtime_pool_state_geometry(storage_owner);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool, geometry, geometry.mapping_size, 256, &statistics[0], &first));
+  const loom_runtime_memory_range_t range = {first, 0, 256};
+  loom_runtime_memory_commit_t prepared = {};
+  native.FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_runtime_memory_pool_prepare_commit(pool, 1, &range, &prepared));
+  EXPECT_EQ(prepared.ranges, nullptr);
+
+  IREE_ASSERT_OK(
+      loom_runtime_memory_pool_prepare_commit(pool, 1, &range, &prepared));
+  native.FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC);
+  loom_runtime_memory_admission_t admission;
+  loom_runtime_memory_operation_t* operation = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_runtime_memory_pool_commit_prepared_async(
+          pool, &prepared, {}, nullptr, 0, &admission, &operation));
+  EXPECT_EQ(prepared.ranges, nullptr);
+  EXPECT_EQ(operation, nullptr);
+  EXPECT_EQ(statistics[0].pending_bytes, 0u);
+  EXPECT_EQ(statistics[0].committed_bytes, 0u);
+  EXPECT_EQ(loom_runtime_memory_pool_retained_bytes(pool), 0u);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, 256));
+  RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
+}
+
+TEST_F(MemoryTest, FailedCancellationShrinkClearsSelectionAndKeepsLiveData) {
+  const auto geometry = loom_runtime_pool_state_geometry(storage_owner);
+  const uint64_t page = geometry.mapping_size;
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool, geometry, 33 * page, 256, &statistics[0], &first));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, page));
+  RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
+
+  const loom_runtime_memory_range_t range = {first, 0, 33 * page};
+  loom_runtime_memory_commit_t prepared = {};
+  IREE_ASSERT_OK(
+      loom_runtime_memory_pool_prepare_commit(pool, 1, &range, &prepared));
+  EXPECT_EQ(prepared.mapping_count, 32u);
+  native.FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_runtime_memory_pool_cancel_commit(&prepared));
+  EXPECT_EQ(prepared.ranges, nullptr);
+  EXPECT_EQ(statistics[0].pending_bytes, 0u);
+  EXPECT_EQ(statistics[0].committed_bytes, page);
+  CheckRetained(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
+
+  // Failed host compaction cannot leave a selection that suppresses new work.
+  IREE_ASSERT_OK(
+      loom_runtime_memory_pool_prepare_commit(pool, 1, &range, &prepared));
+  EXPECT_EQ(prepared.mapping_count, 32u);
+  EXPECT_EQ(loom_runtime_memory_demand_total(prepared.demand), 32 * page);
+  IREE_ASSERT_OK(loom_runtime_memory_pool_cancel_commit(&prepared));
+}
+
+TEST_F(MemoryTest, FailedPreparationCancelsOnlyItsSelectedSparsePrefix) {
+  const auto geometry = loom_runtime_pool_state_geometry(storage_owner);
+  const uint64_t page = geometry.mapping_size;
+  const uint64_t length =
+      iree_min(kHighOffset, reservation_capabilities.max_byte_length / 2);
+  ASSERT_GT(length, 32 * page);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool, geometry, length, 256, &statistics[0], &first));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, page));
+
+  // The first few selections fit the existing directory; its next growth
+  // fails. Cancellation consumes that produced prefix, not the huge untouched
+  // virtual suffix whose backing was never inspected.
+  const loom_runtime_memory_range_t range = {first, 0, length};
+  loom_runtime_memory_commit_t prepared = {};
+  native.FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_runtime_memory_pool_prepare_commit(pool, 1, &range, &prepared));
+  EXPECT_EQ(prepared.ranges, nullptr);
+  EXPECT_EQ(statistics[0].pending_bytes, 0u);
+  EXPECT_EQ(statistics[0].committed_bytes, page);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, page, page));
+  RoundTrip(loom_runtime_virtual_buffer_handle(first), page, 0x12345678);
+}
+
 TEST_F(MemoryTest, BackingSelectionCountsActualUnionAndClearsFailedVisitors) {
   const auto geometry = loom_runtime_pool_state_geometry(storage_owner);
   const uint64_t sparse_length = iree_device_align(
