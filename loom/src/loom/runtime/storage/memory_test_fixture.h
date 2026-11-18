@@ -317,7 +317,8 @@ class MemoryTest : public ::testing::Test {
   }
 
   void UseBacking(bool deferred, uint64_t limit_bytes, iree_hal_queue_t* queue,
-                  bool distinct_classes = true) {
+                  bool distinct_classes = true,
+                  uint64_t state_mapping_size = 0) {
     // Selection happens before this case allocates any reservations.
     loom_runtime_memory_pool_free(owned_pool);
     owned_pool = nullptr;
@@ -378,7 +379,9 @@ class MemoryTest : public ::testing::Test {
           &reservation_capabilities, backing,
           distinct_classes ? kSlabSize / 4 : kSlabSize, &geometries[1]);
       if (iree_status_is_ok(status)) {
-        geometries[1].mapping_size = geometries[1].minimum_size;
+        geometries[1].mapping_size = state_mapping_size
+                                         ? state_mapping_size
+                                         : geometries[1].minimum_size;
       }
     }
     if (iree_status_is_ok(status)) {

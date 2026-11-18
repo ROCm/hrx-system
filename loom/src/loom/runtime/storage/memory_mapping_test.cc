@@ -26,6 +26,93 @@ class MemoryMappingTest : public loom_runtime::testing::memory::MemoryTest {
   }
 };
 
+enum class MappingSize { kNative, kThreeNativePages, kParent };
+
+class MemoryGranularityTest
+    : public loom_runtime::testing::memory::MemoryTest,
+      public ::testing::WithParamInterface<MappingSize> {
+ protected:
+  uint64_t mapping_size() const {
+    const auto geometry = loom_runtime_pool_state_geometry(storage_owner);
+    switch (GetParam()) {
+      case MappingSize::kNative:
+        return geometry.minimum_size;
+      case MappingSize::kThreeNativePages:
+        return 3 * geometry.minimum_size;
+      case MappingSize::kParent:
+        return kSlabSize;
+    }
+    IREE_CHECK_UNREACHABLE("unknown mapping size");
+  }
+
+  void SetUpPool() override {
+    UseBacking(false, 3 * kSlabSize, nullptr, false, mapping_size());
+  }
+};
+
+TEST_P(MemoryGranularityTest, MixedMappingSizesPreserveNativePacking) {
+  const auto native = loom_runtime_pool_state_geometry(storage_owner);
+  const uint64_t page = native.minimum_size;
+  RecordProperty("native_page_bytes", static_cast<int>(page));
+  RecordProperty("mapping_bytes", static_cast<int>(mapping_size()));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool, native, 3 * page, native.granularity, &statistics[0], &first));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, 3 * page));
+  // Workspace uses native pages even when state has larger replacement units.
+  // Three small mappings must occupy one physical parent, not three parents.
+  ASSERT_EQ(loom_runtime_memory_pool_retained_bytes(pool), kSlabSize);
+  ASSERT_EQ(loom_runtime_memory_pool_statistics(pool).cached_bytes,
+            kSlabSize - 3 * page);
+  RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
+  RoundTrip(loom_runtime_virtual_buffer_handle(first), 2 * page, 0x87654321);
+
+  auto coarse = native;
+  coarse.mapping_size = mapping_size();
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool, coarse, coarse.mapping_size + page, native.granularity,
+      &statistics[1], &second));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(second, 0, page));
+  IREE_ASSERT_OK(
+      loom_runtime_virtual_buffer_commit(second, coarse.mapping_size, page));
+  EXPECT_EQ(statistics[1].committed_bytes, coarse.mapping_size + page);
+  RoundTrip(loom_runtime_virtual_buffer_handle(second), 0, 0xaabbccdd);
+  RoundTrip(loom_runtime_virtual_buffer_handle(second), coarse.mapping_size,
+            0x11223344);
+
+  // Returning the large mapping preserves its short tail and native neighbors.
+  const loom_runtime_memory_range_t release = {second, 0, coarse.mapping_size};
+  loom_runtime_memory_operation_t* operation = nullptr;
+  IREE_ASSERT_OK(loom_runtime_memory_pool_trim_async(pool, 1, &release, nullptr,
+                                                     0, &operation));
+  const auto completed = AwaitOperation(operation);
+  IREE_ASSERT_OK(loom_runtime_memory_operation_query_status(operation));
+  // Dedicated extents return to the source after their unmap completes.
+  IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
+  CheckRetained(loom_runtime_virtual_buffer_handle(second), coarse.mapping_size,
+                0x11223344);
+  CheckRetained(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
+  CheckRetained(loom_runtime_virtual_buffer_handle(first), 2 * page,
+                0x87654321);
+
+  // A new small mapping reuses native slots without acquiring another parent.
+  const uint64_t retained = loom_runtime_memory_pool_retained_bytes(pool);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool, native, page, native.granularity, &statistics[2], &third));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(third, 0, page));
+  EXPECT_EQ(loom_runtime_memory_pool_retained_bytes(pool), retained);
+  RoundTrip(loom_runtime_virtual_buffer_handle(third), 0, 0x55667788);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(second, 0, page));
+  RoundTrip(loom_runtime_virtual_buffer_handle(second), 0, 0xabcdef01);
+  CheckRetained(loom_runtime_virtual_buffer_handle(third), 0, 0x55667788);
+  CheckRetained(loom_runtime_virtual_buffer_handle(second), coarse.mapping_size,
+                0x11223344);
+}
+
+INSTANTIATE_TEST_SUITE_P(MappingSizes, MemoryGranularityTest,
+                         ::testing::Values(MappingSize::kNative,
+                                           MappingSize::kThreeNativePages,
+                                           MappingSize::kParent));
+
 TEST_F(MemoryMappingTest, ContiguousRunKeepsIndependentPageOwnership) {
   const auto geometry = loom_runtime_pool_state_geometry(storage_owner);
   const uint64_t page = geometry.mapping_size;

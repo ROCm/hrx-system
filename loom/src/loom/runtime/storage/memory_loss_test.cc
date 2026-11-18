@@ -322,9 +322,14 @@ class MemoryLossTest : public ::testing::Test {
 
   iree_status_t Prepare(uint64_t count,
                         loom_runtime_memory_admission_t* out_admission) {
-    return loom_runtime_memory_pool_prepare(
-        pool_, {.packed_bytes = count * kSlabSize, .packed_count = count},
-        out_admission);
+    // Quote each additional root from the still-unbacked fourth reservation.
+    const auto unit =
+        loom_runtime_virtual_buffer_missing_demand(buffers_.back());
+    loom_runtime_memory_demand_t demand = {};
+    for (uint64_t i = 0; i < count; ++i) {
+      loom_runtime_memory_demand_add(&demand, unit);
+    }
+    return loom_runtime_memory_pool_prepare(pool_, demand, out_admission);
   }
 
   void ExpectLoss(iree_status_t status) {

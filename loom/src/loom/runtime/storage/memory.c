@@ -390,8 +390,10 @@ iree_status_t loom_runtime_memory_pool_allocate(
   iree_notification_initialize(&pool->capacity_notification);
   pool->weight_request = iree_hal_make_pool_reservation_request(
       weight_geometry.mapping_size, weight_geometry.granularity);
+  // Small storage and workspace mappings retain native-sized physical slots
+  // even when mutable state uses larger independently replaced extents.
   pool->packed_request = iree_hal_make_pool_reservation_request(
-      state_geometry.mapping_size, state_geometry.granularity);
+      state_geometry.minimum_size, state_geometry.granularity);
   const uint64_t parent_granularity =
       iree_max(state_geometry.granularity, capabilities.maintenance_alignment);
   const iree_hal_pool_reservation_request_t parent_request =
