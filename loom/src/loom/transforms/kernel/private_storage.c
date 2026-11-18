@@ -15,6 +15,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/cfg/ops.h"
+#include "loom/ops/scf/ops.h"
 #include "loom/ops/view/ops.h"
 #include "loom/pass/value_facts.h"
 #include "loom/transforms/kernel/private_storage_copy.h"
@@ -44,6 +45,8 @@ typedef struct loom_private_storage_event_t {
     LOOM_PRIVATE_STORAGE_COPY,
     LOOM_PRIVATE_STORAGE_CONTROL,
   } kind;
+  // Explicit alternatives, including omitted optional fallthrough regions.
+  uint8_t region_count;
   union {
     // Access record for an ordinary memory operation.
     loom_private_storage_access_t* access;
@@ -54,8 +57,6 @@ typedef struct loom_private_storage_event_t {
     // Nested control regions in operation region order.
     loom_private_storage_region_t** regions;
   };
-  // Explicit alternatives, including omitted optional fallthrough regions.
-  uint8_t region_count;
   // Writes and allocation resets in this event and its nested regions.
   loom_private_storage_cell_span_t writes;
   // Next event in the same block.
@@ -172,6 +173,38 @@ static iree_status_t loom_private_storage_collect_copy(
       out_copy);
 }
 
+static iree_status_t loom_private_storage_collect_copy_loop(
+    loom_private_storage_builder_t* builder, loom_op_t* loop,
+    loom_private_storage_copy_t** out_copy) {
+  loom_region_t* body = loom_scf_for_body(loop);
+  if (loop->result_count || body->block_count != 1) {
+    return iree_ok_status();
+  }
+  loom_block_t* block = loom_region_entry_block(body);
+  loom_op_t* store = block->last_op;
+  if (store && loom_scf_yield_isa(store)) {
+    store = store->prev_op;
+  }
+  if (!store || !loom_view_store_isa(store)) {
+    return iree_ok_status();
+  }
+  loom_private_storage_allocation_t* target =
+      loom_private_storage_allocation(builder, loom_view_store_view(store));
+  const loom_value_t* value =
+      loom_module_value(builder->plan->module, loom_view_store_value(store));
+  if (!target || !target->selected || loom_value_is_block_arg(value)) {
+    return iree_ok_status();
+  }
+  loom_op_t* load = loom_value_def_op(value);
+  if (!load || load->parent_block != block || !loom_view_load_isa(load)) {
+    return iree_ok_status();
+  }
+  return loom_private_storage_record_copy_loop(
+      builder->plan, &builder->regions, builder->facts, loop, load,
+      loom_private_storage_allocation(builder, loom_view_load_view(load)),
+      store, target, out_copy);
+}
+
 static iree_status_t loom_private_storage_collect_access(
     loom_private_storage_builder_t* builder, loom_op_t* op,
     loom_memory_access_t memory, loom_private_storage_allocation_t* allocation,
@@ -275,6 +308,9 @@ static iree_status_t loom_private_storage_collect_region(
       if (supported && loom_buffer_copy_isa(op)) {
         IREE_RETURN_IF_ERROR(
             loom_private_storage_collect_copy(builder, op, &copy));
+      } else if (supported && loom_scf_for_isa(op)) {
+        IREE_RETURN_IF_ERROR(
+            loom_private_storage_collect_copy_loop(builder, op, &copy));
       }
       loom_private_storage_access_t* access = NULL;
       const loom_value_id_t* operands = loom_op_const_operands(op);

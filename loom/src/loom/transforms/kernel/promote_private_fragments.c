@@ -853,6 +853,15 @@ static iree_status_t loom_promote_private_fragments_process_view(
     return loom_promote_private_fragments_try_single_store_forward(
         context, view_op, alloca_op, private_view, out_changed);
   }
+  // The replacement vector is a snapshot at loop entry. Every forwarded load
+  // must observe the completed copy on every path reaching it.
+  for (iree_host_size_t i = 0; i < loads.count; ++i) {
+    if (loads.ops[i] == copy_loop.source_load_op ||
+        !loom_dominates_op(context->dominance, copy_loop.loop_op,
+                           loads.ops[i])) {
+      return iree_ok_status();
+    }
+  }
 
   IREE_RETURN_IF_ERROR(loom_promote_private_fragments_promote(
       context, view_op, alloca_op, &copy_loop, &loads));
@@ -1159,7 +1168,8 @@ static iree_status_t loom_private_storage_rewrite_cfg(
 
 static iree_status_t loom_private_storage_rewrite(
     loom_private_storage_plan_t* plan, loom_rewriter_t* rewriter,
-    loom_promote_private_fragments_statistics_t* statistics) {
+    loom_promote_private_fragments_statistics_t* statistics,
+    bool* out_remaining) {
   // Define every appended identity first so cyclic and out-of-order CFG edges
   // can reference their destinations before those signatures are rebuilt.
   for (loom_private_storage_signature_t* s = plan->signatures; s; s = s->next) {
@@ -1231,6 +1241,7 @@ static iree_status_t loom_private_storage_rewrite(
        a = a->next) {
     bool erased;
     IREE_RETURN_IF_ERROR(loom_rewriter_erase_if_dead(rewriter, a->op, &erased));
+    *out_remaining |= !erased;
   }
   return iree_ok_status();
 }
@@ -1238,6 +1249,22 @@ static iree_status_t loom_private_storage_rewrite(
 //===----------------------------------------------------------------------===//
 // Pass entry point
 //===----------------------------------------------------------------------===//
+
+static iree_status_t loom_promote_private_fragments_allocations(
+    loom_pass_t* pass, loom_module_t* module, loom_func_like_t function,
+    loom_rewriter_t* rewriter, bool* out_remaining) {
+  loom_private_storage_plan_t plan = {0};
+  iree_status_t status =
+      loom_private_storage_plan_build(pass, module, function, &plan);
+  *out_remaining = false;
+  if (iree_status_is_ok(status) && plan.allocations) {
+    status = loom_private_storage_rewrite(
+        &plan, rewriter, loom_promote_private_fragments_statistics(pass),
+        out_remaining);
+  }
+  loom_private_storage_plan_release(&plan);
+  return status;
+}
 
 iree_status_t loom_promote_private_fragments_run(loom_pass_t* pass,
                                                  loom_module_t* module,
@@ -1249,9 +1276,12 @@ iree_status_t loom_promote_private_fragments_run(loom_pass_t* pass,
 
   loom_rewriter_t rewriter;
   loom_rewriter_initialize(&rewriter, module, pass->arena);
-  iree_status_t status = iree_ok_status();
+  // Preserve scalar cells before considering a vector snapshot. A dynamic
+  // read or an external source may still benefit from the per-view rewrite.
+  bool iteration_changed = false;
+  iree_status_t status = loom_promote_private_fragments_allocations(
+      pass, module, function, &rewriter, &iteration_changed);
   bool changed = false;
-  bool iteration_changed = true;
   while (iree_status_is_ok(status) && iteration_changed) {
     iteration_changed = false;
 
@@ -1296,18 +1326,11 @@ iree_status_t loom_promote_private_fragments_run(loom_pass_t* pass,
       }
     }
   }
-  loom_private_storage_plan_t plan = {0};
-  if (iree_status_is_ok(status)) {
-    if (changed) {
-      loom_pass_value_fact_owner_invalidate(pass->value_facts);
-    }
-    status = loom_private_storage_plan_build(pass, module, function, &plan);
+  if (iree_status_is_ok(status) && changed) {
+    loom_pass_value_fact_owner_invalidate(pass->value_facts);
+    status = loom_promote_private_fragments_allocations(
+        pass, module, function, &rewriter, &iteration_changed);
   }
-  if (iree_status_is_ok(status) && plan.allocations) {
-    status = loom_private_storage_rewrite(
-        &plan, &rewriter, loom_promote_private_fragments_statistics(pass));
-  }
-  loom_private_storage_plan_release(&plan);
   if (iree_any_bit_set(rewriter.flags, LOOM_REWRITER_FLAG_CHANGED)) {
     loom_pass_value_fact_owner_invalidate(pass->value_facts);
     if (iree_status_is_ok(status)) {

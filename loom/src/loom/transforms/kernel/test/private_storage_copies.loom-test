@@ -72,3 +72,211 @@ func.def @partial_word(%a: i32, %b: i32) -> (i32) {
   %mixed = view.load %result[0] : view<1xi32> -> i32
   func.return %mixed : i32
 }
+
+// ====
+
+// Pointer indexing rebases a fresh scalar view each iteration. Only the
+// second element is observed, and the source changes after the copy.
+func.def @rebased_copy(%original: i32, %later: i32) -> (i32, i32) {
+  %bytes = index.constant 12 : offset
+  %origin = index.constant 0 : index
+  %word = index.constant 4 : index
+  %limit = index.constant 12 : index
+  %source = buffer.alloca<private> align(4) %bytes : buffer
+  %target = buffer.alloca<private> align(4) %bytes : buffer
+  %input = buffer.view %source[%origin] : buffer -> view<3xi32>
+  %output = buffer.view %target[%word] : buffer -> view<1xi32>
+  view.store %original, %input[1] : i32, view<3xi32>
+  scf.for %byte = [%origin to %limit step %word] {
+    %from = buffer.view %source[%byte] : buffer -> view<1xi32>
+    %value = view.load %from[0] : view<1xi32> -> i32
+    %to = buffer.view %target[%byte] : buffer -> view<1xi32>
+    view.store %value, %to[0] : i32, view<1xi32>
+  }
+  view.store %later, %input[1] : i32, view<3xi32>
+  %before = view.load %output[0] : view<1xi32> -> i32
+  %after = view.load %input[1] : view<3xi32> -> i32
+  func.return %before, %after : i32, i32
+}
+
+// ----
+func.def @rebased_copy(%original: i32, %later: i32) -> (i32, i32) {
+  func.return %original, %later : i32, i32
+}
+
+// ====
+
+// A shaped index at the source and a shifted byte offset at the destination
+// identify corresponding i16 lanes. Each lane has a distinct reaching value.
+func.def @mixed_indexing(%a: i16, %b: i16, %c: i16) -> (i16, i16, i16) {
+  %bytes = index.constant 6 : offset
+  %origin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %limit = index.constant 3 : index
+  %source = buffer.alloca<private> align(2) %bytes : buffer
+  %target = buffer.alloca<private> align(2) %bytes : buffer
+  %input = buffer.view %source[%origin] : buffer -> view<3xi16>
+  %output = buffer.view %target[%origin] : buffer -> view<3xi16>
+  view.store %a, %input[0] : i16, view<3xi16>
+  view.store %b, %input[1] : i16, view<3xi16>
+  view.store %c, %input[2] : i16, view<3xi16>
+  scf.for %i = [%origin to %limit step %step] {
+    %value = view.load %input[%i] : view<3xi16> -> i16
+    %byte = index.shli %i, %step : index
+    %address = buffer.view %target[%byte] : buffer -> view<1xi16>
+    view.store %value, %address[0] : i16, view<1xi16>
+  }
+  %last = view.load %output[2] : view<3xi16> -> i16
+  %first = view.load %output[0] : view<3xi16> -> i16
+  %middle = view.load %output[1] : view<3xi16> -> i16
+  func.return %last, %first, %middle : i16, i16, i16
+}
+
+// ----
+func.def @mixed_indexing(%a: i16, %b: i16, %c: i16) -> (i16, i16, i16) {
+  func.return %c, %a, %b : i16, i16, i16
+}
+
+// ====
+
+// A dimension index describes the same byte transfer. Reverse iteration
+// visits a strict subrange and leaves the first destination lane intact.
+func.def @reverse_subrange(%kept: f32, %moved: f32) -> (f32, f32) {
+  %bytes = index.constant 16 : offset
+  %origin = index.constant 0 : index
+  %first = index.constant 1 : index
+  %limit = index.constant 4 : index
+  %source = buffer.alloca<private> align(4) %bytes : buffer
+  %target = buffer.alloca<private> align(4) %bytes : buffer
+  %input = buffer.view %source[%origin] : buffer -> view<4xf32>
+  %output = buffer.view %target[%origin] : buffer -> view<4xf32>
+  view.store %kept, %output[0] : f32, view<4xf32>
+  view.store %moved, %input[2] : f32, view<4xf32>
+  scf.for %i = [%first to %limit step %first] {
+    %lane = index.sub %limit, %i : index
+    %value = view.load %input[%lane] : view<4xf32> -> f32
+    view.store %value, %output[%lane] : f32, view<4xf32>
+  }
+  %left = view.load %output[0] : view<4xf32> -> f32
+  %right = view.load %output[2] : view<4xf32> -> f32
+  func.return %left, %right : f32, f32
+}
+
+// ----
+func.def @reverse_subrange(%kept: f32, %moved: f32) -> (f32, f32) {
+  func.return %kept, %moved : f32, f32
+}
+
+// ====
+
+// The next iteration reads the preceding write. A bulk snapshot would
+// return the old middle lane instead of propagating the first lane.
+func.def @overlapping_loop(%first: i32, %middle: i32) -> (i32) {
+  %bytes = index.constant 12 : offset
+  %origin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %limit = index.constant 2 : index
+  %storage = buffer.alloca<private> align(4) %bytes : buffer
+  %values = buffer.view %storage[%origin] : buffer -> view<3xi32>
+  view.store %first, %values[0] : i32, view<3xi32>
+  view.store %middle, %values[1] : i32, view<3xi32>
+  scf.for %i = [%origin to %limit step %step] {
+    %next = index.add %i, %step : index
+    %value = view.load %values[%i] : view<3xi32> -> i32
+    view.store %value, %values[%next] : i32, view<3xi32>
+  }
+  %result = view.load %values[2] : view<3xi32> -> i32
+  func.return %result : i32
+}
+
+// ====
+
+// Opposite walks reverse element order, even between distinct roots.
+func.def @reversed_output(%first: i16, %last: i16) -> (i16) {
+  %bytes = index.constant 4 : offset
+  %origin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %limit = index.constant 2 : index
+  %source = buffer.alloca<private> align(2) %bytes : buffer
+  %target = buffer.alloca<private> align(2) %bytes : buffer
+  %input = buffer.view %source[%origin] : buffer -> view<2xi16>
+  %output = buffer.view %target[%origin] : buffer -> view<2xi16>
+  view.store %first, %input[0] : i16, view<2xi16>
+  view.store %last, %input[1] : i16, view<2xi16>
+  scf.for %i = [%origin to %limit step %step] {
+    %opposite = index.sub %step, %i : index
+    %value = view.load %input[%opposite] : view<2xi16> -> i16
+    view.store %value, %output[%i] : i16, view<2xi16>
+  }
+  %result = view.load %output[0] : view<2xi16> -> i16
+  func.return %result : i16
+}
+
+// ====
+
+// A separate volatile write is observable on every trip, even though both
+// ends of the copy are private and the destination value is known.
+func.def @observed_iterations(%initial: i8, %observer: view<2xi8>) -> (i8) {
+  %bytes = index.constant 2 : offset
+  %origin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %limit = index.constant 2 : index
+  %source = buffer.alloca<private> align(1) %bytes : buffer
+  %target = buffer.alloca<private> align(1) %bytes : buffer
+  %input = buffer.view %source[%origin] : buffer -> view<2xi8>
+  %output = buffer.view %target[%origin] : buffer -> view<2xi8>
+  view.store %initial, %input[0] : i8, view<2xi8>
+  view.store %initial, %input[1] : i8, view<2xi8>
+  scf.for %i = [%origin to %limit step %step] {
+    %value = view.load %input[%i] : view<2xi8> -> i8
+    view.store<volatile> %value, %observer[%i] : i8, view<2xi8>
+    view.store %value, %output[%i] : i8, view<2xi8>
+  }
+  %result = view.load %output[0] : view<2xi8> -> i8
+  func.return %result : i8
+}
+
+// ====
+
+// The induction variable is a block argument. This is a fill loop, and its
+// per-lane values remain available to the subsequent read.
+func.def @fill_from_induction() -> (index) {
+  %bytes = index.constant 16 : offset
+  %origin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %limit = index.constant 2 : index
+  %storage = buffer.alloca<private> align(8) %bytes : buffer
+  %values = buffer.view %storage[%origin] : buffer -> view<2xindex>
+  scf.for %i = [%origin to %limit step %step] {
+    view.store %i, %values[%i] : index, view<2xindex>
+  }
+  %last = view.load %values[1] : view<2xindex> -> index
+  func.return %last : index
+}
+
+// ====
+
+// The two branches have the same condition, so the scalar read is always
+// initialized. A vector loaded inside the first branch is out of scope in
+// the second branch.
+func.def @conditional_snapshot(%enabled: i1, %input: view<2xi32>, %fallback: i32) -> (i32) {
+  %bytes = index.constant 8 : offset
+  %origin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %limit = index.constant 2 : index
+  %storage = buffer.alloca<private> align(4) %bytes : buffer
+  %output = buffer.view %storage[%origin] : buffer -> view<2xi32>
+  scf.if %enabled {
+    scf.for %i = [%origin to %limit step %step] {
+      %value = view.load %input[%i] : view<2xi32> -> i32
+      view.store %value, %output[%i] : i32, view<2xi32>
+    }
+  }
+  %chosen = scf.if %enabled -> (i32) {
+    %result = view.load %output[1] : view<2xi32> -> i32
+    scf.yield %result : i32
+  } else {
+    scf.yield %fallback : i32
+  }
+  func.return %chosen : i32
+}

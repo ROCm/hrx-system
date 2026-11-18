@@ -7,6 +7,7 @@
 #ifndef LOOM_TRANSFORMS_KERNEL_PRIVATE_STORAGE_COPY_H_
 #define LOOM_TRANSFORMS_KERNEL_PRIVATE_STORAGE_COPY_H_
 
+#include "loom/analysis/view_regions.h"
 #include "loom/transforms/kernel/private_storage.h"
 
 #ifdef __cplusplus
@@ -45,6 +46,16 @@ iree_status_t loom_private_storage_record_copy(
     loom_private_storage_allocation_t* source, int64_t source_offset,
     loom_private_storage_allocation_t* target, int64_t target_offset,
     int64_t byte_length, loom_private_storage_copy_t** out_copy);
+
+// Recognizes one scalar load/store per iteration as a byte transfer when
+// both accesses walk contiguous ranges in the same direction. The caller
+// supplies the private roots of the two views.
+iree_status_t loom_private_storage_record_copy_loop(
+    loom_private_storage_plan_t* plan, loom_view_region_table_t* regions,
+    const loom_value_fact_table_t* facts, loom_op_t* loop, loom_op_t* load,
+    loom_private_storage_allocation_t* source, loom_op_t* store,
+    loom_private_storage_allocation_t* target,
+    loom_private_storage_copy_t** out_copy);
 
 // Maps byte ranges to the completed sparse scalar partition before value flow.
 iree_status_t loom_private_storage_partition_copies(
