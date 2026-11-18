@@ -5,7 +5,7 @@ changes live in the maintained fork rather than as patches in this directory:
 
 - Upstream: <https://github.com/robertoraggi/cplusplus>
 - Maintained fork: <https://github.com/benvanik/cplusplus>
-- Current stack: [`hrx-upstream/155-expand-macro-arguments-on-use`](https://github.com/benvanik/cplusplus/commits/hrx-upstream/155-expand-macro-arguments-on-use/)
+- Current stack: [`hrx-upstream/157-scope-type-dependence-proofs`](https://github.com/benvanik/cplusplus/commits/hrx-upstream/157-scope-type-dependence-proofs/)
 
 `../deps.MODULE.bazel` owns the archive commit and checksum. The generated root
 `MODULE.cmake.lock` carries the same identity for CMake. `cxx.BUILD.bazel` and
