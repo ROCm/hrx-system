@@ -143,7 +143,7 @@ struct NativeInstance {
   // One fake dependency instance per test; no native driver is loaded.
   static NativeInstance* current;
   // Mixed native topology with two usable PM4 GPUs, one NPU, and one AQL GPU.
-  std::array<NativeEndpoint, 6> endpoints;
+  std::vector<NativeEndpoint> endpoints{6};
   // Instance-owned identity for the system memory scope.
   int system_scope = 0;
   // Live query-only handles, balanced on success and query failure.
@@ -462,6 +462,30 @@ TEST_F(DriverTest, NativeGpuIdentityPathsUseCachedDiscovery) {
         IREE_SV("GPU-0000000000000000")}) {
     CreatePath(path, IREE_STATUS_INVALID_ARGUMENT, 0);
   }
+}
+
+TEST_F(DriverTest, SingleEndpointIdentityUsesCachedDiscovery) {
+  native_.endpoints[0] = std::move(native_.endpoints[1]);
+  native_.endpoints.resize(1);
+  native_.endpoints[0].gpu.unique_id = UINT64_C(0xfedcba9876543210);
+  IREE_ASSERT_OK(CreateDriver());
+  const uint32_t query_count = native_.query_count;
+  iree_host_size_t count = 0;
+  iree_hal_device_info_t* infos = nullptr;
+  IREE_ASSERT_OK(iree_hal_driver_query_available_devices(
+      driver_, IREE_SV("rdna"), iree_allocator_system(), &count, &infos));
+  EXPECT_EQ(count, 1u);
+  if (count == 1) {
+    EXPECT_EQ(infos[0].device_id, 1u);
+    EXPECT_TRUE(
+        iree_string_view_equal(infos[0].path, IREE_SV("GPU-fedcba9876543210")));
+  }
+  iree_allocator_free(iree_allocator_system(), infos);
+  EXPECT_EQ(Enumerate(IREE_SV("amdgpu")),
+            (std::vector<iree_hal_device_id_t>{1}));
+  EXPECT_EQ(native_.query_count, query_count);
+  EXPECT_EQ(native_.activation_count, 0u);
+  EXPECT_EQ(native_.open_count, 0u);
 }
 
 TEST_F(DriverTest, AmbiguousGpuIdentityKeepsExactEndpointPaths) {

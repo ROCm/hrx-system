@@ -158,7 +158,7 @@ TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
     EXPECT_EQ(range.region, nullptr);
     EXPECT_EQ(range.effects.bits, 0u);
     if (host) {
-      iree_hal_file_request_t request;
+      iree_hal_file_request_t request = {};
       IREE_ASSERT_OK(iree_hal_file_request_prepare(
           file, access, kFileOffset + start - kBufferOffset, end - start,
           iree_async_span_from_ptr(range.contents.data,
@@ -287,7 +287,7 @@ TEST_F(MemoryBackendTest, ExplicitSourcesPreserveIoCoordinatesAcrossLayouts) {
         EXPECT_EQ(range.effects.bits, 0u);
         uint64_t position = 0;
         while (position < length) {
-          iree_hal_file_request_t request;
+          iree_hal_file_request_t request = {};
           IREE_ASSERT_OK(iree_hal_file_request_prepare(
               file, access, offset + position, length - position,
               iree_async_span_from_ptr(range.contents.data + position,

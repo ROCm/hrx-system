@@ -336,10 +336,12 @@ iree_status_t iree_hal_webgpu_queue_submit_file_transfer(
                         &files_offset),
       IREE_STRUCT_FIELD(waits.count, iree_hal_semaphore_t*,
                         &wait_semaphores_offset),
-      IREE_STRUCT_FIELD(waits.count, uint64_t, &wait_values_offset),
+      IREE_STRUCT_FIELD_ALIGNED(waits.count, uint64_t, iree_alignof(uint64_t),
+                                &wait_values_offset),
       IREE_STRUCT_FIELD(signals.count, iree_hal_semaphore_t*,
                         &signal_semaphores_offset),
-      IREE_STRUCT_FIELD(signals.count, uint64_t, &signal_values_offset)));
+      IREE_STRUCT_FIELD_ALIGNED(signals.count, uint64_t, iree_alignof(uint64_t),
+                                &signal_values_offset)));
   iree_hal_webgpu_file_transfer_t* transfer = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(queue->host_allocator, size, (void**)&transfer));

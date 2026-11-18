@@ -884,8 +884,9 @@ iree_status_t iree_hal_vulkan_queue_submit_file_transfer(
                                 &batch_offset),
       IREE_STRUCT_FIELD(files.count, iree_hal_vulkan_file_binding_t,
                         &files_offset),
-      IREE_STRUCT_FIELD(buffers.count, iree_hal_vulkan_file_buffer_t,
-                        &buffers_offset),
+      IREE_STRUCT_FIELD_ALIGNED(buffers.count, iree_hal_vulkan_file_buffer_t,
+                                iree_alignof(iree_hal_vulkan_file_buffer_t),
+                                &buffers_offset),
       IREE_STRUCT_FIELD(piece_capacity, iree_hal_vulkan_file_piece_t,
                         &pieces_offset),
       IREE_STRUCT_FIELD(piece_capacity, iree_hal_transfer_operation_t,
@@ -894,7 +895,8 @@ iree_status_t iree_hal_vulkan_queue_submit_file_transfer(
                         iree_hal_file_transfer_record_t, &records_offset),
       IREE_STRUCT_FIELD(signals.count, iree_hal_semaphore_t*,
                         &semaphores_offset),
-      IREE_STRUCT_FIELD(signals.count, uint64_t, &payloads_offset)));
+      IREE_STRUCT_FIELD_ALIGNED(signals.count, uint64_t, iree_alignof(uint64_t),
+                                &payloads_offset)));
   iree_hal_vulkan_file_transfer_t* transfer = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(queue->host_allocator, size, (void**)&transfer));

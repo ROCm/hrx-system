@@ -654,7 +654,8 @@ static iree_status_t iree_hal_amd_driver_initialize_views(
     iree_host_size_t size = 0, indices_offset = 0, unique_ids_offset = 0;
     IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
         0, &size, IREE_STRUCT_FIELD_FAM(endpoint_count, uint32_t),
-        IREE_STRUCT_FIELD(endpoint_count, uint64_t, &unique_ids_offset),
+        IREE_STRUCT_FIELD_ALIGNED(endpoint_count, uint64_t,
+                                  iree_alignof(uint64_t), &unique_ids_offset),
         IREE_STRUCT_FIELD(endpoint_count * (IREE_ARRAYSIZE(driver->views) + 1),
                           uint32_t, &indices_offset)));
     IREE_RETURN_IF_ERROR(iree_allocator_malloc(
