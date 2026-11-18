@@ -193,6 +193,18 @@ const iree_hal_slab_provider_vtable_t RetainingProvider::vtable_ = {
 
 class MemoryLossTest : public ::testing::Test {
  protected:
+  iree_status_t Trim(loom_runtime_virtual_buffer_t* buffer) {
+    const loom_runtime_memory_range_t range = {buffer, 0, kSlabSize};
+    loom_runtime_memory_operation_t* operation = nullptr;
+    iree_status_t status = loom_runtime_memory_pool_trim_async(
+        pool_, 1, &range, nullptr, 0, &operation);
+    loom_runtime_memory_operation_await(operation);
+    status = iree_status_join(
+        status, loom_runtime_memory_operation_query_status(operation));
+    loom_runtime_memory_operation_free(operation);
+    return iree_status_join(status, loom_runtime_memory_pool_await(pool_));
+  }
+
   void SetUp() override {
     loom_runtime_host_t* host = nullptr;
     IREE_ASSERT_OK(loom_runtime_host_create(1, nullptr, nullptr,
@@ -348,8 +360,8 @@ TEST_F(MemoryLossTest, AcceptedWaitEndsWithoutSpendingLostCapacity) {
         loom_runtime_virtual_buffer_commit(buffers_[i], 0, kSlabSize));
     CheckContents(i, 100 + i, true);
   }
-  loom_runtime_virtual_buffer_begin_trim(buffers_[2]);
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(buffers_[2]));
+
+  IREE_ASSERT_OK(Trim(buffers_[2]));
   provider_->HoldNextRelease();
   loom_runtime_memory_pool_trim(pool_, 2 * kSlabSize);
   loom_runtime_memory_admission_t admission;
@@ -374,8 +386,7 @@ TEST_F(MemoryLossTest, AcceptedWaitEndsWithoutSpendingLostCapacity) {
   EXPECT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_CAPACITY);
   IREE_EXPECT_OK(loom_runtime_memory_pool_query_status(pool_));
 
-  loom_runtime_virtual_buffer_begin_trim(buffers_[0]);
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(buffers_[0]));
+  IREE_ASSERT_OK(Trim(buffers_[0]));
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(buffers_[3], 0, kSlabSize));
   CheckContents(3, 999, true);
   CheckContents(1, 101);

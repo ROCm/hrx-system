@@ -1151,8 +1151,9 @@ TEST_P(WeightsTest, PressureTurnSurvivesMutableStateNativeReturn) {
   // capacity until the source has actually disposed of the old backing.
   const loom_runtime_memory_range_t next = {state_, kSlabBytes, kSlabBytes};
   bool admitted = false;
-  loom_runtime_virtual_buffer_begin_trim(state_);
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(state_));
+
+  IREE_ASSERT_OK(
+      loom_runtime_test_buffer_trim(pool_, state_, 0, IREE_HAL_WHOLE_BUFFER));
   IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool_));
   {
     if (deferred_backing_) {
@@ -1449,8 +1450,9 @@ TEST_P(WeightsTest, ReclaimsIdleHistoryOnlyWhenProtectedParametersFit) {
   loom_runtime_residency_cancel_admission(residencies_[0]);
   EXPECT_TRUE(loom_runtime_residency_cache_is_reclaiming(cache));
   EXPECT_EQ(state_statistics_.committed_bytes, kSlabBytes);
-  loom_runtime_virtual_buffer_begin_trim(state_);
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(state_));
+
+  IREE_ASSERT_OK(
+      loom_runtime_test_buffer_trim(pool_, state_, 0, IREE_HAL_WHOLE_BUFFER));
   owner.pending = false;
   EXPECT_FALSE(loom_runtime_residency_cache_is_reclaiming(cache));
   ASSERT_NO_FATAL_FAILURE(AdmitAfterRelease(0));
@@ -1531,10 +1533,9 @@ TEST_P(WeightsTest, MutableGrowthReclaimsIdleParametersWithoutDiscardingState) {
       loom_runtime_execution_feedback(execution_, 1, &download, &completion));
   IREE_ASSERT_OK(loom_runtime_execution_feedback_wait(execution_, completion));
   EXPECT_EQ(observed, value);
-  loom_runtime_virtual_buffer_begin_trim(state_);
-  IREE_ASSERT_OK(
-      loom_runtime_virtual_buffer_keep(state_, 0, sizeof(value), nullptr));
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(state_));
+
+  IREE_ASSERT_OK(loom_runtime_test_buffer_trim(pool_, state_, kSlabBytes,
+                                               IREE_HAL_WHOLE_BUFFER));
   ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
   EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).committed_bytes,
             2 * kSlabBytes);

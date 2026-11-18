@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "loom/runtime/device/device.h"
+#include "loom/runtime/testing/native_allocator.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/serve/service/text/source.h"
 #include "loom/serve/service/text/state.h"
@@ -21,7 +22,8 @@ class TextStateReservationTest
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(SourceTextServiceTest::SetUp());
     const auto options = ModelOptions();
-    loom_serve_text_state_initialize(&options, host_allocator_, &state_);
+    loom_serve_text_state_initialize(&options, allocations_.allocator(),
+                                     &state_);
     IREE_ASSERT_OK(loom_runtime_device_create_jit(device_, &options.sources,
                                                   &options.kernel_sanitizer,
                                                   &compilation_, &jit_));
@@ -56,6 +58,8 @@ class TextStateReservationTest
     loom_serve_text_state_row_complete_reserve(state_.rows[index]);
   }
 
+  // Observes actual state planning allocations without replacing the planner.
+  loom_runtime::testing::NativeAllocator allocations_;
   // Owned source description outliving native state.
   loom_serve_text_source_t source_ = {};
   // Model-local compilation evidence outliving its source JIT.
@@ -104,6 +108,63 @@ TEST_F(TextStateReservationTest, PreparationOwnsIdsWithoutSubmittingOrMapping) {
   EXPECT_EQ(row->reserved_extent, 96u);
   EXPECT_GE(state_.cache.pool.capacity, 24u);
   EXPECT_EQ(state_.cache.pool.available, state_.cache.pool.capacity - 24);
+}
+
+TEST_F(TextStateReservationTest, UnchangedContinuationBorrowsItsInstalledMap) {
+  ASSERT_NO_FATAL_FAILURE(Reserve(0, 16));
+  auto* row = state_.rows[0];
+  const std::vector<uint32_t> blocks(state_.cache.maps,
+                                     state_.cache.maps + row->block_count);
+  const std::vector<uint32_t> references(
+      state_.cache.pool.references,
+      state_.cache.pool.references + state_.cache.pool.capacity);
+  allocations_.ResetAllocationMetrics();
+  IREE_ASSERT_OK(loom_serve_text_state_row_prepare_reserve(
+      row, LOOM_SERVE_TEXT_RESERVE_CONTINUE, nullptr, 16, &reservation_));
+  ASSERT_NE(reservation_, nullptr);
+  // The constant-sized plan borrows all existing IDs; it needs neither a
+  // replacement map, range scratch, nor native-directory query storage.
+  EXPECT_EQ(allocations_.allocation_metrics().request_count, 1u);
+  EXPECT_EQ(std::vector<uint32_t>(
+                state_.cache.pool.references,
+                state_.cache.pool.references + state_.cache.pool.capacity),
+            references);
+  loom_serve_text_state_reservation_free(reservation_);
+  reservation_ = nullptr;
+  EXPECT_EQ(std::vector<uint32_t>(state_.cache.maps,
+                                  state_.cache.maps + row->block_count),
+            blocks);
+  IREE_ASSERT_OK(loom_serve_text_state_row_prepare_reserve(
+      row, LOOM_SERVE_TEXT_RESERVE_CONTINUE, nullptr, 16, &reservation_));
+  const auto commit = [](void* user_data, iree_host_size_t count,
+                         const loom_runtime_memory_range_t* ranges,
+                         iree_hal_semaphore_t* readiness, uint64_t value,
+                         loom_runtime_memory_admission_t* out_admission,
+                         loom_runtime_memory_operation_t** out_operation) {
+    EXPECT_EQ(count, 0u);
+    *out_admission = LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE;
+    *out_operation = nullptr;
+    auto* pool = static_cast<loom_runtime_memory_pool_t*>(user_data);
+    return pool ? loom_runtime_memory_pool_commit_async(
+                      pool, count, ranges, readiness, value, out_admission,
+                      out_operation)
+                : iree_ok_status();
+  };
+  loom_runtime_memory_admission_t admission;
+  IREE_ASSERT_OK(loom_serve_text_state_reservation_submit(
+      reservation_, commit, state_.memory.pool, &admission));
+  EXPECT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
+  loom_serve_text_state_reservation_free(reservation_);
+  reservation_ = nullptr;
+  IREE_ASSERT_OK(loom_runtime_execution_drain(execution_));
+  loom_serve_text_state_row_complete_reserve(row);
+  EXPECT_EQ(std::vector<uint32_t>(state_.cache.maps,
+                                  state_.cache.maps + row->block_count),
+            blocks);
+  EXPECT_EQ(std::vector<uint32_t>(
+                state_.cache.pool.references,
+                state_.cache.pool.references + state_.cache.pool.capacity),
+            references);
 }
 
 TEST_F(TextStateReservationTest,

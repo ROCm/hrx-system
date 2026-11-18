@@ -45,7 +45,6 @@ TEST(BackingDirectoryTest, RehashesAndReusesDeletedProbeSlots) {
     loom_runtime_backing_entry_t* entry = nullptr;
     IREE_ASSERT_OK(
         loom_runtime_backing_directory_insert(&directory, index, &entry));
-    entry->keep = true;
   }
   EXPECT_EQ(directory.count, 3u);
   loom_runtime_backing_directory_remove(

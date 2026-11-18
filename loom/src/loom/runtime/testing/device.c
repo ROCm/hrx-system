@@ -13,6 +13,25 @@
 #include "iree/hal/pool_wait.h"
 #include "loom/runtime/execution/workspace.h"
 
+iree_status_t loom_runtime_test_buffer_trim(
+    loom_runtime_memory_pool_t* pool, loom_runtime_virtual_buffer_t* buffer,
+    iree_device_size_t offset, iree_device_size_t length) {
+  if (length == IREE_HAL_WHOLE_BUFFER) {
+    length = iree_hal_buffer_byte_length(
+                 loom_runtime_virtual_buffer_handle(buffer)) -
+             offset;
+  }
+  const loom_runtime_memory_range_t range = {buffer, offset, length};
+  loom_runtime_memory_operation_t* operation = NULL;
+  iree_status_t status =
+      loom_runtime_memory_pool_trim_async(pool, 1, &range, NULL, 0, &operation);
+  loom_runtime_memory_operation_await(operation);
+  status = iree_status_join(
+      status, loom_runtime_memory_operation_query_status(operation));
+  loom_runtime_memory_operation_free(operation);
+  return iree_status_join(status, loom_runtime_memory_pool_await(pool));
+}
+
 static iree_once_flag loom_runtime_test_driver_once = IREE_ONCE_FLAG_INIT;
 static iree_status_t loom_runtime_test_driver_registration_status = 0;
 

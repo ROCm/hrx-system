@@ -136,7 +136,10 @@ loom_cc_library(
     srcs = ["block_pool.c"],
     hdrs = ["block_pool.h"],
     visibility = ["//visibility:public"],
-    deps = ["//runtime/src/iree/base"],
+    deps = [
+        "//loom/src/loom/util:index_set",
+        "//runtime/src/iree/base",
+    ],
 )
 
 loom_cc_library(

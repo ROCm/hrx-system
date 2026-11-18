@@ -69,6 +69,7 @@ void loom_serve_text_pending_push(
 
 // Gathers a bounded observed queue window without changing text admission
 // order.
-bool loom_serve_text_media_lookahead(loom_serve_text_service_t* service);
+iree_status_t loom_serve_text_media_lookahead(
+    loom_serve_text_service_t* service, bool* out_progress);
 
 #endif  // LOOM_SERVE_SERVICE_TEXT_REQUEST_ADMISSION_H_

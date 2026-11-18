@@ -1703,20 +1703,23 @@ iree_status_t loom_runtime_weights_deactivate(loom_runtime_weights_t* weights,
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(
       z0, (int64_t)weights->statistics.committed_bytes);
-  loom_runtime_virtual_buffer_t** reservations = NULL;
+  loom_runtime_memory_range_t* ranges = NULL;
   iree_status_t status = iree_allocator_malloc_array(
-      weights->host_allocator, weights->storage_count, sizeof(*reservations),
-      (void**)&reservations);
+      weights->host_allocator, weights->storage_count, sizeof(*ranges),
+      (void**)&ranges);
   if (iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < weights->storage_count; ++i) {
-      reservations[i] = weights->storages[i].reservation;
-      loom_runtime_virtual_buffer_begin_trim(reservations[i]);
+      loom_runtime_virtual_buffer_t* buffer = weights->storages[i].reservation;
+      ranges[i] = (loom_runtime_memory_range_t){
+          buffer, 0,
+          iree_hal_buffer_byte_length(
+              loom_runtime_virtual_buffer_handle(buffer))};
     }
     status = loom_runtime_memory_pool_trim_async(
-        weights->pool, weights->storage_count, reservations, NULL, 0,
+        weights->pool, weights->storage_count, ranges, NULL, 0,
         &weights->deactivation);
   }
-  iree_allocator_free(weights->host_allocator, reservations);
+  iree_allocator_free(weights->host_allocator, ranges);
   if (iree_status_is_ok(status)) {
     weights->activity.deactivations += weights->active;
     weights->active = false;

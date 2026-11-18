@@ -62,6 +62,7 @@ loom_cc_library(
         "//loom/src/loom/runtime/device",
         "//loom/src/loom/runtime/execution:workspace",
         "//loom/src/loom/runtime/host",
+        "//loom/src/loom/runtime/storage:memory",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/base/threading:thread",

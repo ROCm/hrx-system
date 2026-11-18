@@ -103,6 +103,15 @@ void loom_serve_text_storage_release_payloads(
     loom_serve_text_storage_t* storage);
 void loom_serve_text_storage_deinitialize(loom_serve_text_storage_t* storage);
 
+// One borrowed sequence of physical IDs in logical order. Multiple spans let
+// a continuation borrow its retained prefix without copying a replacement map.
+typedef struct loom_serve_text_storage_blocks_t {
+  // Number of physical IDs in this sequence.
+  uint32_t count;
+  // Borrowed IDs, stable through planning; NULL when count is zero.
+  const uint32_t* values;
+} loom_serve_text_storage_blocks_t;
+
 // Builds logical-order transfer and admission ranges from the source geometry.
 // Consecutive physical pages share a range without changing logical byte order.
 // The five private views are row bindings 1-5; null views are omitted. A row
@@ -115,7 +124,7 @@ void loom_serve_text_storage_deinitialize(loom_serve_text_storage_t* storage);
 iree_status_t loom_serve_text_storage_plan_snapshot(
     const loom_serve_text_storage_t* storage, iree_host_size_t carry_index,
     iree_hal_buffer_t* const* private_views, bool include_carry,
-    uint32_t block_count, const uint32_t* blocks,
+    iree_host_size_t span_count, const loom_serve_text_storage_blocks_t* spans,
     iree_allocator_t host_allocator, iree_host_size_t* out_count,
     loom_runtime_snapshot_range_t** out_ranges);
 

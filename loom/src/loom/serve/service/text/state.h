@@ -42,7 +42,15 @@ typedef enum loom_serve_text_trim_phase_e {
   LOOM_SERVICE_TEXT_TRIM_RELEASE,
 } loom_serve_text_trim_phase_t;
 
+enum loom_serve_text_trim_flag_bits_e {
+  // Mapping/geometry changes, new IDs, or abandoned placement require free-ID
+  // ordering to be refreshed before the next admission retry.
+  LOOM_SERVE_TEXT_TRIM_FLAG_PLACEMENT_PENDING = 1u << 0,
+};
+typedef uint32_t loom_serve_text_trim_flags_t;
+
 typedef struct loom_serve_text_state_t loom_serve_text_state_t;
+typedef struct loom_serve_text_backing_t loom_serve_text_backing_t;
 
 // Retained device state at a consumed-token frontier. Host predictions and
 // metrics belong to the model row and do not own device storage.
@@ -60,7 +68,7 @@ typedef struct loom_serve_text_state_row_t {
     uint32_t slot;
     // Owned reader until the cohort retires, or UINT32_MAX when in-place.
     uint32_t anchor;
-    // Changed origins not yet captured by the source state encoder.
+    // Reader/writer or fork frontier not yet captured by the source encoder.
     bool dirty;
   } recurrent;
   // Old partial KV tail owned through COW retirement, or UINT32_MAX.
@@ -165,6 +173,9 @@ struct loom_serve_text_state_t {
   struct {
     // Borrowed shared allocation domain for state and model parameters.
     loom_runtime_memory_pool_t* pool;
+    // Owned source-geometry index and pending release work; absent for fixed
+    // storage. Logical owners and native mappings retain their own authority.
+    loom_serve_text_backing_t* index;
     // Mutable virtual state only, excluding weights and execution workspace.
     loom_runtime_storage_statistics_t statistics;
     // Native backing changes exclude state mutation through their readiness.
@@ -191,6 +202,8 @@ struct loom_serve_text_state_t {
     struct {
       // Action admitted after successful readiness of the preceding phase.
       loom_serve_text_trim_phase_t phase;
+      // Cold maintenance invalidated by its producer, retained until complete.
+      loom_serve_text_trim_flags_t flags;
       // State-local release counter before this maintenance cut.
       uint64_t released_before;
     } trim;
@@ -248,6 +261,23 @@ iree_status_t loom_serve_text_state_allocate(
 // Source slot to its owned root, shared by allocation and cold maintenance.
 iree_hal_buffer_t** loom_serve_text_state_allocation(
     loom_serve_text_state_t* state, iree_host_size_t index);
+
+// Builds or replaces the elastic geometry index at allocation/resize. Existing
+// pending work and carry membership survive the serialized layout replacement.
+iree_status_t loom_serve_text_state_backing_initialize(
+    loom_serve_text_state_t* state);
+void loom_serve_text_state_backing_deinitialize(loom_serve_text_state_t* state);
+
+// Records final logical transitions, including compound reservation installs.
+// Recurrent writer replacement alone does not release row-private storage.
+void loom_serve_text_state_backing_row_changed(
+    loom_serve_text_state_row_t* row);
+void loom_serve_text_state_backing_checkpoint_changed(
+    loom_serve_text_state_checkpoint_t* checkpoint);
+
+// Joins an already-successful native frontier before reusing its operation
+// slot. The serialized owner has observed the model's successful readiness.
+void loom_serve_text_state_complete_backing(loom_serve_text_state_t* state);
 
 // Moves a validated enlarged source layout into retired state. Existing
 // private views, recurrent slots, and cache planes retain their byte offsets.
@@ -317,8 +347,9 @@ iree_status_t loom_serve_text_state_row_submit_pin(
 iree_status_t loom_serve_text_state_row_try_restore(
     loom_serve_text_state_row_t* row,
     loom_serve_text_state_checkpoint_t* checkpoint, bool* out_restored);
-// Joins a caller's complete working set to the state planner's exact range
-// union. Called synchronously on the serialized owner after logical IDs are
+// Joins a caller's admission to the state planner's uncertain backing ranges.
+// Admitted row/checkpoint borrows need no new backing selection. Called
+// synchronously on the serialized owner after logical IDs are
 // tentatively acquired, before publishing any row changes. Denial submits no
 // work and leaves no pin; success returns accepted native backing ownership.
 // Fixed backing supplies zero ranges and no readiness. The callback must not
@@ -330,10 +361,11 @@ typedef iree_status_t (*loom_serve_text_state_admit_fn_t)(
     uint64_t value, loom_runtime_memory_admission_t* out_admission,
     loom_runtime_memory_operation_t** out_operation);
 
-// A prepared continuation owns its selected logical IDs without changing the
-// row, mapping backing, or submitting work. The row and optional checkpoint
-// remain borrowed and immutable until submission or cancellation; other rows
-// may execute, but state compaction waits for prepared continuations to retire.
+// A prepared continuation borrows its admitted prefix and owns a changed
+// suffix without changing the row, mapping backing, or submitting work. The
+// row and optional checkpoint remain borrowed and immutable until submission
+// or cancellation; other rows may execute, but state compaction waits for
+// prepared continuations to retire.
 typedef struct loom_serve_text_state_reservation_t
     loom_serve_text_state_reservation_t;
 
@@ -346,13 +378,13 @@ iree_status_t loom_serve_text_state_row_prepare_reserve(
     loom_serve_text_state_reservation_t** out_reservation);
 
 // Whole continuation's unique physical slab footprint, including shared
-// epoch/proposal storage and COW sources through retirement. Captured with the
-// plan, independent of current backing. Fixed backing has no finite budget and
-// returns zero rather than claiming a physical estimate.
-uint64_t loom_serve_text_state_reservation_footprint(
-    const loom_serve_text_state_reservation_t* reservation);
+// epoch/proposal storage and COW sources through retirement. Materialized once
+// on demand, independently of current backing. Only host allocation can fail.
+// Fixed backing has no finite budget and returns zero.
+iree_status_t loom_serve_text_state_reservation_footprint(
+    loom_serve_text_state_reservation_t* reservation, uint64_t* out_bytes);
 
-// Commits the prepared union and installs its selected IDs on success. Denial
+// Backs uncertain additions and installs the selected IDs on success. Denial
 // keeps the plan intact for retry. The owner excludes concurrent state edits
 // and joins prior backing work before submission. Native failure is terminal;
 // state keeps any installed ownership through ordinary retirement.

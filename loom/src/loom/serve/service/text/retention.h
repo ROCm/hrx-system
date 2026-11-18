@@ -29,7 +29,7 @@ void loom_serve_text_retention_clear(loom_serve_text_model_t* model);
 // host scratch allocation can fail. Clear eligibility after every outcome.
 iree_status_t loom_serve_text_retention_forecast(
     loom_serve_text_model_t* model,
-    const struct loom_serve_text_state_reservation_t* request, bool replan,
+    struct loom_serve_text_state_reservation_t* request, bool replan,
     loom_runtime_residency_projection_t* out_projection);
 
 #ifdef __cplusplus

@@ -7,6 +7,7 @@
 #ifndef LOOM_RUNTIME_STORAGE_ROWS_H_
 #define LOOM_RUNTIME_STORAGE_ROWS_H_
 
+#include "iree/base/bitmap.h"
 #include "loom/runtime/device/device.h"
 #include "loom/runtime/execution/execution.h"
 #include "loom/runtime/execution/retirement.h"
@@ -51,10 +52,9 @@ typedef struct loom_runtime_rows_t {
   loom_runtime_virtual_buffer_t* reservations[LOOM_RUNTIME_ROWS_BUFFER_COUNT];
   // Input/state row strides and the complete conditioning extent.
   iree_device_size_t strides[LOOM_RUNTIME_ROWS_BUFFER_COUNT];
-  // Addressable row count, independent of current cohort membership.
-  iree_host_size_t row_count;
-  // Owner-only row reservations, retained until release_row.
-  bool* rows;
+  // Canonical row reservations, retained until release_row. The bit domain is
+  // the source's addressable row capacity, independent of cohort membership.
+  iree_bitmap_t rows;
 } loom_runtime_rows_t;
 
 void loom_runtime_rows_initialize(iree_allocator_t host_allocator,

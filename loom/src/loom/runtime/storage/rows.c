@@ -26,12 +26,13 @@ iree_status_t loom_runtime_rows_allocate(
         loom_runtime_device_handle(device), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
         0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &state->backing.semaphore));
   }
-  state->row_count = row_count;
+  state->rows.bit_count = row_count;
   state->strides[LOOM_RUNTIME_ROWS_INPUT] = input_stride;
   state->strides[LOOM_RUNTIME_ROWS_CONDITIONING] = conditioning_length;
   state->strides[LOOM_RUNTIME_ROWS_STREAM] = stream_stride;
   iree_status_t status = iree_allocator_malloc_array(
-      host_allocator, row_count, sizeof(*state->rows), (void**)&state->rows);
+      host_allocator, iree_bitmap_calculate_words(row_count),
+      sizeof(*state->rows.words), (void**)&state->rows.words);
   if (iree_status_is_ok(status) && !state->pool) {
     iree_hal_pool_reservation_request_t
         requests[LOOM_RUNTIME_ROWS_BUFFER_COUNT];
@@ -98,7 +99,7 @@ iree_status_t loom_runtime_rows_try_reserve(
     if (state->pool) {
       ++state->backing.value;
     }
-    state->rows[row_index] = true;
+    iree_bitmap_set(state->rows, row_index);
   }
   if (state->backing.operation) {
     return loom_runtime_execution_barrier(
@@ -117,6 +118,16 @@ void loom_runtime_rows_complete_backing(loom_runtime_rows_t* state) {
   state->backing.operation = NULL;
 }
 
+// Contiguous rows share only their boundary mappings. Limit each query to the
+// rows overlapping that boundary rather than scanning the source capacity.
+static bool loom_runtime_rows_any_reserved(const loom_runtime_rows_t* state,
+                                           iree_host_size_t begin,
+                                           iree_host_size_t end) {
+  return begin < end &&
+         iree_bitmap_find_first_set((iree_bitmap_t){end, state->rows.words},
+                                    begin) < end;
+}
+
 iree_status_t loom_runtime_rows_release_row(loom_runtime_rows_t* state,
                                             iree_host_size_t row_index,
                                             bool* out_complete) {
@@ -126,27 +137,45 @@ iree_status_t loom_runtime_rows_release_row(loom_runtime_rows_t* state,
     *out_complete = true;
     return iree_ok_status();
   }
-  state->rows[row_index] = false;
-  loom_runtime_virtual_buffer_t* buffers[2];
+  iree_bitmap_reset(state->rows, row_index);
+  loom_runtime_memory_range_t ranges[2];
   iree_host_size_t count = 0;
   for (iree_host_size_t i = 0;
        state->pool && i < LOOM_RUNTIME_ROWS_BUFFER_COUNT; ++i) {
     if (i == LOOM_RUNTIME_ROWS_CONDITIONING) {
       continue;
     }
-    loom_runtime_virtual_buffer_begin_trim(state->reservations[i]);
-    for (iree_host_size_t row = 0; row < state->row_count; ++row) {
-      if (state->rows[row]) {
-        IREE_RETURN_IF_ERROR(loom_runtime_virtual_buffer_keep(
-            state->reservations[i], row * state->strides[i], state->strides[i],
-            NULL));
-      }
+    loom_runtime_virtual_buffer_t* buffer = state->reservations[i];
+    const iree_device_size_t mapping_size =
+        loom_runtime_virtual_buffer_mapping_size(buffer);
+    const iree_device_size_t length =
+        iree_hal_buffer_byte_length(state->buffers[i]);
+    const iree_device_size_t stride = state->strides[i];
+    const iree_device_size_t row_begin = row_index * stride;
+    const iree_device_size_t row_end = row_begin + stride;
+    iree_device_size_t begin = row_begin - row_begin % mapping_size;
+    iree_device_size_t end =
+        row_end +
+        iree_min((mapping_size - row_end % mapping_size) % mapping_size,
+                 length - row_end);
+    if (loom_runtime_rows_any_reserved(state, begin / stride, row_index)) {
+      begin = row_begin +
+              iree_min((mapping_size - row_begin % mapping_size) % mapping_size,
+                       end - row_begin);
     }
-    buffers[count++] = state->reservations[i];
+    const iree_host_size_t end_row =
+        iree_min(end / stride + (end % stride != 0), state->rows.bit_count);
+    if (loom_runtime_rows_any_reserved(state, row_index + 1, end_row)) {
+      end = row_end - row_end % mapping_size;
+    }
+    if (begin < end) {
+      ranges[count++] =
+          (loom_runtime_memory_range_t){buffer, begin, end - begin};
+    }
   }
   if (count) {
     IREE_RETURN_IF_ERROR(loom_runtime_memory_pool_trim_async(
-        state->pool, count, buffers, state->backing.semaphore,
+        state->pool, count, ranges, state->backing.semaphore,
         state->backing.value + 1, &state->backing.operation));
     ++state->backing.value;
   }
@@ -197,8 +226,8 @@ iree_status_t loom_runtime_rows_deinitialize(loom_runtime_rows_t* state) {
   }
   if (iree_status_is_ok(status)) {
     loom_runtime_retirement_deinitialize(&state->retirement);
-    iree_allocator_free(state->host_allocator, state->rows);
-    state->rows = NULL;
+    iree_allocator_free(state->host_allocator, state->rows.words);
+    state->rows = (iree_bitmap_t){0};
   }
   return status;
 }

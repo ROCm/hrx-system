@@ -122,12 +122,21 @@ void BM_TransitionBacking(benchmark::State& state) {
                            : iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                                               "benchmark backing denied"));
   };
+  const auto trim = [&] {
+    const loom_runtime_memory_range_t release = {buffer, 0, reserved_length};
+    loom_runtime_memory_operation_t* operation = nullptr;
+    IREE_CHECK_OK(loom_runtime_memory_pool_trim_async(pool, 1, &release,
+                                                      nullptr, 0, &operation));
+    loom_runtime_memory_operation_await(operation);
+    IREE_CHECK_OK(loom_runtime_memory_operation_query_status(operation));
+    loom_runtime_memory_operation_free(operation);
+    IREE_CHECK_OK(loom_runtime_memory_pool_await(pool));
+  };
   // Establish published backing for detach, or empty addresses with the chosen
   // physical retention policy for commit. Directory setup is outside timing.
   commit();
   if constexpr (Mode != Transition::kDetachRetained) {
-    loom_runtime_virtual_buffer_begin_trim(buffer);
-    IREE_CHECK_OK(loom_runtime_virtual_buffer_trim(buffer));
+    trim();
   }
   if constexpr (Mode == Transition::kCommitCold) {
     loom_runtime_memory_pool_trim(pool, 0);
@@ -141,8 +150,7 @@ void BM_TransitionBacking(benchmark::State& state) {
       bytes_before = traffic.bytes.load(std::memory_order_relaxed);
     }
     if constexpr (Mode == Transition::kDetachRetained) {
-      loom_runtime_virtual_buffer_begin_trim(buffer);
-      IREE_CHECK_OK(loom_runtime_virtual_buffer_trim(buffer));
+      trim();
     } else {
       commit();
     }
@@ -154,8 +162,7 @@ void BM_TransitionBacking(benchmark::State& state) {
     if constexpr (Mode == Transition::kDetachRetained) {
       commit();
     } else {
-      loom_runtime_virtual_buffer_begin_trim(buffer);
-      IREE_CHECK_OK(loom_runtime_virtual_buffer_trim(buffer));
+      trim();
     }
     if constexpr (Mode == Transition::kCommitCold) {
       loom_runtime_memory_pool_trim(pool, 0);

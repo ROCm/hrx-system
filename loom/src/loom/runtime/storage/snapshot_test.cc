@@ -320,8 +320,8 @@ TEST_F(SnapshotTest, LargeSparseStateSurvivesBackingReuseAndFreshPlacement) {
       iree_allocator_system(), &snapshot));
   IREE_ASSERT_OK(loom_runtime_execution_drain(execution));
   for (auto* reservation : reservations) {
-    loom_runtime_virtual_buffer_begin_trim(reservation);
-    IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(reservation));
+    IREE_ASSERT_OK(loom_runtime_test_buffer_trim(pool, reservation, 0,
+                                                 IREE_HAL_WHOLE_BUFFER));
   }
   EXPECT_EQ(statistics.committed_bytes, 0u);
   ranges[1].offset = kHighOffset + kStateStride * 5 + 256;

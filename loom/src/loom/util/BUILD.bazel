@@ -45,7 +45,8 @@ loom_cc_benchmark(
     ],
 )
 
-loom_cc_library(
+# Layout and membership words are caller-owned; no image-local identity is used.
+loom_cc_instance_library(
     name = "index_set",
     srcs = ["index_set.c"],
     hdrs = ["index_set.h"],

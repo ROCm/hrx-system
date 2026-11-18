@@ -242,17 +242,25 @@ typedef struct loom_serve_text_storage_block_run_t {
 iree_status_t loom_serve_text_storage_plan_snapshot(
     const loom_serve_text_storage_t* storage, iree_host_size_t carry_index,
     iree_hal_buffer_t* const* private_views, bool include_carry,
-    uint32_t block_count, const uint32_t* blocks,
+    iree_host_size_t span_count, const loom_serve_text_storage_blocks_t* spans,
     iree_allocator_t host_allocator, iree_host_size_t* out_count,
     loom_runtime_snapshot_range_t** out_ranges) {
   *out_count = 0;
   *out_ranges = NULL;
   include_carry &= storage->carry_stride != 0;
-  uint32_t run_count = block_count ? 1 : 0;
-  for (uint32_t i = 1; i < block_count; ++i) {
-    run_count += (uint64_t)blocks[i - 1] + 1 != blocks[i];
+  uint32_t run_count = 0;
+  uint64_t previous = UINT64_MAX;
+  for (iree_host_size_t span = 0; span < span_count; ++span) {
+    for (uint32_t i = 0; i < spans[span].count; ++i) {
+      const uint32_t block = spans[span].values[i];
+      run_count += !run_count || previous + 1 != block;
+      previous = block;
+    }
   }
-  iree_host_size_t capacity = 5 + (include_carry ? 1 : 0);
+  iree_host_size_t capacity = include_carry ? 1 : 0;
+  for (iree_host_size_t i = 0; i < 5; ++i) {
+    capacity += private_views[i] != NULL;
+  }
   for (iree_host_size_t r = 0; r < storage->region_count; ++r) {
     if (run_count && storage->regions[r].blocks.count >
                          (IREE_HOST_SIZE_MAX - capacity) / run_count) {
@@ -260,6 +268,9 @@ iree_status_t loom_serve_text_storage_plan_snapshot(
                               "snapshot transfer plan exceeds host size");
     }
     capacity += storage->regions[r].blocks.count * run_count;
+  }
+  if (!capacity) {
+    return iree_ok_status();
   }
   // All planes consume the same ordered runs. Keep their construction scratch
   // in the plan allocation instead of rediscovering adjacency for each plane.
@@ -275,11 +286,16 @@ iree_status_t loom_serve_text_storage_plan_snapshot(
   loom_serve_text_storage_block_run_t* runs =
       (loom_serve_text_storage_block_run_t*)((uint8_t*)ranges + runs_offset);
   uint32_t run_index = 0;
-  for (uint32_t i = 0; i < block_count; ++i) {
-    if (!i || (uint64_t)blocks[i - 1] + 1 != blocks[i]) {
-      runs[run_index++] = (loom_serve_text_storage_block_run_t){blocks[i], 1};
-    } else {
-      ++runs[run_index - 1].count;
+  for (iree_host_size_t span = 0; span < span_count; ++span) {
+    for (uint32_t i = 0; i < spans[span].count; ++i) {
+      const uint32_t block = spans[span].values[i];
+      if (!run_index ||
+          (uint64_t)runs[run_index - 1].first + runs[run_index - 1].count !=
+              block) {
+        runs[run_index++] = (loom_serve_text_storage_block_run_t){block, 1};
+      } else {
+        ++runs[run_index - 1].count;
+      }
     }
   }
   iree_host_size_t count = 0;

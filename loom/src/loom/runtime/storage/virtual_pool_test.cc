@@ -136,8 +136,8 @@ TEST_F(VirtualPoolTest,
   ASSERT_FALSE(admitted);
   ASSERT_NO_FATAL_FAILURE(
       CheckRetained(loom_runtime_virtual_buffer_handle(third), 0, 0x87654321));
-  loom_runtime_virtual_buffer_begin_trim(first);
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(first));
+
+  IREE_ASSERT_OK(Trim(first));
   IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
 
   // Repeat actual queue allocation, device writes, downloads and deallocation
@@ -180,16 +180,15 @@ TEST_F(VirtualPoolTest,
     EXPECT_EQ(memory.committed_bytes, 3 * kSlabSize);
     EXPECT_EQ(memory.peak_bytes, 3 * kSlabSize);
 
-    loom_runtime_virtual_buffer_begin_trim(second);
-    IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(second));
+    IREE_ASSERT_OK(Trim(second));
     IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
     IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, 2 * kSlabSize));
     ASSERT_NO_FATAL_FAILURE(RoundTrip(loom_runtime_virtual_buffer_handle(first),
                                       kSlabSize, 0x11223344));
     ASSERT_NO_FATAL_FAILURE(CheckRetained(
         loom_runtime_virtual_buffer_handle(third), 0, 0x87654321));
-    loom_runtime_virtual_buffer_begin_trim(first);
-    IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(first));
+
+    IREE_ASSERT_OK(Trim(first));
     IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
     iree_hal_pool_stats_t reused;
     iree_hal_pool_query_stats(deferred_backing, &reused);
@@ -198,8 +197,8 @@ TEST_F(VirtualPoolTest,
 
   // A true physical trim does not invalidate virtual addresses or TLSF reuse
   // history. Regrowth acquires only the two slabs the next invocation needs.
-  loom_runtime_virtual_buffer_begin_trim(third);
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(third));
+
+  IREE_ASSERT_OK(Trim(third));
   loom_runtime_memory_pool_trim(pool, 0);
   IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
   EXPECT_EQ(loom_runtime_memory_pool_statistics(pool).committed_bytes, 0u);
@@ -221,8 +220,8 @@ TEST_F(VirtualPoolTest, QueueDrivenVirtualBackingReusesRetainedSlabs) {
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, 2 * kSlabSize));
   ASSERT_NO_FATAL_FAILURE(
       RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0x13579bdf));
-  loom_runtime_virtual_buffer_begin_trim(first);
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(first));
+
+  IREE_ASSERT_OK(Trim(first));
   iree_hal_pool_stats_t baseline;
   iree_hal_pool_query_stats(deferred_backing, &baseline);
   ASSERT_NO_FATAL_FAILURE(CreateVirtualPool(true));
@@ -283,8 +282,8 @@ TEST_F(VirtualPoolTest, QueueDrivenVirtualBackingReusesRetainedSlabs) {
       RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0x2468ace0));
   iree_hal_pool_query_stats(deferred_backing, &reused);
   EXPECT_EQ(reused.reserve_count, baseline.reserve_count);
-  loom_runtime_virtual_buffer_begin_trim(first);
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(first));
+
+  IREE_ASSERT_OK(Trim(first));
   loom_runtime_memory_pool_trim(pool, 0);
   IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
   EXPECT_EQ(loom_runtime_memory_pool_statistics(pool).committed_bytes, 0u);
@@ -484,9 +483,8 @@ TEST_F(VirtualPoolTest, VirtualBackingReusesStatePagesWithoutNativeReturn) {
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, 3 * kSlabSize));
   ASSERT_NO_FATAL_FAILURE(
       RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678));
-  loom_runtime_virtual_buffer_begin_trim(first);
-  Keep(first, 0, kSlabSize);
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(first));
+
+  IREE_ASSERT_OK(Trim(first, kSlabSize));
   IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
   ASSERT_NO_FATAL_FAILURE(CreateVirtualPool());
   auto* source = loom_runtime_virtual_pool_handle(virtual_pool);

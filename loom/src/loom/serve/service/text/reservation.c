@@ -15,7 +15,7 @@ typedef struct loom_serve_text_reserve_context_t {
   // Borrowed model owning parameters and the selected row's state.
   loom_serve_text_model_t* model;
   // Exact attempt whose logical requirements are already retained.
-  const loom_serve_text_state_reservation_t* reservation;
+  loom_serve_text_state_reservation_t* reservation;
   // This synchronous attempt is discarded after denial; IDs may be reselected.
   bool replan;
   // Caller-owned result, distinct from a local logical-ID shortage.
@@ -103,12 +103,16 @@ iree_status_t loom_serve_text_reservation_prepare(
   return iree_ok_status();
 }
 
-uint64_t loom_serve_text_reservation_memory_footprint(
-    const loom_serve_text_reservation_t* reservation) {
+iree_status_t loom_serve_text_reservation_memory_footprint(
+    const loom_serve_text_reservation_t* reservation, uint64_t* out_bytes) {
+  *out_bytes = 0;
+  uint64_t state_bytes = 0;
+  IREE_RETURN_IF_ERROR(loom_serve_text_state_reservation_footprint(
+      reservation->state, &state_bytes));
   const loom_serve_text_model_t* model = reservation->row->model;
   const uint64_t extents[] = {
       loom_runtime_residency_activation_footprint(model->residency),
-      loom_serve_text_state_reservation_footprint(reservation->state),
+      state_bytes,
       loom_runtime_module_workspace_requirement(model->control.native_module)
           .allocation_size,
       2ull * model->source.prefill_capacity *
@@ -118,7 +122,8 @@ uint64_t loom_serve_text_reservation_memory_footprint(
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(extents); ++i) {
     bytes += iree_min(extents[i], UINT64_MAX - bytes);
   }
-  return bytes;
+  *out_bytes = bytes;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_serve_text_reservation_submit_plan(

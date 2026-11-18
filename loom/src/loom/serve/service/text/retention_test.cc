@@ -146,12 +146,48 @@ TEST_F(TextRetentionTest, PreparedRequestProtectsItsBorrowAndExactRanges) {
   EXPECT_GE(required.minimum_bytes, retained.minimum_bytes);
   // This request borrows the only retained endpoint. Its exact source bound
   // must match the native commitment union, including COW readers and tails.
-  EXPECT_EQ(required.minimum_bytes,
-            loom_serve_text_state_reservation_footprint(reservation_.state));
+  uint64_t footprint = 0;
+  IREE_ASSERT_OK(loom_serve_text_state_reservation_footprint(reservation_.state,
+                                                             &footprint));
+  EXPECT_EQ(required.minimum_bytes, footprint);
   if (retained.resident_bytes) {
     EXPECT_GT(retained.minimum_bytes, 0u);
   }
   loom_serve_text_retention_clear(model_);
+  loom_serve_text_reservation_deinitialize(&reservation_);
+  ASSERT_NO_FATAL_FAILURE(Continue());
+}
+
+TEST_F(TextRetentionTest, CompleteRequirementsAreLazyRetryableAndRetained) {
+  ASSERT_NO_FATAL_FAILURE(SeparatePrivateMappings());
+  ASSERT_NO_FATAL_FAILURE(Capture());
+  if (!loom_serve_text_model_memory_statistics(model_).reserved_bytes) {
+    return;
+  }
+  auto* row = loom_serve_text_model_row(model_, 1);
+  IREE_ASSERT_OK(loom_serve_text_reservation_prepare(
+      row, LOOM_SERVE_TEXT_RESERVE_CHECKPOINT, checkpoint_, 16, &reservation_));
+  ASSERT_NE(reservation_.state, nullptr);
+  const auto before = loom_serve_text_model_memory_statistics(model_);
+  allocations_.FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC);
+  uint64_t footprint = UINT64_MAX;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_serve_text_state_reservation_footprint(
+                            reservation_.state, &footprint));
+  EXPECT_EQ(footprint, 0u);
+  IREE_ASSERT_OK(loom_serve_text_state_reservation_footprint(reservation_.state,
+                                                             &footprint));
+  EXPECT_GT(footprint, 0u);
+  const auto after = loom_serve_text_model_memory_statistics(model_);
+  EXPECT_EQ(after.committed_bytes, before.committed_bytes);
+  EXPECT_EQ(after.pending_bytes, before.pending_bytes);
+  EXPECT_EQ(after.released_bytes, before.released_bytes);
+  allocations_.ResetAllocationMetrics();
+  uint64_t retained = 0;
+  IREE_ASSERT_OK(loom_serve_text_state_reservation_footprint(reservation_.state,
+                                                             &retained));
+  EXPECT_EQ(retained, footprint);
+  EXPECT_EQ(allocations_.allocation_metrics().request_count, 0u);
   loom_serve_text_reservation_deinitialize(&reservation_);
   ASSERT_NO_FATAL_FAILURE(Continue());
 }
@@ -244,8 +280,10 @@ TEST_F(TextRetentionTest, ColdRestoreDoesNotChargeUnacceptedDeclarations) {
                                                     false, &request));
   EXPECT_GT(request.minimum_bytes, idle.minimum_bytes);
   EXPECT_EQ(request.resident_bytes, idle.resident_bytes);
-  EXPECT_EQ(request.minimum_bytes,
-            loom_serve_text_state_reservation_footprint(reservation_.state));
+  uint64_t footprint = 0;
+  IREE_ASSERT_OK(loom_serve_text_state_reservation_footprint(reservation_.state,
+                                                             &footprint));
+  EXPECT_EQ(request.minimum_bytes, footprint);
   loom_serve_text_reservation_deinitialize(&reservation_);
   ASSERT_NO_FATAL_FAILURE(Continue());
 }
