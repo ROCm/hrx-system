@@ -1379,6 +1379,62 @@ cc_library(
         self.assertIn('"INPUT={{${PROJECT_SOURCE_DIR}/pkg/input.txt}}"', converter.body)
         self.assertIn('DATA\n    "iree::testing::runtime"', converter.body)
 
+    def test_benchmark_preserves_configurable_data_locations(self):
+        for system in (None, "Linux", "Windows"):
+            for mixed in (False, True):
+                with self.subTest(system=system, mixed=mixed):
+                    converter = SimpleNamespace(body="")
+                    functions = bazel_to_cmake_converter.BuildFileFunctions(
+                        converter=converter,
+                        targets=bazel_to_cmake_targets.TargetConverter(
+                            repo_map={"@hrx": ""}
+                        ),
+                        build_dir="/repo/pkg",
+                        repo_root="/repo",
+                        configuration={"CMAKE_SYSTEM_NAME": system} if system else None,
+                    )
+                    functions.iree_spirv_asm_module(
+                        name="generated_data",
+                        src="input.spvasm",
+                        target_compatible_with=[],
+                    )
+                    data = functions.select(
+                        {
+                            "@platforms//os:linux": [":generated_data"],
+                            "//conditions:default": ["fallback.bin"],
+                        }
+                    )
+                    if mixed:
+                        data = ["//runtime/src/iree/testing:runtime"] + data
+                    functions.cc_binary_benchmark(
+                        name="configured_benchmark",
+                        srcs=["benchmark.cc"],
+                        data=data,
+                    )
+                    generated = "${IREE_BINARY_DIR}/pkg/generated_data.spv"
+                    fallback = "${PROJECT_SOURCE_DIR}/pkg/fallback.bin"
+                    if system is None:
+                        self.assertIn(
+                            'if(CMAKE_SYSTEM_NAME STREQUAL "Linux")\n'
+                            "  list(APPEND _configured_benchmark_platform_data "
+                            f'"{generated}")\n'
+                            "else()\n"
+                            "  list(APPEND _configured_benchmark_platform_data "
+                            f'"{fallback}")\n'
+                            "endif()",
+                            converter.body,
+                        )
+                        self.assertIn(
+                            "${_configured_benchmark_platform_data}", converter.body
+                        )
+                    else:
+                        expected = generated if system == "Linux" else fallback
+                        self.assertIn(f'DATA\n    "{expected}"', converter.body)
+                        self.assertNotIn("platform_data", converter.body)
+                    self.assertEqual(
+                        '"iree::testing::runtime"' in converter.body, mixed
+                    )
+
     def test_runtime_hal_cts_test_suite_converts_location_args_to_source_paths(
         self,
     ):

@@ -975,7 +975,12 @@ class BuildFileFunctions:
         includes_block = self._convert_includes_block(includes)
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
         srcs_block = self._convert_srcs_block(srcs)
-        data_block = self._convert_data_list_block(data)
+        data_block, platform_data_block = self._convert_platform_select_strings(
+            name,
+            "DATA",
+            self._map_configurable_list(data, self._convert_data_locations),
+            sort=True,
+        )
         deps_block = self._convert_target_list_block("DEPS", deps)
         copts_block = self._convert_string_list_block("COPTS", copts, sort=False)
         defines_block = self._convert_string_list_block("DEFINES", defines)
@@ -993,6 +998,7 @@ class BuildFileFunctions:
         )
 
         self._emit_platform_guard_begin(target_compatible_with)
+        self._converter.body += platform_data_block
         invocation = (
             f"iree_cc_binary_benchmark(\n"
             f"{name_block}"
