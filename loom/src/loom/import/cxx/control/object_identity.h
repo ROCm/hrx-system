@@ -19,10 +19,19 @@
 #include <vector>
 
 #include "loom/import/cxx/value/bindings.h"
+#include "loom/import/cxx/value/partition.h"
 
 namespace loom::cxx_import {
 
 class Types;
+
+// A subobject selected from one evaluated complete prvalue.
+struct TemporaryMember {
+  // Expression producing the complete object, including its side effects.
+  cxx::ExpressionAST* object;
+  // Member components relative to that complete object's value.
+  ValueProjection group;
+};
 
 // Storage requirements of owned source objects. The owning AST walk joins
 // prvalues with their direct initialization destinations and containing
@@ -45,6 +54,8 @@ class ObjectIdentity {
   // The reference declaration owns the complete lifetime-extended temporary,
   // even when the reference itself denotes one of its subobjects.
   void own_members(cxx::Symbol* binding, cxx::ExpressionAST* origin);
+  // Complete prvalue and member geometry for a retained xvalue selection.
+  const TemporaryMember* temporary_member(cxx::ExpressionAST* expression) const;
   // A same-type prvalue return initializes this function's result object.
   void returned(cxx::FunctionSymbol* function, cxx::ExpressionAST* expression);
   // Compresses construction groups before interprocedural demand propagation.
@@ -109,17 +120,22 @@ class ObjectIdentity {
   void join(size_t first, size_t second);
   void join(const void* destination, cxx::ExpressionAST* source);
   void alias(cxx::ExpressionAST* expression, const void* source);
+  bool retain_temporary_member(cxx::MemberExpressionAST* member);
   void elements(cxx::ExpressionAST* object,
                 cxx::List<cxx::ExpressionAST*>* initializers);
 
   // Source semantic categories and complete object types.
   cxx::TranslationUnit& unit_;
-  // Canonical source type normalization; retaining identities needs no layout.
+  // Canonical source types and subobject geometry for member projections.
   Types& types_;
   // Source nodes name static construction sites, not dynamic instances.
   std::unordered_map<const void*, size_t> identities_;
   // Disjoint construction groups with retained storage demand.
   std::vector<Group> groups_;
+  using TemporaryMembers =
+      std::unordered_map<cxx::ExpressionAST*, TemporaryMember>;
+  // Only member xvalues selected from otherwise value-transported prvalues.
+  std::unique_ptr<TemporaryMembers> temporary_members_;
   // Present only when aggregate initialization crosses a numeric storage
   // boundary.
   std::unique_ptr<AggregateMembers> members_;

@@ -31,3 +31,46 @@ struct Holder {
 };
 // ERROR@+1: PARSE/036 "a temporary expression bound to member 'member' from a default member initializer is ill-formed"
 Holder invalid_default_reference_member{};
+
+// ====
+// XFAIL: A numeric member that publishes its address during construction needs its final destination then.
+struct Cell {
+  int coords[2];
+  Cell(int*& published, int seed) : coords{seed, seed + 1} { published = &coords[1]; }
+};
+struct View { int* data; Cell cell; int observed; };
+static int read(const int* p) { return p[1]; }
+int published_during_construction(int seed) {
+  int* p = nullptr;
+  return read(View{nullptr, Cell(p, seed), (*p = 17)}.cell.coords);
+}
+
+// ====
+// XFAIL: Cleanup after a conditional arm needs the mixed temporary's SSA fields as well as its borrowed member.
+struct Observed {
+  int* output;
+  int coords[2];
+  ~Observed() { *output = coords[1]; }
+};
+static int set(int* coords) { return coords[1] = 17; }
+int conditional_lifetime(bool take) {
+  int n = 0;
+  (take ? set(Observed{&n, {2, 3}}.coords) : 0), ++n;
+  return n;
+}
+
+// ====
+// XFAIL: A destructor that borrows a numeric member must receive its original address.
+static void mutate(int* p) { *p = 42; }
+struct Owner {
+  int* result;
+  int* saved;
+  int coords[2];
+  ~Owner() { mutate(&coords[0]); *result = *saved; }
+};
+static void remember(Owner&& owner) { owner.saved = &owner.coords[0]; }
+int alias_at_destruction() {
+  int result = 0;
+  remember(Owner{&result, nullptr, {13, 14}});
+  return result;
+}

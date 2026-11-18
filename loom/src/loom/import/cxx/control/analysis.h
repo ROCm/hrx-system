@@ -35,6 +35,7 @@
 namespace loom::cxx_import {
 
 class ObjectIdentity;
+struct TemporaryMember;
 class Imports;
 
 struct DirectOperatorCall;
@@ -261,6 +262,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::span<const ValueProjection> storage_members(cxx::Symbol* binding) const;
   // Retained construction identity of an owned prvalue or function result.
   bool object_requires_storage(cxx::AST* source) const;
+  const TemporaryMember* temporary_member(cxx::ExpressionAST* source) const;
   bool result_requires_storage() const;
   // Retained automatic-object destination, or no value for a memory access or
   // unsupported lvalue. A vector lane names its owning vector slice; whole

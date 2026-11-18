@@ -15,6 +15,7 @@
 
 #include "loom/import/cxx/lifetime/destruction.h"
 #include "loom/import/cxx/value/evaluation.h"
+#include "loom/import/cxx/value/partition.h"
 #include "loom/import/cxx/value/storage.h"
 
 namespace loom::cxx_import {
@@ -49,6 +50,8 @@ struct DestructionAction {
   const cxx::Type* object_type = nullptr;
   // Direct SSA object retained by an unmaterialized temporary.
   std::optional<Value> value;
+  // One-based head of addressable members to read back at destruction.
+  size_t borrowed_members = 0;
   // Direct object storage retained by an addressed temporary.
   std::optional<StorageProjection> storage;
   // Conditional temporary activation flag, stored outside its source arm.
@@ -133,6 +136,12 @@ class ObjectLifetimes {
                                       cxx::Symbol* binding, cxx::AST* source);
   void update_temporary(std::optional<TemporaryReference> temporary,
                         Value updated, const cxx::Type* type, cxx::AST* owner);
+  // Materializes a numeric member of a completed object. A nontrivial object's
+  // cleanup observes the latest contents through this same address.
+  StorageProjection borrow_member(Value value, ValueProjection group,
+                                  std::optional<TemporaryReference> temporary,
+                                  cxx::AST* source);
+  Value temporary_value(const DestructionAction& action);
   StorageProjection materialize_temporary(
       cxx::ExpressionAST* expression, Value value,
       std::optional<TemporaryReference> temporary = std::nullopt);
@@ -173,6 +182,16 @@ class ObjectLifetimes {
   // completes. Result-object transfer removes only the selected final value;
   // side temporaries retain reverse construction order.
   std::vector<std::optional<DestructionAction>> temporary_destructions_;
+  struct BorrowedMember {
+    // Selected member relative to the complete temporary.
+    ValueProjection group;
+    // Numeric member's address for this evaluation.
+    StorageProjection home;
+    // Previous member of this same cleanup, or zero.
+    size_t previous;
+  };
+  // Allocated only for evaluated nontrivial prvalues with addressable members.
+  std::vector<BorrowedMember> borrowed_members_;
   // Latest evaluated result at each retained construction site. Cleanup tokens
   // remain stable when another result is adopted or extended to lexical scope.
   std::unordered_map<cxx::ExpressionAST*, size_t> temporary_results_;

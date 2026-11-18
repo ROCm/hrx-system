@@ -488,6 +488,12 @@ bool ControlFlow::object_requires_storage(cxx::AST* source) const {
   return object_identity_ && object_identity_->requires_storage(source);
 }
 
+const TemporaryMember* ControlFlow::temporary_member(
+    cxx::ExpressionAST* source) const {
+  return object_identity_ ? object_identity_->temporary_member(source)
+                          : nullptr;
+}
+
 std::span<const ValueProjection> ControlFlow::storage_members(
     cxx::Symbol* binding) const {
   if (storage_members_) {

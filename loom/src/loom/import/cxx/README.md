@@ -1211,6 +1211,9 @@ can eliminate the array storage when the pointer stays within the function.
 Binding a returned record to `const auto&` or `auto&&` extends the same member
 storage through the reference's scope. A destructor that reads the coordinates
 observes writes made through the borrowed pointer.
+Passing `first(make_view().lo)` directly keeps that array addressable until
+the end of the full expression. Two calls to `make_view()` in the same
+expression give their arrays distinct addresses.
 
 Export emits the explicit leaf signature as ordinary C++ parameters. The
 grouping into the original record or lambda is not required to reimport the
