@@ -181,18 +181,6 @@ Vector entry(View source, Vector scale) {
 // ====
 #include <loomcxx/fragment.h>
 using Vector = float __attribute__((ext_vector_type(4)));
-using View = loom::type::view<loom::type::shape<4, 4>, const float>;
-Vector entry(View source) {
-  // ERROR@+1: LOWERING/059 "fragment static origin selector is outside the index domain"
-  return loom::vector::fragment::load<
-      loom::vector::fragment::role::lhs, Vector, loom::memory_access::none,
-      9223372036854775808ULL, 0>(
-      source, loom::vector::fragment::shape{2, 2});
-}
-
-// ====
-#include <loomcxx/fragment.h>
-using Vector = float __attribute__((ext_vector_type(4)));
 struct Parameters {
   Vector scale;
 };

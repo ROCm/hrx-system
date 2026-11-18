@@ -47,7 +47,7 @@ def _program() -> str:
             ]
             for index, flags in enumerate(
                 (
-                    "Access::none",
+                    "Access::inferred",
                     "Access::root_in_bounds",
                     "Access::volatile_",
                     "Access::volatile_ | Access::root_in_bounds",

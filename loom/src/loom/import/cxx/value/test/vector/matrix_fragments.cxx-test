@@ -143,8 +143,9 @@ func.def public @load_mma_store(%lhs_source_dim0: index, %lhs_source_dim1: index
 }
 
 // ====
-// Static template origins remain indexed-memory attributes while dynamic
-// entries alone are carried as SSA operands.
+// RUN: pass canonicalize,cse,dce
+// Ordinary records mix literal and dynamic coordinates. Constant facts survive
+// source conversion alongside explicit alias permissions and auxiliaries.
 #include <loomcxx/fragment.h>
 
 namespace fragment = loom::vector::fragment;
@@ -162,51 +163,48 @@ struct Auxiliary {
   Scale2 scale;
 };
 
-void static_fragment_origins(Input source, EncodedInput encoded, Output output,
-                             loomt::index row, loomt::size_type m,
-                             loomt::size_type n, Scale2 scale) {
-  auto fixed = fragment::load<fragment::role::lhs, Half16,
-                              loom::memory_access::none, 0, 4>(
-      source, fragment::shape{m, n});
-  auto mixed = fragment::load<fragment::role::rhs, Half16,
-                              loom::memory_access::none, loomt::dynamic, 4>(
-      source, {row}, fragment::shape{m, n});
+void fragment_origins(Input source, EncodedInput encoded, Output output,
+                      loomt::index row, loomt::size_type m,
+                      loomt::size_type n, Scale2 scale) {
+  auto fixed = fragment::load<fragment::role::lhs, Half16>(
+      source, {0, 4}, fragment::shape{m, n});
+  auto mixed = fragment::load<fragment::role::rhs, Half16>(
+      source, loomt::indices{row, loomt::index{4}}, fragment::shape{m, n});
   auto scaled = fragment::load<fragment::role::rhs, Half16,
-                               loom::memory_access::may_alias, 0, 0>(
-      encoded, fragment::shape{m, n}, Auxiliary{scale});
-  auto mixed_scaled = fragment::load<
-      fragment::role::rhs, Half16, loom::memory_access::may_alias,
-      loomt::dynamic, 0>(encoded, {row}, fragment::shape{m, n},
-                         Auxiliary{scale});
-  fragment::store<fragment::role::result, loom::memory_access::none, 0, 0>(
-      fixed, output, fragment::shape{m, n});
-  fragment::store<fragment::role::result, loom::memory_access::none,
-                  loomt::dynamic, 8>(mixed, output, {row},
-                                     fragment::shape{m, n});
-  (void)scaled;
-  (void)mixed_scaled;
+                               loom::memory_access::may_alias>(
+      encoded, {0, 0}, fragment::shape{m, n}, Auxiliary{scale});
+  auto mixed_scaled = fragment::load<fragment::role::rhs, Half16,
+                                     loom::memory_access::may_alias>(
+      encoded, loomt::indices{row, loomt::index{0}}, fragment::shape{m, n},
+      Auxiliary{scale});
+  fragment::store<fragment::role::result>(
+      fixed, output, {0, 0}, fragment::shape{m, n});
+  fragment::store<fragment::role::result>(
+      mixed, output, loomt::indices{row, loomt::index{8}},
+      fragment::shape{m, n});
+  // Retain both storage-schema loads so the canonical result observes their
+  // different origins and named scale values.
+  fragment::store<fragment::role::result>(
+      scaled, output, {4, 0}, fragment::shape{m, n});
+  fragment::store<fragment::role::result>(
+      mixed_scaled, output, {8, 0}, fragment::shape{m, n});
 }
 
 // ----
-func.def public @static_fragment_origins(%source_layout: encoding<layout>, %source: view<16x16xf16, %source_layout>, %encoded_storage: encoding<storage>, %encoded: view<16x16xf16, %encoded_storage>, %output_layout: encoding<layout>, %output: view<16x16xf16, %output_layout>, %row: index, %m: i64, %n: i64, %scale: vector<2xi32>) {
-  %10 = index.cast %m : i64 to index
-  %11 = index.cast %n : i64 to index
-  %fixed = vector.fragment.load<lhs, type_disjoint> %source[0, 4] shape [%10, %11] : view<16x16xf16, %source_layout> -> vector<16xf16>
-  %13 = index.cast %m : i64 to index
-  %14 = index.cast %n : i64 to index
-  %mixed = vector.fragment.load<rhs, type_disjoint> %source[%row, 4] shape [%13, %14] : view<16x16xf16, %source_layout> -> vector<16xf16>
-  %16 = index.cast %m : i64 to index
-  %17 = index.cast %n : i64 to index
-  %scaled = vector.fragment.load<rhs> %encoded[0, 0] shape [%16, %17] using {scale = %scale : vector<2xi32>} : view<16x16xf16, %encoded_storage> -> vector<16xf16>
-  %19 = index.cast %m : i64 to index
-  %20 = index.cast %n : i64 to index
-  %mixed_scaled = vector.fragment.load<rhs> %encoded[%row, 0] shape [%19, %20] using {scale = %scale : vector<2xi32>} : view<16x16xf16, %encoded_storage> -> vector<16xf16>
-  %22 = index.cast %m : i64 to index
-  %23 = index.cast %n : i64 to index
-  vector.fragment.store<result, type_disjoint> %fixed, %output[0, 0] shape [%22, %23] : vector<16xf16>, view<16x16xf16, %output_layout>
-  %24 = index.cast %m : i64 to index
-  %25 = index.cast %n : i64 to index
-  vector.fragment.store<result, type_disjoint> %mixed, %output[%row, 8] shape [%24, %25] : vector<16xf16>, view<16x16xf16, %output_layout>
+func.def public @fragment_origins(%source_layout: encoding<layout>, %source: view<16x16xf16, %source_layout>, %encoded_storage: encoding<storage>, %encoded: view<16x16xf16, %encoded_storage>, %output_layout: encoding<layout>, %output: view<16x16xf16, %output_layout>, %row: index, %m: i64, %n: i64, %scale: vector<2xi32>) {
+  %14 = index.cast %m : i64 to index
+  %15 = index.cast %n : i64 to index
+  %81 = index.constant 0 : index
+  %80 = index.constant 4 : index
+  %fixed = vector.fragment.load<lhs, type_disjoint> %source[%81, %80] shape [%14, %15] : view<16x16xf16, %source_layout> -> vector<16xf16>
+  %mixed = vector.fragment.load<rhs, type_disjoint> %source[%row, %80] shape [%14, %15] : view<16x16xf16, %source_layout> -> vector<16xf16>
+  %scaled = vector.fragment.load<rhs> %encoded[%81, %81] shape [%14, %15] using {scale = %scale : vector<2xi32>} : view<16x16xf16, %encoded_storage> -> vector<16xf16>
+  %mixed_scaled = vector.fragment.load<rhs> %encoded[%row, %81] shape [%14, %15] using {scale = %scale : vector<2xi32>} : view<16x16xf16, %encoded_storage> -> vector<16xf16>
+  vector.fragment.store<result, type_disjoint> %fixed, %output[%81, %81] shape [%14, %15] : vector<16xf16>, view<16x16xf16, %output_layout>
+  %73 = index.constant 8 : index
+  vector.fragment.store<result, type_disjoint> %mixed, %output[%row, %73] shape [%14, %15] : vector<16xf16>, view<16x16xf16, %output_layout>
+  vector.fragment.store<result, type_disjoint> %scaled, %output[%80, %81] shape [%14, %15] : vector<16xf16>, view<16x16xf16, %output_layout>
+  vector.fragment.store<result, type_disjoint> %mixed_scaled, %output[%73, %81] shape [%14, %15] : vector<16xf16>, view<16x16xf16, %output_layout>
   func.return
 }
 
