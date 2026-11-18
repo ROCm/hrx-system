@@ -38,8 +38,6 @@ extern "C" {
 typedef struct loom_low_allocation_search_context_t {
   // Module with the allocated function's local value domain acquired.
   const loom_module_t* module;
-  // Function control-flow graph used to construct |liveness|.
-  const loom_cfg_graph_t* cfg_graph;
   // Descriptor set selected for the low function.
   const loom_low_descriptor_set_t* descriptor_set;
   // Liveness facts for the allocated low function body.
@@ -69,11 +67,8 @@ typedef struct loom_low_allocation_search_context_t {
   // Retained producer reconstruction flags, dense by liveness value ordinal.
   // NULL before victim ranking has required classification.
   const uint8_t* rematerialization_flags;
-  // Cached predicted spill traffic, dense by liveness value ordinal. A
-  // store_count of UINT32_MAX means the entry is not computed yet.
-  loom_low_allocation_spill_plan_traffic_t* spill_traffic_by_value_ordinal;
-  // Attempt-local block grouping scratch for uncached traffic queries.
-  loom_low_allocation_spill_plan_traffic_workspace_t* spill_traffic_workspace;
+  // Per-value memory traffic shared across victim queries and coloring trials.
+  loom_low_allocation_spill_traffic_table_t* spill_traffic;
   // Whether spill victims are ranked by traffic per remaining
   // register-pressure area instead of absolute traffic. Hard register-required
   // candidates use absolute traffic because they cannot select themselves as

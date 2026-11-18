@@ -63,8 +63,8 @@ typedef struct loom_low_allocation_build_state_t {
   loom_low_allocation_interval_plan_t interval_plan;
   // Structural content identity shared by all assignment attempts.
   loom_low_allocation_content_identity_t content_identity;
-  // Lazy producer classification preserved across alternative assignments.
-  loom_low_allocation_reconstruction_t reconstruction;
+  // Spill predictions and reconstruction facts shared across coloring trials.
+  loom_low_allocation_spill_analysis_t spill_analysis;
   // Completed interval assignment, spill plan, and remark rows.
   loom_low_allocation_interval_assignment_result_t interval_assignment;
   // Mutable low.copy decision plan being built.
@@ -184,7 +184,7 @@ loom_low_allocation_make_interval_assignment_context(
       .residency = state->options->residency,
       .storage_leases = storage_leases,
       .arena = arena,
-      .reconstruction = &state->reconstruction,
+      .spill_analysis = &state->spill_analysis,
       .function_cfg_graph = &model->cfg_graph,
       .spill_traffic_exclusive_limit = spill_traffic_exclusive_limit,
       .fragmentation_repair_reg_classes = fragmentation_repair_reg_classes,
@@ -851,7 +851,7 @@ static iree_status_t loom_low_allocate_function_impl(
       .function_op = model->context.function_op,
       .target = model->context.target,
   };
-  iree_arena_initialize(arena->block_pool, &state.reconstruction.arena);
+  iree_arena_initialize(arena->block_pool, &state.spill_analysis.arena);
   if (iree_status_is_ok(status) && retained_location_table != NULL) {
     status = loom_low_allocation_index_retained_assignments(
         model, retained_location_table, &decision_arena, &state);
@@ -1085,6 +1085,22 @@ static iree_status_t loom_low_allocate_function_impl(
         /*baseline_numbering=*/NULL, &interval_assignment_checkpoint,
         &decision_arena);
   }
+  // Only reconstruction flags are needed by the next repair. Release spill
+  // costs as soon as the last trial has finished comparing assignments.
+  uint8_t* rematerialization_flags = NULL;
+  if (iree_status_is_ok(status) &&
+      state.spill_analysis.rematerialization_flags != NULL) {
+    status = iree_arena_allocate_array(arena, value_domain->value_count,
+                                       sizeof(*rematerialization_flags),
+                                       (void**)&rematerialization_flags);
+    if (iree_status_is_ok(status)) {
+      memcpy(rematerialization_flags,
+             state.spill_analysis.rematerialization_flags,
+             value_domain->value_count);
+    }
+  }
+  iree_arena_deinitialize(&state.spill_analysis.arena);
+
   // Backedge placement belongs to the final physical assignment. Spill repair
   // rewrites the IR and rebuilds the frame, so relocating a provisional spill
   // assignment would be discarded.
@@ -1179,20 +1195,6 @@ static iree_status_t loom_low_allocate_function_impl(
     }
   }
   iree_arena_deinitialize(&decision_arena);
-  // Retain only the compact immutable facts after every assignment rollback is
-  // complete. The classification arena's pool block is immediately reusable.
-  uint8_t* rematerialization_flags = NULL;
-  if (iree_status_is_ok(status) && state.reconstruction.value_flags != NULL) {
-    status = iree_arena_allocate_array(arena, value_domain->value_count,
-                                       sizeof(*rematerialization_flags),
-                                       (void**)&rematerialization_flags);
-    if (iree_status_is_ok(status)) {
-      memcpy(rematerialization_flags, state.reconstruction.value_flags,
-             value_domain->value_count);
-    }
-  }
-  iree_arena_deinitialize(&state.reconstruction.arena);
-
   uint32_t* first_storage_release_action_by_node = NULL;
   if (locations_replayed && iree_status_is_ok(status) &&
       state.storage_leases.release_action_count != 0 &&

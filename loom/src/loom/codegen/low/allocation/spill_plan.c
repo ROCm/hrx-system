@@ -108,17 +108,16 @@ iree_status_t loom_low_allocation_spill_plan_layout(
   return iree_ok_status();
 }
 
-bool loom_low_allocation_spill_plan_slice_reload_byte_size(
-    const loom_module_t* module,
-    const loom_low_allocation_assignment_t* assignment,
-    uint32_t spill_byte_size, const loom_op_t* use_op,
-    uint32_t* out_reload_byte_size) {
+// A spilled register range admits a narrow slice reload when its units can
+// be addressed individually in bytes.
+static bool loom_low_allocation_spill_plan_slice_reload_byte_size(
+    const loom_module_t* module, uint32_t unit_count, uint32_t spill_byte_size,
+    const loom_op_t* use_op, uint32_t* out_reload_byte_size) {
   *out_reload_byte_size = 0;
-  if (!loom_low_slice_isa(use_op) ||
-      spill_byte_size % assignment->unit_count != 0) {
+  if (!loom_low_slice_isa(use_op) || spill_byte_size % unit_count != 0) {
     return false;
   }
-  const uint32_t unit_byte_size = spill_byte_size / assignment->unit_count;
+  const uint32_t unit_byte_size = spill_byte_size / unit_count;
   const loom_type_t result_type =
       loom_module_value_type(module, loom_low_slice_result(use_op));
   *out_reload_byte_size =
@@ -652,8 +651,8 @@ static bool loom_low_spill_materialization_try_slice_use(
     uint32_t* out_reload_byte_size) {
   loom_op_t* slice_op = loom_use_user_op(source_use);
   if (!loom_low_allocation_spill_plan_slice_reload_byte_size(
-          builder->table->module, assignment, spill_plan->byte_size, slice_op,
-          out_reload_byte_size) ||
+          builder->table->module, assignment->unit_count, spill_plan->byte_size,
+          slice_op, out_reload_byte_size) ||
       !loom_region_try_block_index(builder->body, slice_op->parent_block,
                                    NULL)) {
     return false;
@@ -1507,37 +1506,53 @@ typedef struct loom_low_allocation_spill_plan_slice_group_t {
   iree_host_size_t next_scope_index;
 } loom_low_allocation_spill_plan_slice_group_t;
 
-iree_status_t loom_low_allocation_spill_plan_traffic_workspace_initialize(
-    const loom_region_t* body,
+// A full page holds 512 bytes of predictions. Dense tables cost one directory
+// pointer per sixteen values and a small spill set touches only its own pages.
+#define LOOM_LOW_ALLOCATION_SPILL_TRAFFIC_PAGE_CAPACITY 16u
+
+iree_status_t loom_low_allocation_spill_traffic_table_initialize(
+    const loom_local_value_domain_t* value_domain,
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_cfg_graph_t* cfg_graph,
     const loom_low_call_boundary_index_t* call_boundaries,
     iree_arena_allocator_t* arena,
-    loom_low_allocation_spill_plan_traffic_workspace_t* out_workspace) {
-  out_workspace->call_boundaries = *call_boundaries;
-  const iree_host_size_t scope_count =
-      body->block_count + call_boundaries->count;
+    loom_low_allocation_spill_traffic_table_t* out_table) {
+  *out_table = (loom_low_allocation_spill_traffic_table_t){
+      .value_domain = value_domain,
+      .descriptor_set = descriptor_set,
+      .cfg_graph = cfg_graph,
+      .arena = arena,
+      .call_boundaries = *call_boundaries,
+  };
+  const iree_host_size_t page_count =
+      iree_host_size_ceil_div(value_domain->value_count,
+                              LOOM_LOW_ALLOCATION_SPILL_TRAFFIC_PAGE_CAPACITY);
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, scope_count, sizeof(*out_workspace->slice_groups_by_scope),
-      (void**)&out_workspace->slice_groups_by_scope));
-  memset(out_workspace->slice_groups_by_scope, 0,
-         scope_count * sizeof(*out_workspace->slice_groups_by_scope));
+      arena, page_count, sizeof(*out_table->pages), (void**)&out_table->pages));
+  memset(out_table->pages, 0, page_count * sizeof(*out_table->pages));
+  const iree_host_size_t scope_count =
+      cfg_graph->region->block_count + call_boundaries->count;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, scope_count, sizeof(*out_table->slice_groups_by_scope),
+      (void**)&out_table->slice_groups_by_scope));
+  memset(out_table->slice_groups_by_scope, 0,
+         scope_count * sizeof(*out_table->slice_groups_by_scope));
   return iree_ok_status();
 }
 
 static void loom_low_allocation_spill_plan_value_reload_traffic(
-    const loom_module_t* module,
-    const loom_low_allocation_assignment_t* assignment,
-    uint32_t spill_byte_size, const loom_value_t* value,
-    const loom_region_t* body,
-    loom_low_allocation_spill_plan_traffic_workspace_t* workspace,
+    loom_low_allocation_spill_traffic_table_t* table, loom_value_id_t value_id,
+    const loom_value_t* value, uint32_t unit_count, uint32_t spill_byte_size,
     uint32_t* out_reload_count, uint64_t* out_reload_bytes,
     bool* out_has_narrow_uses) {
+  const loom_module_t* module = table->value_domain->module;
+  const loom_region_t* body = table->cfg_graph->region;
   *out_has_narrow_uses = false;
   iree_host_size_t first_touched_scope_index = IREE_HOST_SIZE_MAX;
 
   const loom_block_t* block = NULL;
   uint16_t arg_index = 0;
-  if (loom_low_allocation_spill_plan_removes_argument(module, body,
-                                                      assignment->value_id)) {
+  if (loom_low_allocation_spill_plan_removes_argument(module, body, value_id)) {
     block = loom_value_def_block(value);
     arg_index = loom_value_def_index(value);
   }
@@ -1556,12 +1571,12 @@ static void loom_low_allocation_spill_plan_value_reload_traffic(
     uint32_t reload_byte_size = 0;
     const bool is_slice_reload =
         loom_low_allocation_spill_plan_slice_reload_byte_size(
-            module, assignment, spill_byte_size, user_op, &reload_byte_size);
+            module, unit_count, spill_byte_size, user_op, &reload_byte_size);
     if (loom_low_slice_isa(user_op)) {
       const loom_type_t result_type =
           loom_module_value_type(module, loom_low_slice_result(user_op));
-      *out_has_narrow_uses |= loom_low_register_type_unit_count(result_type) <
-                              assignment->unit_count;
+      *out_has_narrow_uses |=
+          loom_low_register_type_unit_count(result_type) < unit_count;
     }
 
     if (!is_slice_reload || !can_group_slices ||
@@ -1572,9 +1587,9 @@ static void loom_low_allocation_spill_plan_value_reload_traffic(
     }
 
     const iree_host_size_t scope_index =
-        loom_low_call_boundary_scope(&workspace->call_boundaries, user_op);
+        loom_low_call_boundary_scope(&table->call_boundaries, user_op);
     loom_low_allocation_spill_plan_slice_group_t* group =
-        &workspace->slice_groups_by_scope[scope_index];
+        &table->slice_groups_by_scope[scope_index];
     if (group->slice_count == 0) {
       group->next_scope_index = first_touched_scope_index;
       first_touched_scope_index = scope_index;
@@ -1585,7 +1600,7 @@ static void loom_low_allocation_spill_plan_value_reload_traffic(
 
   while (first_touched_scope_index != IREE_HOST_SIZE_MAX) {
     loom_low_allocation_spill_plan_slice_group_t* group =
-        &workspace->slice_groups_by_scope[first_touched_scope_index];
+        &table->slice_groups_by_scope[first_touched_scope_index];
     if (loom_low_allocation_spill_plan_use_full_slice_reload(
             group->slice_count, group->narrow_reload_bytes, spill_byte_size)) {
       ++reload_count;
@@ -1635,22 +1650,28 @@ static uint32_t loom_low_allocation_spill_plan_value_store_count(
   return store_count;
 }
 
-static void loom_low_allocation_spill_plan_traffic_for_layout(
-    const loom_module_t* module, const loom_cfg_graph_t* cfg_graph,
-    const loom_low_allocation_assignment_t* assignment, uint32_t byte_size,
-    loom_low_allocation_spill_plan_traffic_workspace_t* workspace,
+static iree_status_t loom_low_allocation_spill_plan_compute_traffic(
+    loom_low_allocation_spill_traffic_table_t* table,
+    loom_value_ordinal_t value_ordinal,
     loom_low_allocation_spill_plan_traffic_t* out_traffic) {
-  *out_traffic = (loom_low_allocation_spill_plan_traffic_t){0};
-  const loom_value_id_t value_id = assignment->value_id;
+  const loom_module_t* module = table->value_domain->module;
+  const loom_value_id_t value_id =
+      table->value_domain->value_ids[value_ordinal];
   const loom_value_t* value = loom_module_value(module, value_id);
+  const uint32_t unit_count = loom_low_register_type_unit_count(value->type);
+  const uint16_t class_id = loom_low_register_type_class_id(value->type);
+  uint32_t byte_size = 0;
+  IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_byte_size(
+      unit_count, table->descriptor_set->reg_classes[class_id].spill_unit_bits,
+      &byte_size));
   uint32_t reload_count = 0;
   uint64_t reload_bytes = 0;
   bool has_narrow_uses = false;
   loom_low_allocation_spill_plan_value_reload_traffic(
-      module, assignment, byte_size, value, cfg_graph->region, workspace,
-      &reload_count, &reload_bytes, &has_narrow_uses);
+      table, value_id, value, unit_count, byte_size, &reload_count,
+      &reload_bytes, &has_narrow_uses);
   const uint32_t store_count = loom_low_allocation_spill_plan_value_store_count(
-      module, cfg_graph, value_id, value, reload_count);
+      module, table->cfg_graph, value_id, value, reload_count);
   *out_traffic = (loom_low_allocation_spill_plan_traffic_t){
       .store_count = store_count,
       .has_narrow_uses = has_narrow_uses,
@@ -1658,6 +1679,7 @@ static void loom_low_allocation_spill_plan_traffic_for_layout(
       .reload_count = reload_count,
       .reload_bytes = reload_bytes,
   };
+  return iree_ok_status();
 }
 
 uint64_t loom_low_allocation_spill_plan_traffic_cost(
@@ -1675,17 +1697,32 @@ uint64_t loom_low_allocation_spill_plan_traffic_cost(
                                       traffic->reload_bytes);
 }
 
-iree_status_t loom_low_allocation_spill_plan_traffic(
-    const loom_module_t* module, const loom_cfg_graph_t* cfg_graph,
-    const loom_low_allocation_assignment_t* assignment,
-    uint16_t spill_unit_bits,
-    loom_low_allocation_spill_plan_traffic_workspace_t* workspace,
-    loom_low_allocation_spill_plan_traffic_t* out_traffic) {
-  uint32_t byte_size = 0;
-  IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_byte_size(
-      assignment->unit_count, spill_unit_bits, &byte_size));
-  loom_low_allocation_spill_plan_traffic_for_layout(
-      module, cfg_graph, assignment, byte_size, workspace, out_traffic);
+iree_status_t loom_low_allocation_spill_traffic_table_lookup(
+    loom_low_allocation_spill_traffic_table_t* table,
+    loom_value_ordinal_t value_ordinal,
+    const loom_low_allocation_spill_plan_traffic_t** out_traffic) {
+  const uint32_t page_capacity =
+      LOOM_LOW_ALLOCATION_SPILL_TRAFFIC_PAGE_CAPACITY;
+  const uint32_t page_index = value_ordinal / page_capacity;
+  loom_low_allocation_spill_plan_traffic_t* page = table->pages[page_index];
+  if (!page) {
+    const iree_host_size_t count = iree_min(
+        page_capacity, table->value_domain->value_count -
+                           (iree_host_size_t)page_index * page_capacity);
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        table->arena, count, sizeof(*page), (void**)&page));
+    for (iree_host_size_t i = 0; i < count; ++i) {
+      page[i].store_count = UINT32_MAX;
+    }
+    table->pages[page_index] = page;
+  }
+  loom_low_allocation_spill_plan_traffic_t* row =
+      &page[value_ordinal % page_capacity];
+  if (row->store_count == UINT32_MAX) {
+    IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_compute_traffic(
+        table, value_ordinal, row));
+  }
+  *out_traffic = row;
   return iree_ok_status();
 }
 

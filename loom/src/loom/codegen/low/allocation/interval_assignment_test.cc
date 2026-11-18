@@ -32,7 +32,7 @@ class LowAllocationIntervalAssignmentTest : public ::testing::Test {
                                      &block_pool_);
     iree_arena_initialize(&block_pool_, &arena_);
     iree_arena_initialize(&block_pool_, &decision_arena_);
-    iree_arena_initialize(&block_pool_, &reconstruction_.arena);
+    iree_arena_initialize(&block_pool_, &spill_analysis_.arena);
     loom_context_initialize(iree_allocator_system(), &context_);
     iree_host_size_t vtable_count = 0;
     const loom_op_vtable_t* const* vtables =
@@ -76,7 +76,7 @@ class LowAllocationIntervalAssignmentTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    iree_arena_deinitialize(&reconstruction_.arena);
+    iree_arena_deinitialize(&spill_analysis_.arena);
     iree_arena_deinitialize(&decision_arena_);
     iree_arena_deinitialize(&arena_);
     loom_module_free(module_);
@@ -123,7 +123,7 @@ class LowAllocationIntervalAssignmentTest : public ::testing::Test {
   // Owns allocation decisions and checkpoint-scoped assignment scratch.
   iree_arena_allocator_t decision_arena_;
   // Shared snapshot facts survive scratch rollback across assignment attempts.
-  loom_low_allocation_reconstruction_t reconstruction_ = {};
+  loom_low_allocation_spill_analysis_t spill_analysis_ = {};
   // Context for the module-local value domain.
   loom_context_t context_;
   // Owns value identities and the function used for diagnostics.
@@ -141,6 +141,65 @@ loom_liveness_value_class_t RegisterValueClass(uint64_t descriptor_set_id) {
       .register_descriptor_set_stable_id = descriptor_set_id,
   };
   return value_class;
+}
+
+TEST_F(LowAllocationIntervalAssignmentTest,
+       SpillTrafficFollowsValueTypeAndUsesAcrossSparseOrdinals) {
+  constexpr uint64_t kDescriptorSetId = 17;
+  const loom_low_reg_class_t classes[] = {{.spill_unit_bits = 32},
+                                          {.spill_unit_bits = 64}};
+  const loom_low_descriptor_set_t descriptors = {
+      .stable_id = kDescriptorSetId,
+      .reg_classes = classes,
+      .reg_class_count = IREE_ARRAYSIZE(classes),
+  };
+  loom_builder_t builder = {};
+  loom_builder_initialize(module_, &module_->arena, return_op_->parent_block,
+                          &builder);
+  loom_builder_set_before(&builder, return_op_);
+  loom_value_id_t values[35];
+  for (size_t i = 0; i < IREE_ARRAYSIZE(values); ++i) {
+    const bool wide = i == IREE_ARRAYSIZE(values) - 1;
+    loom_op_t* producer = nullptr;
+    IREE_ASSERT_OK(loom_test_constant_build(
+        &builder, loom_attr_i64(0),
+        loom_low_register_type(kDescriptorSetId, wide ? 1 : 0, wide ? 3 : 1),
+        LOOM_LOCATION_UNKNOWN, &producer));
+    values[i] = loom_test_constant_result(producer);
+  }
+  const loom_value_id_t wide = values[IREE_ARRAYSIZE(values) - 1];
+  const loom_value_id_t operands[] = {wide, values[0], wide};
+  loom_op_t* use = nullptr;
+  IREE_ASSERT_OK(loom_test_use_build(&builder, operands,
+                                     IREE_ARRAYSIZE(operands),
+                                     LOOM_LOCATION_UNKNOWN, &use));
+  const loom_region_t* body = loom_low_func_def_body(function_op_);
+  loom_local_value_domain_t domain = {};
+  IREE_ASSERT_OK(loom_local_value_domain_acquire_for_region(module_, body,
+                                                            &arena_, &domain));
+  loom_cfg_graph_t graph = {};
+  IREE_ASSERT_OK(loom_cfg_graph_build(module_, body, &arena_, &graph));
+  const loom_low_call_boundary_index_t calls = {};
+  loom_low_allocation_spill_traffic_table_t table = {};
+  IREE_ASSERT_OK(loom_low_allocation_spill_traffic_table_initialize(
+      &domain, &descriptors, &graph, &calls, &arena_, &table));
+
+  auto expect_traffic = [&](loom_value_id_t id, uint64_t store_bytes,
+                            uint32_t reload_count, uint64_t reload_bytes) {
+    const loom_low_allocation_spill_plan_traffic_t* traffic = nullptr;
+    IREE_ASSERT_OK(loom_low_allocation_spill_traffic_table_lookup(
+        &table, loom_local_value_domain_ordinal(&domain, id), &traffic));
+    EXPECT_EQ(traffic->store_bytes, store_bytes);
+    EXPECT_EQ(traffic->reload_count, reload_count);
+    EXPECT_EQ(traffic->reload_bytes, reload_bytes);
+  };
+  expect_traffic(wide, 24, 2, 48);
+  expect_traffic(values[0], 4, 1, 4);
+  expect_traffic(values[1], 0, 0, 0);
+  const iree_host_size_t populated_bytes = arena_.used_allocation_size;
+  expect_traffic(wide, 24, 2, 48);
+  EXPECT_EQ(arena_.used_allocation_size, populated_bytes);
+  loom_local_value_domain_release(&domain);
 }
 
 TEST_F(LowAllocationIntervalAssignmentTest,
@@ -268,7 +327,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .interval_plan = &interval_plan,
       .storage_leases = &storage_leases,
       .arena = &arena_,
-      .reconstruction = &reconstruction_,
+      .spill_analysis = &spill_analysis_,
       .function_cfg_graph = &function_cfg_graph,
   };
   loom_low_allocation_interval_assignment_result_t result = {};
@@ -294,8 +353,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   EXPECT_EQ(result.remark_count, 0u);
   EXPECT_EQ(result.spill_plans, nullptr);
   EXPECT_EQ(result.remarks, nullptr);
-  EXPECT_EQ(reconstruction_.value_flags, nullptr);
-  EXPECT_EQ(reconstruction_.arena.used_allocation_size, 0u);
+  EXPECT_EQ(spill_analysis_.rematerialization_flags, nullptr);
+  EXPECT_EQ(spill_analysis_.arena.used_allocation_size, 0u);
 
   // Replaying a retained location bypasses first-fit search while rebuilding
   // the assignment's current lifetime and indexes.
@@ -344,18 +403,18 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   EXPECT_EQ(result.spill_traffic_bytes, spill_traffic_exclusive_limit);
   EXPECT_EQ(result.spill_plan_count, 0u);
   EXPECT_EQ(result.remark_count, 0u);
-  ASSERT_NE(reconstruction_.value_flags, nullptr);
-  const uint8_t* reconstruction_flags = reconstruction_.value_flags;
-  const iree_host_size_t reconstruction_bytes =
-      reconstruction_.arena.used_allocation_size;
+  ASSERT_NE(spill_analysis_.rematerialization_flags, nullptr);
+  const uint8_t* reconstruction_flags = spill_analysis_.rematerialization_flags;
+  const iree_host_size_t spill_analysis_bytes =
+      spill_analysis_.arena.used_allocation_size;
 
   ++spill_traffic_exclusive_limit;
   result = {};
   IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(
       &bounded_context, &decision_arena_, &result));
   EXPECT_EQ(decision_arena_.used_allocation_size, decision_bytes);
-  EXPECT_EQ(reconstruction_.value_flags, reconstruction_flags);
-  EXPECT_EQ(reconstruction_.arena.used_allocation_size, reconstruction_bytes);
+  EXPECT_EQ(spill_analysis_.rematerialization_flags, reconstruction_flags);
+  EXPECT_EQ(spill_analysis_.arena.used_allocation_size, spill_analysis_bytes);
   EXPECT_FALSE(result.reached_spill_traffic_limit);
   ASSERT_EQ(result.assignment_count, 1u);
   EXPECT_EQ(result.assignments[0].location_kind,
@@ -381,6 +440,9 @@ TEST_F(LowAllocationIntervalAssignmentTest,
 
   // Wider native memory payloads affect both candidate pruning and the final
   // reservation. Register capacity and liveness are unchanged.
+  iree_arena_deinitialize(&spill_analysis_.arena);
+  spill_analysis_ = {};
+  iree_arena_initialize(&block_pool_, &spill_analysis_.arena);
   reg_class.spill_unit_bits = 64;
   reg_class.spill_alignment_log2 = 0x66;
   result = {};
@@ -613,7 +675,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .interval_plan = &interval_plan,
       .storage_leases = &storage_leases,
       .arena = &arena_,
-      .reconstruction = &reconstruction_,
+      .spill_analysis = &spill_analysis_,
   };
   loom_low_allocation_interval_assignment_result_t result = {};
   IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(
@@ -858,7 +920,7 @@ TEST_P(LowFixedSubrangeAssignmentTest, PreservesOffsetAndTiedOwner) {
       .interval_plan = &interval_plan,
       .storage_leases = &storage_leases,
       .arena = &arena_,
-      .reconstruction = &reconstruction_,
+      .spill_analysis = &spill_analysis_,
   };
   loom_low_allocation_interval_assignment_result_t result = {};
   IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(
@@ -1042,7 +1104,7 @@ class LowRequiredRegisterRelocationTest
         .interval_plan = &interval_plan,
         .storage_leases = &leases,
         .arena = &arena_,
-        .reconstruction = &reconstruction_,
+        .spill_analysis = &spill_analysis_,
         .function_cfg_graph = &function_cfg_graph,
         .required_register_values = {module->values.count, &required_bits},
     };
@@ -1329,7 +1391,7 @@ void LowEntryPlacementTest::CheckPlacement(
       .interval_plan = &interval_plan,
       .storage_leases = &leases,
       .arena = &arena_,
-      .reconstruction = &reconstruction_,
+      .spill_analysis = &spill_analysis_,
       .function_cfg_graph = &graph,
       .search_strategy = test_case.strategy,
   };

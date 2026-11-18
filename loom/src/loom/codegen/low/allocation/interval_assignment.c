@@ -82,10 +82,6 @@ typedef struct loom_low_allocation_interval_assignment_state_t {
   // Explicit scalar classes proved full in the current entry-repair query.
   // Reused scratch words; no result survives an active-assignment change.
   uint64_t* full_entry_class_words;
-  // Cached predicted spill traffic, dense by liveness value ordinal.
-  loom_low_allocation_spill_plan_traffic_t* spill_traffic_by_value_ordinal;
-  // Block-local grouping scratch shared by all uncached traffic queries.
-  loom_low_allocation_spill_plan_traffic_workspace_t spill_traffic_workspace;
   // Lazily allocated decision array. Each allocatable interval spills at most
   // once, so the interval count is a fixed upper bound without growth.
   loom_low_allocation_spill_decision_t* spill_decisions;
@@ -141,7 +137,6 @@ loom_low_allocation_interval_assignment_search_context(
     loom_low_allocation_interval_assignment_state_t* state) {
   return (loom_low_allocation_search_context_t){
       .module = state->context->module,
-      .cfg_graph = state->context->function_cfg_graph,
       .descriptor_set = state->context->target->descriptor_set,
       .liveness = state->context->liveness,
       .unit_liveness = &state->unit_liveness,
@@ -159,9 +154,9 @@ loom_low_allocation_interval_assignment_search_context(
                                 : NULL,
       .storage_leases = state->context->storage_leases,
       .expanded_execution_values = state->context->expanded_execution_values,
-      .rematerialization_flags = state->context->reconstruction->value_flags,
-      .spill_traffic_by_value_ordinal = state->spill_traffic_by_value_ordinal,
-      .spill_traffic_workspace = &state->spill_traffic_workspace,
+      .rematerialization_flags =
+          state->context->spill_analysis->rematerialization_flags,
+      .spill_traffic = &state->context->spill_analysis->traffic,
       .use_pressure_efficiency =
           state->context->search_strategy ==
           LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_PRESSURE_EFFICIENCY,
@@ -608,25 +603,6 @@ loom_low_allocation_interval_assignment_consumption_query_callback(
       out_query);
 }
 
-static iree_status_t loom_low_allocation_interval_assignment_spill_traffic(
-    loom_low_allocation_interval_assignment_state_t* state,
-    const loom_low_allocation_assignment_t* assignment,
-    uint16_t spill_unit_bits,
-    loom_low_allocation_spill_plan_traffic_t* out_traffic) {
-  IREE_ASSERT(state->spill_traffic_by_value_ordinal);
-  const loom_value_ordinal_t value_ordinal = loom_local_value_domain_ordinal(
-      state->context->value_domain, assignment->value_id);
-  loom_low_allocation_spill_plan_traffic_t* traffic =
-      &state->spill_traffic_by_value_ordinal[value_ordinal];
-  if (traffic->store_count == UINT32_MAX) {
-    IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_traffic(
-        state->context->module, state->context->function_cfg_graph, assignment,
-        spill_unit_bits, &state->spill_traffic_workspace, traffic));
-  }
-  *out_traffic = *traffic;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_low_allocation_interval_assignment_record_spill(
     loom_low_allocation_interval_assignment_state_t* state,
     uint32_t assignment_index,
@@ -634,9 +610,11 @@ static iree_status_t loom_low_allocation_interval_assignment_record_spill(
     uint32_t retained_fixed_value_index_plus_one) {
   const loom_low_allocation_assignment_t* assignment =
       &state->result.assignments[assignment_index];
-  loom_low_allocation_spill_plan_traffic_t traffic = {0};
-  IREE_RETURN_IF_ERROR(loom_low_allocation_interval_assignment_spill_traffic(
-      state, assignment, capacity->spill_unit_bits, &traffic));
+  const loom_value_ordinal_t value_ordinal = loom_local_value_domain_ordinal(
+      state->context->value_domain, assignment->value_id);
+  const loom_low_allocation_spill_plan_traffic_t* traffic = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_allocation_spill_traffic_table_lookup(
+      &state->context->spill_analysis->traffic, value_ordinal, &traffic));
   if (!state->spill_decisions) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         state->scratch_arena, state->interval_count,
@@ -648,13 +626,11 @@ static iree_status_t loom_low_allocation_interval_assignment_record_spill(
           .budget_units =
               capacity->is_bounded ? capacity->max_units : UINT32_MAX,
       };
-  const loom_value_ordinal_t value_ordinal = loom_local_value_domain_ordinal(
-      state->context->value_domain, assignment->value_id);
   state->result.spill_traffic_bytes = iree_math_saturating_add_u64(
       state->result.spill_traffic_bytes,
       loom_low_allocation_spill_plan_traffic_cost(
-          &traffic,
-          state->context->reconstruction->value_flags[value_ordinal]));
+          traffic, state->context->spill_analysis
+                       ->rematerialization_flags[value_ordinal]));
   const uint64_t* spill_traffic_exclusive_limit =
       state->context->spill_traffic_exclusive_limit;
   if (spill_traffic_exclusive_limit &&
@@ -1760,44 +1736,27 @@ loom_low_allocation_interval_assignment_initialize_result_storage(
 }
 
 static iree_status_t
-loom_low_allocation_interval_assignment_initialize_spill_traffic_cache(
-    loom_low_allocation_interval_assignment_state_t* state) {
-  if (state->spill_traffic_by_value_ordinal) {
+loom_low_allocation_interval_assignment_prepare_spill_analysis(
+    const loom_low_allocation_interval_assignment_context_t* context) {
+  loom_low_allocation_spill_analysis_t* analysis = context->spill_analysis;
+  if (analysis->traffic.pages != NULL) {
     return iree_ok_status();
   }
-  const iree_host_size_t value_count = state->context->liveness->value_count;
-  if (value_count == 0) {
-    return iree_ok_status();
-  }
-  loom_low_allocation_reconstruction_t* reconstruction =
-      state->context->reconstruction;
-  if (reconstruction->value_flags == NULL) {
-    const loom_low_rematerialization_scope_t scope = {
-        .module = state->context->module,
-        .target = state->context->target,
-        .value_ids = state->context->liveness->value_ids,
-        .value_count = value_count,
-        .liveness = state->context->liveness,
-        .region = state->context->body,
-    };
-    IREE_RETURN_IF_ERROR(loom_low_rematerialization_facts_build(
-        &scope, /*reconstruct_constants=*/true, &reconstruction->arena,
-        &reconstruction->value_flags));
-  }
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->scratch_arena, value_count,
-      sizeof(*state->spill_traffic_by_value_ordinal),
-      (void**)&state->spill_traffic_by_value_ordinal));
-  for (iree_host_size_t i = 0; i < value_count; ++i) {
-    state->spill_traffic_by_value_ordinal[i] =
-        (loom_low_allocation_spill_plan_traffic_t){
-            .store_count = UINT32_MAX,
-        };
-  }
-  return loom_low_allocation_spill_plan_traffic_workspace_initialize(
-      state->context->function_cfg_graph->region,
-      &state->context->call_boundaries, state->scratch_arena,
-      &state->spill_traffic_workspace);
+  const loom_low_rematerialization_scope_t scope = {
+      .module = context->module,
+      .target = context->target,
+      .value_ids = context->liveness->value_ids,
+      .value_count = context->liveness->value_count,
+      .liveness = context->liveness,
+      .region = context->body,
+  };
+  IREE_RETURN_IF_ERROR(loom_low_rematerialization_facts_build(
+      &scope, /*reconstruct_constants=*/true, &analysis->arena,
+      &analysis->rematerialization_flags));
+  return loom_low_allocation_spill_traffic_table_initialize(
+      context->value_domain, context->target->descriptor_set,
+      context->function_cfg_graph, &context->call_boundaries, &analysis->arena,
+      &analysis->traffic);
 }
 
 static iree_status_t loom_low_allocation_interval_assignment_assign(
@@ -2016,8 +1975,8 @@ static iree_status_t loom_low_allocation_interval_assignment_assign(
     }
     if (!assigned) {
       IREE_RETURN_IF_ERROR(
-          loom_low_allocation_interval_assignment_initialize_spill_traffic_cache(
-              state));
+          loom_low_allocation_interval_assignment_prepare_spill_analysis(
+              context));
       search_context =
           loom_low_allocation_interval_assignment_search_context(state);
       loom_low_allocation_spill_search_victim_set_t victim_set = {0};
@@ -2143,11 +2102,13 @@ static iree_status_t loom_low_allocation_interval_assignment_finalize_spills(
     const loom_low_reg_class_t* reg_class =
         &state->context->target->descriptor_set
              ->reg_classes[assignment->descriptor_reg_class_id];
-    loom_low_allocation_spill_plan_traffic_t traffic = {0};
-    IREE_RETURN_IF_ERROR(loom_low_allocation_interval_assignment_spill_traffic(
-        state, assignment, reg_class->spill_unit_bits, &traffic));
+    const loom_value_ordinal_t value_ordinal = loom_local_value_domain_ordinal(
+        state->context->value_domain, assignment->value_id);
+    const loom_low_allocation_spill_plan_traffic_t* traffic = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_allocation_spill_traffic_table_lookup(
+        &state->context->spill_analysis->traffic, value_ordinal, &traffic));
     IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_append(
-        assignment, decision->assignment_index, reg_class, &traffic,
+        assignment, decision->assignment_index, reg_class, traffic,
         result->spill_plans, &result->spill_plan_count));
     loom_low_allocation_spill_remark_record(
         result->remarks, &result->remark_count, decision->assignment_index,

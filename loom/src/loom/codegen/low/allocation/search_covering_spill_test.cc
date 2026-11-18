@@ -330,6 +330,8 @@ TEST_F(LowAllocationCoveringSpillSearchTest,
       {.store_count = 1, .store_bytes = 8},
       {.store_count = 1, .store_bytes = 8},
   };
+  loom_low_allocation_spill_plan_traffic_t* page = spill_traffic;
+  loom_low_allocation_spill_traffic_table_t spill_table = {.pages = &page};
   const uint8_t rematerialization_flags[IREE_ARRAYSIZE(spill_traffic)] = {};
   loom_low_allocation_search_context_t context = {
       .module = module,
@@ -342,7 +344,7 @@ TEST_F(LowAllocationCoveringSpillSearchTest,
       .active_set = &active_set,
       .storage_leases = &empty_storage_leases,
       .rematerialization_flags = rematerialization_flags,
-      .spill_traffic_by_value_ordinal = spill_traffic,
+      .spill_traffic = &spill_table,
   };
   assignments[0].flags |= LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REQUIRES_REGISTER;
   iree_bitmap_set(unit_liveness.values_with_incomplete_storage_segments,
