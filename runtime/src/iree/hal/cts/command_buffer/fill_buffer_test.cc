@@ -70,6 +70,54 @@ class CommandBufferFillBufferTest : public CtsTestBase<> {
   }
 };
 
+TEST_P(CommandBufferFillBufferTest, RectanglesPreservePaddingAcrossTiles) {
+  constexpr size_t kWidth = 260, kRows = 257, kSlices = 2;
+  constexpr size_t kStride = 280, kSlice = kStride * kRows + 24;
+  constexpr size_t kCapacity = kSlices * kSlice + 32;
+  const uint8_t pattern[] = {0x17, 0x53, 0xB9, 0xED};
+  const bool indirect = recording_mode() == RecordingMode::kIndirect;
+  for (size_t pattern_length : {size_t{1}, size_t{2}, size_t{4}}) {
+    SCOPED_TRACE(pattern_length);
+    Ref<iree_hal_buffer_t> buffer;
+    IREE_ASSERT_OK(CreateZeroedDeviceBuffer(kCapacity, buffer.out()));
+    Ref<iree_hal_command_buffer_t> command_buffer;
+    IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                       IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+                                       indirect ? 1 : 0, command_buffer.out()));
+    IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+    const iree_hal_fill_region_t region = {
+        .row_length = kWidth,
+        .row_count = kRows,
+        .slice_count = kSlices,
+        .target_strides = {.row_stride = kStride, .slice_stride = kSlice},
+    };
+    const auto target =
+        indirect ? iree_hal_make_indirect_buffer_ref(0, 4, kCapacity - 4)
+                 : iree_hal_make_buffer_ref(buffer, 4, kCapacity - 4);
+    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+        command_buffer, target, pattern, pattern_length, &region, 0));
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+    if (indirect) {
+      const iree_hal_buffer_binding_t binding = {buffer, 0, kCapacity};
+      IREE_ASSERT_OK(SubmitCommandBufferAndWait(command_buffer, {1, &binding}));
+    } else {
+      IREE_ASSERT_OK(SubmitCommandBufferAndWait(command_buffer));
+    }
+    std::vector<uint8_t> expected(kCapacity, 0);
+    for (size_t z = 0; z < kSlices; ++z) {
+      for (size_t y = 0; y < kRows; ++y) {
+        for (size_t x = 0; x < kWidth; ++x) {
+          expected[4 + z * kSlice + y * kStride + x] =
+              pattern[x % pattern_length];
+        }
+      }
+    }
+    std::vector<uint8_t> actual(kCapacity);
+    IREE_ASSERT_OK(DownloadBufferData(buffer, 0, actual.data(), actual.size()));
+    EXPECT_THAT(actual, ContainerEq(expected));
+  }
+}
+
 TEST_P(CommandBufferFillBufferTest, Pattern1_Size1_Offset0_Length1) {
   iree_device_size_t buffer_size = 1;
   uint8_t pattern = 0x07;
@@ -497,6 +545,41 @@ TEST_P(CommandBufferFillBufferTest, RemainingRangeLengthAlignment) {
   EXPECT_THAT(
       ReadBufferBytes(buffer, 0, 17),
       ContainerEq(MakeFilledBytes(17, 4, 12, pattern, sizeof(pattern))));
+}
+
+TEST_P(CommandBufferFillBufferTest, AdjacentPartialWordsPreserveOtherRows) {
+  constexpr size_t kLength = 257;
+  Ref<iree_hal_buffer_t> target;
+  IREE_ASSERT_OK(CreateZeroedDeviceBuffer(kLength, target.out()));
+  const bool indirect = recording_mode() == RecordingMode::kIndirect;
+  Ref<iree_hal_command_buffer_t> recording;
+  IREE_ASSERT_OK(CreateCommandBuffer(0, IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+                                     indirect ? 1 : 0, recording.out()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+  const uint8_t pattern = 0xA7;
+  const iree_hal_fill_region_t region = {
+      .row_length = 1,
+      .row_count = 128,
+      .slice_count = 1,
+      .target_strides = {2, 0},
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+      recording,
+      (indirect ? iree_hal_make_indirect_buffer_ref(0, 1, kLength - 1)
+                : iree_hal_make_buffer_ref(target, 1, kLength - 1)),
+      &pattern, 1, &region, 0));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+  if (indirect) {
+    const iree_hal_buffer_binding_t binding = {target, 0, kLength};
+    IREE_ASSERT_OK(SubmitCommandBufferAndWait(recording, {1, &binding}));
+  } else {
+    IREE_ASSERT_OK(SubmitCommandBufferAndWait(recording));
+  }
+  std::vector<uint8_t> expected(kLength, 0);
+  for (size_t i = 1; i < kLength; i += 2) {
+    expected[i] = pattern;
+  }
+  EXPECT_THAT(ReadBufferBytes(target, 0, kLength), ContainerEq(expected));
 }
 
 CTS_REGISTER_COMMAND_BUFFER_TEST_SUITE(CommandBufferFillBufferTest);

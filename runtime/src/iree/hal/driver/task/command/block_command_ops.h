@@ -79,14 +79,14 @@ void iree_hal_cmd_build_rollback(iree_hal_cmd_block_builder_t* builder,
 // Builds a FILL command into the builder.
 //
 // Appends a fill command that writes |pattern| (1/2/4 bytes) repeated across
-// |length| bytes of the target buffer. Large fills decompose into transfer
+// the useful bytes of |region|. Large fills decompose into transfer
 // tiles so multiple workers can participate. WHOLE_BUFFER resolves to the
 // remaining target binding extent when the invocation reaches the command.
 //
 // Returns 1 fixup entry via |out_fixups|:
 //   fixups[0]: target buffer (data_index pre-filled, caller resolves binding)
 iree_status_t iree_hal_cmd_build_fill(iree_hal_cmd_block_builder_t* builder,
-                                      iree_device_size_t length,
+                                      const iree_hal_fill_region_t* region,
                                       const void* pattern,
                                       iree_host_size_t pattern_length,
                                       iree_hal_cmd_fixup_t** out_fixups,
@@ -98,16 +98,16 @@ iree_status_t iree_hal_cmd_build_fill(iree_hal_cmd_block_builder_t* builder,
 
 // Builds a COPY command into the builder.
 //
-// Appends a copy command that copies |length| bytes from the source buffer to
-// the target buffer. Large copies decompose into transfer tiles so multiple
-// workers can participate. WHOLE_BUFFER requires equal remaining source and
-// target binding extents, resolved when the invocation reaches the command.
+// Appends a copy command that copies the useful bytes of |region| between
+// bindings. Large copies decompose into transfer tiles so multiple workers can
+// participate. WHOLE_BUFFER requires equal remaining source and target binding
+// extents, resolved when the invocation reaches the command.
 //
 // Returns 2 fixup entries via |out_fixups|:
 //   fixups[0]: source buffer (data_index pre-filled, caller resolves binding)
 //   fixups[1]: target buffer (data_index pre-filled, caller resolves binding)
 iree_status_t iree_hal_cmd_build_copy(iree_hal_cmd_block_builder_t* builder,
-                                      iree_device_size_t length,
+                                      const iree_hal_transfer_region_t* region,
                                       iree_hal_cmd_fixup_t** out_fixups,
                                       iree_hal_cmd_build_token_t* out_token);
 
@@ -117,18 +117,18 @@ iree_status_t iree_hal_cmd_build_copy(iree_hal_cmd_block_builder_t* builder,
 
 // Builds an UPDATE command into the builder.
 //
-// Copies |length| bytes from |source_buffer| + |source_offset| inline into
-// the ISA command stream (.text). At execution time, the processor memcpy's
-// the inline data to the target buffer.
+// Captures one capacity-bounded piece starting at the dense useful-byte
+// |offset| of |region|, packing only useful source bytes inline in .text.
+// The returned command length advances the caller's cursor. The target fixup
+// addresses the original binding origin, independently of the piece offset.
 //
 // Returns 1 fixup entry via |out_fixups|:
 //   fixups[0]: target buffer (data_index pre-filled, caller resolves binding)
-iree_status_t iree_hal_cmd_build_update(iree_hal_cmd_block_builder_t* builder,
-                                        const void* source_buffer,
-                                        iree_host_size_t source_offset,
-                                        iree_device_size_t length,
-                                        iree_hal_cmd_fixup_t** out_fixups,
-                                        iree_hal_cmd_build_token_t* out_token);
+iree_status_t iree_hal_cmd_build_update(
+    iree_hal_cmd_block_builder_t* builder, const void* source_buffer,
+    iree_host_size_t source_offset, const iree_hal_transfer_region_t* region,
+    iree_device_size_t offset, iree_hal_cmd_fixup_t** out_fixups,
+    iree_hal_cmd_build_token_t* out_token);
 
 // Builds a one-tile FENCE command into the builder. The caller isolates this
 // command in its own barrier-delimited region.

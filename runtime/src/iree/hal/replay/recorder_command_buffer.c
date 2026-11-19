@@ -480,7 +480,8 @@ static iree_status_t iree_hal_replay_recorder_command_buffer_advise_buffer(
 static iree_status_t iree_hal_replay_recorder_command_buffer_fill_buffer(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_buffer_ref_t target_ref, const void* pattern,
-    iree_host_size_t pattern_length, iree_hal_fill_flags_t flags) {
+    iree_host_size_t pattern_length, const iree_hal_fill_region_t* region,
+    iree_hal_fill_flags_t flags) {
   iree_hal_replay_recorder_command_buffer_t* command_buffer =
       iree_hal_replay_recorder_command_buffer_cast(base_command_buffer);
   iree_hal_replay_command_buffer_fill_buffer_payload_t payload;
@@ -488,6 +489,9 @@ static iree_status_t iree_hal_replay_recorder_command_buffer_fill_buffer(
   iree_hal_replay_recorder_buffer_ref_make_payload(target_ref,
                                                    &payload.target_ref);
   payload.flags = flags;
+  static_assert(sizeof(payload.region) == sizeof(*region),
+                "transfer wire geometry size");
+  memcpy(&payload.region, region, sizeof(*region));
   payload.pattern_length = pattern_length;
   iree_const_byte_span_t iovecs[2] = {
       iree_make_const_byte_span(&payload, sizeof(payload)),
@@ -513,9 +517,9 @@ static iree_status_t iree_hal_replay_recorder_command_buffer_fill_buffer(
   if (iree_status_is_ok(status)) {
     status = iree_hal_replay_recorder_end_operation_with_payload(
         &pending_record,
-        iree_hal_command_buffer_fill_buffer_linear(
-            command_buffer->base_command_buffer, base_target_ref, pattern,
-            pattern_length, flags),
+        iree_hal_command_buffer_fill_buffer(command_buffer->base_command_buffer,
+                                            base_target_ref, pattern,
+                                            pattern_length, region, flags),
         IREE_ARRAYSIZE(iovecs), iovecs);
   }
   iree_hal_replay_recorder_buffer_release_temporary(temporary_target_buffer);
@@ -525,29 +529,34 @@ static iree_status_t iree_hal_replay_recorder_command_buffer_fill_buffer(
 static iree_status_t iree_hal_replay_recorder_command_buffer_update_buffer(
     iree_hal_command_buffer_t* base_command_buffer, const void* source_buffer,
     iree_host_size_t source_offset, iree_hal_buffer_ref_t target_ref,
-    iree_hal_update_flags_t flags) {
+    const iree_hal_transfer_region_t* region, iree_hal_update_flags_t flags) {
   iree_hal_replay_recorder_command_buffer_t* command_buffer =
       iree_hal_replay_recorder_command_buffer_cast(base_command_buffer);
-  if (IREE_UNLIKELY(target_ref.length > IREE_HOST_SIZE_MAX)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "replay command buffer update length exceeds host size");
-  }
-  if (IREE_UNLIKELY(target_ref.length != 0 && !source_buffer)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "replay command buffer update source buffer is required");
-  }
-
   iree_hal_replay_command_buffer_update_buffer_payload_t payload;
   memset(&payload, 0, sizeof(payload));
   iree_hal_replay_recorder_buffer_ref_make_payload(target_ref,
                                                    &payload.target_ref);
   payload.flags = flags;
+  static_assert(sizeof(payload.region) == sizeof(*region),
+                "transfer wire geometry size");
+  memcpy(&payload.region, region, sizeof(*region));
   payload.source_offset = source_offset;
-  payload.data_length = target_ref.length;
-  const uint8_t* source_data =
-      target_ref.length ? (const uint8_t*)source_buffer + source_offset : NULL;
+  payload.data_length = iree_hal_transfer_region_length(region);
+  const uint8_t* source_data = (const uint8_t*)source_buffer + source_offset;
+  uint8_t* packed_source = NULL;
+  if (!iree_hal_transfer_range_is_linear(region->row_length, region->row_count,
+                                         region->slice_count,
+                                         &region->source_strides)) {
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc(command_buffer->host_allocator,
+                                               payload.data_length,
+                                               (void**)&packed_source));
+    iree_hal_transfer_gather_host(source_data, region, 0, payload.data_length,
+                                  packed_source);
+    source_data = packed_source;
+  }
+  payload.region.source_strides.row_stride = region->row_length;
+  payload.region.source_strides.slice_stride =
+      region->row_length * region->row_count;
   iree_const_byte_span_t iovecs[2] = {
       iree_make_const_byte_span(&payload, sizeof(payload)),
       iree_make_const_byte_span(source_data,
@@ -573,19 +582,20 @@ static iree_status_t iree_hal_replay_recorder_command_buffer_update_buffer(
   if (iree_status_is_ok(status)) {
     status = iree_hal_replay_recorder_end_operation_with_payload(
         &pending_record,
-        iree_hal_command_buffer_update_buffer_linear(
+        iree_hal_command_buffer_update_buffer(
             command_buffer->base_command_buffer, source_buffer, source_offset,
-            base_target_ref, flags),
+            base_target_ref, region, flags),
         IREE_ARRAYSIZE(iovecs), iovecs);
   }
   iree_hal_replay_recorder_buffer_release_temporary(temporary_target_buffer);
+  iree_allocator_free(command_buffer->host_allocator, packed_source);
   return status;
 }
 
 static iree_status_t iree_hal_replay_recorder_command_buffer_copy_buffer(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_buffer_ref_t source_ref, iree_hal_buffer_ref_t target_ref,
-    iree_hal_copy_flags_t flags) {
+    const iree_hal_transfer_region_t* region, iree_hal_copy_flags_t flags) {
   iree_hal_replay_recorder_command_buffer_t* command_buffer =
       iree_hal_replay_recorder_command_buffer_cast(base_command_buffer);
   iree_hal_replay_command_buffer_copy_buffer_payload_t payload;
@@ -595,6 +605,9 @@ static iree_status_t iree_hal_replay_recorder_command_buffer_copy_buffer(
   iree_hal_replay_recorder_buffer_ref_make_payload(target_ref,
                                                    &payload.target_ref);
   payload.flags = flags;
+  static_assert(sizeof(payload.region) == sizeof(*region),
+                "transfer wire geometry size");
+  memcpy(&payload.region, region, sizeof(*region));
   iree_const_byte_span_t payload_iovec =
       iree_make_const_byte_span(&payload, sizeof(payload));
 
@@ -624,9 +637,9 @@ static iree_status_t iree_hal_replay_recorder_command_buffer_copy_buffer(
   if (iree_status_is_ok(status)) {
     status = iree_hal_replay_recorder_end_operation_with_payload(
         &pending_record,
-        iree_hal_command_buffer_copy_buffer_linear(
-            command_buffer->base_command_buffer, base_source_ref,
-            base_target_ref, flags),
+        iree_hal_command_buffer_copy_buffer(command_buffer->base_command_buffer,
+                                            base_source_ref, base_target_ref,
+                                            region, flags),
         1, &payload_iovec);
   }
   iree_hal_replay_recorder_buffer_release_temporary(temporary_target_buffer);

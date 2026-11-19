@@ -355,6 +355,128 @@ int begin(uint32_t form, uint32_t count) {
   return report(status);
 }
 
+// Exercise the same asynchronous native host used for file transfers. Recording
+// captures padded host updates, and a binding-table replay keeps source and
+// target rectangles in one allocation without aliasing their useful bytes.
+EXPORT(begin_buffer)
+int begin_buffer(void) {
+  current_buffer_length = 16384;
+  current_file_length = 0;
+  invalid = false;
+  imported_files = released_files = 0;
+  memset(actual, 0, current_buffer_length);
+  memset(expected, 0xCD, current_buffer_length);
+  for (size_t i = 0; i < 8192; ++i) {
+    input[i] = (uint8_t)(i * 17 + 3);
+  }
+  for (size_t slice = 0; slice < 2; ++slice) {
+    for (size_t row = 0; row < 64; ++row) {
+      memcpy(expected + 1 + slice * 8192 + row * 128,
+             input + slice * 4096 + row * 64, 37);
+      memcpy(expected + 49 + slice * 8192 + row * 128,
+             input + slice * 4096 + row * 64, 37);
+      expected[slice * 8192 + row * 128] = 0xA7;
+      expected[39 + slice * 8192 + row * 128] = 0xA7;
+    }
+  }
+  iree_hal_buffer_t* buffer = NULL;
+  iree_hal_command_buffer_t* recording = NULL;
+  iree_status_t status = allocate(current_buffer_length, &buffer);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_semaphore_create(device, 1, 0, 0, &semaphores[READY]);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_semaphore_create(device, 1, 0, 0, &semaphores[FINISHED]);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_command_buffer_create(
+        iree_hal_queue_family((iree_hal_queue_t*)queue), 0,
+        IREE_HAL_COMMAND_CATEGORY_TRANSFER, 1, &recording);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_command_buffer_begin(recording);
+  }
+  const uint8_t padding = 0xCD;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_command_buffer_fill_buffer_linear(
+        recording,
+        iree_hal_make_indirect_buffer_ref(0, 0, current_buffer_length),
+        &padding, 1, 0);
+  }
+  const iree_hal_memory_barrier_t memory = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE};
+  const iree_hal_barrier_t dependency = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .memory_barrier_count = 1,
+      .memory_barriers = &memory};
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_command_buffer_barrier(recording, &dependency);
+  }
+  const iree_hal_transfer_region_t update = {.row_length = 37,
+                                             .row_count = 64,
+                                             .slice_count = 2,
+                                             .source_strides = {64, 4096},
+                                             .target_strides = {128, 8192}};
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_command_buffer_update_buffer(
+        recording, input, 0,
+        iree_hal_make_indirect_buffer_ref(0, 1, current_buffer_length - 1),
+        &update, 0);
+  }
+  memset(input, 0xEE, 8192);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_command_buffer_barrier(recording, &dependency);
+  }
+  const iree_hal_transfer_region_t copy = {.row_length = 37,
+                                           .row_count = 64,
+                                           .slice_count = 2,
+                                           .source_strides = {128, 8192},
+                                           .target_strides = {128, 8192}};
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_command_buffer_copy_buffer(
+        recording,
+        iree_hal_make_indirect_buffer_ref(0, 1, current_buffer_length - 1),
+        iree_hal_make_indirect_buffer_ref(0, 49, current_buffer_length - 49),
+        &copy, 0);
+  }
+  const uint8_t marker = 0xA7;
+  const iree_hal_fill_region_t fill = {.row_length = 1,
+                                       .row_count = 64,
+                                       .slice_count = 2,
+                                       .target_strides = {128, 8192}};
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_command_buffer_fill_buffer(
+        recording,
+        iree_hal_make_indirect_buffer_ref(0, 0, current_buffer_length), &marker,
+        1, &fill, 0);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_command_buffer_fill_buffer(
+        recording,
+        iree_hal_make_indirect_buffer_ref(0, 39, current_buffer_length - 39),
+        &marker, 1, &fill, 0);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_command_buffer_end(recording);
+  }
+  const iree_hal_buffer_binding_t binding = {buffer, 0, current_buffer_length};
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_queue_execute(
+        (iree_hal_queue_t*)queue, iree_hal_semaphore_list_empty(), point(READY),
+        recording, (iree_hal_buffer_binding_table_t){1, &binding}, 0);
+  }
+  if (iree_status_is_ok(status)) {
+    status = linear(IREE_HAL_MEMORY_ACCESS_WRITE, point(READY), point(FINISHED),
+                    actual, current_buffer_length, buffer);
+  }
+  iree_hal_command_buffer_release(recording);
+  iree_hal_buffer_release(buffer);
+  return report(status);
+}
+
 EXPORT(query)
 int query(uint32_t independent) {
   uint64_t value = 0;
@@ -398,6 +520,7 @@ int finish(void) {
   }
   for (int i = 0; i < SEMAPHORE_COUNT; ++i) {
     iree_hal_semaphore_release(semaphores[i]);
+    semaphores[i] = NULL;
   }
   return report(status);
 }

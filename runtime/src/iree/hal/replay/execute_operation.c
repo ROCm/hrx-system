@@ -1320,10 +1320,8 @@ static iree_status_t iree_hal_replay_executor_command_buffer_fill_buffer(
       sizeof(iree_hal_replay_command_buffer_fill_buffer_payload_t)));
   iree_hal_replay_command_buffer_fill_buffer_payload_t payload;
   memcpy(&payload, record->payload.data, sizeof(payload));
-  if (IREE_UNLIKELY(payload.pattern_length > IREE_HOST_SIZE_MAX ||
-                    sizeof(payload) +
-                            (iree_host_size_t)payload.pattern_length !=
-                        record->payload.data_length)) {
+  if (IREE_UNLIKELY(payload.pattern_length !=
+                    record->payload.data_length - sizeof(payload))) {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
                             "replay command buffer fill payload length "
                             "mismatch");
@@ -1338,9 +1336,13 @@ static iree_status_t iree_hal_replay_executor_command_buffer_fill_buffer(
   iree_const_byte_span_t pattern =
       iree_make_const_byte_span(record->payload.data + sizeof(payload),
                                 (iree_host_size_t)payload.pattern_length);
-  return iree_hal_command_buffer_fill_buffer_linear(
+  iree_hal_fill_region_t region;
+  static_assert(sizeof(payload.region) == sizeof(region),
+                "transfer wire geometry size");
+  memcpy(&region, &payload.region, sizeof(region));
+  return iree_hal_command_buffer_fill_buffer(
       command_buffer_entry->value.command_buffer, target_ref, pattern.data,
-      pattern.data_length, payload.flags);
+      pattern.data_length, &region, payload.flags);
 }
 
 static iree_status_t iree_hal_replay_executor_command_buffer_update_buffer(
@@ -1351,9 +1353,8 @@ static iree_status_t iree_hal_replay_executor_command_buffer_update_buffer(
       sizeof(iree_hal_replay_command_buffer_update_buffer_payload_t)));
   iree_hal_replay_command_buffer_update_buffer_payload_t payload;
   memcpy(&payload, record->payload.data, sizeof(payload));
-  if (IREE_UNLIKELY(payload.data_length > IREE_HOST_SIZE_MAX ||
-                    sizeof(payload) + (iree_host_size_t)payload.data_length !=
-                        record->payload.data_length)) {
+  if (IREE_UNLIKELY(payload.data_length !=
+                    record->payload.data_length - sizeof(payload))) {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
                             "replay command buffer update payload length "
                             "mismatch");
@@ -1365,17 +1366,30 @@ static iree_status_t iree_hal_replay_executor_command_buffer_update_buffer(
   iree_hal_buffer_ref_t target_ref;
   IREE_RETURN_IF_ERROR(iree_hal_replay_executor_make_buffer_ref(
       executor, &payload.target_ref, &target_ref));
-  if (payload.data_length != target_ref.length) {
-    return iree_make_status(IREE_STATUS_DATA_LOSS,
-                            "replay command buffer update data length does not "
-                            "match target length");
+  uint64_t useful_length = 0;
+  if (!iree_checked_mul_u64(payload.region.row_length, payload.region.row_count,
+                            &useful_length) ||
+      !iree_checked_mul_u64(useful_length, payload.region.slice_count,
+                            &useful_length) ||
+      useful_length != payload.data_length ||
+      payload.region.source_strides.row_stride != payload.region.row_length ||
+      (payload.region.row_count &&
+       payload.region.source_strides.slice_stride !=
+           payload.region.row_length * payload.region.row_count)) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "replay update payload is not a packed useful-byte sequence");
   }
   iree_const_byte_span_t data =
       iree_make_const_byte_span(record->payload.data + sizeof(payload),
                                 (iree_host_size_t)payload.data_length);
-  return iree_hal_command_buffer_update_buffer_linear(
+  iree_hal_transfer_region_t region;
+  static_assert(sizeof(payload.region) == sizeof(region),
+                "transfer wire geometry size");
+  memcpy(&region, &payload.region, sizeof(region));
+  return iree_hal_command_buffer_update_buffer(
       command_buffer_entry->value.command_buffer, data.data,
-      /*source_offset=*/0, target_ref, payload.flags);
+      /*source_offset=*/0, target_ref, &region, payload.flags);
 }
 
 static iree_status_t iree_hal_replay_executor_command_buffer_copy_buffer(
@@ -1396,9 +1410,13 @@ static iree_status_t iree_hal_replay_executor_command_buffer_copy_buffer(
   iree_hal_buffer_ref_t target_ref;
   IREE_RETURN_IF_ERROR(iree_hal_replay_executor_make_buffer_ref(
       executor, &payload.target_ref, &target_ref));
-  return iree_hal_command_buffer_copy_buffer_linear(
+  iree_hal_transfer_region_t region;
+  static_assert(sizeof(payload.region) == sizeof(region),
+                "transfer wire geometry size");
+  memcpy(&region, &payload.region, sizeof(region));
+  return iree_hal_command_buffer_copy_buffer(
       command_buffer_entry->value.command_buffer, source_ref, target_ref,
-      payload.flags);
+      &region, payload.flags);
 }
 
 static iree_status_t iree_hal_replay_executor_queue_barrier(

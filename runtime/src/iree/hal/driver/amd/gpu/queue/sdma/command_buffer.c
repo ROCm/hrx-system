@@ -227,15 +227,16 @@ static iree_status_t iree_hal_amd_gpu_sdma_command_barrier(
 static iree_status_t iree_hal_amd_gpu_sdma_command_transfer(
     iree_hal_amd_gpu_sdma_command_buffer_t* buffer,
     iree_hal_transfer_operation_type_t type, iree_hal_buffer_ref_t source,
-    iree_hal_buffer_ref_t target, const void* source_bytes, uint32_t pattern) {
+    iree_hal_buffer_ref_t target, const void* source_bytes, uint32_t pattern,
+    const iree_hal_transfer_region_t* region) {
   const bool copy = type == IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
   const bool update = type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE;
-  const bool whole = target.length == IREE_HAL_WHOLE_BUFFER;
+  const bool whole = region->row_length == IREE_HAL_WHOLE_BUFFER;
   if (copy && whole) {
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_equal_lengths(
         &buffer->inputs, source, target));
   }
-  uint64_t length = target.length;
+  uint64_t length = iree_hal_transfer_region_length(region);
   if (whole && target.buffer) {
     length = iree_hal_buffer_byte_length(target.buffer) - target.offset;
   }
@@ -266,7 +267,11 @@ static iree_status_t iree_hal_amd_gpu_sdma_command_transfer(
         &buffer->recording.storage, update ? (uint32_t)length : 8, 4,
         &data_offset, &data));
     if (update) {
-      memcpy(data, source_bytes, (size_t)length);
+      iree_hal_transfer_region_t capture = *region;
+      capture.target_strides.row_stride = region->row_length;
+      capture.target_strides.slice_stride =
+          region->row_length * region->row_count;
+      iree_hal_transfer_copy_host(source_bytes, data, &capture);
     } else {
       iree_unaligned_store_le_u32(data, pattern);
       iree_unaligned_store_le_u32((uint8_t*)data + 4, pattern);
@@ -279,7 +284,30 @@ static iree_status_t iree_hal_amd_gpu_sdma_command_transfer(
     range.length = 0 - target.offset;
   }
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_sdma_command_flush_barrier(buffer));
-  if ((copy || update) && length != IREE_HAL_WHOLE_BUFFER) {
+  const bool linear =
+      iree_hal_transfer_range_is_linear(region->row_length, region->row_count,
+                                        region->slice_count,
+                                        &region->target_strides) &&
+      (!copy || iree_hal_transfer_range_is_linear(
+                    region->row_length, region->row_count, region->slice_count,
+                    &region->source_strides));
+  if (!linear) {
+    iree_hal_transfer_region_t* captured_region = NULL;
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
+        &buffer->recording.storage, sizeof(*region), 8, &range.region_offset,
+        (void**)&captured_region));
+    *captured_region = *region;
+    if (update) {
+      captured_region->source_strides.row_stride = region->row_length;
+      captured_region->source_strides.slice_stride =
+          region->row_length * region->row_count;
+    }
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_sdma_recording_range(
+        &buffer->recording,
+        copy || update ? IREE_HAL_AMD_GPU_SDMA_PROGRAM_COPY_REGION
+                       : IREE_HAL_AMD_GPU_SDMA_PROGRAM_FILL_REGION,
+        range));
+  } else if ((copy || update) && length != IREE_HAL_WHOLE_BUFFER) {
     iree_status_t status = iree_ok_status();
     for (uint64_t offset = 0; offset < length && iree_status_is_ok(status);) {
       const uint32_t part = (uint32_t)iree_min(
@@ -317,9 +345,14 @@ static iree_status_t iree_hal_amd_gpu_sdma_command_transfer(
 static iree_status_t iree_hal_amd_gpu_sdma_command_fill_buffer(
     iree_hal_command_buffer_t* base, iree_hal_buffer_ref_t target,
     const void* pattern, iree_host_size_t pattern_length,
-    iree_hal_fill_flags_t flags) {
+    const iree_hal_fill_region_t* region, iree_hal_fill_flags_t flags) {
   iree_hal_amd_gpu_sdma_command_buffer_t* buffer = (void*)base;
   IREE_RETURN_IF_ERROR(iree_status_clone(buffer->recording_status));
+  const iree_hal_transfer_region_t transfer = {
+      .row_length = region->row_length,
+      .row_count = region->row_count,
+      .slice_count = region->slice_count,
+      .target_strides = region->target_strides};
   uint32_t value = 0;
   memcpy(&value, pattern, pattern_length);
   if (pattern_length == 1) {
@@ -331,31 +364,32 @@ static iree_status_t iree_hal_amd_gpu_sdma_command_fill_buffer(
   return iree_hal_amd_gpu_sdma_command_status(
       buffer, iree_hal_amd_gpu_sdma_command_transfer(
                   buffer, IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
-                  (iree_hal_buffer_ref_t){0}, target, NULL, value));
+                  (iree_hal_buffer_ref_t){0}, target, NULL, value, &transfer));
 }
 
 static iree_status_t iree_hal_amd_gpu_sdma_command_update_buffer(
     iree_hal_command_buffer_t* base, const void* source,
     iree_host_size_t source_offset, iree_hal_buffer_ref_t target,
-    iree_hal_update_flags_t flags) {
+    const iree_hal_transfer_region_t* region, iree_hal_update_flags_t flags) {
   iree_hal_amd_gpu_sdma_command_buffer_t* buffer = (void*)base;
   IREE_RETURN_IF_ERROR(iree_status_clone(buffer->recording_status));
   return iree_hal_amd_gpu_sdma_command_status(
       buffer, iree_hal_amd_gpu_sdma_command_transfer(
                   buffer, IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE,
                   (iree_hal_buffer_ref_t){0}, target,
-                  (const uint8_t*)source + source_offset, 0));
+                  (const uint8_t*)source + source_offset, 0, region));
 }
 
 static iree_status_t iree_hal_amd_gpu_sdma_command_copy_buffer(
     iree_hal_command_buffer_t* base, iree_hal_buffer_ref_t source,
-    iree_hal_buffer_ref_t target, iree_hal_copy_flags_t flags) {
+    iree_hal_buffer_ref_t target, const iree_hal_transfer_region_t* region,
+    iree_hal_copy_flags_t flags) {
   iree_hal_amd_gpu_sdma_command_buffer_t* buffer = (void*)base;
   IREE_RETURN_IF_ERROR(iree_status_clone(buffer->recording_status));
   return iree_hal_amd_gpu_sdma_command_status(
       buffer, iree_hal_amd_gpu_sdma_command_transfer(
                   buffer, IREE_HAL_TRANSFER_OPERATION_TYPE_COPY, source, target,
-                  NULL, 0));
+                  NULL, 0, region));
 }
 
 static iree_status_t iree_hal_amd_gpu_sdma_command_sample(

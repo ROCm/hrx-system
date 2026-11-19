@@ -94,6 +94,92 @@ class CommandBufferCopyBufferTest : public CtsTestBase<> {
   }
 };
 
+TEST_P(CommandBufferCopyBufferTest, RectanglesPreservePaddingAcrossTiles) {
+  constexpr size_t kWidth = 37, kRows = 2049, kSlices = 2;
+  constexpr size_t kSourceStride = 48, kTargetStride = 60;
+  constexpr size_t kSourceSlice = kRows * kSourceStride + 24;
+  constexpr size_t kTargetSlice = kRows * kTargetStride + 40;
+  constexpr size_t kSourceCapacity = kSlices * kSourceSlice + 32;
+  constexpr size_t kTargetCapacity = kSlices * kTargetSlice + 32;
+  const auto source = MakeDeterministicBytes(kSourceCapacity);
+  std::vector<uint8_t> expected(kTargetCapacity, 0);
+  for (size_t z = 0; z < kSlices; ++z) {
+    for (size_t y = 0; y < kRows; ++y) {
+      memcpy(expected.data() + 7 + z * kTargetSlice + y * kTargetStride,
+             source.data() + 3 + z * kSourceSlice + y * kSourceStride, kWidth);
+    }
+  }
+  Ref<iree_hal_buffer_t> source_buffer, target_buffer;
+  IREE_ASSERT_OK(CreateDeviceBufferWithData(source.data(), source.size(),
+                                            source_buffer.out()));
+  IREE_ASSERT_OK(
+      CreateZeroedDeviceBuffer(kTargetCapacity, target_buffer.out()));
+  Ref<iree_hal_command_buffer_t> command_buffer;
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+                                     binding_capacity(), command_buffer.out()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+  const iree_hal_transfer_region_t region = {
+      .row_length = kWidth,
+      .row_count = kRows,
+      .slice_count = kSlices,
+      .source_strides =
+          {
+              .row_stride = kSourceStride,
+              .slice_stride = kSourceSlice,
+          },
+      .target_strides =
+          {
+              .row_stride = kTargetStride,
+              .slice_stride = kTargetSlice,
+          },
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+      command_buffer, MakeRef(source_buffer, 0, 3, kSourceCapacity - 3),
+      MakeRef(target_buffer, 1, 7, kTargetCapacity - 7), &region, 0));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+  IREE_ASSERT_OK(
+      SubmitWithBindings(command_buffer, source_buffer, target_buffer));
+  std::vector<uint8_t> actual(kTargetCapacity);
+  IREE_ASSERT_OK(
+      DownloadBufferData(target_buffer, 0, actual.data(), actual.size()));
+  EXPECT_THAT(actual, ContainerEq(expected));
+}
+
+TEST_P(CommandBufferCopyBufferTest, InterleavedRowsMaySharePadding) {
+  constexpr size_t kWidth = 17, kStride = 64, kRows = 32;
+  constexpr size_t kCapacity = kStride * kRows;
+  const auto initial = MakeDeterministicBytes(kCapacity);
+  auto expected = initial;
+  for (size_t y = 0; y < kRows; ++y) {
+    memcpy(expected.data() + y * kStride + 23, initial.data() + y * kStride + 3,
+           kWidth);
+  }
+  Ref<iree_hal_buffer_t> buffer;
+  IREE_ASSERT_OK(
+      CreateDeviceBufferWithData(initial.data(), initial.size(), buffer.out()));
+  Ref<iree_hal_command_buffer_t> command_buffer;
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+                                     binding_capacity(), command_buffer.out()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+  const iree_hal_transfer_region_t region = {
+      .row_length = kWidth,
+      .row_count = kRows,
+      .slice_count = 1,
+      .source_strides = {.row_stride = kStride},
+      .target_strides = {.row_stride = kStride},
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+      command_buffer, MakeRef(buffer, 0, 3, kCapacity - 3),
+      MakeRef(buffer, 1, 23, kCapacity - 23), &region, 0));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+  IREE_ASSERT_OK(SubmitWithBindings(command_buffer, buffer, buffer));
+  std::vector<uint8_t> actual(kCapacity);
+  IREE_ASSERT_OK(DownloadBufferData(buffer, 0, actual.data(), actual.size()));
+  EXPECT_THAT(actual, ContainerEq(expected));
+}
+
 TEST_P(CommandBufferCopyBufferTest, CopyWholeBuffer) {
   uint8_t i8_val = 0x54;
   std::vector<uint8_t> reference_buffer(kDefaultAllocationSize, i8_val);
@@ -219,6 +305,55 @@ TEST_P(CommandBufferCopyBufferTest, BulkSizeAndAlignmentClasses) {
     SCOPED_TRACE(length);
     RunCopyBufferTest(/*source_offset=*/16, /*target_offset=*/32, length);
     RunCopyBufferTest(/*source_offset=*/1, /*target_offset=*/3, length);
+  }
+}
+
+TEST_P(CommandBufferCopyBufferTest, FixedGeometryRequiresItsWholeBindingSpan) {
+  const iree_hal_transfer_region_t region = {
+      .row_length = 17,
+      .row_count = 3,
+      .slice_count = 2,
+      .source_strides = {32, 128},
+      .target_strides = {64, 256},
+  };
+  Ref<iree_hal_buffer_t> source, target;
+  IREE_ASSERT_OK(CreateZeroedDeviceBuffer(512, source.out()));
+  IREE_ASSERT_OK(CreateZeroedDeviceBuffer(512, target.out()));
+  Ref<iree_hal_command_buffer_t> recording;
+  IREE_ASSERT_OK(CreateCommandBuffer(0, IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+                                     binding_capacity(), recording.out()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+  if (recording_mode() == RecordingMode::kIndirect) {
+    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+        recording, MakeRef(source, 0, 7, IREE_HAL_WHOLE_BUFFER),
+        MakeRef(target, 1, 11, IREE_HAL_WHOLE_BUFFER), &region, 0));
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+    iree_hal_buffer_binding_t bindings[] = {
+        {source, 0, 7 + 128 + 64 + 17},
+        {target, 0, 11 + 256 + 128 + 17},
+    };
+    IREE_ASSERT_OK(
+        iree_hal_command_buffer_validate_submission(recording, {2, bindings}));
+    --bindings[0].length;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_OUT_OF_RANGE,
+        iree_hal_command_buffer_validate_submission(recording, {2, bindings}));
+    ++bindings[0].length;
+    --bindings[1].length;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_OUT_OF_RANGE,
+        iree_hal_command_buffer_validate_submission(recording, {2, bindings}));
+  } else {
+    Ref<iree_hal_buffer_t> short_target;
+    IREE_ASSERT_OK(iree_hal_buffer_subspan(target, 0, 11 + 256 + 128 + 16,
+                                           iree_allocator_system(),
+                                           short_target.out()));
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_OUT_OF_RANGE,
+        iree_hal_command_buffer_copy_buffer(
+            recording, MakeRef(source, 0, 7, IREE_HAL_WHOLE_BUFFER),
+            MakeRef(short_target, 1, 11, IREE_HAL_WHOLE_BUFFER), &region, 0));
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
   }
 }
 

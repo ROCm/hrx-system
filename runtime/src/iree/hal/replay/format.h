@@ -19,9 +19,9 @@ extern "C" {
 // Magic header bytes for IREE HAL replay files: "IRRP".
 #define IREE_HAL_REPLAY_FILE_MAGIC 0x50525249u
 
-// Major version of the IREE HAL replay file format. Version 19 records finite
-// file groups with binding tables and deferred indirect metadata.
-#define IREE_HAL_REPLAY_FILE_VERSION_MAJOR 19u
+// Major version of the IREE HAL replay file format. Buffer transfers preserve
+// fixed rectangular geometry independently of accessible binding windows.
+#define IREE_HAL_REPLAY_FILE_VERSION_MAJOR 20u
 
 // Minor version of the IREE HAL replay file format. Pool scopes preserve
 // zero-compute atomic requirements in their previously reserved family word.
@@ -1292,6 +1292,40 @@ typedef struct iree_hal_replay_queue_timestamp_payload_t {
 static_assert(sizeof(iree_hal_replay_queue_timestamp_payload_t) == 56,
               "queue timestamp replay payload must be 56 bytes");
 
+// Fixed-width byte strides in a serialized transfer endpoint.
+typedef struct iree_hal_replay_transfer_strides_t {
+  // Byte distance between rows; ignored for one row.
+  uint64_t row_stride;
+  // Byte distance between slices; ignored for one slice.
+  uint64_t slice_stride;
+} iree_hal_replay_transfer_strides_t;
+
+// Fixed-width geometry for copy-like buffer transfers.
+typedef struct iree_hal_replay_transfer_region_t {
+  // Useful bytes in each row.
+  uint64_t row_length;
+  // Rows in each slice.
+  uint64_t row_count;
+  // Number of slices.
+  uint64_t slice_count;
+  // Displacements relative to the source origin.
+  iree_hal_replay_transfer_strides_t source_strides;
+  // Displacements relative to the target origin.
+  iree_hal_replay_transfer_strides_t target_strides;
+} iree_hal_replay_transfer_region_t;
+
+// Fixed-width geometry for buffer fills.
+typedef struct iree_hal_replay_fill_region_t {
+  // Useful bytes in each row.
+  uint64_t row_length;
+  // Rows in each slice.
+  uint64_t row_count;
+  // Number of slices.
+  uint64_t slice_count;
+  // Displacements relative to the target origin.
+  iree_hal_replay_transfer_strides_t target_strides;
+} iree_hal_replay_fill_region_t;
+
 // Payload describing a command buffer fill operation followed by the fill
 // pattern bytes.
 typedef struct iree_hal_replay_command_buffer_fill_buffer_payload_t {
@@ -1303,6 +1337,8 @@ typedef struct iree_hal_replay_command_buffer_fill_buffer_payload_t {
   uint32_t reserved0;
   // Byte length of the captured fill pattern following this header.
   uint64_t pattern_length;
+  // Useful byte geometry independent of binding windows.
+  iree_hal_replay_fill_region_t region;
 } iree_hal_replay_command_buffer_fill_buffer_payload_t;
 
 // Payload describing a command buffer update operation followed by the captured
@@ -1318,6 +1354,8 @@ typedef struct iree_hal_replay_command_buffer_update_buffer_payload_t {
   uint64_t source_offset;
   // Byte length of the captured source data following this header.
   uint64_t data_length;
+  // Useful byte geometry independent of binding windows.
+  iree_hal_replay_transfer_region_t region;
 } iree_hal_replay_command_buffer_update_buffer_payload_t;
 
 // Payload describing a command buffer copy operation.
@@ -1332,6 +1370,8 @@ typedef struct iree_hal_replay_command_buffer_copy_buffer_payload_t {
   uint32_t reserved0;
   // Reserved for future copy metadata; must be zero.
   uint64_t reserved1;
+  // Useful byte geometry independent of binding windows.
+  iree_hal_replay_transfer_region_t region;
 } iree_hal_replay_command_buffer_copy_buffer_payload_t;
 
 // Compression algorithm used for one replay file byte range.

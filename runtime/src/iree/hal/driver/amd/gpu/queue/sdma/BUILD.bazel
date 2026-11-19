@@ -150,6 +150,7 @@ iree_runtime_cc_library(
         ":commands",
         "//libamdf:headers",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:fixup",
     ],
 )

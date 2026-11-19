@@ -1779,9 +1779,12 @@ static iree_status_t iree_hal_task_queue_build_transfer_recording_operation(
   iree_hal_cmd_fixup_t* fixups = NULL;
   iree_hal_cmd_build_token_t token;
   if (transfer_operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_FILL) {
+    const iree_hal_fill_region_t region = {
+        .row_length = transfer_operation->fill.length,
+        .row_count = 1,
+        .slice_count = 1};
     IREE_RETURN_IF_ERROR(iree_hal_cmd_build_fill(
-        builder, transfer_operation->fill.length,
-        transfer_operation->fill.pattern,
+        builder, &region, transfer_operation->fill.pattern,
         transfer_operation->fill.pattern_length, &fixups, &token));
     return iree_hal_task_queue_resolve_buffer_fixup(
         transfer_operation->fill.target_buffer,
@@ -1826,8 +1829,10 @@ static iree_status_t iree_hal_task_queue_build_transfer_recording_operation(
                               "fill reached copy recording path");
   }
 
+  const iree_hal_transfer_region_t region = {
+      .row_length = length, .row_count = 1, .slice_count = 1};
   IREE_RETURN_IF_ERROR(
-      iree_hal_cmd_build_copy(builder, length, &fixups, &token));
+      iree_hal_cmd_build_copy(builder, &region, &fixups, &token));
   if (source_buffer) {
     IREE_RETURN_IF_ERROR(iree_hal_task_queue_resolve_buffer_fixup(
         source_buffer, source_offset, length, &fixups[0]));

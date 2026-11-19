@@ -6,6 +6,7 @@
 
 #include "iree/hal/replay/recorder.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -1280,6 +1281,151 @@ TEST(ReplayRecorderTest, WrappedDeviceRecordsQueueExecuteWithSparseBindings) {
   ASSERT_FALSE(summary.queue.provisioned_object_ids.empty());
   EXPECT_EQ(summary.queue.provisioned_object_ids.front(),
             summary.queue.last_execute_object_id);
+}
+
+TEST(ReplayRecorderTest, RecordsAndExecutesRectangularTransfers) {
+  std::vector<uint8_t> storage(65536, 0);
+  auto* recorder = CreateHostAllocationRecorder(&storage);
+  auto* source_group = CreateTaskDeviceGroup();
+  iree_hal_device_group_t* wrapped_group = nullptr;
+  IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
+      recorder, source_group, iree_allocator_system(), &wrapped_group));
+  auto* device = iree_hal_device_group_device_at(wrapped_group, 0);
+  auto* queue = iree_hal_device_queue(device, 0, 0);
+  iree_hal_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(CreateTestPool(wrapped_group, IREE_HAL_BUFFER_USAGE_TRANSFER,
+                                IREE_HAL_MAPPING_MODE_SCOPED,
+                                IREE_SV("replay.rectangles"), &pool));
+  iree_hal_buffer_t* source = nullptr;
+  iree_hal_buffer_t* target = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool, iree_hal_make_pool_reservation_request(2048, 4),
+      iree_infinite_timeout(), &source));
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool, iree_hal_make_pool_reservation_request(2048, 4),
+      iree_infinite_timeout(), &target));
+  std::vector<uint8_t> input(1024);
+  for (size_t i = 0; i < input.size(); ++i) {
+    input[i] = uint8_t(i * 17 + 3);
+  }
+  std::vector<uint8_t> expected(2048, 0xCD);
+  std::vector<uint8_t> packed;
+  for (size_t slice = 0; slice < 2; ++slice) {
+    for (size_t row = 0; row < 5; ++row) {
+      const uint8_t* bytes = input.data() + slice * 512 + row * 64;
+      packed.insert(packed.end(), bytes, bytes + 37);
+      memcpy(expected.data() + 4 + slice * 1024 + row * 128, bytes, 37);
+      expected[slice * 1024 + row * 128] = 0xA7;
+    }
+  }
+  iree_hal_command_buffer_t* command_buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      iree_hal_queue_family(queue), 0, IREE_HAL_COMMAND_CATEGORY_TRANSFER, 1,
+      &command_buffer));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+  const uint8_t padding = 0xCD;
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
+      command_buffer, iree_hal_make_indirect_buffer_ref(0, 0, 2048), &padding,
+      sizeof(padding), 0));
+  const iree_hal_transfer_region_t update_region = {
+      .row_length = 37,
+      .row_count = 5,
+      .slice_count = 2,
+      .source_strides = {.row_stride = 64, .slice_stride = 512},
+      .target_strides = {.row_stride = 80, .slice_stride = 640},
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+      command_buffer, input.data(), 0,
+      iree_hal_make_buffer_ref(source, 0, 2048), &update_region, 0));
+  std::fill(input.begin(), input.end(), 0xEE);
+  const iree_hal_memory_barrier_t memory = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+  };
+  const iree_hal_barrier_t dependency = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .memory_barrier_count = 1,
+      .memory_barriers = &memory,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_barrier(command_buffer, &dependency));
+  const iree_hal_transfer_region_t copy_region = {
+      .row_length = 37,
+      .row_count = 5,
+      .slice_count = 2,
+      .source_strides = {.row_stride = 80, .slice_stride = 640},
+      .target_strides = {.row_stride = 128, .slice_stride = 1024},
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+      command_buffer, iree_hal_make_buffer_ref(source, 0, 2048),
+      iree_hal_make_indirect_buffer_ref(0, 4, 2044), &copy_region, 0));
+  const uint8_t pattern = 0xA7;
+  const iree_hal_fill_region_t fill_region = {
+      .row_length = 1,
+      .row_count = 5,
+      .slice_count = 2,
+      .target_strides = {.row_stride = 128, .slice_stride = 1024},
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+      command_buffer, iree_hal_make_indirect_buffer_ref(0, 0, 2048), &pattern,
+      sizeof(pattern), &fill_region, 0));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0, 0, &semaphore));
+  uint64_t one = 1;
+  const iree_hal_buffer_binding_t binding = {target, 0, 2048};
+  IREE_ASSERT_OK(iree_hal_queue_execute(queue, {}, {1, &semaphore, &one},
+                                        command_buffer, {1, &binding}, 0));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      semaphore, one, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+  std::vector<uint8_t> actual(2048);
+  IREE_ASSERT_OK(
+      iree_hal_buffer_map_read(target, 0, actual.data(), actual.size()));
+  EXPECT_EQ(actual, expected);
+  iree_hal_semaphore_release(semaphore);
+  iree_hal_command_buffer_release(command_buffer);
+  iree_hal_buffer_release(target);
+  iree_hal_buffer_release(source);
+  iree_hal_pool_release(pool);
+  IREE_ASSERT_OK(iree_hal_replay_recorder_close(recorder));
+  iree_hal_replay_recorder_release(recorder);
+  iree_hal_device_group_release(wrapped_group);
+  iree_hal_device_group_release(source_group);
+
+  size_t update_count = 0;
+  size_t copy_count = 0;
+  for (const auto& record : ParseOperationRecords(storage)) {
+    if (record.header.operation_code ==
+        IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_UPDATE_BUFFER) {
+      iree_hal_replay_command_buffer_update_buffer_payload_t payload;
+      ASSERT_EQ(record.payload.data_length, sizeof(payload) + packed.size());
+      memcpy(&payload, record.payload.data, sizeof(payload));
+      EXPECT_EQ(payload.data_length, packed.size());
+      EXPECT_EQ(payload.region.source_strides.row_stride, 37u);
+      EXPECT_EQ(payload.region.source_strides.slice_stride, 185u);
+      EXPECT_EQ(payload.region.target_strides.row_stride, 80u);
+      EXPECT_EQ(payload.region.target_strides.slice_stride, 640u);
+      EXPECT_EQ(0, memcmp(record.payload.data + sizeof(payload), packed.data(),
+                          packed.size()));
+      ++update_count;
+    } else if (record.header.operation_code ==
+               IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_COPY_BUFFER) {
+      iree_hal_replay_command_buffer_copy_buffer_payload_t payload;
+      ASSERT_EQ(record.payload.data_length, sizeof(payload));
+      memcpy(&payload, record.payload.data, sizeof(payload));
+      EXPECT_EQ(0, memcmp(&payload.region, &copy_region, sizeof(copy_region)));
+      ++copy_count;
+    }
+  }
+  EXPECT_EQ(update_count, 1u);
+  EXPECT_EQ(copy_count, 1u);
+  auto* replay_group = CreateTaskDeviceGroup();
+  IREE_ASSERT_OK(iree_hal_replay_execute_file(GetCapturedFileContents(storage),
+                                              replay_group, nullptr,
+                                              iree_allocator_system()));
+  iree_hal_device_group_release(replay_group);
 }
 
 TEST(ReplayRecorderTest, RecordsAndExecutesDirectAndIndirectTimestamps) {

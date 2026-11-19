@@ -454,11 +454,13 @@ class VulkanCommandBufferTest : public ::testing::Test {
     queue_family_ = iree_hal_device_queue_family(device_, 0);
     IREE_ASSERT_OK(iree_hal_allocator_create_heap(iree_allocator_system(),
                                                   &device_allocator_));
-    atomic_pipelines_.pipeline_layout =
+    builtins_.max_storage_buffer_range = 128 * 1024 * 1024;
+    builtins_.min_storage_buffer_offset_alignment = 256;
+    builtins_.atomic_pipelines.pipeline_layout =
         reinterpret_cast<VkPipelineLayout>(static_cast<uintptr_t>(0x1111));
-    atomic_pipelines_.pipeline_32 =
+    builtins_.atomic_pipelines.pipeline_32 =
         reinterpret_cast<VkPipeline>(static_cast<uintptr_t>(0x2222));
-    atomic_pipelines_.pipeline_64 =
+    builtins_.atomic_pipelines.pipeline_64 =
         reinterpret_cast<VkPipeline>(static_cast<uintptr_t>(0x3333));
   }
 
@@ -476,7 +478,7 @@ class VulkanCommandBufferTest : public ::testing::Test {
     IREE_EXPECT_OK(iree_hal_vulkan_command_buffer_create(
         device_allocator_, queue_family_,
         VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, mode,
-        IREE_HAL_COMMAND_CATEGORY_ANY, binding_capacity, &atomic_pipelines_,
+        IREE_HAL_COMMAND_CATEGORY_ANY, binding_capacity, &builtins_,
         &block_pool_, iree_allocator_system(), &command_buffer));
     return CommandBufferPtr(command_buffer);
   }
@@ -497,7 +499,7 @@ class VulkanCommandBufferTest : public ::testing::Test {
   iree_arena_block_pool_t block_pool_;
 
   // Device-owned pipeline table borrowed by command buffers.
-  iree_hal_vulkan_atomic_pipelines_t atomic_pipelines_ = {};
+  iree_hal_vulkan_builtins_t builtins_ = {};
 };
 
 TEST_F(VulkanCommandBufferTest, FinalAtomicTargetAlignmentFollowsMode) {

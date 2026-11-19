@@ -1014,7 +1014,7 @@ static iree_status_t iree_hal_vulkan_logical_device_create_command_buffer(
   }
   return iree_hal_vulkan_command_buffer_create(
       device->device_allocator, queue_family, family->flags, mode,
-      command_categories, binding_capacity, &device->builtins.atomic_pipelines,
+      command_categories, binding_capacity, &device->builtins,
       &device->command_buffer_block_pool, device->host_allocator,
       out_command_buffer);
 }

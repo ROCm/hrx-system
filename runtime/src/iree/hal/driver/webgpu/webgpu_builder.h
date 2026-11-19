@@ -160,7 +160,8 @@ static inline uint32_t iree_hal_webgpu_builder_static_slot_count(
 // bytes). The pattern is replicated to uint32 at recording time.
 iree_status_t iree_hal_webgpu_builder_fill_buffer(
     iree_hal_webgpu_builder_t* builder, iree_hal_buffer_ref_t target_ref,
-    const void* pattern, iree_host_size_t pattern_length);
+    const void* pattern, iree_host_size_t pattern_length,
+    const iree_hal_fill_region_t* region);
 
 // Emits one or more UPDATE_BUFFER instructions with inline host data.
 // |source_buffer| + |source_offset| points to the host data to copy.
@@ -168,12 +169,13 @@ iree_status_t iree_hal_webgpu_builder_fill_buffer(
 // multiple instructions to fit within block boundaries.
 iree_status_t iree_hal_webgpu_builder_update_buffer(
     iree_hal_webgpu_builder_t* builder, const void* source_buffer,
-    iree_host_size_t source_offset, iree_hal_buffer_ref_t target_ref);
+    iree_host_size_t source_offset, iree_hal_buffer_ref_t target_ref,
+    const iree_hal_transfer_region_t* region);
 
 // Emits a COPY_BUFFER instruction.
 iree_status_t iree_hal_webgpu_builder_copy_buffer(
     iree_hal_webgpu_builder_t* builder, iree_hal_buffer_ref_t source_ref,
-    iree_hal_buffer_ref_t target_ref);
+    iree_hal_buffer_ref_t target_ref, const iree_hal_transfer_region_t* region);
 
 // Emits a DISPATCH instruction.
 // |pipeline_handle| and |bind_group_layout_handle| are baked from the

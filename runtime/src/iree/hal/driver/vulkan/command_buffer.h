@@ -23,7 +23,7 @@ typedef struct iree_arena_block_pool_t iree_arena_block_pool_t;
 
 // Creates a Vulkan HAL command buffer.
 //
-// |atomic_pipelines| is borrowed from the logical device and must outlive the
+// |builtins| is borrowed from the logical device and must outlive the
 // command buffer.
 iree_status_t iree_hal_vulkan_command_buffer_create(
     iree_hal_allocator_t* device_allocator,
@@ -31,7 +31,7 @@ iree_status_t iree_hal_vulkan_command_buffer_create(
     iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
     iree_host_size_t binding_capacity,
-    const iree_hal_vulkan_atomic_pipelines_t* atomic_pipelines,
+    const iree_hal_vulkan_builtins_t* builtins,
     iree_arena_block_pool_t* command_buffer_block_pool,
     iree_allocator_t host_allocator,
     iree_hal_command_buffer_t** out_command_buffer);

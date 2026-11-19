@@ -260,7 +260,8 @@ static iree_status_t iree_hal_amd_xdna_command_buffer_transfer(
     iree_hal_amd_xdna_command_buffer_t* buffer,
     iree_hal_amd_xdna_record_kind_t kind, iree_hal_buffer_ref_t source,
     iree_hal_buffer_ref_t target, const void* pattern,
-    iree_host_size_t pattern_length, iree_const_byte_span_t update) {
+    iree_host_size_t pattern_length, iree_const_byte_span_t update,
+    const iree_hal_transfer_region_t* region) {
   if (!target.length) {
     return iree_ok_status();
   }
@@ -274,11 +275,23 @@ static iree_status_t iree_hal_amd_xdna_command_buffer_transfer(
     IREE_RETURN_IF_ERROR(
         iree_hal_amd_xdna_command_buffer_capture_ref(buffer, source));
   }
+  const bool rectangular = !iree_hal_transfer_range_is_linear(
+                               region->row_length, region->row_count,
+                               region->slice_count, &region->target_strides) ||
+                           (kind == IREE_HAL_AMD_XDNA_RECORD_COPY &&
+                            !iree_hal_transfer_range_is_linear(
+                                region->row_length, region->row_count,
+                                region->slice_count, &region->source_strides));
   iree_hal_amd_xdna_record_t* record = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate(&buffer->capture.metadata_arena,
-                                           sizeof(*record), (void**)&record));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      &buffer->capture.metadata_arena,
+      sizeof(*record) + (rectangular ? sizeof(*region) : 0), (void**)&record));
   memset(record, 0, sizeof(*record));
   record->kind = kind;
+  record->rectangular = rectangular;
+  if (rectangular) {
+    memcpy(record + 1, region, sizeof(*region));
+  }
   record->transfer.source = source;
   record->transfer.target = target;
   record->transfer.pattern_length = pattern_length;
@@ -286,7 +299,7 @@ static iree_status_t iree_hal_amd_xdna_command_buffer_transfer(
     memcpy(record->transfer.pattern, pattern, pattern_length);
   }
   IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_queue_capture_payload(
-      &buffer->capture, update, &record->transfer.payload));
+      &buffer->capture, update, region, &record->transfer.payload));
   iree_hal_amd_xdna_command_buffer_append(buffer, record);
   return iree_ok_status();
 }
@@ -294,29 +307,36 @@ static iree_status_t iree_hal_amd_xdna_command_buffer_transfer(
 static iree_status_t iree_hal_amd_xdna_command_buffer_fill_buffer(
     iree_hal_command_buffer_t* base, iree_hal_buffer_ref_t target,
     const void* pattern, iree_host_size_t pattern_length,
-    iree_hal_fill_flags_t flags) {
+    const iree_hal_fill_region_t* region, iree_hal_fill_flags_t flags) {
+  const iree_hal_transfer_region_t transfer = {
+      .row_length = region->row_length,
+      .row_count = region->row_count,
+      .slice_count = region->slice_count,
+      .target_strides = region->target_strides};
   return iree_hal_amd_xdna_command_buffer_transfer(
       (void*)base, IREE_HAL_AMD_XDNA_RECORD_FILL, (iree_hal_buffer_ref_t){0},
-      target, pattern, pattern_length, iree_const_byte_span_empty());
+      target, pattern, pattern_length, iree_const_byte_span_empty(), &transfer);
 }
 
 static iree_status_t iree_hal_amd_xdna_command_buffer_update_buffer(
     iree_hal_command_buffer_t* base, const void* source,
     iree_host_size_t source_offset, iree_hal_buffer_ref_t target,
-    iree_hal_update_flags_t flags) {
+    const iree_hal_transfer_region_t* region, iree_hal_update_flags_t flags) {
   return iree_hal_amd_xdna_command_buffer_transfer(
       (void*)base, IREE_HAL_AMD_XDNA_RECORD_UPDATE, (iree_hal_buffer_ref_t){0},
       target, NULL, 0,
       iree_make_const_byte_span((const uint8_t*)source + source_offset,
-                                target.length));
+                                iree_hal_transfer_region_length(region)),
+      region);
 }
 
 static iree_status_t iree_hal_amd_xdna_command_buffer_copy_buffer(
     iree_hal_command_buffer_t* base, iree_hal_buffer_ref_t source,
-    iree_hal_buffer_ref_t target, iree_hal_copy_flags_t flags) {
+    iree_hal_buffer_ref_t target, const iree_hal_transfer_region_t* region,
+    iree_hal_copy_flags_t flags) {
   return iree_hal_amd_xdna_command_buffer_transfer(
       (void*)base, IREE_HAL_AMD_XDNA_RECORD_COPY, source, target, NULL, 0,
-      iree_const_byte_span_empty());
+      iree_const_byte_span_empty(), region);
 }
 
 static iree_status_t iree_hal_amd_xdna_command_buffer_dispatch(

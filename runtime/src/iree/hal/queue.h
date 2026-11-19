@@ -654,6 +654,55 @@ typedef struct iree_hal_fill_region_t {
   iree_hal_transfer_strides_t target_strides;
 } iree_hal_fill_region_t;
 
+// Useful byte count of already validated geometry. Empty extents yield zero.
+// Public admission establishes that the product fits in uint64_t.
+static inline uint64_t iree_hal_transfer_region_length(
+    const iree_hal_transfer_region_t* region) {
+  return region->row_length * region->row_count * region->slice_count;
+}
+
+// Addressed span of already validated geometry, including inter-row padding.
+// Unused strides do not participate, and empty extents yield zero.
+static inline uint64_t iree_hal_transfer_range_length(
+    uint64_t row_length, uint64_t row_count, uint64_t slice_count,
+    const iree_hal_transfer_strides_t* strides) {
+  if (!row_length || !row_count || !slice_count) {
+    return 0;
+  }
+  return row_length +
+         (row_count > 1 ? (row_count - 1) * strides->row_stride : 0) +
+         (slice_count > 1 ? (slice_count - 1) * strides->slice_stride : 0);
+}
+
+// Whether useful bytes of an admitted endpoint form one contiguous range in
+// slice/row order. This never reads a stride for an unused dimension.
+static inline bool iree_hal_transfer_range_is_linear(
+    uint64_t row_length, uint64_t row_count, uint64_t slice_count,
+    const iree_hal_transfer_strides_t* strides) {
+  return (row_count <= 1 || strides->row_stride == row_length) &&
+         (slice_count <= 1 || strides->slice_stride == row_length * row_count);
+}
+
+// Copies a validated rectangle between host-accessible origins. Useful bytes
+// must not alias writes, and both addressed spans remain live through return.
+// No resource mapping, allocation, synchronization, or padding copy occurs.
+IREE_API_EXPORT void iree_hal_transfer_copy_host(
+    const void* source, void* target, const iree_hal_transfer_region_t* region);
+
+// Packs a subrange of the useful-byte sequence into contiguous host storage.
+// Geometry and the dense [offset, offset + length) interval are prevalidated.
+// Source padding is never read; target must have length writable bytes.
+IREE_API_EXPORT void iree_hal_transfer_gather_host(
+    const void* source, const iree_hal_transfer_region_t* region,
+    uint64_t offset, iree_host_size_t length, void* target);
+
+// Writes contiguous host bytes into a subrange of the useful-byte sequence.
+// Geometry and the dense interval are prevalidated. Target padding is
+// untouched.
+IREE_API_EXPORT void iree_hal_transfer_scatter_host(
+    const void* source, const iree_hal_transfer_region_t* region,
+    uint64_t offset, iree_host_size_t length, void* target);
+
 // Returns whether an endpoint's addressed bytes fit a window of |length| bytes.
 // |offset| is relative to the window origin. This checks external geometry in
 // constant time without overflow, resource queries, or row expansion. It does

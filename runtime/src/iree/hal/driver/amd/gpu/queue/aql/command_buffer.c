@@ -806,13 +806,72 @@ static iree_status_t iree_hal_amd_gpu_aql_command_buffer_dispatch(
                                             constants, bindings, flags));
 }
 
+static iree_status_t iree_hal_amd_gpu_aql_command_blit(
+    iree_hal_amd_gpu_aql_command_buffer_t* buffer,
+    iree_hal_transfer_operation_type_t type, iree_hal_buffer_ref_t source,
+    iree_hal_buffer_ref_t target, uint32_t source_value, uint32_t target_value,
+    uint32_t update_offset, uint32_t pattern,
+    const iree_hal_amd_gpu_blit_arguments_t* prepared, bool dynamic_length,
+    uint32_t header) {
+  const bool copy = type == IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
+  const bool update = type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_reserve_block(buffer, 1));
+  uint32_t argument_offset = 0;
+  iree_hal_amd_gpu_blit_arguments_t* arguments = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amd_gpu_recording_data(&buffer->recording, sizeof(*arguments), 8,
+                                      &argument_offset, (void**)&arguments));
+  *arguments = *prepared;
+  arguments->source = 0;
+  arguments->target = 0;
+  arguments->pattern = pattern;
+  arguments->fill = !copy && !update;
+  if (copy || update) {
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
+        buffer, argument_offset, source_value,
+        (update ? update_offset : source.offset) + prepared->source,
+        IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA |
+            (update ? IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA : 0)));
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
+      buffer, argument_offset + 8, target_value,
+      target.offset + prepared->target,
+      IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA));
+  if (dynamic_length) {
+    uint32_t value = 0;
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_length(
+        &buffer->inputs, target.buffer_slot, &value));
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
+        buffer, argument_offset + 16, value, 0 - target.offset,
+        IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA));
+  }
+  uint32_t offset = 0;
+  iree_hal_amd_gpu_aql_packet_t* packet = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amd_gpu_aql_command_packets(buffer, 1, &offset, &packet));
+  const uint32_t workgroup_count[3] = {
+      dynamic_length ? 256
+                     : iree_hal_amd_gpu_blit_workgroup_count(prepared->length),
+      prepared->groups_y, prepared->groups_z};
+  *packet = iree_hal_amd_gpu_aql_transfer_packet(buffer->pool->blit, 0,
+                                                 workgroup_count, header);
+  buffer->last_ordered = !buffer->last_header ||
+                         (header & IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED) != 0;
+  buffer->last_header = &packet->words[0];
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
+      buffer, offset + 40, 0, argument_offset,
+      IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA));
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_amd_gpu_aql_command_transfer(
     iree_hal_amd_gpu_aql_command_buffer_t* buffer,
     iree_hal_transfer_operation_type_t type, iree_hal_buffer_ref_t source,
-    iree_hal_buffer_ref_t target, const void* source_bytes, uint32_t pattern) {
+    iree_hal_buffer_ref_t target, const void* source_bytes, uint32_t pattern,
+    const iree_hal_transfer_region_t* region) {
   const bool copy = type == IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
   const bool update = type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE;
-  const bool whole = target.length == IREE_HAL_WHOLE_BUFFER;
+  const bool whole = region->row_length == IREE_HAL_WHOLE_BUFFER;
   if (copy && whole) {
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_equal_lengths(
         &buffer->inputs, source, target));
@@ -820,13 +879,12 @@ static iree_status_t iree_hal_amd_gpu_aql_command_transfer(
   const uint64_t length =
       whole && target.buffer
           ? iree_hal_buffer_byte_length(target.buffer) - target.offset
-          : target.length;
+          : iree_hal_transfer_region_length(region);
   if (!length) {
     return iree_ok_status();
   }
   uint32_t header = 0;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_header(buffer, &header));
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_reserve_block(buffer, 1));
   uint32_t target_value = 0, source_value = 0;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_binding(
       &buffer->inputs, target, 1, 0, 1, whole, &target_value));
@@ -840,54 +898,44 @@ static iree_status_t iree_hal_amd_gpu_aql_command_transfer(
     void* bytes = NULL;
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
         &buffer->recording, (uint32_t)length, 1, &update_offset, &bytes));
-    memcpy(bytes, source_bytes, (iree_host_size_t)length);
+    iree_hal_transfer_region_t capture = *region;
+    capture.target_strides.row_stride = region->row_length;
+    capture.target_strides.slice_stride =
+        region->row_length * region->row_count;
+    iree_hal_transfer_copy_host(source_bytes, bytes, &capture);
   }
-  uint32_t argument_offset = 0;
-  iree_hal_amd_gpu_blit_arguments_t* arguments = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amd_gpu_recording_data(&buffer->recording, sizeof(*arguments), 8,
-                                      &argument_offset, (void**)&arguments));
-  *arguments = (iree_hal_amd_gpu_blit_arguments_t){
-      .length = length == IREE_HAL_WHOLE_BUFFER ? 0 : length,
-      .pattern = pattern,
-      .fill = !copy && !update,
-      .row_count = 1,
-      .slice_count = 1,
-      .groups_y = 1,
-      .groups_z = 1,
-  };
-  if (copy || update) {
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
-        buffer, argument_offset, source_value,
-        update ? update_offset : source.offset,
-        IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA |
-            (update ? IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA : 0)));
+  iree_hal_transfer_region_t prepared_region = *region;
+  if (update) {
+    prepared_region.source_strides.row_stride = region->row_length;
+    prepared_region.source_strides.slice_stride =
+        region->row_length * region->row_count;
   }
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
-      buffer, argument_offset + 8, target_value, target.offset,
-      IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA));
-  if (length == IREE_HAL_WHOLE_BUFFER) {
-    uint32_t value = 0;
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_length(
-        &buffer->inputs, target.buffer_slot, &value));
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
-        buffer, argument_offset + 16, value, 0 - target.offset,
-        IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA));
+  // Flatten dense rectangles so linear callers retain the smallest grid.
+  if (whole || (iree_hal_transfer_range_is_linear(
+                    region->row_length, region->row_count, region->slice_count,
+                    &region->target_strides) &&
+                (!copy || iree_hal_transfer_range_is_linear(
+                              region->row_length, region->row_count,
+                              region->slice_count, &region->source_strides)))) {
+    prepared_region = (iree_hal_transfer_region_t){
+        .row_length = length, .row_count = 1, .slice_count = 1};
   }
-  uint32_t offset = 0;
-  iree_hal_amd_gpu_aql_packet_t* packet = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amd_gpu_aql_command_packets(buffer, 1, &offset, &packet));
-  const uint32_t workgroup_count[3] = {
-      iree_hal_amd_gpu_blit_workgroup_count(length), 1, 1};
-  *packet = iree_hal_amd_gpu_aql_transfer_packet(buffer->pool->blit, 0,
-                                                 workgroup_count, header);
-  buffer->last_ordered = !buffer->last_header ||
-                         (header & IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED) != 0;
-  buffer->last_header = &packet->words[0];
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
-      buffer, offset + 40, 0, argument_offset,
-      IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA));
+  iree_status_t status = iree_ok_status();
+  uint64_t position = 0;
+  while (position < length && iree_status_is_ok(status)) {
+    iree_hal_amd_gpu_blit_arguments_t prepared;
+    uint64_t part = iree_hal_amd_gpu_blit_prepare_region(
+        &prepared_region, position, length - position, &prepared);
+    if (length == IREE_HAL_WHOLE_BUFFER) {
+      prepared.length = 0;
+    }
+    status = iree_hal_amd_gpu_aql_command_blit(
+        buffer, type, source, target, source_value, target_value, update_offset,
+        pattern, &prepared, length == IREE_HAL_WHOLE_BUFFER,
+        position ? 0 : header);
+    position += part;
+  }
+  IREE_RETURN_IF_ERROR(status);
   ++buffer->program->operation_count;
   return iree_ok_status();
 }
@@ -895,17 +943,23 @@ static iree_status_t iree_hal_amd_gpu_aql_command_transfer(
 static iree_status_t iree_hal_amd_gpu_aql_command_buffer_transfer(
     iree_hal_amd_gpu_aql_command_buffer_t* buffer,
     iree_hal_transfer_operation_type_t type, iree_hal_buffer_ref_t source,
-    iree_hal_buffer_ref_t target, const void* source_bytes, uint32_t pattern) {
+    iree_hal_buffer_ref_t target, const void* source_bytes, uint32_t pattern,
+    const iree_hal_transfer_region_t* region) {
   IREE_RETURN_IF_ERROR(iree_status_clone(buffer->recording_status));
   return iree_hal_amd_gpu_aql_command_record_status(
       buffer, iree_hal_amd_gpu_aql_command_transfer(
-                  buffer, type, source, target, source_bytes, pattern));
+                  buffer, type, source, target, source_bytes, pattern, region));
 }
 
 static iree_status_t iree_hal_amd_gpu_aql_command_buffer_fill_buffer(
     iree_hal_command_buffer_t* base, iree_hal_buffer_ref_t target,
     const void* pattern, iree_host_size_t pattern_length,
-    iree_hal_fill_flags_t flags) {
+    const iree_hal_fill_region_t* region, iree_hal_fill_flags_t flags) {
+  const iree_hal_transfer_region_t transfer = {
+      .row_length = region->row_length,
+      .row_count = region->row_count,
+      .slice_count = region->slice_count,
+      .target_strides = region->target_strides};
   uint32_t value = 0;
   memcpy(&value, pattern, pattern_length);
   if (pattern_length == 1) {
@@ -916,25 +970,26 @@ static iree_status_t iree_hal_amd_gpu_aql_command_buffer_fill_buffer(
   }
   return iree_hal_amd_gpu_aql_command_buffer_transfer(
       (void*)base, IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
-      (iree_hal_buffer_ref_t){0}, target, NULL, value);
+      (iree_hal_buffer_ref_t){0}, target, NULL, value, &transfer);
 }
 
 static iree_status_t iree_hal_amd_gpu_aql_command_buffer_update_buffer(
     iree_hal_command_buffer_t* base, const void* source,
     iree_host_size_t source_offset, iree_hal_buffer_ref_t target,
-    iree_hal_update_flags_t flags) {
+    const iree_hal_transfer_region_t* region, iree_hal_update_flags_t flags) {
   return iree_hal_amd_gpu_aql_command_buffer_transfer(
       (void*)base, IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE,
       (iree_hal_buffer_ref_t){0}, target,
-      (const uint8_t*)source + source_offset, 0);
+      (const uint8_t*)source + source_offset, 0, region);
 }
 
 static iree_status_t iree_hal_amd_gpu_aql_command_buffer_copy_buffer(
     iree_hal_command_buffer_t* base, iree_hal_buffer_ref_t source,
-    iree_hal_buffer_ref_t target, iree_hal_copy_flags_t flags) {
+    iree_hal_buffer_ref_t target, const iree_hal_transfer_region_t* region,
+    iree_hal_copy_flags_t flags) {
   return iree_hal_amd_gpu_aql_command_buffer_transfer(
       (void*)base, IREE_HAL_TRANSFER_OPERATION_TYPE_COPY, source, target, NULL,
-      0);
+      0, region);
 }
 
 iree_status_t iree_hal_amd_gpu_aql_command_invocation_initialize(

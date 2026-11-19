@@ -88,14 +88,14 @@ struct RecordingCommandBuffer {
         .fill_buffer =
             +[](iree_hal_command_buffer_t* command_buffer,
                 iree_hal_buffer_ref_t, const void*, iree_host_size_t,
-                iree_hal_fill_flags_t) {
+                const iree_hal_fill_region_t*, iree_hal_fill_flags_t) {
               Cast(command_buffer)->commands.push_back({RecordedKind::kFill});
               return iree_ok_status();
             },
         .copy_buffer =
             +[](iree_hal_command_buffer_t* command_buffer,
                 iree_hal_buffer_ref_t, iree_hal_buffer_ref_t,
-                iree_hal_copy_flags_t) {
+                const iree_hal_transfer_region_t*, iree_hal_copy_flags_t) {
               Cast(command_buffer)->commands.push_back({RecordedKind::kCopy});
               return iree_ok_status();
             },

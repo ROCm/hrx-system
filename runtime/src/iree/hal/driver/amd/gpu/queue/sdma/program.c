@@ -6,6 +6,8 @@
 
 #include "iree/hal/driver/amd/gpu/queue/sdma/program.h"
 
+#include "iree/hal/queue.h"
+
 static uint64_t iree_hal_amd_gpu_sdma_program_length(
     const iree_hal_amd_gpu_sdma_program_range_t* range,
     const uint64_t* values) {
@@ -41,23 +43,53 @@ iree_hal_amd_gpu_sdma_program_progress_t iree_hal_amd_gpu_sdma_program_emit(
       continue;
     }
     const iree_hal_amd_gpu_sdma_program_range_t* range = &segment->range;
-    const uint64_t length = iree_hal_amd_gpu_sdma_program_length(range, values);
+    const bool rectangular =
+        segment->kind == IREE_HAL_AMD_GPU_SDMA_PROGRAM_COPY_REGION ||
+        segment->kind == IREE_HAL_AMD_GPU_SDMA_PROGRAM_FILL_REGION;
+    const uint64_t length =
+        rectangular ? range->length
+                    : iree_hal_amd_gpu_sdma_program_length(range, values);
     if (cursor->offset == length) {
       ++cursor->segment;
       cursor->offset = 0;
       continue;
     }
+    uint64_t source_offset = cursor->offset, target_offset = cursor->offset;
+    uint64_t row_remaining = length - cursor->offset;
+    uint64_t column = cursor->offset;
+    if (rectangular) {
+      const iree_hal_transfer_region_t* region =
+          (const void*)(program->data.data + range->region_offset);
+      const uint64_t row_index = cursor->offset / region->row_length;
+      const uint64_t row = row_index % region->row_count;
+      const uint64_t slice = row_index / region->row_count;
+      column = cursor->offset % region->row_length;
+      source_offset =
+          column +
+          (region->row_count > 1 ? row * region->source_strides.row_stride
+                                 : 0) +
+          (region->slice_count > 1 ? slice * region->source_strides.slice_stride
+                                   : 0);
+      target_offset =
+          column +
+          (region->row_count > 1 ? row * region->target_strides.row_stride
+                                 : 0) +
+          (region->slice_count > 1 ? slice * region->target_strides.slice_stride
+                                   : 0);
+      row_remaining = region->row_length - column;
+    }
     const uint64_t target =
-        values[range->target_value] + range->target_offset + cursor->offset;
-    uint32_t part = (uint32_t)iree_min(length - cursor->offset,
+        values[range->target_value] + range->target_offset + target_offset;
+    uint32_t part = (uint32_t)iree_min(row_remaining,
                                        IREE_HAL_AMD_GPU_SDMA_MAX_PACKET_LENGTH);
-    if (segment->kind == IREE_HAL_AMD_GPU_SDMA_PROGRAM_COPY) {
+    if (segment->kind == IREE_HAL_AMD_GPU_SDMA_PROGRAM_COPY ||
+        segment->kind == IREE_HAL_AMD_GPU_SDMA_PROGRAM_COPY_REGION) {
       if (end - output < 7) {
         break;
       }
       output = iree_hal_amd_gpu_sdma_emit_copy(
           output, program->features,
-          values[range->source_value] + range->source_offset + cursor->offset,
+          values[range->source_value] + range->source_offset + source_offset,
           target, part);
     } else {
       // Each edge reads only captured pattern bytes. Aligned interior packets
@@ -68,17 +100,16 @@ iree_hal_amd_gpu_sdma_program_progress_t iree_hal_amd_gpu_sdma_program_emit(
           break;
         }
         part = iree_min(part, head ? head : 3u);
-        output = iree_hal_amd_gpu_sdma_emit_copy(output, program->features,
-                                                 values[range->source_value] +
-                                                     range->source_offset +
-                                                     (cursor->offset & 3u),
-                                                 target, part);
+        output = iree_hal_amd_gpu_sdma_emit_copy(
+            output, program->features,
+            values[range->source_value] + range->source_offset + (column & 3u),
+            target, part);
       } else {
         if (end - output < 5) {
           break;
         }
         part &= ~3u;
-        const uint32_t shift = (uint32_t)(cursor->offset & 3u) * 8u;
+        const uint32_t shift = (uint32_t)(column & 3u) * 8u;
         const uint32_t pattern =
             shift ? (range->pattern >> shift) | (range->pattern << (32 - shift))
                   : range->pattern;

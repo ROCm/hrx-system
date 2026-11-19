@@ -30,6 +30,9 @@ typedef struct iree_hal_vulkan_builtins_t {
   // Required descriptor offset alignment for storage buffer descriptors.
   VkDeviceSize min_storage_buffer_offset_alignment;
 
+  // Maximum byte range addressable by one storage-buffer descriptor.
+  VkDeviceSize max_storage_buffer_range;
+
   // Descriptor set layout for built-in storage-buffer operands.
   VkDescriptorSetLayout storage_buffer_descriptor_set_layout;
 
@@ -56,6 +59,21 @@ iree_status_t iree_hal_vulkan_builtins_initialize(
 // Deinitializes built-in Vulkan pipelines and releases device handles.
 void iree_hal_vulkan_builtins_deinitialize(
     iree_hal_vulkan_builtins_t* builtins);
+
+// Returns a rectangular tile fitting one descriptor and native dispatch grid.
+// The descriptor alignment allowance makes the tile independent of binding
+// offsets, so recording can count descriptors before resolving indirect refs.
+iree_hal_fill_region_t iree_hal_vulkan_builtins_fill_tile(
+    const iree_hal_vulkan_builtins_t* builtins,
+    const iree_hal_fill_region_t* region);
+
+// Records a rectangular fill using the same pipeline as linear edge patches.
+// Each native tile owns one descriptor; no storage is allocated per row.
+iree_status_t iree_hal_vulkan_builtins_record_fill_region(
+    const iree_hal_vulkan_builtins_t* builtins, VkCommandBuffer command_buffer,
+    VkDescriptorPool descriptor_pool, VkBuffer target_buffer,
+    VkDeviceSize target_offset, const uint8_t* pattern,
+    iree_host_size_t pattern_length, const iree_hal_fill_region_t* region);
 
 // Records shader patches for the unaligned edges of a buffer fill.
 //

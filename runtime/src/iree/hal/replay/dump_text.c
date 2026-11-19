@@ -1098,9 +1098,8 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
       }
       iree_hal_replay_command_buffer_fill_buffer_payload_t payload;
       memcpy(&payload, record->payload.data, sizeof(payload));
-      if (payload.pattern_length > IREE_HOST_SIZE_MAX ||
-          sizeof(payload) + (iree_host_size_t)payload.pattern_length !=
-              record->payload.data_length) {
+      if (payload.pattern_length !=
+          record->payload.data_length - sizeof(payload)) {
         return iree_make_status(
             IREE_STATUS_DATA_LOSS,
             "replay command buffer fill payload length mismatch");
@@ -1110,6 +1109,13 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
           " flags=0x%08" PRIx32 " pattern_range=[%" PRIu64 ", +%" PRIu64 "]",
           payload.flags, payload_range->offset + sizeof(payload),
           payload.pattern_length));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          " row_length=%" PRIu64 " rows=%" PRIu64 " slices=%" PRIu64
+          " target_strides=[%" PRIu64 ",%" PRIu64 "]",
+          payload.region.row_length, payload.region.row_count,
+          payload.region.slice_count, payload.region.target_strides.row_stride,
+          payload.region.target_strides.slice_stride));
       return iree_hal_replay_dump_append_text_buffer_ref(builder, "target",
                                                          &payload.target_ref);
     }
@@ -1122,9 +1128,8 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
       }
       iree_hal_replay_command_buffer_update_buffer_payload_t payload;
       memcpy(&payload, record->payload.data, sizeof(payload));
-      if (payload.data_length > IREE_HOST_SIZE_MAX ||
-          sizeof(payload) + (iree_host_size_t)payload.data_length !=
-              record->payload.data_length) {
+      if (payload.data_length !=
+          record->payload.data_length - sizeof(payload)) {
         return iree_make_status(
             IREE_STATUS_DATA_LOSS,
             "replay command buffer update payload length mismatch");
@@ -1135,6 +1140,17 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
           " data_range=[%" PRIu64 ", +%" PRIu64 "]",
           payload.flags, payload.source_offset,
           payload_range->offset + sizeof(payload), payload.data_length));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          " row_length=%" PRIu64 " rows=%" PRIu64 " slices=%" PRIu64
+          " target_strides=[%" PRIu64 ",%" PRIu64
+          "]"
+          " source_strides=[%" PRIu64 ",%" PRIu64 "]",
+          payload.region.row_length, payload.region.row_count,
+          payload.region.slice_count, payload.region.target_strides.row_stride,
+          payload.region.target_strides.slice_stride,
+          payload.region.source_strides.row_stride,
+          payload.region.source_strides.slice_stride));
       return iree_hal_replay_dump_append_text_buffer_ref(builder, "target",
                                                          &payload.target_ref);
     }
@@ -1148,6 +1164,17 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
           builder, " flags=0x%08" PRIx32, payload.flags));
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_text_buffer_ref(
           builder, "source", &payload.source_ref));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          " row_length=%" PRIu64 " rows=%" PRIu64 " slices=%" PRIu64
+          " target_strides=[%" PRIu64 ",%" PRIu64
+          "]"
+          " source_strides=[%" PRIu64 ",%" PRIu64 "]",
+          payload.region.row_length, payload.region.row_count,
+          payload.region.slice_count, payload.region.target_strides.row_stride,
+          payload.region.target_strides.slice_stride,
+          payload.region.source_strides.row_stride,
+          payload.region.source_strides.slice_stride));
       return iree_hal_replay_dump_append_text_buffer_ref(builder, "target",
                                                          &payload.target_ref);
     }

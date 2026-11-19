@@ -22,35 +22,12 @@ void iree_hal_amd_gpu_transfer_copy_host(
     }
     return;
   }
-  const iree_hal_transfer_region_t* region = operation->region;
-  const iree_hal_transfer_strides_t* strides =
-      download ? &region->target_strides : &region->source_strides;
-  const uint64_t slice_length = region->row_length * region->row_count;
-  uint64_t slice = offset / slice_length;
-  uint64_t row = (offset % slice_length) / region->row_length;
-  uint64_t column = offset % region->row_length;
-  uint8_t* bytes = staging;
-  while (length) {
-    uint64_t displacement = column;
-    if (region->row_count > 1) {
-      displacement += row * strides->row_stride;
-    }
-    if (region->slice_count > 1) {
-      displacement += slice * strides->slice_stride;
-    }
-    const iree_host_size_t part = iree_min(length, region->row_length - column);
-    if (download) {
-      memcpy(host + displacement, bytes, part);
-    } else {
-      memcpy(bytes, host + displacement, part);
-    }
-    bytes += part;
-    length -= part;
-    column = 0;
-    if (++row == region->row_count) {
-      row = 0;
-      ++slice;
-    }
+  if (download) {
+    iree_hal_transfer_scatter_host(staging, operation->region, offset, length,
+                                   host);
+  } else {
+    iree_hal_transfer_gather_host(host, operation->region, offset, length,
+                                  staging);
   }
 }
 

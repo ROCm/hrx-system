@@ -28,7 +28,7 @@ typedef struct iree_hal_webgpu_builtins_t {
   // fill_buffer: fills a byte range with a repeating 4-byte pattern.
   // Handles arbitrary alignment via per-byte pattern extraction at edges.
   // Bind group layout: binding 0 = target (storage rw), binding 1 = params
-  // (uniform, 16 bytes: offset, length, pattern, padding).
+  // (uniform, 48-byte shared transfer parameters).
   iree_hal_webgpu_handle_t fill_pipeline;
   iree_hal_webgpu_handle_t fill_bind_group_layout;
 
@@ -36,8 +36,7 @@ typedef struct iree_hal_webgpu_builtins_t {
   // Uses per-byte extraction at misaligned edges, fast u32 copy for aligned
   // interior.
   // Bind group layout: binding 0 = source (storage ro), binding 1 = dest
-  // (storage rw), binding 2 = params (uniform, 16 bytes: src_offset,
-  // dst_offset, length, padding).
+  // (storage rw), binding 2 = params (uniform, 48-byte transfer parameters).
   iree_hal_webgpu_handle_t copy_pipeline;
   iree_hal_webgpu_handle_t copy_bind_group_layout;
 } iree_hal_webgpu_builtins_t;

@@ -426,127 +426,181 @@ iree_status_t iree_hal_command_buffer_advise_buffer_validation(
   return iree_ok_status();
 }
 
+// Validates the fixed geometry before any backend consumes its products. Only
+// the single-row copy/fill form may defer its length to a binding at execution.
+static iree_status_t iree_hal_command_buffer_validate_transfer_extent(
+    uint64_t row_length, uint64_t row_count, uint64_t slice_count,
+    bool allow_whole) {
+  if (row_length == IREE_HAL_WHOLE_BUFFER) {
+    if (allow_whole && row_count == 1 && slice_count == 1) {
+      return iree_ok_status();
+    }
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "only single-row copies and fills admit WHOLE_BUFFER");
+  }
+  uint64_t length = 0;
+  if (!iree_checked_mul_u64(row_length, row_count, &length) ||
+      !iree_checked_mul_u64(length, slice_count, &length)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "transfer useful byte count overflows");
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_command_buffer_validate_transfer_buffer(
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_command_buffer_validation_state_t* validation_state,
+    iree_hal_buffer_ref_t reference, uint64_t row_length, uint64_t row_count,
+    uint64_t slice_count, const iree_hal_transfer_strides_t* strides,
+    iree_hal_buffer_binding_requirements_t requirements) {
+  if (row_length != IREE_HAL_WHOLE_BUFFER) {
+    if (!iree_hal_transfer_range_fits(0, row_length, row_count, slice_count,
+                                      strides, reference.length)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "transfer geometry exceeds its binding window");
+    }
+    // Fixed geometry imposes a minimum even when the caller permits the whole
+    // remaining binding. Capture that bound now for indirect invocation checks.
+    if (reference.length == IREE_HAL_WHOLE_BUFFER) {
+      reference.length = iree_hal_transfer_range_length(row_length, row_count,
+                                                        slice_count, strides);
+    }
+  }
+  return iree_hal_command_buffer_validate_buffer_requirements(
+      command_buffer, validation_state, reference, requirements);
+}
+
 iree_status_t iree_hal_command_buffer_fill_buffer_validation(
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_command_buffer_validation_state_t* validation_state,
     iree_hal_buffer_ref_t target_ref, const void* pattern,
-    iree_host_size_t pattern_length, iree_hal_fill_flags_t flags) {
+    iree_host_size_t pattern_length, const iree_hal_fill_region_t* region,
+    iree_hal_fill_flags_t flags) {
   IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_categories(
       command_buffer, validation_state, IREE_HAL_COMMAND_CATEGORY_TRANSFER));
-
-  // Ensure the value length is supported.
-  if (pattern_length != 1 && pattern_length != 2 && pattern_length != 4) {
+  IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_transfer_extent(
+      region->row_length, region->row_count, region->slice_count, true));
+  if (flags || !pattern ||
+      (pattern_length != 1 && pattern_length != 2 && pattern_length != 4)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "fill value length is not one of the supported "
-                            "values (pattern_length=%" PRIhsz ")",
-                            pattern_length);
+                            "fill requires a 1/2/4-byte pattern and no flags");
   }
-
-  if ((target_ref.offset % pattern_length) != 0 ||
-      (target_ref.length != IREE_HAL_WHOLE_BUFFER &&
-       (target_ref.length % pattern_length) != 0)) {
+  if (target_ref.offset % pattern_length ||
+      (region->row_length != IREE_HAL_WHOLE_BUFFER &&
+       region->row_length % pattern_length) ||
+      (region->row_count > 1 &&
+       region->target_strides.row_stride % pattern_length) ||
+      (region->slice_count > 1 &&
+       region->target_strides.slice_stride % pattern_length)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "binding offset and/or length do not match the required alignment of "
-        "one or more command (offset=%" PRIdsz ", length=%" PRIdsz
-        ", pattern_length=%" PRIhsz ")",
-        target_ref.offset, target_ref.length, pattern_length);
+        "fill origin, row length, and used strides must align to the pattern");
   }
-
   const iree_hal_buffer_binding_requirements_t target_reqs = {
       .usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
       .access = IREE_HAL_MEMORY_ACCESS_WRITE,
       .type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
       .min_byte_alignment = pattern_length,
       .min_byte_length_alignment =
-          target_ref.length == IREE_HAL_WHOLE_BUFFER ? pattern_length : 0,
+          region->row_length == IREE_HAL_WHOLE_BUFFER ? pattern_length : 0,
   };
-  IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_buffer_requirements(
-      command_buffer, validation_state, target_ref, target_reqs));
-
-  return iree_ok_status();
+  return iree_hal_command_buffer_validate_transfer_buffer(
+      command_buffer, validation_state, target_ref, region->row_length,
+      region->row_count, region->slice_count, &region->target_strides,
+      target_reqs);
 }
 
 iree_status_t iree_hal_command_buffer_update_buffer_validation(
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_command_buffer_validation_state_t* validation_state,
     const void* source_buffer, iree_host_size_t source_offset,
-    iree_hal_buffer_ref_t target_ref, iree_hal_update_flags_t flags) {
+    iree_hal_buffer_ref_t target_ref, const iree_hal_transfer_region_t* region,
+    iree_hal_update_flags_t flags) {
   IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_categories(
       command_buffer, validation_state, IREE_HAL_COMMAND_CATEGORY_TRANSFER));
-
-  if (target_ref.length == IREE_HAL_WHOLE_BUFFER) {
+  IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_transfer_extent(
+      region->row_length, region->row_count, region->slice_count, false));
+  if (flags || !source_buffer) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "recorded updates require an explicit byte count");
+                            "update requires a source and no flags");
   }
-  if (target_ref.length > IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE ||
-      source_offset > IREE_HOST_SIZE_MAX - target_ref.length) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "recorded update exceeds the capture or host range "
-                            "limit");
+  if (iree_hal_transfer_region_length(region) >
+          IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE ||
+      !iree_hal_transfer_range_fits(
+          source_offset, region->row_length, region->row_count,
+          region->slice_count, &region->source_strides, IREE_HOST_SIZE_MAX)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "recorded update exceeds the capture or host range limit");
   }
-
   const iree_hal_buffer_binding_requirements_t target_reqs = {
       .usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
       .access = IREE_HAL_MEMORY_ACCESS_WRITE,
       .type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
   };
-  IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_buffer_requirements(
-      command_buffer, validation_state, target_ref, target_reqs));
-
-  return iree_ok_status();
+  return iree_hal_command_buffer_validate_transfer_buffer(
+      command_buffer, validation_state, target_ref, region->row_length,
+      region->row_count, region->slice_count, &region->target_strides,
+      target_reqs);
 }
 
 iree_status_t iree_hal_command_buffer_copy_buffer_validation(
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_command_buffer_validation_state_t* validation_state,
     iree_hal_buffer_ref_t source_ref, iree_hal_buffer_ref_t target_ref,
-    iree_hal_copy_flags_t flags) {
+    const iree_hal_transfer_region_t* region, iree_hal_copy_flags_t flags) {
   IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_categories(
       command_buffer, validation_state, IREE_HAL_COMMAND_CATEGORY_TRANSFER));
-
-  if (source_ref.length != target_ref.length) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "copy spans between source and target must match "
-                            "(source_length=%" PRIdsz ", target_length=%" PRIdsz
-                            ")",
-                            source_ref.length, target_ref.length);
+  IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_transfer_extent(
+      region->row_length, region->row_count, region->slice_count, true));
+  if (flags || (region->row_length == IREE_HAL_WHOLE_BUFFER &&
+                source_ref.length != target_ref.length)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "copy flags must be zero and WHOLE_BUFFER windows must match");
   }
-
   const iree_hal_buffer_binding_requirements_t source_reqs = {
       .usage = IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
       .access = IREE_HAL_MEMORY_ACCESS_READ,
       .type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
   };
-  IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_buffer_requirements(
-      command_buffer, validation_state, source_ref, source_reqs));
-
+  IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_transfer_buffer(
+      command_buffer, validation_state, source_ref, region->row_length,
+      region->row_count, region->slice_count, &region->source_strides,
+      source_reqs));
   const iree_hal_buffer_binding_requirements_t target_reqs = {
       .usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
       .access = IREE_HAL_MEMORY_ACCESS_WRITE,
       .type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
   };
-  IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_buffer_requirements(
-      command_buffer, validation_state, target_ref, target_reqs));
-
-  // Check for overlap - just like memcpy we don't handle that.
-  // Note that it's only undefined behavior if violated so we are ok if tricky
-  // situations (subspans of subspans of binding table subranges etc) make it
-  // through. This is only possible if both buffers are directly referenced -
-  // we _could_ try to catch this for indirect references by stashing the
-  // overlap check metadata for validation when the binding table is available
-  // but that's too costly to be worth it.
-  if (source_ref.buffer && target_ref.buffer) {
-    if (iree_hal_buffer_test_overlap(source_ref.buffer, source_ref.offset,
-                                     source_ref.length, target_ref.buffer,
-                                     target_ref.offset, target_ref.length) !=
-        IREE_HAL_BUFFER_OVERLAP_DISJOINT) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "source and target ranges overlap within the same buffer");
-    }
+  IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_transfer_buffer(
+      command_buffer, validation_state, target_ref, region->row_length,
+      region->row_count, region->slice_count, &region->target_strides,
+      target_reqs));
+  // A bounding-window overlap does not prove overlap between useful rows.
+  // Keep the exact contiguous check; strided nonaliasing is caller-owned.
+  if (source_ref.buffer && target_ref.buffer &&
+      iree_hal_transfer_range_is_linear(region->row_length, region->row_count,
+                                        region->slice_count,
+                                        &region->source_strides) &&
+      iree_hal_transfer_range_is_linear(region->row_length, region->row_count,
+                                        region->slice_count,
+                                        &region->target_strides) &&
+      iree_hal_buffer_test_overlap(
+          source_ref.buffer, source_ref.offset,
+          (region->row_length == IREE_HAL_WHOLE_BUFFER
+               ? source_ref.length
+               : iree_hal_transfer_region_length(region)),
+          target_ref.buffer, target_ref.offset,
+          (region->row_length == IREE_HAL_WHOLE_BUFFER
+               ? target_ref.length
+               : iree_hal_transfer_region_length(region))) !=
+          IREE_HAL_BUFFER_OVERLAP_DISJOINT) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "source and target ranges overlap within the same buffer");
   }
-
   return iree_ok_status();
 }
 

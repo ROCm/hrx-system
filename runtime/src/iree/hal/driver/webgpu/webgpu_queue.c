@@ -444,6 +444,9 @@ static iree_status_t iree_hal_webgpu_queue_execute_scratch_builder(
     entries[slot_entries[i].slot].gpu_buffer_handle =
         slot_entries[i].gpu_buffer_handle;
     entries[slot_entries[i].slot].base_offset = 0;
+    entries[slot_entries[i].slot].reserved = 0;
+    entries[slot_entries[i].slot].length =
+        iree_hal_buffer_byte_length(slot_entries[i].buffer);
   }
 
   iree_hal_webgpu_isa_builtins_descriptor_t builtins_descriptor;
@@ -895,9 +898,16 @@ static void iree_hal_webgpu_queue_op_wait_completion(
         iree_hal_buffer_ref_t target_ref = iree_hal_make_buffer_ref(
             state->fill.target_buffer, state->fill.target_offset,
             state->fill.length);
+        const iree_hal_fill_region_t region = {
+
+            .row_length = target_ref.length,
+            .row_count = 1,
+            .slice_count = 1,
+
+        };
         work_status = iree_hal_webgpu_builder_fill_buffer(
             &queue->scratch_builder, target_ref, &state->fill.pattern,
-            state->fill.pattern_length);
+            state->fill.pattern_length, &region);
       }
       if (iree_hal_webgpu_queue_op_finalize_and_submit(state, work_status)) {
         return;
@@ -915,9 +925,16 @@ static void iree_hal_webgpu_queue_op_wait_completion(
         iree_hal_buffer_ref_t target_ref = iree_hal_make_buffer_ref(
             state->update.target_buffer, state->update.target_offset,
             state->update.length);
+        const iree_hal_transfer_region_t region = {
+
+            .row_length = target_ref.length,
+            .row_count = 1,
+            .slice_count = 1,
+
+        };
         work_status = iree_hal_webgpu_builder_update_buffer(
             &queue->scratch_builder, state->update.captured_data,
-            /*source_offset=*/0, target_ref);
+            /*source_offset=*/0, target_ref, &region);
       }
       if (iree_hal_webgpu_queue_op_finalize_and_submit(state, work_status)) {
         return;
@@ -937,8 +954,15 @@ static void iree_hal_webgpu_queue_op_wait_completion(
         iree_hal_buffer_ref_t target_ref = iree_hal_make_buffer_ref(
             state->copy.target_buffer, state->copy.target_offset,
             state->copy.length);
+        const iree_hal_transfer_region_t region = {
+
+            .row_length = target_ref.length,
+            .row_count = 1,
+            .slice_count = 1,
+
+        };
         work_status = iree_hal_webgpu_builder_copy_buffer(
-            &queue->scratch_builder, source_ref, target_ref);
+            &queue->scratch_builder, source_ref, target_ref, &region);
       }
       if (iree_hal_webgpu_queue_op_finalize_and_submit(state, work_status)) {
         return;
@@ -1212,8 +1236,16 @@ iree_status_t iree_hal_webgpu_queue_fill(
     if (iree_status_is_ok(status)) {
       iree_hal_buffer_ref_t target_ref =
           iree_hal_make_buffer_ref(target_buffer, target_offset, length);
-      status = iree_hal_webgpu_builder_fill_buffer(
-          &queue->scratch_builder, target_ref, pattern, pattern_length);
+      const iree_hal_fill_region_t region = {
+
+          .row_length = target_ref.length,
+          .row_count = 1,
+          .slice_count = 1,
+
+      };
+      status = iree_hal_webgpu_builder_fill_buffer(&queue->scratch_builder,
+                                                   target_ref, pattern,
+                                                   pattern_length, &region);
     }
     return iree_hal_webgpu_queue_submit_scratch_and_signal(
         queue, signal_semaphore_list, status);
@@ -1256,8 +1288,16 @@ iree_status_t iree_hal_webgpu_queue_update(
     if (iree_status_is_ok(status)) {
       iree_hal_buffer_ref_t target_ref =
           iree_hal_make_buffer_ref(target_buffer, target_offset, length);
+      const iree_hal_transfer_region_t region = {
+
+          .row_length = target_ref.length,
+          .row_count = 1,
+          .slice_count = 1,
+
+      };
       status = iree_hal_webgpu_builder_update_buffer(
-          &queue->scratch_builder, source_buffer, source_offset, target_ref);
+          &queue->scratch_builder, source_buffer, source_offset, target_ref,
+          &region);
     }
     return iree_hal_webgpu_queue_submit_scratch_and_signal(
         queue, signal_semaphore_list, status);
@@ -1328,8 +1368,15 @@ iree_status_t iree_hal_webgpu_queue_copy(
           iree_hal_make_buffer_ref(source_buffer, source_offset, length);
       iree_hal_buffer_ref_t target_ref =
           iree_hal_make_buffer_ref(target_buffer, target_offset, length);
-      status = iree_hal_webgpu_builder_copy_buffer(&queue->scratch_builder,
-                                                   source_ref, target_ref);
+      const iree_hal_transfer_region_t region = {
+
+          .row_length = target_ref.length,
+          .row_count = 1,
+          .slice_count = 1,
+
+      };
+      status = iree_hal_webgpu_builder_copy_buffer(
+          &queue->scratch_builder, source_ref, target_ref, &region);
     }
     return iree_hal_webgpu_queue_submit_scratch_and_signal(
         queue, signal_semaphore_list, status);
@@ -1689,11 +1736,18 @@ static iree_status_t iree_hal_webgpu_queue_execute_recording(
           iree_hal_buffer_allocated_buffer(binding->buffer);
       dynamic_entries[i].gpu_buffer_handle =
           iree_hal_webgpu_buffer_handle(allocated);
+      dynamic_entries[i].reserved = 0;
       dynamic_entries[i].base_offset =
-          (uint32_t)iree_hal_buffer_byte_offset(binding->buffer);
+          iree_hal_buffer_byte_offset(binding->buffer) + binding->offset;
+      dynamic_entries[i].length =
+          binding->length == IREE_HAL_WHOLE_BUFFER
+              ? iree_hal_buffer_byte_length(binding->buffer) - binding->offset
+              : binding->length;
     } else {
       dynamic_entries[i].gpu_buffer_handle = 0;
       dynamic_entries[i].base_offset = 0;
+      dynamic_entries[i].reserved = 0;
+      dynamic_entries[i].length = 0;
     }
   }
 
@@ -1736,6 +1790,9 @@ static iree_status_t iree_hal_webgpu_queue_execute_one_shot(
     entries[slot_entries[i].slot].gpu_buffer_handle =
         slot_entries[i].gpu_buffer_handle;
     entries[slot_entries[i].slot].base_offset = 0;
+    entries[slot_entries[i].slot].reserved = 0;
+    entries[slot_entries[i].slot].length =
+        iree_hal_buffer_byte_length(slot_entries[i].buffer);
   }
 
   iree_hal_webgpu_isa_builtins_descriptor_t builtins_descriptor;

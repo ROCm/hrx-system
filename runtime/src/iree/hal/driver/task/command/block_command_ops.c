@@ -27,7 +27,7 @@ void iree_hal_cmd_build_rollback(iree_hal_cmd_block_builder_t* builder,
 //===----------------------------------------------------------------------===//
 
 iree_status_t iree_hal_cmd_build_fill(iree_hal_cmd_block_builder_t* builder,
-                                      iree_device_size_t length,
+                                      const iree_hal_fill_region_t* region,
                                       const void* pattern,
                                       iree_host_size_t pattern_length,
                                       iree_hal_cmd_fixup_t** out_fixups,
@@ -36,28 +36,37 @@ iree_status_t iree_hal_cmd_build_fill(iree_hal_cmd_block_builder_t* builder,
   IREE_ASSERT_ARGUMENT(pattern);
   IREE_ASSERT_ARGUMENT(out_fixups);
   IREE_ASSERT_ARGUMENT(out_token);
+  const iree_device_size_t length =
+      region->row_length * region->row_count * region->slice_count;
+  const bool rectangular = !iree_hal_transfer_range_is_linear(
+      region->row_length, region->row_count, region->slice_count,
+      &region->target_strides);
+  const iree_hal_cmd_flags_t flags =
+      rectangular ? IREE_HAL_CMD_FLAG_RECTANGULAR : 0;
+  const iree_host_size_t cmd_bytes =
+      sizeof(iree_hal_cmd_fill_t) + (rectangular ? sizeof(*region) : 0);
   if (IREE_UNLIKELY(
-          length != IREE_HAL_WHOLE_BUFFER &&
+          region->row_length != IREE_HAL_WHOLE_BUFFER &&
           !iree_hal_cmd_transfer_tile_count_is_representable(length))) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "fill length exceeds block ISA tile capacity");
   }
 
-  const uint32_t tile_count = length == IREE_HAL_WHOLE_BUFFER
+  const uint32_t tile_count = region->row_length == IREE_HAL_WHOLE_BUFFER
                                   ? 1
                                   : iree_hal_cmd_transfer_tile_count(length);
 
   iree_hal_cmd_fill_t* cmd = NULL;
   iree_hal_cmd_fixup_t* fixups = NULL;
   out_token->command = NULL;
-  out_token->cmd_bytes = sizeof(iree_hal_cmd_fill_t);
-  out_token->flags = IREE_HAL_CMD_FLAG_NONE;
+  out_token->cmd_bytes = cmd_bytes;
+  out_token->flags = flags;
   out_token->fixup_count = 1;
   out_token->binding_count = 1;
   out_token->tile_count = tile_count;
   IREE_RETURN_IF_ERROR(iree_hal_cmd_block_builder_append_cmd(
-      builder, IREE_HAL_CMD_FILL, IREE_HAL_CMD_FLAG_NONE,
-      sizeof(iree_hal_cmd_fill_t), 1, 1, tile_count, (void**)&cmd, &fixups));
+      builder, IREE_HAL_CMD_FILL, flags, cmd_bytes, 1, 1, tile_count,
+      (void**)&cmd, &fixups));
 
   const uint16_t binding_data_base =
       (uint16_t)(builder->total_binding_count - out_token->binding_count);
@@ -67,6 +76,10 @@ iree_status_t iree_hal_cmd_build_fill(iree_hal_cmd_block_builder_t* builder,
   cmd->params.direct.length = length;
   cmd->params.direct.pattern = 0;
   memcpy(&cmd->params.direct.pattern, pattern, pattern_length);
+
+  if (rectangular) {
+    memcpy(cmd + 1, region, sizeof(*region));
+  }
 
   // Pre-fill fixup data_index. Caller sets span.
   fixups[0].data_index = binding_data_base;
@@ -81,34 +94,46 @@ iree_status_t iree_hal_cmd_build_fill(iree_hal_cmd_block_builder_t* builder,
 //===----------------------------------------------------------------------===//
 
 iree_status_t iree_hal_cmd_build_copy(iree_hal_cmd_block_builder_t* builder,
-                                      iree_device_size_t length,
+                                      const iree_hal_transfer_region_t* region,
                                       iree_hal_cmd_fixup_t** out_fixups,
                                       iree_hal_cmd_build_token_t* out_token) {
   IREE_ASSERT_ARGUMENT(builder);
   IREE_ASSERT_ARGUMENT(out_fixups);
   IREE_ASSERT_ARGUMENT(out_token);
+  const iree_device_size_t length =
+      region->row_length * region->row_count * region->slice_count;
+  const bool rectangular = !iree_hal_transfer_range_is_linear(
+                               region->row_length, region->row_count,
+                               region->slice_count, &region->target_strides) ||
+                           !iree_hal_transfer_range_is_linear(
+                               region->row_length, region->row_count,
+                               region->slice_count, &region->source_strides);
+  const iree_hal_cmd_flags_t flags =
+      rectangular ? IREE_HAL_CMD_FLAG_RECTANGULAR : 0;
+  const iree_host_size_t cmd_bytes =
+      sizeof(iree_hal_cmd_copy_t) + (rectangular ? sizeof(*region) : 0);
   if (IREE_UNLIKELY(
-          length != IREE_HAL_WHOLE_BUFFER &&
+          region->row_length != IREE_HAL_WHOLE_BUFFER &&
           !iree_hal_cmd_transfer_tile_count_is_representable(length))) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "copy length exceeds block ISA tile capacity");
   }
 
-  const uint32_t tile_count = length == IREE_HAL_WHOLE_BUFFER
+  const uint32_t tile_count = region->row_length == IREE_HAL_WHOLE_BUFFER
                                   ? 1
                                   : iree_hal_cmd_transfer_tile_count(length);
 
   iree_hal_cmd_copy_t* cmd = NULL;
   iree_hal_cmd_fixup_t* fixups = NULL;
   out_token->command = NULL;
-  out_token->cmd_bytes = sizeof(iree_hal_cmd_copy_t);
-  out_token->flags = IREE_HAL_CMD_FLAG_NONE;
+  out_token->cmd_bytes = cmd_bytes;
+  out_token->flags = flags;
   out_token->fixup_count = 2;
   out_token->binding_count = 2;
   out_token->tile_count = tile_count;
   IREE_RETURN_IF_ERROR(iree_hal_cmd_block_builder_append_cmd(
-      builder, IREE_HAL_CMD_COPY, IREE_HAL_CMD_FLAG_NONE,
-      sizeof(iree_hal_cmd_copy_t), 2, 2, tile_count, (void**)&cmd, &fixups));
+      builder, IREE_HAL_CMD_COPY, flags, cmd_bytes, 2, 2, tile_count,
+      (void**)&cmd, &fixups));
 
   const uint16_t binding_data_base =
       (uint16_t)(builder->total_binding_count - out_token->binding_count);
@@ -117,6 +142,10 @@ iree_status_t iree_hal_cmd_build_copy(iree_hal_cmd_block_builder_t* builder,
   cmd->params.direct.source_offset = 0;
   cmd->params.direct.target_offset = 0;
   cmd->params.direct.length = length;
+
+  if (rectangular) {
+    memcpy(cmd + 1, region, sizeof(*region));
+  }
 
   // Pre-fill fixup data_indices. Caller resolves bindings.
   fixups[0].data_index = binding_data_base;
@@ -131,49 +160,85 @@ iree_status_t iree_hal_cmd_build_copy(iree_hal_cmd_block_builder_t* builder,
 // UPDATE
 //===----------------------------------------------------------------------===//
 
-iree_status_t iree_hal_cmd_build_update(iree_hal_cmd_block_builder_t* builder,
-                                        const void* source_buffer,
-                                        iree_host_size_t source_offset,
-                                        iree_device_size_t length,
-                                        iree_hal_cmd_fixup_t** out_fixups,
-                                        iree_hal_cmd_build_token_t* out_token) {
+iree_status_t iree_hal_cmd_build_update(
+    iree_hal_cmd_block_builder_t* builder, const void* source_buffer,
+    iree_host_size_t source_offset, const iree_hal_transfer_region_t* region,
+    iree_device_size_t offset, iree_hal_cmd_fixup_t** out_fixups,
+    iree_hal_cmd_build_token_t* out_token) {
   IREE_ASSERT_ARGUMENT(builder);
   IREE_ASSERT_ARGUMENT(source_buffer);
   IREE_ASSERT_ARGUMENT(out_fixups);
   IREE_ASSERT_ARGUMENT(out_token);
-  if (IREE_UNLIKELY(
-          !iree_hal_cmd_transfer_tile_count_is_representable(length))) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "update length exceeds block ISA tile capacity");
+  const bool rectangular = !iree_hal_transfer_range_is_linear(
+      region->row_length, region->row_count, region->slice_count,
+      &region->target_strides);
+  const iree_host_size_t geometry_bytes = rectangular ? sizeof(*region) : 0;
+  const iree_device_size_t capacity =
+      IREE_HAL_CMD_MAX_BYTE_LENGTH -
+      offsetof(iree_hal_cmd_update_t, source_data) - geometry_bytes;
+  const uint64_t slice_length = region->row_length * region->row_count;
+  const uint64_t slice = offset / slice_length;
+  const uint64_t row = (offset % slice_length) / region->row_length;
+  const uint64_t column = offset % region->row_length;
+  iree_hal_transfer_region_t piece = *region;
+  piece.row_count = 1;
+  piece.slice_count = 1;
+  if (column || capacity < piece.row_length) {
+    piece.row_length = iree_min(piece.row_length - column, capacity);
+  } else if (row || capacity < slice_length) {
+    piece.row_count =
+        iree_min(region->row_count - row, capacity / piece.row_length);
+  } else {
+    piece.row_count = region->row_count;
+    piece.slice_count =
+        iree_min(region->slice_count - slice, capacity / slice_length);
   }
-
-  const uint32_t tile_count = iree_hal_cmd_transfer_tile_count(length);
-
-  // Command includes trailing inline source data, 8-byte aligned.
-  iree_host_size_t cmd_bytes =
-      iree_host_align(offsetof(iree_hal_cmd_update_t, source_data) + length, 8);
+  const uint64_t source_position =
+      column +
+      (region->row_count > 1 ? row * region->source_strides.row_stride : 0) +
+      (region->slice_count > 1 ? slice * region->source_strides.slice_stride
+                               : 0);
+  const uint64_t target_position =
+      column +
+      (region->row_count > 1 ? row * region->target_strides.row_stride : 0) +
+      (region->slice_count > 1 ? slice * region->target_strides.slice_stride
+                               : 0);
+  const iree_device_size_t length = iree_hal_transfer_region_length(&piece);
+  const uint32_t tile_count = 1;
+  const iree_hal_cmd_flags_t flags =
+      rectangular ? IREE_HAL_CMD_FLAG_RECTANGULAR : 0;
+  const iree_host_size_t cmd_bytes = iree_host_align(
+      offsetof(iree_hal_cmd_update_t, source_data) + geometry_bytes + length,
+      8);
 
   iree_hal_cmd_update_t* cmd = NULL;
   iree_hal_cmd_fixup_t* fixups = NULL;
   out_token->command = NULL;
   out_token->cmd_bytes = cmd_bytes;
-  out_token->flags = IREE_HAL_CMD_FLAG_NONE;
+  out_token->flags = flags;
   out_token->fixup_count = 1;
   out_token->binding_count = 1;
   out_token->tile_count = tile_count;
   IREE_RETURN_IF_ERROR(iree_hal_cmd_block_builder_append_cmd(
-      builder, IREE_HAL_CMD_UPDATE, IREE_HAL_CMD_FLAG_NONE, cmd_bytes, 1, 1,
-      tile_count, (void**)&cmd, &fixups));
+      builder, IREE_HAL_CMD_UPDATE, flags, cmd_bytes, 1, 1, tile_count,
+      (void**)&cmd, &fixups));
 
   const uint16_t binding_data_base =
       (uint16_t)(builder->total_binding_count - out_token->binding_count);
   cmd->target_binding = binding_data_base;
-  cmd->target_offset = 0;
+  cmd->target_offset = target_position;
   cmd->length = length;
 
-  // Copy inline source data into the FAM.
-  memcpy(cmd->source_data, (const uint8_t*)source_buffer + source_offset,
-         (size_t)length);
+  iree_hal_transfer_region_t capture = piece;
+  capture.target_strides.row_stride = piece.row_length;
+  capture.target_strides.slice_stride = piece.row_length * piece.row_count;
+  iree_hal_transfer_copy_host(
+      (const uint8_t*)source_buffer + source_offset + source_position,
+      cmd->source_data + geometry_bytes, &capture);
+  if (rectangular) {
+    piece.source_strides = capture.target_strides;
+    memcpy(cmd->source_data, &piece, sizeof(piece));
+  }
 
   // Pre-fill fixup data_index. Caller sets span.
   fixups[0].data_index = binding_data_base;

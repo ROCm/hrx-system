@@ -982,6 +982,90 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_dealloca(
   return status;
 }
 
+void iree_hal_transfer_copy_host(const void* source, void* target,
+                                 const iree_hal_transfer_region_t* region) {
+  if (!region->row_length || !region->row_count || !region->slice_count) {
+    return;
+  }
+  if (iree_hal_transfer_range_is_linear(region->row_length, region->row_count,
+                                        region->slice_count,
+                                        &region->source_strides) &&
+      iree_hal_transfer_range_is_linear(region->row_length, region->row_count,
+                                        region->slice_count,
+                                        &region->target_strides)) {
+    memcpy(target, source, iree_hal_transfer_region_length(region));
+    return;
+  }
+  const uint64_t source_row =
+      region->row_count > 1 ? region->source_strides.row_stride : 0;
+  const uint64_t target_row =
+      region->row_count > 1 ? region->target_strides.row_stride : 0;
+  const uint64_t source_slice =
+      region->slice_count > 1 ? region->source_strides.slice_stride : 0;
+  const uint64_t target_slice =
+      region->slice_count > 1 ? region->target_strides.slice_stride : 0;
+  for (uint64_t z = 0; z < region->slice_count; ++z) {
+    const uint8_t* source_bytes = (const uint8_t*)source + z * source_slice;
+    uint8_t* target_bytes = (uint8_t*)target + z * target_slice;
+    for (uint64_t y = 0; y < region->row_count; ++y) {
+      memcpy(target_bytes + y * target_row, source_bytes + y * source_row,
+             region->row_length);
+    }
+  }
+}
+
+static void iree_hal_transfer_copy_host_span(
+    const void* source, void* target, const iree_hal_transfer_region_t* region,
+    uint64_t offset, iree_host_size_t length, bool scatter) {
+  if (!length) {
+    return;
+  }
+  const iree_hal_transfer_strides_t* strides =
+      scatter ? &region->target_strides : &region->source_strides;
+  if (iree_hal_transfer_range_is_linear(region->row_length, region->row_count,
+                                        region->slice_count, strides)) {
+    memcpy((uint8_t*)target + (scatter ? offset : 0),
+           (const uint8_t*)source + (scatter ? 0 : offset), length);
+    return;
+  }
+  const uint64_t slice_length = region->row_length * region->row_count;
+  uint64_t slice = offset / slice_length;
+  uint64_t row = (offset % slice_length) / region->row_length;
+  uint64_t column = offset % region->row_length;
+  uint64_t position = 0;
+  while (length) {
+    const uint64_t displacement =
+        column + (region->row_count > 1 ? row * strides->row_stride : 0) +
+        (region->slice_count > 1 ? slice * strides->slice_stride : 0);
+    const iree_host_size_t part = iree_min(length, region->row_length - column);
+    memcpy((uint8_t*)target + (scatter ? displacement : position),
+           (const uint8_t*)source + (scatter ? position : displacement), part);
+    position += part;
+    length -= part;
+    column = 0;
+    if (++row == region->row_count) {
+      row = 0;
+      ++slice;
+    }
+  }
+}
+
+void iree_hal_transfer_gather_host(const void* source,
+                                   const iree_hal_transfer_region_t* region,
+                                   uint64_t offset, iree_host_size_t length,
+                                   void* target) {
+  iree_hal_transfer_copy_host_span(source, target, region, offset, length,
+                                   false);
+}
+
+void iree_hal_transfer_scatter_host(const void* source,
+                                    const iree_hal_transfer_region_t* region,
+                                    uint64_t offset, iree_host_size_t length,
+                                    void* target) {
+  iree_hal_transfer_copy_host_span(source, target, region, offset, length,
+                                   true);
+}
+
 static iree_status_t iree_hal_queue_validate_transfer_buffer(
     const iree_hal_queue_t* queue, iree_hal_buffer_t* buffer,
     iree_device_size_t offset, iree_device_size_t length,

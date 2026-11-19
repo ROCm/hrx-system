@@ -13,26 +13,25 @@
 #include "iree/hal/driver/vulkan/physical_device.h"
 
 typedef struct iree_hal_vulkan_fill_unaligned_push_constants_t {
-  // Repeated fill pattern stored in the low bytes.
-  uint32_t fill_pattern;
-
-  // Byte width of the fill pattern.
-  uint32_t fill_pattern_width;
-
-  // Storage-buffer uint32 element containing the first edge byte.
-  uint32_t target_word_index;
-
-  // Byte offset within target_word_index where the edge begins.
-  uint32_t target_word_byte_offset;
-
-  // Byte offset into fill_pattern corresponding to the first edge byte.
-  uint32_t pattern_byte_offset;
-
-  // Number of bytes to patch in target_word_index.
-  uint32_t fill_length_bytes;
+  // Four bytes of repeated fill pattern.
+  uint32_t pattern;
+  // First row byte relative to the descriptor base.
+  uint32_t target_offset;
+  // Pattern phase at the first useful byte of each row.
+  uint32_t pattern_offset;
+  // Useful bytes in each row.
+  uint32_t row_length;
+  // Number of rows in each slice.
+  uint32_t row_count;
+  // Number of slices.
+  uint32_t slice_count;
+  // Byte distance between rows, or zero for one row.
+  uint32_t row_stride;
+  // Byte distance between slices, or zero for one slice.
+  uint32_t slice_stride;
 } iree_hal_vulkan_fill_unaligned_push_constants_t;
 
-static_assert(sizeof(iree_hal_vulkan_fill_unaligned_push_constants_t) == 24,
+static_assert(sizeof(iree_hal_vulkan_fill_unaligned_push_constants_t) == 32,
               "push constant layout must match the built-in shader");
 
 typedef struct iree_hal_vulkan_update_unaligned_push_constants_t {
@@ -61,6 +60,11 @@ static iree_status_t iree_hal_vulkan_fill_unaligned_expand_pattern(
     case 2:
     case 4:
       memcpy(out_pattern, pattern, pattern_length);
+      if (pattern_length == 1) {
+        *out_pattern *= 0x01010101u;
+      } else if (pattern_length == 2) {
+        *out_pattern |= *out_pattern << 16;
+      }
       return iree_ok_status();
     default:
       return iree_make_status(
@@ -143,6 +147,8 @@ iree_status_t iree_hal_vulkan_builtins_initialize(
   }
   out_builtins->min_storage_buffer_offset_alignment =
       min_storage_buffer_offset_alignment;
+  out_builtins->max_storage_buffer_range =
+      physical_device->properties2.properties.limits.maxStorageBufferRange;
 
   VkDescriptorSetLayoutBinding fill_layout_binding = {
       .binding = 0,
@@ -238,6 +244,136 @@ void iree_hal_vulkan_builtins_deinitialize(
   memset(builtins, 0, sizeof(*builtins));
 }
 
+iree_hal_fill_region_t iree_hal_vulkan_builtins_fill_tile(
+    const iree_hal_vulkan_builtins_t* builtins,
+    const iree_hal_fill_region_t* region) {
+  // Leave room for descriptor alignment and the final partial dword.
+  const uint64_t capacity =
+      (builtins->max_storage_buffer_range -
+       builtins->min_storage_buffer_offset_alignment - 4) &
+      ~UINT64_C(3);
+  iree_hal_fill_region_t tile = *region;
+  tile.row_length = iree_min(region->row_length, capacity);
+  tile.row_count = 1;
+  tile.slice_count = 1;
+  if (tile.row_length == region->row_length && region->row_count > 1) {
+    tile.row_count = iree_min(
+        iree_min(region->row_count, UINT64_C(65535)),
+        1 + (capacity - tile.row_length) / region->target_strides.row_stride);
+  }
+  if (tile.row_count == region->row_count && region->slice_count > 1) {
+    const uint64_t slice_length =
+        tile.row_length +
+        (tile.row_count - 1) * region->target_strides.row_stride;
+    tile.slice_count = iree_min(
+        iree_min(region->slice_count, UINT64_C(65535)),
+        1 + (capacity - slice_length) / region->target_strides.slice_stride);
+  }
+  return tile;
+}
+
+iree_status_t iree_hal_vulkan_builtins_record_fill_region(
+    const iree_hal_vulkan_builtins_t* builtins, VkCommandBuffer command_buffer,
+    VkDescriptorPool descriptor_pool, VkBuffer target_buffer,
+    VkDeviceSize target_offset, const uint8_t* pattern,
+    iree_host_size_t pattern_length, const iree_hal_fill_region_t* region) {
+  uint32_t expanded_pattern = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_fill_unaligned_expand_pattern(
+      pattern, pattern_length, &expanded_pattern));
+  const iree_hal_fill_region_t tile =
+      iree_hal_vulkan_builtins_fill_tile(builtins, region);
+  iree_status_t status = iree_ok_status();
+  for (uint64_t slice = 0;
+       iree_status_is_ok(status) && slice < region->slice_count;
+       slice += tile.slice_count) {
+    for (uint64_t row = 0; iree_status_is_ok(status) && row < region->row_count;
+         row += tile.row_count) {
+      for (uint64_t column = 0;
+           iree_status_is_ok(status) && column < region->row_length;
+           column += tile.row_length) {
+        const VkDeviceSize offset =
+            target_offset + column +
+            (region->row_count > 1 ? row * region->target_strides.row_stride
+                                   : 0) +
+            (region->slice_count > 1
+                 ? slice * region->target_strides.slice_stride
+                 : 0);
+        const VkDeviceSize descriptor_offset =
+            offset & ~(builtins->min_storage_buffer_offset_alignment - 1);
+        const iree_hal_vulkan_fill_unaligned_push_constants_t constants = {
+            .pattern = expanded_pattern,
+            .target_offset = (uint32_t)(offset - descriptor_offset),
+            .row_length = (uint32_t)iree_min(tile.row_length,
+                                             region->row_length - column),
+            .row_count =
+                (uint32_t)iree_min(tile.row_count, region->row_count - row),
+            .slice_count = (uint32_t)iree_min(tile.slice_count,
+                                              region->slice_count - slice),
+            .row_stride = tile.row_count > 1
+                              ? (uint32_t)region->target_strides.row_stride
+                              : 0,
+            .slice_stride = tile.slice_count > 1
+                                ? (uint32_t)region->target_strides.slice_stride
+                                : 0,
+        };
+        VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
+        const VkDescriptorSetAllocateInfo allocate_info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .descriptorPool = descriptor_pool,
+            .descriptorSetCount = 1,
+            .pSetLayouts = &builtins->storage_buffer_descriptor_set_layout,
+        };
+        status = iree_vkAllocateDescriptorSets(
+            IREE_VULKAN_DEVICE(&builtins->syms), builtins->logical_device,
+            &allocate_info, &descriptor_set);
+        if (!iree_status_is_ok(status)) {
+          break;
+        }
+        const VkDescriptorBufferInfo buffer_info = {
+            .buffer = target_buffer,
+            .offset = descriptor_offset,
+            .range = iree_device_align(
+                constants.target_offset +
+                    (VkDeviceSize)(constants.row_count - 1) *
+                        constants.row_stride +
+                    (VkDeviceSize)(constants.slice_count - 1) *
+                        constants.slice_stride +
+                    constants.row_length,
+                4),
+        };
+        const VkWriteDescriptorSet write_info = {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = descriptor_set,
+            .dstBinding = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .pBufferInfo = &buffer_info,
+        };
+        iree_vkUpdateDescriptorSets(IREE_VULKAN_DEVICE(&builtins->syms),
+                                    builtins->logical_device, 1, &write_info, 0,
+                                    NULL);
+        iree_vkCmdBindPipeline(IREE_VULKAN_DEVICE(&builtins->syms),
+                               command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                               builtins->fill_pipeline);
+        iree_vkCmdBindDescriptorSets(IREE_VULKAN_DEVICE(&builtins->syms),
+                                     command_buffer,
+                                     VK_PIPELINE_BIND_POINT_COMPUTE,
+                                     builtins->storage_buffer_pipeline_layout,
+                                     0, 1, &descriptor_set, 0, NULL);
+        iree_vkCmdPushConstants(
+            IREE_VULKAN_DEVICE(&builtins->syms), command_buffer,
+            builtins->storage_buffer_pipeline_layout,
+            VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants), &constants);
+        const uint32_t word_count = (constants.row_length + 6) / 4;
+        iree_vkCmdDispatch(IREE_VULKAN_DEVICE(&builtins->syms), command_buffer,
+                           iree_min((word_count + 63) / 64, 256u),
+                           constants.row_count, constants.slice_count);
+      }
+    }
+  }
+  return status;
+}
+
 static iree_status_t iree_hal_vulkan_builtins_record_fill_edge(
     const iree_hal_vulkan_builtins_t* builtins, VkCommandBuffer command_buffer,
     VkDescriptorSet descriptor_set, VkBuffer target_buffer,
@@ -270,7 +406,7 @@ static iree_status_t iree_hal_vulkan_builtins_record_fill_edge(
   VkDescriptorBufferInfo buffer_info = {
       .buffer = target_buffer,
       .offset = descriptor_offset,
-      .range = VK_WHOLE_SIZE,
+      .range = target_word_offset - descriptor_offset + sizeof(uint32_t),
   };
   VkWriteDescriptorSet write_info = {
       .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -287,13 +423,12 @@ static iree_status_t iree_hal_vulkan_builtins_record_fill_edge(
                               /*pDescriptorCopies=*/NULL);
 
   const iree_hal_vulkan_fill_unaligned_push_constants_t constants = {
-      .fill_pattern = fill_pattern,
-      .fill_pattern_width = (uint32_t)pattern_length,
-      .target_word_index = (uint32_t)target_word_index,
-      .target_word_byte_offset = (uint32_t)(edge_offset % sizeof(uint32_t)),
-      .pattern_byte_offset =
-          (uint32_t)((edge_offset - fill_offset) % pattern_length),
-      .fill_length_bytes = edge_length,
+      .pattern = fill_pattern,
+      .target_offset = (uint32_t)(edge_offset - descriptor_offset),
+      .pattern_offset = (uint32_t)((edge_offset - fill_offset) & 3),
+      .row_length = edge_length,
+      .row_count = 1,
+      .slice_count = 1,
   };
   iree_vkCmdBindPipeline(IREE_VULKAN_DEVICE(&builtins->syms), command_buffer,
                          VK_PIPELINE_BIND_POINT_COMPUTE,

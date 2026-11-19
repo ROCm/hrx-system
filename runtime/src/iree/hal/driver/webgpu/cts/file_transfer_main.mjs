@@ -60,6 +60,9 @@ function waitFor(independent) {
 let result = 1;
 try {
   assert.equal(api.initialize(deviceHandle), 0, 'HAL initialization');
+  assert.equal(api.begin_buffer(), 0, 'recorded rectangular transfers');
+  assert.equal(await waitFor(0), 1, 'recorded transfer completion');
+  assert.equal(api.finish(), 0, 'captured bytes and untouched padding');
   for (const form of [0, 1, 2, 3, 4, 5, 6, 7]) {
     const length = api.file_length(form);
     for (const count of form & 4 ? [form & 1 ? 2 : 1] : [0, 1, 65]) {

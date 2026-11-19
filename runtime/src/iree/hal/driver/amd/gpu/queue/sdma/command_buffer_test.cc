@@ -437,6 +437,54 @@ TEST_F(CommandBufferTest, CapturedUpdatesAndNaturalFillEdgesPreserveAllBytes) {
   iree_hal_amd_gpu_program_cancel(storage, instance);
 }
 
+TEST_F(CommandBufferTest, RectanglesCaptureAndScatterOnlyUsefulBytes) {
+  std::vector<uint8_t> source_data(2048, 0x19);
+  std::vector<uint8_t> target_data(4096, 0x23);
+  std::vector<uint8_t> expected = target_data;
+  for (size_t i = 0; i < source_data.size(); ++i) {
+    source_data[i] = i * 31;
+  }
+  auto* target = MakeBuffer(reinterpret_cast<uintptr_t>(target_data.data()),
+                            target_data.size());
+  const iree_hal_transfer_region_t region = {
+      .row_length = 17,
+      .row_count = 7,
+      .slice_count = 3,
+      .source_strides = {32, 256},
+      .target_strides = {64, 768},
+  };
+  for (size_t slice = 0; slice < 3; ++slice) {
+    for (size_t row = 0; row < 7; ++row) {
+      memcpy(expected.data() + 5 + slice * 768 + row * 64,
+             source_data.data() + 3 + slice * 256 + row * 32, 17);
+    }
+  }
+  ASSERT_NO_FATAL_FAILURE(Begin(1));
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+      recording_, source_data.data(), 3,
+      iree_hal_make_indirect_buffer_ref(0, 5, IREE_HAL_WHOLE_BUFFER), &region,
+      0));
+  std::fill(source_data.begin(), source_data.end(), 0);
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(recording_));
+  auto* storage = iree_hal_amd_gpu_sdma_command_buffer_storage(recording_);
+  ASSERT_NE(storage, nullptr);
+  const uint64_t frontier[2] = {};
+  auto* instance = iree_hal_amd_gpu_program_try_acquire(storage, 0, frontier);
+  ASSERT_NE(instance, nullptr);
+  const iree_hal_buffer_binding_t binding = {&target->base, 0,
+                                             target_data.size()};
+  Invocation invocation;
+  IREE_ASSERT_OK(invocation.Initialize(recording_, {1, &binding}));
+  IREE_ASSERT_OK(invocation.Resolve(instance->address));
+  iree_hal_amd_gpu_sdma_program_progress_t progress;
+  do {
+    const auto words = Emit(invocation, &progress);
+    ASSERT_NO_FATAL_FAILURE(Apply(words));
+  } while (progress != IREE_HAL_AMD_GPU_SDMA_PROGRAM_END);
+  EXPECT_EQ(target_data, expected);
+  iree_hal_amd_gpu_program_cancel(storage, instance);
+}
+
 TEST_F(CommandBufferTest,
        SharedWholeRangeRecordingHasIndependentLargeAndEmptyInvocations) {
   constexpr uint64_t kLength = (UINT64_C(5) << 30) + 31;
