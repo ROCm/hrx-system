@@ -126,7 +126,8 @@ iree_status_t loom_low_schedule_candidate_policy_initialize(
 typedef struct loom_low_schedule_candidate_selection_t {
   // Chosen node index.
   uint32_t chosen_node;
-  // Highest-ranked rejected node, or LOOM_LOW_SCHEDULE_NODE_NONE.
+  // Highest-ranked alternative for a requested decision report, or
+  // LOOM_LOW_SCHEDULE_NODE_NONE when absent.
   uint32_t rejected_node;
   // Number of dependency-ready nodes when selection began.
   uint32_t ready_candidate_count;

@@ -954,18 +954,6 @@ static void loom_low_schedule_add_ready_view_nominees(
   }
 }
 
-static uint8_t loom_low_schedule_collect_source_nominees(
-    const loom_low_schedule_ready_policy_t* ready_policy,
-    uint32_t* out_nominees) {
-  uint8_t nominee_count = 0;
-  loom_low_schedule_add_ready_view_nominees(
-      ready_policy, LOOM_LOW_SCHEDULE_READY_VIEW_SOURCE,
-      LOOM_LOW_SCHEDULE_READY_SOURCE_NOMINEE_COUNT,
-      LOOM_LOW_SCHEDULE_READY_SOURCE_NOMINEE_COUNT, out_nominees,
-      &nominee_count);
-  return nominee_count;
-}
-
 static void loom_low_schedule_collect_recovery_nominees(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_ready_policy_t* ready_policy,
@@ -989,6 +977,34 @@ static void loom_low_schedule_collect_recovery_nominees(
       nominees, nominee_count);
 }
 
+// The schedule consumes the winner. Only a requested decision report needs to
+// rank the rejected nominees against one another.
+static void loom_low_schedule_rank_nominee(
+    const loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_candidate_policy_t* policy,
+    loom_low_schedule_candidate_compare_mode_t compare_mode, uint32_t node,
+    const loom_low_schedule_candidate_score_t* score,
+    loom_low_schedule_candidate_selection_t* selection) {
+  if (loom_low_schedule_candidate_score_less(
+          state->options, compare_mode, score, &selection->chosen_score,
+          policy->register_debt_word_count)) {
+    if (state->candidate_decisions) {
+      selection->rejected_node = selection->chosen_node;
+      selection->rejected_score = selection->chosen_score;
+    }
+    selection->chosen_node = node;
+    selection->chosen_score = *score;
+  } else if (state->candidate_decisions &&
+             (selection->rejected_node == LOOM_LOW_SCHEDULE_NODE_NONE ||
+              loom_low_schedule_candidate_score_less(
+                  state->options, compare_mode, score,
+                  &selection->rejected_score,
+                  policy->register_debt_word_count))) {
+    selection->rejected_node = node;
+    selection->rejected_score = *score;
+  }
+}
+
 void loom_low_schedule_candidate_policy_select(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_candidate_policy_t* policy,
@@ -1002,11 +1018,20 @@ void loom_low_schedule_candidate_policy_select(
       .rejected_node = LOOM_LOW_SCHEDULE_NODE_NONE,
       .ready_candidate_count = ready_candidate_count,
   };
-  if (!loom_low_schedule_strategy_uses_pressure(state->options->strategy)) {
+  const bool score_pressure =
+      loom_low_schedule_strategy_uses_pressure(state->options->strategy);
+  if (!score_pressure || ready_candidate_count == 1) {
     (void)loom_low_schedule_ready_frontier_copy_best(
         &ready_policy->frontier, LOOM_LOW_SCHEDULE_READY_VIEW_SOURCE,
         /*capacity=*/1, &out_selection->chosen_node);
-    IREE_ASSERT_NE(out_selection->chosen_node, LOOM_LOW_SCHEDULE_NODE_NONE);
+    if (score_pressure) {
+      loom_low_schedule_pressure_score_candidate(
+          state, pressure_state, ready_policy, indegrees,
+          out_selection->chosen_node,
+          loom_low_schedule_candidate_policy_reset_register_debt(policy, 0),
+          &out_selection->chosen_score);
+      out_selection->scored_candidate_count = 1;
+    }
     return;
   }
 
@@ -1014,7 +1039,9 @@ void loom_low_schedule_candidate_policy_select(
   loom_low_schedule_candidate_score_t
       nominee_scores[LOOM_LOW_SCHEDULE_READY_NOMINEE_CAPACITY];
   const uint8_t source_view_nominee_count =
-      loom_low_schedule_collect_source_nominees(ready_policy, nominees);
+      loom_low_schedule_ready_frontier_copy_best(
+          &ready_policy->frontier, LOOM_LOW_SCHEDULE_READY_VIEW_SOURCE,
+          LOOM_LOW_SCHEDULE_READY_SOURCE_NOMINEE_COUNT, nominees);
   uint8_t nominee_count = source_view_nominee_count;
   uint32_t graph_nominee = LOOM_LOW_SCHEDULE_NODE_NONE;
   if (ready_candidate_count > nominee_count) {
@@ -1079,34 +1106,23 @@ void loom_low_schedule_candidate_policy_select(
       loom_low_schedule_choose_candidate_compare_mode(
           nominee_scores, nominee_count,
           pressure_state->current_persistent_pressure_penalty);
-  for (uint8_t i = 0; i < nominee_count; ++i) {
-    const uint32_t node_index = nominees[i];
-    if (out_selection->chosen_node == LOOM_LOW_SCHEDULE_NODE_NONE ||
-        loom_low_schedule_candidate_score_less(
-            state->options, compare_mode, &nominee_scores[i],
-            &out_selection->chosen_score, policy->register_debt_word_count)) {
-      if (out_selection->chosen_node != LOOM_LOW_SCHEDULE_NODE_NONE) {
-        out_selection->rejected_node = out_selection->chosen_node;
-        out_selection->rejected_score = out_selection->chosen_score;
-      }
-      out_selection->chosen_node = node_index;
-      out_selection->chosen_score = nominee_scores[i];
-    } else if (out_selection->rejected_node == LOOM_LOW_SCHEDULE_NODE_NONE ||
-               loom_low_schedule_candidate_score_less(
-                   state->options, compare_mode, &nominee_scores[i],
-                   &out_selection->rejected_score,
-                   policy->register_debt_word_count)) {
-      out_selection->rejected_node = node_index;
-      out_selection->rejected_score = nominee_scores[i];
-    }
+  out_selection->chosen_node = nominees[0];
+  out_selection->chosen_score = nominee_scores[0];
+  for (uint8_t i = 1; i < nominee_count; ++i) {
+    loom_low_schedule_rank_nominee(state, policy, compare_mode, nominees[i],
+                                   &nominee_scores[i], out_selection);
+  }
+  // Every view indexes the same ready nodes. Once every node is admitted,
+  // recovery cannot add a nominee, even under pressure or a resource stall.
+  if (nominee_count == ready_candidate_count) {
+    return;
   }
 
   const bool recover_pressure =
       compare_mode != LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT;
   const bool recover_deferred_materialization =
       loom_low_schedule_candidate_defers_materialization(
-          compare_mode, &out_selection->chosen_score) &&
-      ready_candidate_count > nominee_count;
+          compare_mode, &out_selection->chosen_score);
   // Keep zero-stall selection on the bounded source-order path unless its best
   // candidate would consume a longer-latency result while ready work remains
   // outside that window. The existing recovery views can then preserve the
@@ -1115,8 +1131,7 @@ void loom_low_schedule_candidate_policy_select(
       !recover_pressure &&
       out_selection->chosen_score.effective_stall_cycles == 0 &&
       out_selection->chosen_score.dependency_latency_cycles >
-          out_selection->chosen_score.latency_cycles &&
-      ready_candidate_count > nominee_count;
+          out_selection->chosen_score.latency_cycles;
   if (!recover_pressure &&
       out_selection->chosen_score.effective_stall_cycles == 0 &&
       !recover_latency_window && !recover_deferred_materialization) {
@@ -1180,20 +1195,7 @@ void loom_low_schedule_candidate_policy_select(
             compare_mode, &nominee_scores[i], &out_selection->chosen_score)) {
       continue;
     }
-    if (loom_low_schedule_candidate_score_less(
-            state->options, compare_mode, &nominee_scores[i],
-            &out_selection->chosen_score, policy->register_debt_word_count)) {
-      out_selection->rejected_node = out_selection->chosen_node;
-      out_selection->rejected_score = out_selection->chosen_score;
-      out_selection->chosen_node = nominees[i];
-      out_selection->chosen_score = nominee_scores[i];
-    } else if (out_selection->rejected_node == LOOM_LOW_SCHEDULE_NODE_NONE ||
-               loom_low_schedule_candidate_score_less(
-                   state->options, compare_mode, &nominee_scores[i],
-                   &out_selection->rejected_score,
-                   policy->register_debt_word_count)) {
-      out_selection->rejected_node = nominees[i];
-      out_selection->rejected_score = nominee_scores[i];
-    }
+    loom_low_schedule_rank_nominee(state, policy, compare_mode, nominees[i],
+                                   &nominee_scores[i], out_selection);
   }
 }
