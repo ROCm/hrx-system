@@ -932,6 +932,257 @@ RECORDED_TRANSFER_CASE(Fill, kFill, 1048576);
 RECORDED_TRANSFER_CASE(Update, kUpdate, 65536);
 #undef RECORDED_TRANSFER_CASE
 
+// Compare one rectangle with an equivalent row batch. Both forms use the same
+// buffers, useful traffic, and acquire/release boundaries. The device persists
+// across the sweep; reset and exact payload/padding checks are outside timing.
+static void BM_RectangularTransfer(benchmark::State& state,
+                                   RecordedTransfer kind, bool recorded,
+                                   bool completion) {
+  static QueueDevice device;
+  static const iree::Status initialization = device.Initialize(1);
+  if (!initialization.ok()) {
+    state.SkipWithError(initialization.ToString().c_str());
+    return;
+  }
+  state.SetLabel(device.label());
+  const size_t rows = state.range(0);
+  const size_t width = state.range(1);
+  const bool row_batch = state.range(2) != 0;
+  const size_t source_stride = width + 64;
+  const size_t target_stride = width + 128;
+  std::vector<uint8_t> input(rows * source_stride + 64);
+  std::vector<uint8_t> initial(rows * target_stride + 64, 0xCD);
+  std::vector<uint8_t> expected = initial;
+  std::vector<uint8_t> actual(initial.size());
+  const uint32_t pattern = 0x1973A5CD;
+  for (size_t i = 0; i < input.size(); ++i) {
+    input[i] = static_cast<uint8_t>(i * 13 + i / source_stride);
+  }
+  for (size_t row = 0; row < rows; ++row) {
+    for (size_t column = 0; column < width; ++column) {
+      expected[row * target_stride + column] =
+          kind == RecordedTransfer::kFill
+              ? reinterpret_cast<const uint8_t*>(&pattern)[column % 4]
+              : input[row * source_stride + column];
+    }
+  }
+  iree_hal_buffer_t* source = nullptr;
+  iree_hal_buffer_t* target = nullptr;
+  IREE_CHECK_OK(iree_hal_pool_allocate_buffer(
+      device.pool(), iree_hal_make_pool_reservation_request(input.size(), 16),
+      iree_infinite_timeout(), &source));
+  IREE_CHECK_OK(iree_hal_pool_allocate_buffer(
+      device.pool(), iree_hal_make_pool_reservation_request(initial.size(), 16),
+      iree_infinite_timeout(), &target));
+  IREE_CHECK_OK(
+      iree_hal_buffer_map_write(source, 0, input.data(), input.size()));
+  const iree_hal_transfer_region_t region = {
+      .row_length = width,
+      .row_count = row_batch ? 1 : rows,
+      .slice_count = 1,
+      .source_strides = {.row_stride = source_stride},
+      .target_strides = {.row_stride = target_stride},
+  };
+  const iree_hal_fill_region_t fill_region = {
+      .row_length = region.row_length,
+      .row_count = region.row_count,
+      .slice_count = 1,
+      .target_strides = region.target_strides,
+  };
+  std::vector<iree_hal_transfer_operation_t> operations(row_batch ? rows : 1);
+  for (size_t i = 0; i < operations.size(); ++i) {
+    auto& operation = operations[i];
+    switch (kind) {
+      case RecordedTransfer::kCopy:
+        operation.type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
+        operation.copy = {
+            .source_buffer = source,
+            .source_offset = i * source_stride,
+            .target_buffer = target,
+            .target_offset = i * target_stride,
+            .region = &region,
+        };
+        break;
+      case RecordedTransfer::kFill:
+        operation.type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
+        operation.fill = {
+            .target_buffer = target,
+            .target_offset = i * target_stride,
+            .region = &fill_region,
+            .pattern = &pattern,
+            .pattern_length = sizeof(pattern),
+        };
+        break;
+      case RecordedTransfer::kUpdate:
+        operation.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE;
+        operation.update = {
+            .source_buffer = input.data(),
+            .source_offset = i * source_stride,
+            .target_buffer = target,
+            .target_offset = i * target_stride,
+            .region = &region,
+        };
+        break;
+    }
+  }
+  iree_hal_command_buffer_t* recording = nullptr;
+  if (recorded) {
+    const auto record_begin = iree_time_now();
+    IREE_CHECK_OK(iree_hal_command_buffer_create(
+        iree_hal_queue_family(device.queue(0)),
+        IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+        IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0, &recording));
+    IREE_CHECK_OK(iree_hal_command_buffer_begin(recording));
+    const iree_hal_barrier_t acquire = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
+    };
+    IREE_CHECK_OK(iree_hal_command_buffer_barrier(recording, &acquire));
+    for (size_t i = 0; i < operations.size(); ++i) {
+      const auto target_ref = iree_hal_make_buffer_ref(
+          target, i * target_stride, initial.size() - i * target_stride);
+      switch (kind) {
+        case RecordedTransfer::kCopy: {
+          IREE_CHECK_OK(iree_hal_command_buffer_copy_buffer(
+              recording,
+              iree_hal_make_buffer_ref(source, i * source_stride,
+                                       input.size() - i * source_stride),
+              target_ref, &region, IREE_HAL_COPY_FLAG_NONE));
+          break;
+        }
+        case RecordedTransfer::kFill: {
+          IREE_CHECK_OK(iree_hal_command_buffer_fill_buffer(
+              recording, target_ref, &pattern, sizeof(pattern), &fill_region,
+              IREE_HAL_FILL_FLAG_NONE));
+          break;
+        }
+        case RecordedTransfer::kUpdate: {
+          IREE_CHECK_OK(iree_hal_command_buffer_update_buffer(
+              recording, input.data(), i * source_stride, target_ref, &region,
+              IREE_HAL_UPDATE_FLAG_NONE));
+          break;
+        }
+      }
+    }
+    const iree_hal_barrier_t release = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+        .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+    };
+    IREE_CHECK_OK(iree_hal_command_buffer_barrier(recording, &release));
+    IREE_CHECK_OK(iree_hal_command_buffer_end(recording));
+    state.counters["record_ns"] = iree_time_now() - record_begin;
+  }
+  iree_hal_semaphore_t* timeline = nullptr;
+  IREE_CHECK_OK(iree_hal_semaphore_create(
+      device.device(), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &timeline));
+  uint64_t value = 0;
+  auto reset = [&] {
+    IREE_CHECK_OK(
+        iree_hal_buffer_map_write(target, 0, initial.data(), initial.size()));
+  };
+  auto submit = [&] {
+    ++value;
+    if (recorded) {
+      IREE_CHECK_OK(iree_hal_queue_execute(
+          device.queue(0), {}, {1, &timeline, &value}, recording, {},
+          IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
+    } else {
+      IREE_CHECK_OK(iree_hal_queue_transfer(
+          device.queue(0), {}, {1, &timeline, &value}, operations.size(),
+          operations.data(), nullptr));
+    }
+  };
+  auto wait = [&] {
+    IREE_CHECK_OK(iree_hal_semaphore_wait(
+        timeline, value, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+  };
+  auto verify = [&] {
+    IREE_CHECK_OK(
+        iree_hal_buffer_map_read(target, 0, actual.data(), actual.size()));
+    IREE_CHECK_OK(
+        actual == expected
+            ? iree_ok_status()
+            : iree_make_status(IREE_STATUS_DATA_LOSS,
+                               "rectangle payload or padding differs"));
+  };
+  for (int i = 0; i < 3; ++i) {
+    reset();
+    submit();
+    wait();
+    verify();
+  }
+  const auto allocations_before = device.allocation_count();
+  for (auto _ : state) {
+    state.PauseTiming();
+    reset();
+    state.ResumeTiming();
+    submit();
+    if (completion) {
+      wait();
+    }
+    state.PauseTiming();
+    if (!completion) {
+      wait();
+    }
+    verify();
+    state.ResumeTiming();
+  }
+  state.counters["host_allocations"] =
+      device.allocation_count() - allocations_before;
+  state.counters["descriptor_bytes"] =
+      operations.size() * sizeof(iree_hal_transfer_operation_t) +
+      (kind == RecordedTransfer::kFill ? sizeof(fill_region) : sizeof(region));
+  state.SetBytesProcessed(state.iterations() * rows * width);
+  state.SetItemsProcessed(state.iterations());
+  iree_hal_command_buffer_release(recording);
+  iree_hal_semaphore_release(timeline);
+  iree_hal_buffer_release(target);
+  iree_hal_buffer_release(source);
+}
+
+static void RectangularTransferArguments(benchmark::Benchmark* benchmark,
+                                         bool limited_update) {
+  for (int64_t rows : {1, 128, 1024}) {
+    if (limited_update &&
+        rows * 256 > IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE) {
+      continue;
+    }
+    for (int64_t row_batch : {0, 1}) {
+      benchmark->Args({rows, 256, row_batch});
+    }
+  }
+}
+
+#define RECTANGULAR_TRANSFER_CASE(name, kind, recorded, completion)           \
+  BENCHMARK_CAPTURE(BM_RectangularTransfer, name, RecordedTransfer::kind,     \
+                    recorded, completion)                                     \
+      ->Name("RectangularTransfer/" #name)                                    \
+      ->Apply([](benchmark::Benchmark* benchmark) {                           \
+        RectangularTransferArguments(                                         \
+            benchmark,                                                        \
+            recorded && RecordedTransfer::kind == RecordedTransfer::kUpdate); \
+      })                                                                      \
+      ->ArgNames({"rows", "width", "row_batch"})                              \
+      ->Iterations(100)                                                       \
+      ->MeasureProcessCPUTime()                                               \
+      ->UseRealTime()
+RECTANGULAR_TRANSFER_CASE(CopyQueueSubmit, kCopy, false, false);
+RECTANGULAR_TRANSFER_CASE(CopyQueueCompletion, kCopy, false, true);
+RECTANGULAR_TRANSFER_CASE(FillQueueSubmit, kFill, false, false);
+RECTANGULAR_TRANSFER_CASE(FillQueueCompletion, kFill, false, true);
+RECTANGULAR_TRANSFER_CASE(UpdateQueueSubmit, kUpdate, false, false);
+RECTANGULAR_TRANSFER_CASE(UpdateQueueCompletion, kUpdate, false, true);
+RECTANGULAR_TRANSFER_CASE(CopyRecordedSubmit, kCopy, true, false);
+RECTANGULAR_TRANSFER_CASE(CopyRecordedCompletion, kCopy, true, true);
+RECTANGULAR_TRANSFER_CASE(FillRecordedSubmit, kFill, true, false);
+RECTANGULAR_TRANSFER_CASE(FillRecordedCompletion, kFill, true, true);
+RECTANGULAR_TRANSFER_CASE(UpdateRecordedSubmit, kUpdate, true, false);
+RECTANGULAR_TRANSFER_CASE(UpdateRecordedCompletion, kUpdate, true, true);
+#undef RECTANGULAR_TRANSFER_CASE
+
 // A single public transaction initializes disjoint ranges. A one-byte subspan
 // exercises native edge handling without changing the public pattern alignment.
 // Host reset and full byte verification stay outside completion timing.
