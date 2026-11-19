@@ -3292,13 +3292,11 @@ bool ControlFlow::record_callable_write(cxx::Symbol* binding) {
       return written_indirect_parameters_.insert(binding).second;
     }
   }
-  if (!is_direct_subobject(binding) ||
-      traits.is_lvalue_reference(source_object_type(binding))) {
-    return cxx::symbol_cast<cxx::FieldSymbol>(binding) &&
-           traits.is_reference(source_object_type(binding)) &&
-           record_memory_write();
+  if (auto* field = cxx::symbol_cast<cxx::FieldSymbol>(binding);
+      field && traits.is_reference(field->type())) {
+    return record_memory_write();
   }
-  return add_receiver_write(binding);
+  return is_direct_subobject(binding) && add_receiver_write(binding);
 }
 
 void ControlFlow::invalidate_projected_bound(cxx::AST* owner,
@@ -3332,6 +3330,12 @@ bool ControlFlow::record_scoped_write(ObjectInterval interval,
     changed =
         reference_capture_facts_->written_bindings.insert(binding).second ||
         changed;
+  }
+  // A write through a reference member observes its identity and updates its
+  // referent. The member's address stays fixed across structured edges.
+  if (auto* field = cxx::symbol_cast<cxx::FieldSymbol>(binding);
+      field && unit_.typeTraits().is_reference(field->type())) {
+    return changed;
   }
   for (auto* owner : owners) {
     if (has_projected_loop_bounds_) {

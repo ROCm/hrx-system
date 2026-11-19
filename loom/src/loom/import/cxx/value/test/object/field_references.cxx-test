@@ -741,3 +741,50 @@ func.def @touched(%input: buffer, %input_byte_offset: index, %count$22: i32) -> 
   %count$27 = scalar.addi %count$22, %26 : i32
   func.return %input, %input_byte_offset, %count$27 : buffer, index, i32
 }
+
+// ====
+// The reference names the same object on every iteration, while the receiver's
+// by-value counter is carried across the loop.
+struct Sum {
+  int& value;
+  int count;
+  void accumulate(int n) {
+    while (n > 0) {
+      value += n;
+      ++count;
+      --n;
+    }
+  }
+};
+int accumulate(int* value, int n) {
+  Sum sum{*value, 0};
+  sum.accumulate(n);
+  return sum.count;
+}
+
+// ----
+func.def public @accumulate(%value: buffer, %value_byte_offset: index, %n: i32) -> (i32) {
+  %sum_count$4 = scalar.constant 0 : i32
+  %sum_count$5 = func.call @Sum__accumulate_value(%value, %value_byte_offset, %sum_count$4, %n) : (buffer, index, i32, i32) -> (i32)
+  func.return %sum_count$5 : i32
+}
+
+func.def @Sum__accumulate_value(%this_value: buffer, %this_value_byte_offset: index, %this_count: i32, %n$9: i32) -> (i32) {
+  %count, %n$16 = scf.while(%count = %this_count : i32, %n = %n$9 : i32) -> (i32, i32) {
+    %17 = scalar.constant 0 : i32
+    %18 = scalar.cmpi sgt, %n, %17 : i32
+    scf.condition %18, %count, %n : i1, i32, i32
+  } do(%count$13: i32, %n$14: i32) {
+    %19 = buffer.view %this_value[%this_value_byte_offset] : buffer -> view<1xi32>
+    %20 = view.load<root_in_bounds|type_disjoint> %19[0] : view<1xi32> -> i32
+    %21 = scalar.addi %20, %n$14 : i32
+    %22 = buffer.view %this_value[%this_value_byte_offset] : buffer -> view<1xi32>
+    view.store<root_in_bounds|type_disjoint> %21, %22[0] : i32, view<1xi32>
+    %23 = scalar.constant 1 : i32
+    %count$24 = scalar.addi %count$13, %23 : i32
+    %25 = scalar.constant 1 : i32
+    %n$26 = scalar.subi %n$14, %25 : i32
+    scf.yield %count$24, %n$26 : i32, i32
+  }
+  func.return %count : i32
+}
