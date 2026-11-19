@@ -300,20 +300,26 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
   }
   uint64_t offset = 0, start = 0, available = 0;
   if (storage) {
-    const uint64_t relative =
-        iree_align_uint64(storage->end - storage->begin, program ? 32 : 8);
-    offset = relative & (storage->capacity - 1);
-    start = storage->begin + relative;
     const uint64_t completed = (uint64_t)iree_atomic_load(
         program ? &queue->completed.arguments : &queue->completed.transfers,
         iree_memory_order_acquire);
-    const uint64_t reusable =
-        completed >= storage->end ? start : iree_max(completed, storage->begin);
-    const uint64_t used = start - reusable;
-    available =
-        used >= storage->capacity
-            ? 0
-            : iree_min(storage->capacity - used, storage->capacity - offset);
+    if (completed >= storage->end) {
+      // Every byte has retired. Rebase byte zero at the monotonic end so
+      // the previous write position cannot split the next transfer.
+      start = storage->end;
+      storage->begin = start;
+      available = storage->capacity;
+    } else {
+      const uint64_t relative =
+          iree_align_uint64(storage->end - storage->begin, program ? 32 : 8);
+      offset = relative & (storage->capacity - 1);
+      start = storage->begin + relative;
+      const uint64_t used = start - iree_max(completed, storage->begin);
+      available =
+          used >= storage->capacity
+              ? 0
+              : iree_min(storage->capacity - used, storage->capacity - offset);
+    }
   }
   // A source fitting one admitted span needs no publication boundary. Larger
   // uploads overlap preparation with native reads in two bounded regions.

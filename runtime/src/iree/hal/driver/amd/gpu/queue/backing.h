@@ -28,7 +28,7 @@ typedef struct iree_hal_amd_gpu_byte_storage_t {
   iree_hal_amd_fabric_memory_t memory;
   // Address of byte zero in this queue's native domain.
   uint64_t address;
-  // Monotonic first position belonging to this generation.
+  // Monotonic position of ring byte zero. An empty ring may rebase at end.
   uint64_t begin;
   // Exclusive final reserved position in this generation.
   uint64_t end;
