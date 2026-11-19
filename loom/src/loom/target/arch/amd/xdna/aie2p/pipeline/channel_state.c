@@ -69,6 +69,7 @@ void loom_aie2p_native_cursor_bind(loom_aie2p_native_cursor_t* cursor,
     site_exact &= cursor->exact_admissions;
   }
   *cursor = (loom_aie2p_native_cursor_t){
+      .single_site = cursor->worker == UINT32_MAX,
       .worker = worker,
       .maximum_admissions = maximum_admissions,
       .exact_admissions = site_exact && maximum_admissions != UINT32_MAX,
@@ -82,6 +83,26 @@ bool loom_aie2p_native_cursor_has_exact_admissions(
     const loom_aie2p_native_cursor_t* cursor, uint64_t count) {
   return !cursor->shared && cursor->exact_admissions &&
          cursor->maximum_admissions == count;
+}
+
+const loom_pipeline_channel_repeat_t* loom_aie2p_native_channel_repeat(
+    const loom_pipeline_realization_t* realization,
+    const loom_aie2p_native_channel_t* channel) {
+  const loom_aie2p_native_cursor_t* reader = &channel->cursor.reader;
+  const loom_aie2p_native_cursor_t* writer = &channel->cursor.writer;
+  if (!reader->single_site || !writer->single_site) {
+    return NULL;
+  }
+  const loom_pipeline_channel_repeat_t* read_count =
+      realization->workers[reader->worker].channel_repeat;
+  const loom_pipeline_channel_repeat_t* write_count =
+      realization->workers[writer->worker].channel_repeat;
+  if (!read_count || !write_count || read_count->count != write_count->count ||
+      realization->invocations.workers[reader->worker].invocation !=
+          realization->invocations.workers[writer->worker].invocation) {
+    return NULL;
+  }
+  return read_count;
 }
 
 bool loom_aie2p_native_cursor_has_read_completion(

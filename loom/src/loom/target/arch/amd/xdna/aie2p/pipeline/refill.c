@@ -53,7 +53,8 @@ iree_status_t loom_aie2p_native_select_progress(
     }
     const loom_pipeline_transport_input_phase_t* tail =
         &input->source->phases[input->source->phase_count - 1];
-    if (input->source->admissions != 1 || tail->period != tail->transfers) {
+    if (!input->repeat &&
+        (input->source->admissions != 1 || tail->period != tail->transfers)) {
       ++input_count;
       phase_count += input->source->phase_count;
       continue;

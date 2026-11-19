@@ -23,6 +23,13 @@ iree_status_t loom_aie2p_native_select_input(
   }
   const loom_pipeline_invocation_t* invocation =
       realization->invocations.workers[worker].invocation;
+  const loom_pipeline_channel_repeat_t* repeat = source->channel_repeat;
+  // Independently visited phases require interleaved submits. A single
+  // captured prefix fits one finite queue and one uninterrupted source read.
+  if (repeat && (!invocation->ordinal || plan->phase_count != 1 ||
+                 plan->phases[0].period > 1)) {
+    return iree_ok_status();
+  }
   if (plan->acquisition || !source->transport.sources_stable ||
       (!invocation->ordinal && plan->phase_count == 1 &&
        !plan->phases[0].source_capture_count)) {
@@ -41,6 +48,12 @@ iree_status_t loom_aie2p_native_select_input(
     const loom_pipeline_transport_input_phase_t* phase = &plan->phases[i];
     const loom_aie2p_native_channel_t* local = loom_aie2p_native_channel(
         context, realization, phase->reservation->channel);
+    if (repeat &&
+        (!local->repeat || local->replay.record_count ||
+         repeat->maximum > context->pool_tiles[local->pool_index]
+                               ->facts->dma.maximum_task_repeat_count)) {
+      return iree_ok_status();
+    }
     if (phase->transfer->request.source.memory_space !=
             LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL ||
         phase->transfer->request.dest.memory_space !=
@@ -50,10 +63,10 @@ iree_status_t loom_aie2p_native_select_input(
             local->record_byte_length ||
         !iree_any_bit_set(phase->transfer->request.source.flags,
                           LOOM_MOVEMENT_ENDPOINT_STATIC_LENGTH) ||
-        !phase->period || phase->period > UINT32_MAX ||
+        (!repeat && !phase->period) || phase->period > UINT32_MAX ||
         phase->transfers > UINT32_MAX || !plan->admissions ||
         plan->admissions > UINT32_MAX / phase->transfers ||
-        phase->transfers % phase->period ||
+        (!repeat && phase->transfers % phase->period) ||
         (i + 1 < plan->phase_count &&
          (phase->transfers > local->source->capacity ||
           phase->transfers != phase->period ||
@@ -81,6 +94,7 @@ iree_status_t loom_aie2p_native_select_input(
       .start = loom_symbol_ref_null(),
       .retire = loom_symbol_ref_null(),
       .source = plan,
+      .repeat = repeat,
   };
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       context->pass->arena, plan->phase_count, sizeof(*input->phases),
@@ -164,8 +178,9 @@ static iree_status_t loom_aie2p_native_input_receivers(
       return iree_ok_status();
     }
     const uint32_t repetitions =
-        window
-            ? (i == tail ? window : (uint32_t)phase->source->transfers)
+        window ? (i == tail ? window : (uint32_t)phase->source->transfers)
+        : input->repeat
+            ? (uint32_t)input->repeat->maximum
             : (uint32_t)(input->source->admissions * phase->source->transfers);
     IREE_RETURN_IF_ERROR(loom_aie2p_native_select_channel_endpoint(
         context, &realization->invocations, input->invocation,
@@ -248,7 +263,8 @@ iree_status_t loom_aie2p_native_form_input(loom_aie2p_native_context_t* context,
       &context->tiles[context->workers[input->worker].tile->coordinate.column *
                       context->family->row_count];
   input->window_capacity =
-      loom_aie2p_native_input_receive_window(context, input);
+      input->repeat ? 0
+                    : loom_aie2p_native_input_receive_window(context, input);
   loom_aie2p_native_input_path_t* path;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate(context->pass->arena, sizeof(*path), (void**)&path));
@@ -326,14 +342,16 @@ iree_status_t loom_aie2p_native_route_input(
           IREE_SV("aligned phased input DMA sources"));
     }
     loom_storage_geometry_t geometry;
+    const uint32_t period = input->repeat ? (uint32_t)input->repeat->maximum
+                                          : (uint32_t)plan->period;
     if (!loom_storage_geometry_query(
             &source->facts.context, context->code.module,
             plan->transfer->request.source.type, &geometry) ||
         !loom_aie2p_native_encode_ingress(
             context->family, &geometry, dma,
             (uint32_t)plan->transfer->request.transferred_byte_count,
-            (uint32_t)plan->source_byte_stride, (uint32_t)plan->period,
-            (uint32_t)plan->period, phase->words, &phase->repetitions) ||
+            (uint32_t)plan->source_byte_stride, period, period, phase->words,
+            &phase->repetitions) ||
         phase->repetitions > dma->maximum_task_repeat_count) {
       return loom_aie2p_native_reject(
           context, declaration,
@@ -347,7 +365,7 @@ iree_status_t loom_aie2p_native_route_input(
         plan->source_capture_count
             ? (uint64_t)
                   plan->transfer->request.source.end_byte_offset.facts.range_hi
-            : (uint64_t)plan->source_byte_stride * (plan->period - 1) +
+            : (uint64_t)plan->source_byte_stride * (period - 1) +
                   plan->transfer->request.source.static_byte_length;
     const loom_value_t* root = loom_module_value(
         context->code.module, plan->transfer->request.source.root_value_id);
@@ -367,13 +385,15 @@ iree_status_t loom_aie2p_native_route_input(
         iree_max(context->bindings[binding].byte_alignment,
                  plan->transfer->request.source.root_minimum_alignment);
     context->bindings[binding].access |= LOOM_AIE2P_ARRAY_BINDING_ACCESS_READ;
-    if (plan->source_capture_count) {
-      phase->address_register =
+    if (input->repeat || plan->source_capture_count) {
+      phase->descriptor_register =
           (uint32_t)(loom_xdna_register_field_address(
                          context->family,
-                         LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD1_BASE_ADDRESS_LOW,
+                         LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD0_BUFFER_LENGTH,
                          shim->coordinate, &phase->descriptor) -
                      origin);
+    }
+    if (plan->source_capture_count) {
       loom_aie2p_native_worker_t* owner =
           &context->workers[context->execution.workers
                                 [context->core_engines[input->controller]]];

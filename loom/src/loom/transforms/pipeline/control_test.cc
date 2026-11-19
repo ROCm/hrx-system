@@ -202,9 +202,20 @@ class PipelineControlTest : public ::testing::Test {
     loom_builder_enter_region(builder, serial,
                               loom_pipeline_serial_body(serial));
     for (size_t i = 0; i < count; ++i) {
+      loom_value_id_t actual = value;
+      if (i) {
+        const auto index = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+        loom_op_t *delta, *next;
+        IREE_ASSERT_OK(loom_index_constant_build(
+            builder, loom_attr_i64(i), index, LOOM_LOCATION_UNKNOWN, &delta));
+        IREE_ASSERT_OK(loom_index_add_build(builder, value,
+                                            loom_op_results(delta)[0], index,
+                                            LOOM_LOCATION_UNKNOWN, &next));
+        actual = loom_op_results(next)[0];
+      }
       loom_op_t* call;
       IREE_ASSERT_OK(loom_pipeline_compose_build(
-          builder, loom_pipeline_def_callee(child), nullptr, 0, &value, 1,
+          builder, loom_pipeline_def_callee(child), nullptr, 0, &actual, 1,
           LOOM_LOCATION_UNKNOWN, &call));
     }
     loom_op_t* yield;
@@ -234,7 +245,7 @@ class PipelineControlTest : public ::testing::Test {
       void* user_data, loom_builder_t* builder, iree_host_size_t engine,
       const loom_pipeline_invocation_schedule_t* scope,
       const loom_pipeline_invocation_t* child, bool before,
-      const loom_value_id_t* state) {
+      loom_value_slice_t captures, const loom_value_id_t* state) {
     auto* self = static_cast<PipelineControlTest*>(user_data);
     EXPECT_EQ(engine, kEngine);
     EXPECT_NE(scope, nullptr);
@@ -356,6 +367,62 @@ TEST_F(PipelineControlTest, NestedBoundariesKeepTheirProjectedRuntimeState) {
     }
     EXPECT_EQ(observations, owner == 0 ? 4u : 2u);
   }
+  Verify();
+}
+
+TEST_F(PipelineControlTest, BoundariesUseEachComposeSitesActualOperands) {
+  const auto index = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  auto observer = Function("observe_count", &index, 1);
+  const loom_pipeline_control_options_t options = {
+      .worker_engines = engines_,
+      .emit =
+          {
+              .boundary =
+                  [](void* user_data, loom_builder_t* builder,
+                     iree_host_size_t engine,
+                     const loom_pipeline_invocation_schedule_t* scope,
+                     const loom_pipeline_invocation_t* child, bool before,
+                     loom_value_slice_t captures,
+                     const loom_value_id_t* state) {
+                    EXPECT_EQ(captures.count, 1u);
+                    loom_op_t* call;
+                    return loom_func_call_build(
+                        builder, 0, 0, 0, 0,
+                        *static_cast<loom_symbol_ref_t*>(user_data),
+                        captures.values, captures.count, nullptr, 0, nullptr, 0,
+                        LOOM_LOCATION_UNKNOWN, &call);
+                  },
+              .user_data = &observer,
+          },
+  };
+  loom_pipeline_control_function_t* functions;
+  IREE_ASSERT_OK(loom_pipeline_control_materialize(
+      &rewriter_, &realization_, &execution_, scope_, &options, &functions));
+  const auto& root = functions[0];
+  ASSERT_EQ(root.argument_count, 1u);
+  EXPECT_EQ(root.arguments[0], 0u);
+  auto* body = loom_func_like_body(root.function);
+  const auto arg = loom_region_entry_block(body)->arg_ids[0];
+  size_t original = 0, advanced = 0;
+  for (size_t i = 0; i < body->block_count; ++i) {
+    for (auto* op = body->blocks[i]->first_op; op; op = op->next_op) {
+      if (!loom_func_call_isa(op) ||
+          loom_func_call_callee(op).symbol_id != observer.symbol_id) {
+        continue;
+      }
+      const auto actual = loom_func_call_operands(op).values[0];
+      if (actual == arg) {
+        ++original;
+      } else {
+        const auto* sum = loom_value_def_op(loom_module_value(module_, actual));
+        ASSERT_TRUE(loom_index_add_isa(sum));
+        EXPECT_EQ(loom_index_add_lhs(sum), arg);
+        ++advanced;
+      }
+    }
+  }
+  EXPECT_EQ(original, 2u);
+  EXPECT_EQ(advanced, 2u);
   Verify();
 }
 

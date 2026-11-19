@@ -1,0 +1,123 @@
+// The child copies 0, 1, 2, 3, and 256 records, first from consecutive
+// addresses and then repeatedly from the same source address.
+// Each two-slot iterator starts at slot zero, including after an odd prefix.
+aie2p.target<array> @device
+
+pipeline.def @copy_prefix() run(%input: buffer, %output: buffer, %records: index, %base: offset, %read_stride: offset, %output_base: offset) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %capacity = index.constant 2 : index
+  %record_bytes = index.constant 64 : offset
+  %slot_bytes = index.constant 128 : offset
+  %memory = pipeline.memory<workgroup>[0, 1] : pool
+  %tile = pipeline.memory<workgroup>[0, 2] : pool
+  %staging = buffer.alloca<workgroup> pool(%memory) align(64) %slot_bytes : buffer
+  %local = buffer.alloca<workgroup> pool(%tile) align(64) %slot_bytes : buffer
+  %in_slots = buffer.view %staging[%origin] : buffer -> view<2x16xi32>
+  %out_slots = buffer.view %local[%origin] : buffer -> view<2x16xi32>
+  %ingress = channel.bind<fifo> %in_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %work = channel.bind<fifo> %out_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %i = [%begin to %records step %step] {
+      %at = index.scale %i, %read_stride : index, offset -> offset
+      %offset = index.add %base, %at : offset
+      %source = buffer.view %input[%offset] : buffer -> view<16xi32>
+      %write, %payload = channel.reserve %ingress : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      %copy = kernel.async.copy %source to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+      %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+      channel.publish %write : write<tile<16xi32>>
+    }
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %i = [%begin to %records step %step] {
+      %read, %source = channel.acquire %ingress : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+      %write, %destination = channel.reserve %work : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      channel.copy %read -> %write : read<tile<16xi32>>, write<tile<16xi32>>
+    }
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %bias = vector.splati 17 : vector<16xi32>
+    scf.for %i = [%begin to %records step %step] {
+      %read, %payload = channel.acquire<mutable> %work : channel<tile<16xi32>> -> (read<tile<16xi32>, mutable>, view<16xi32>)
+      %value = vector.load %payload[0] : view<16xi32> -> vector<16xi32>
+      %result = vector.addi %value, %bias : vector<16xi32>
+      vector.store %result, %payload[0] : vector<16xi32>, view<16xi32>
+      %at = index.scale %i, %record_bytes : index, offset -> offset
+      %offset = index.add %output_base, %at : offset
+      %destination = buffer.view %output[%offset] : buffer -> view<16xi32>
+      %copy = kernel.async.copy %payload to %destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+      %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+      channel.release %read : read<tile<16xi32>, mutable>
+    }
+  }
+}
+
+pipeline.def<kernel> public retain target(@device) @counted_input() run(%input_arg: buffer, %output_arg: buffer) {
+  %src, %dst = buffer.assume.noalias %input_arg, %output_arg : buffer, buffer
+  %input, %output = buffer.assume.alignment %src, %dst {minimum_alignment = 64} : buffer, buffer
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %last = index.constant 4 : index
+  %visits = index.constant 5 : index
+  %full = index.constant 256 : index
+  %same_record = index.constant 0 : offset
+  %next_record = index.constant 64 : offset
+  %second_output = index.constant 81920 : offset
+  %span = index.constant 16384 : offset
+  pipeline.serial {
+    scf.for %visit = [%begin to %visits step %step] {
+      %final = index.cmp eq, %visit, %last : index
+      %count = scf.select %final, %full, %visit : index
+      %base = index.scale %visit, %span : index, offset -> offset
+      pipeline.compose @copy_prefix(%input, %output, %count, %base, %next_record, %base) : (buffer, buffer, index, offset, offset, offset)
+      %second_base = index.add %base, %second_output : offset
+      pipeline.compose @copy_prefix(%input, %output, %count, %base, %same_record, %second_base) : (buffer, buffer, index, offset, offset, offset)
+    }
+  }
+}
+
+func.def @reference(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %final_region = index.constant 4 : index
+  %end = index.constant 1280 : index
+  %width = index.constant 256 : index
+  %bias = vector.splati 17 : vector<16xi32>
+  %source = buffer.view %input[%origin] : buffer -> view<1280x16xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<2560x16xi32>
+  scf.for %row = [%begin to %end step %step] {
+    %region = index.div %row, %width : index
+    %within = index.rem %row, %width : index
+    %prefix = index.cmp ult, %within, %region : index
+    %full = index.cmp eq, %region, %final_region : index
+    %live = scalar.ori %prefix, %full : i1
+    scf.if %live {
+      %values = vector.load %source[%row, 0] : view<1280x16xi32> -> vector<16xi32>
+      %updated = vector.addi %values, %bias : vector<16xi32>
+      vector.store %updated, %destination[%row, 0] : vector<16xi32>, view<2560x16xi32>
+      %first = index.mul %region, %width : index
+      %stationary = vector.load %source[%first, 0] : view<1280x16xi32> -> vector<16xi32>
+      %repeated = vector.addi %stationary, %bias : vector<16xi32>
+      %second = index.add %row, %end : index
+      vector.store %repeated, %destination[%second, 0] : vector<16xi32>, view<2560x16xi32>
+    }
+  }
+  func.return
+}
+
+check.scenario public @counted_input_reentry {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-1000 to 1000) : tensor<20480xi32>
+    %storage = check.generate.fill value(-9999) : tensor<40992xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<40992xi32> -> tensor<40960xi32>
+    check.compare<@counted_input, @reference>(%input, %output) : (tensor<20480xi32>, tensor<40960xi32>) -> () {
+      check.expect.equal actual(%storage) expected(%storage) : tensor<40992xi32>
+    }
+  }
+  check.return
+}

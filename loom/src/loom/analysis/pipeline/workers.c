@@ -42,6 +42,14 @@ typedef struct loom_pipeline_transport_block_t {
   iree_host_size_t channel_count;
 } loom_pipeline_transport_block_t;
 
+// Structural counts describe one execution of the transport body. A captured
+// loop multiplies the whole body at invocation time.
+static uint64_t loom_pipeline_transport_block_visits(
+    const loom_pipeline_worker_t* worker, uint16_t block) {
+  return worker->block_execution_counts ? worker->block_execution_counts[block]
+                                        : 1;
+}
+
 // Retains complete channel-copy ownership without assigning a physical
 // transport. This recognizes the semantic family from one source obligation to
 // one or more independently publishing destinations. Anything outside that
@@ -92,10 +100,8 @@ static iree_status_t loom_pipeline_transport_cohorts(
       const loom_value_id_t read = loom_op_const_results(op)[0];
       cohort_indices[loom_local_value_domain_ordinal(
           plan->value_domain, read)] = (uint32_t)cohort_count;
-      const uint64_t admissions =
-          worker->block_execution_counts
-              ? worker->block_execution_counts[op->parent_block->region_index]
-              : 1;
+      const uint64_t admissions = loom_pipeline_transport_block_visits(
+          worker, op->parent_block->region_index);
       if (!admissions) {
         return iree_ok_status();
       }
@@ -150,9 +156,8 @@ static iree_status_t loom_pipeline_transport_cohorts(
     const uint16_t admission_loop = cohort->admission_scope;
     const uint16_t operation_loop =
         loom_cfg_loop_nest_innermost(&structure->loops, block);
-    const uint64_t executions = worker->block_execution_counts
-                                    ? worker->block_execution_counts[block]
-                                    : 1;
+    const uint64_t executions =
+        loom_pipeline_transport_block_visits(worker, block);
     if (release) {
       if (cohort->release || admission_loop != operation_loop ||
           executions != cohort->admissions) {
@@ -227,9 +232,7 @@ static iree_status_t loom_pipeline_transport_cohorts(
     copies[copy_count++] = (loom_pipeline_transport_copy_t){
         .source = cohort,
         .destination = &destinations[destination_index],
-        .executions = worker->block_execution_counts
-                          ? worker->block_execution_counts[block]
-                          : 1,
+        .executions = loom_pipeline_transport_block_visits(worker, block),
         .scope = loom_cfg_loop_nest_innermost(&structure->loops, block)};
   }
   *out_cohorts = cohorts;
@@ -600,19 +603,23 @@ static bool loom_pipeline_transport_input_recurrence(
   }
   if (scope == LOOM_CFG_LOOP_NEST_NONE ||
       !loom_symbolic_expr_is_linear(offset) || offset->term_count != 1 ||
-      phase->transfers % worker->loop_trip_bounds[scope]) {
+      (!worker->channel_repeat &&
+       phase->transfers % worker->loop_trip_bounds[scope])) {
     return false;
   }
-  phase->period = worker->loop_trip_bounds[scope];
+  const uint64_t span = worker->loop_trip_bounds[scope];
+  // A captured prefix may stop at any record. Its linear address has no
+  // wrap unless the projection below introduces one within the proven span.
+  phase->period = worker->channel_repeat ? 0 : span;
   const loom_value_fact_induction_t* induction = &structure->inductions[scope];
   int64_t initial, increment, displacement;
   if (!loom_value_facts_as_exact_i64(
           loom_value_fact_recurrence_operand_facts(&worker->facts,
                                                    induction->initial_value),
           &initial) ||
-      !loom_value_facts_as_exact_i64(loom_value_fact_recurrence_operand_facts(
-                                         &worker->facts, induction->step),
-                                     &increment)) {
+      !loom_value_facts_as_exact_i64(
+          loom_value_fact_induction_step_facts(&worker->facts, induction),
+          &increment)) {
     return false;
   }
   if (offset->terms[0].value_id != induction->value) {
@@ -637,13 +644,14 @@ static bool loom_pipeline_transport_input_recurrence(
       initial %= projection->modulus;
       increment %= projection->modulus;
       if (increment &&
-          phase->period - 1 >
+          span - 1 >
               (uint64_t)((projection->modulus - 1 - initial) / increment)) {
         if (initial >= increment || projection->modulus % increment) {
           return false;
         }
         const uint64_t period = (uint64_t)(projection->modulus / increment);
-        if (phase->period % period) {
+        if ((worker->channel_repeat ? worker->channel_repeat->multiple : span) %
+            period) {
           return false;
         }
         phase->period = period;
@@ -737,15 +745,15 @@ static iree_status_t loom_pipeline_transport_input_phase(
       stream->groups[transfer->group_index].completion != body[2].op) {
     return iree_ok_status();
   }
-  const uint64_t executions = worker->block_execution_counts[block];
+  const uint64_t executions =
+      loom_pipeline_transport_block_visits(worker, block);
   if (!executions || executions % input->admissions) {
     return iree_ok_status();
   }
   for (iree_host_size_t i = 0; i < 4; ++i) {
     if (body[i].scope != body[1].scope ||
-        worker->block_execution_counts[body[i]
-                                           .op->parent_block->region_index] !=
-            executions) {
+        loom_pipeline_transport_block_visits(
+            worker, body[i].op->parent_block->region_index) != executions) {
       return iree_ok_status();
     }
   }
@@ -815,10 +823,11 @@ static iree_status_t loom_pipeline_transport_input(
             loom_channel_acquire_read(steps[0].op)) {
       return iree_ok_status();
     }
-    input.admissions =
-        worker->block_execution_counts[steps[0].op->parent_block->region_index];
+    input.admissions = loom_pipeline_transport_block_visits(
+        worker, steps[0].op->parent_block->region_index);
     if (!input.admissions ||
-        worker->block_execution_counts[final->op->parent_block->region_index] !=
+        loom_pipeline_transport_block_visits(
+            worker, final->op->parent_block->region_index) !=
             input.admissions) {
       return iree_ok_status();
     }
@@ -860,7 +869,8 @@ static iree_status_t loom_pipeline_worker_transport(
     loom_pipeline_worker_t* worker) {
   const loom_cfg_graph_t* graph = worker->graph;
   if ((!worker->asynchronous.streams && !worker->channels.action_count) ||
-      (graph->has_cycles && !worker->block_execution_counts)) {
+      (graph->has_cycles && !worker->block_execution_counts &&
+       !worker->channel_repeat)) {
     return iree_ok_status();
   }
   for (iree_host_size_t i = 0; i < graph->reverse_postorder.count; ++i) {
@@ -887,6 +897,13 @@ static iree_status_t loom_pipeline_worker_transport(
   }
   for (const loom_kernel_async_stream_t* stream = worker->asynchronous.streams;
        stream; stream = stream->next) {
+    if (worker->channel_repeat &&
+        (stream->block->region_index ==
+             structure->loops.loops[0].header_index ||
+         loom_cfg_loop_nest_innermost(&structure->loops,
+                                      stream->block->region_index) != 0)) {
+      return iree_ok_status();
+    }
     blocks[stream->block->region_index].stream = stream;
     capacity += stream->transfer_count + stream->wait_count;
   }
@@ -958,7 +975,7 @@ static iree_status_t loom_pipeline_worker_transport(
                          LOOM_VALUE_FACT_INDUCTION_UPDATE_ADDITIVE) {
         induction = &structure->inductions[0];
         const uint16_t block = steps[0].op->parent_block->region_index;
-        repetitions = worker->block_execution_counts[block];
+        repetitions = loom_pipeline_transport_block_visits(worker, block);
       }
     }
   }
@@ -990,18 +1007,20 @@ static iree_status_t loom_pipeline_worker_transport(
   for (iree_host_size_t i = 0; i < batch_count; ++i) {
     nonuniform_copies |= !batches[i].replays;
   }
+  const uint64_t unit = 1;
+  const uint64_t* body_trips =
+      worker->channel_repeat ? &unit : worker->loop_trip_bounds;
   if (serial_records && (batch_count > 1 || nonuniform_copies)) {
     IREE_RETURN_IF_ERROR(loom_pipeline_transport_copy_stream(
-        &structure->loops, worker->loop_trip_bounds, cohorts, cohort_count,
-        copies, copy_count, nonuniform_copies, arena, &copy_stream));
+        &structure->loops, body_trips, cohorts, cohort_count, copies,
+        copy_count, nonuniform_copies, arena, &copy_stream));
   }
   const loom_pipeline_transport_loop_t* copy_loops = NULL;
   iree_host_size_t copy_loop_count = 0;
   if ((copy_stream || nonuniform_copies || batch_count > 1) &&
       structure->loops.loop_count) {
     IREE_RETURN_IF_ERROR(loom_pipeline_transport_copy_loops(
-        &structure->loops, worker->loop_trip_bounds, copies, copy_count, arena,
-        &copy_loops));
+        &structure->loops, body_trips, copies, copy_count, arena, &copy_loops));
     copy_loop_count = structure->loops.loop_count;
   }
   worker->transport = (loom_pipeline_transport_t){

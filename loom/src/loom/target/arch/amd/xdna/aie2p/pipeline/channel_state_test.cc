@@ -167,6 +167,53 @@ TEST(ChannelCursorTest, ExactCountRequiresEveryAdmissionSite) {
   }
 }
 
+TEST(ChannelCursorTest, CountedEndpointsShareOneCaptureAndConstruction) {
+  loom_pipeline_channel_repeat_t reads = {
+      .count = 5,
+      .minimum = 0,
+      .maximum = 256,
+      .multiple = 1,
+  };
+  loom_pipeline_channel_repeat_t writes = reads;
+  loom_pipeline_worker_t workers[] = {{.channel_repeat = &reads},
+                                      {.channel_repeat = &writes}};
+  loom_pipeline_invocation_t owners[2] = {};
+  loom_pipeline_invocation_worker_t instances[] = {{.invocation = &owners[0]},
+                                                   {.invocation = &owners[0]}};
+  loom_pipeline_realization_t realization = {
+      .invocations = {.workers = instances, .worker_count = 2},
+      .workers = workers,
+  };
+  loom_aie2p_native_channel_t channel = {
+      .cursor =
+          {
+              .reader = {.worker = UINT32_MAX},
+              .writer = {.worker = UINT32_MAX},
+          },
+  };
+  auto repeat = [&] {
+    return loom_aie2p_native_channel_repeat(&realization, &channel);
+  };
+  loom_aie2p_native_cursor_bind(&channel.cursor.reader, 2, 0, 256, false,
+                                false);
+  EXPECT_EQ(repeat(), nullptr);
+  loom_aie2p_native_cursor_bind(&channel.cursor.writer, 2, 1, 256, false,
+                                false);
+  EXPECT_EQ(repeat(), &reads);
+  // Identical ranges allow different runtime counts. A reused child formal
+  // also receives independent actual values in separate constructions.
+  ++writes.count;
+  EXPECT_EQ(repeat(), nullptr);
+  writes.count = reads.count;
+  instances[1].invocation = &owners[1];
+  EXPECT_EQ(repeat(), nullptr);
+  instances[1].invocation = &owners[0];
+  // An additional site on either side can leave the ring unbalanced.
+  loom_aie2p_native_cursor_bind(&channel.cursor.writer, 2, 1, 256, false,
+                                false);
+  EXPECT_EQ(repeat(), nullptr);
+}
+
 TEST(ChannelCursorTest, SaturatedAndSharedBoundsCannotProveCompletion) {
   for (uint32_t count : {UINT32_MAX - 1, UINT32_MAX}) {
     loom_aie2p_native_cursor_t cursor = {.worker = UINT32_MAX};

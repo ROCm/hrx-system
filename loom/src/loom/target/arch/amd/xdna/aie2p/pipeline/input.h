@@ -45,8 +45,8 @@ typedef struct loom_aie2p_native_input_phase_t {
   uint16_t descriptor;
   // Shim executions for one complete source address period.
   uint32_t repetitions;
-  // Shim-relative address-pair register for captured-origin preparation.
-  uint32_t address_register;
+  // Shim-relative first descriptor register for captured address or length.
+  uint32_t descriptor_register;
   // Immutable caller base for captured origins, or NULL for static addresses.
   const loom_aie2p_native_relocation_t* relocation;
   // Physical source geometry before framing and relocation.
@@ -80,6 +80,9 @@ typedef struct loom_aie2p_native_input_t {
   const loom_pipeline_invocation_t* invocation;
   // Complete phase counts from common transport analysis.
   const loom_pipeline_transport_input_t* source;
+  // Worker capture determining the valid prefix on each visit. NULL selects
+  // statically sized phases and their ordinary demand-driven continuations.
+  const loom_pipeline_channel_repeat_t* repeat;
   // Existing instruction worker controlling this input.
   uint32_t controller;
   // Exact demand observations, or NULL when the complete immutable source is

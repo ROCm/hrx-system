@@ -34,6 +34,9 @@ typedef struct loom_aie2p_native_cursor_t {
   // Every admission site has an exact execution count, and the aggregate
   // bound is unsaturated. Other conditional work does not change this count.
   bool exact_admissions;
+  // Exactly one record is admitted by one structural site of one worker.
+  // Its captured loop count therefore describes the whole endpoint.
+  bool single_site;
   // Several worker occurrences use this cursor. They require one physical
   // engine with disjoint lifetimes; single-owner completion proofs do not
   // apply.
@@ -61,6 +64,9 @@ typedef struct loom_aie2p_native_channel_t {
   uint32_t record_byte_length;
   // Logical payload elements occupy one contiguous byte range in order.
   bool record_dense;
+  // Both endpoints visit one record per unit of this invocation's capture.
+  // NULL for static rates, independent captures, or multiple admission sites.
+  const loom_pipeline_channel_repeat_t* repeat;
   // Credit balance accumulated as construction-grouped workers are selected.
   struct {
     // Last worker whose cursor counts have not yet been accumulated.
@@ -969,14 +975,32 @@ iree_status_t loom_aie2p_native_select_control_route(
 iree_status_t loom_aie2p_native_distribution_boundary(
     loom_aie2p_native_context_t* context, loom_builder_t* builder,
     iree_host_size_t worker_index, const loom_pipeline_invocation_t* invocation,
-    bool before);
+    bool before, loom_value_slice_t captures);
+
+// Materializes a bounded source offset or count for a 32-bit DMA field.
+iree_status_t loom_aie2p_native_queue_i32(loom_builder_t* builder,
+                                          loom_value_id_t value,
+                                          loom_value_id_t* out_value);
+
+// An empty transfer enqueues nothing. For a possibly empty prefix, leave
+// the builder on the positive-count path of a void submission helper.
+iree_status_t loom_aie2p_native_skip_empty(loom_aie2p_worker_builder_t* code,
+                                           loom_builder_t* builder,
+                                           loom_op_t* function,
+                                           loom_value_id_t count);
+
+// Builds a task word using a positive record count and the queue's encoding.
+iree_status_t loom_aie2p_native_counted_task(
+    loom_aie2p_worker_builder_t* code, loom_builder_t* builder,
+    loom_value_id_t count, uint32_t start,
+    loom_xdna_register_field_id_t repeat_field, loom_value_id_t* out_value);
 
 // Publishes the selected endpoint's ordered tasks after its owner initialized
 // any partial-ring iterator state.
 iree_status_t loom_aie2p_native_endpoint_start(
     loom_aie2p_native_context_t* context, loom_builder_t* builder,
     const loom_aie2p_native_distribution_endpoint_t* endpoint,
-    loom_xdna_dma_direction_t direction, uint8_t packet);
+    loom_xdna_dma_direction_t direction, uint8_t packet, loom_value_id_t count);
 
 // Observes complete native queue retirement through the selected controller's
 // exclusive scalar reply stream and leaves builder in the completion block.

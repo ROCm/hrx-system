@@ -653,6 +653,8 @@ static iree_status_t loom_pipeline_control_project(
       case LOOM_PIPELINE_CONTROL_COLLECTIVE_MEMBER:
         break;  // The acquire site consumes the complete closed borrow.
       case LOOM_PIPELINE_CONTROL_COMPOSITION: {
+        const loom_value_slice_t captures =
+            loom_call_like_operands(loom_call_like_cast(module, site->target));
         if (site->deferred) {
           if (projection != LOOM_PIPELINE_ENTRY_COMPLETE &&
               loom_pipeline_participants_worker(
@@ -660,7 +662,7 @@ static iree_status_t loom_pipeline_control_project(
                   IREE_HOST_SIZE_MAX) {
             IREE_RETURN_IF_ERROR(options->emit.boundary(
                 options->emit.user_data, &rewriter->builder, engine, NULL,
-                site->child, projection == LOOM_PIPELINE_ENTRY_START,
+                site->child, projection == LOOM_PIPELINE_ENTRY_START, captures,
                 state_arguments));
           }
           IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, site->target));
@@ -681,7 +683,7 @@ static iree_status_t loom_pipeline_control_project(
         if (options->emit.boundary) {
           IREE_RETURN_IF_ERROR(options->emit.boundary(
               options->emit.user_data, &rewriter->builder, engine, site->scope,
-              site->child, true, state_arguments));
+              site->child, true, captures, state_arguments));
         }
         const iree_host_size_t child = loom_pipeline_execution_index(
             execution, site->child->ordinal, engine);
@@ -692,7 +694,7 @@ static iree_status_t loom_pipeline_control_project(
         if (options->emit.boundary) {
           IREE_RETURN_IF_ERROR(options->emit.boundary(
               options->emit.user_data, &rewriter->builder, engine, site->scope,
-              site->child, false, state_arguments));
+              site->child, false, captures, state_arguments));
         }
         IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, site->target));
         break;
@@ -719,11 +721,13 @@ static iree_status_t loom_pipeline_control_project(
                 engine) != IREE_HOST_SIZE_MAX) {
           IREE_RETURN_IF_ERROR(options->emit.boundary(
               options->emit.user_data, &rewriter->builder, engine,
-              site->enclosing_scope, NULL, true, state_arguments));
+              site->enclosing_scope, NULL, true, (loom_value_slice_t){0},
+              state_arguments));
           loom_builder_set_before(&rewriter->builder, site->target->next_op);
           IREE_RETURN_IF_ERROR(options->emit.boundary(
               options->emit.user_data, &rewriter->builder, engine,
-              site->enclosing_scope, NULL, false, state_arguments));
+              site->enclosing_scope, NULL, false, (loom_value_slice_t){0},
+              state_arguments));
         }
         if (loom_pipeline_participants_worker(
                 loom_pipeline_execution_schedule(execution, site->scope)

@@ -74,9 +74,12 @@ class PhaseRetirementTest
     IREE_CHECK_OK(loom_aie2p_worker_helper(&context_.code, nullptr, 0, nullptr,
                                            0, &builder, &symbol, &function));
     IREE_CHECK_OK(loom_aie2p_native_distribution_boundary(
-        &context_, &builder, 0, invocation, false));
+        &context_, &builder, 0, invocation, false, {}));
     auto* call =
         loom_region_entry_block(loom_low_func_def_body(function))->first_op;
+    if (!call) {
+      return nullptr;
+    }
     EXPECT_TRUE(loom_low_invoke_isa(call));
     return module_->symbols.entries[loom_low_invoke_callee(call).symbol_id]
         .defining_op;
@@ -119,6 +122,7 @@ class PhaseRetirementTest
 TEST_P(PhaseRetirementTest, OneStaticSiteKeepsItsPollingBodyInline) {
   retirement_.use_count = 1;
   auto* boundary = Boundary(&invocation_);
+  ASSERT_NE(boundary, nullptr);
   EXPECT_FALSE(loom_symbol_ref_is_valid(retirement_.function));
   // The poll has a CFG backedge; it is not an empty helper or an outlined call.
   auto* body = loom_low_func_def_body(boundary);
@@ -134,6 +138,7 @@ TEST_P(PhaseRetirementTest, DistinctStaticSitesCallOneRetirementBody) {
   retirement_.use_count = 2;
   for (size_t site = 0; site < 2; ++site) {
     auto* boundary = Boundary(&invocation_);
+    ASSERT_NE(boundary, nullptr);
     ASSERT_TRUE(loom_symbol_ref_is_valid(retirement_.function));
     auto* block = loom_region_entry_block(loom_low_func_def_body(boundary));
     ASSERT_EQ(block->op_count, 2u);
@@ -153,22 +158,14 @@ TEST_P(PhaseRetirementTest, DistinctStaticSitesCallOneRetirementBody) {
 TEST_P(PhaseRetirementTest, AnotherChildDoesNotRetireThisEndpoint) {
   retirement_.use_count = 2;
   const loom_pipeline_invocation_t other = {};
-  auto* boundary = Boundary(&other);
-  auto* body = loom_low_func_def_body(boundary);
-  ASSERT_EQ(body->block_count, 1u);
-  ASSERT_EQ(body->blocks[0]->op_count, 1u);
-  EXPECT_TRUE(loom_low_return_isa(body->blocks[0]->first_op));
+  EXPECT_EQ(Boundary(&other), nullptr);
   EXPECT_FALSE(loom_symbol_ref_is_valid(retirement_.function));
 }
 
 TEST_P(PhaseRetirementTest, PrefixPublicationDoesNotRetireTheSharedQueue) {
   command_.retire = false;
   command_.retirement = nullptr;
-  auto* boundary = Boundary(&invocation_);
-  auto* body = loom_low_func_def_body(boundary);
-  ASSERT_EQ(body->block_count, 1u);
-  ASSERT_EQ(body->blocks[0]->op_count, 1u);
-  EXPECT_TRUE(loom_low_return_isa(body->blocks[0]->first_op));
+  EXPECT_EQ(Boundary(&invocation_), nullptr);
 }
 
 INSTANTIATE_TEST_SUITE_P(MemoryAndDirection, PhaseRetirementTest,

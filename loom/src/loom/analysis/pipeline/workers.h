@@ -166,7 +166,8 @@ typedef struct loom_pipeline_transport_input_phase_t {
   const loom_kernel_async_transfer_t* transfer;
   // Number of this phase's completed transfers within each source lifetime.
   uint64_t transfers;
-  // Transfer count before the source address repeats, dividing transfers.
+  // Address period in records. Zero denotes an affine prefix with a captured
+  // length and no address wrap. A fixed period divides the executed count.
   uint64_t period;
   // First byte relative to the acquired payload or enclosing storage root.
   int64_t source_byte_offset;
@@ -199,7 +200,9 @@ typedef struct loom_pipeline_transport_input_t {
 } loom_pipeline_transport_input_t;
 
 typedef struct loom_pipeline_transport_t {
-  // All observable sites in structural execution order, visiting loop bodies
+  // All observable sites in structural execution order. Counts in this plan
+  // describe one iteration when the worker has a captured channel repeat,
+  // or the complete invocation otherwise. The traversal visits loop bodies
   // before their continuations; NULL when ordinary execution is required.
   // Borrowed movement retains each site's execution scope, including admission
   // and release outside inner transfer loops. Record-batch lifetime and replay

@@ -91,3 +91,48 @@ pipeline.def public @test() run(%storage: buffer, %length: index) {
 
 // ----
 worker 0: transport=unproven execution_counts=unknown batches=0 streams=0
+
+// ====
+// RUN: emit pipeline-transport @test input
+
+// One transfer site advances 16 bytes on every visit. A bounded runtime
+// prefix has no fixed address wrap at the maximum count.
+func.def @read_prefix(%input: buffer, %records: channel<tile<4xi32>>, %count: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %record_bytes = index.constant 16 : index
+  cfg.br ^header(%begin: index)
+^header(%record: index):
+  %more = index.cmp ult, %record, %count : index
+  cfg.cond_br %more, ^copy, ^done
+^copy:
+  %position = index.mul %record, %record_bytes : index
+  %offset = index.cast %position : index to offset
+  %source = buffer.view %input[%offset] : buffer -> view<4xi32>
+  %write, %target = channel.reserve %records : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+  %copy = kernel.async.copy %source to %target {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.publish %write : write<tile<4xi32>>
+  %next = index.add %record, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def public @test() run(%external: buffer, %local: buffer, %length: index) {
+  %input = buffer.assume.memory_space<global> %external : buffer
+  %storage = buffer.assume.memory_space<workgroup> %local : buffer
+  %count = index.assume %length [range(%length, 0, 256)] : index
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x4xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<2x4xi32>, index -> channel<tile<4xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @read_prefix(%input, %records, %count) : (buffer, channel<tile<4xi32>>, index)
+  }
+}
+
+// ----
+worker 0: channel_count=%count argument=2 range=[0,256] multiple=1
+worker 0: repetitions=1 period=0 source_offset=0 source_stride=16 destination_offset=0
