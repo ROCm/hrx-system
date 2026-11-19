@@ -29,7 +29,7 @@ typedef struct loomc_cmd_native_entry_t {
   iree_host_size_t owned_bytes;
   // Independently reclaimable backing owned by this immutable entry.
   iree_arena_block_pool_t block_pool;
-  // Key and projection storage, never used by concurrent invocations.
+  // Immutable source metadata or bound-plan storage, filled before publication.
   iree_arena_allocator_t arena;
   // Selects the source or compact-plan ownership contract.
   bool is_plan;
@@ -162,7 +162,7 @@ static void loomc_cmd_native_source_free(loomc_cmd_native_source_t* source) {
     loomc_target_profile_release(source->targets.assignments[i].profile);
   }
   loomc_target_profile_release(source->deployment_profile);
-  loom_kernel_request_preparation_free(source->preparation);
+  loom_kernel_request_preparation_deinitialize(source->preparation);
   loomc_cmd_entry_free(&source->entry);
 }
 
@@ -293,9 +293,9 @@ static iree_status_t loomc_cmd_native_source_prepare(
   preparation_environment.block_pool = &source->entry.block_pool;
   preparation_environment.allocator = allocator;
   if (iree_status_is_ok(status)) {
-    status = loom_kernel_request_preparation_allocate(
+    status = loom_kernel_request_preparation_build(
         cache->index, &preparation_environment, symbol_ordinal,
-        &source->preparation);
+        &source->entry.arena, &source->preparation);
   }
   if (iree_status_is_ok(status) && source->preparation != NULL) {
     status = loomc_cmd_native_source_capture_key(source, &preparation_state);

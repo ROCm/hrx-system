@@ -84,19 +84,21 @@ typedef struct loom_kernel_request_provider_t {
   void* user_data;
 } loom_kernel_request_provider_t;
 
-// Prepares one immutable source independently of invocation scratch. Owns the
-// linked module, classifier analyses, and candidate-header backing. Borrows the
-// fixed index, context, and block pool until freed; the environment's callbacks
-// and user data are used only during this call and are never retained.
-// Rejection returns OK with a NULL preparation after emitting diagnostics.
-iree_status_t loom_kernel_request_preparation_allocate(
+// Builds an immutable source in |arena| and takes ownership of its linked
+// module and candidate headers. Classifier analyses and configuration keys
+// share the source owner's arena lifetime. The index, context, block pool,
+// and arena must outlive the preparation. Environment callbacks and user data
+// are used only during construction. Rejection emits diagnostics and returns
+// OK with a NULL preparation.
+iree_status_t loom_kernel_request_preparation_build(
     const loom_link_module_index_t* index,
     const loom_link_plan_materialization_environment_t* environment,
-    iree_host_size_t source_symbol_ordinal,
+    iree_host_size_t source_symbol_ordinal, iree_arena_allocator_t* arena,
     loom_kernel_request_preparation_t** out_preparation);
 
-// Releases every object owned by |preparation| before its backing pool retires.
-void loom_kernel_request_preparation_free(
+// Releases the owned module and headers before the source owner resets its
+// arena. Accepts NULL for a rejected or unpublished preparation.
+void loom_kernel_request_preparation_deinitialize(
     loom_kernel_request_preparation_t* preparation);
 
 // Returns names from the finalized configuration dependency closure, including
