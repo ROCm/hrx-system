@@ -786,8 +786,7 @@ ERR_LOWERING_075 = ErrorDef(
     message="a helper cannot declare workgroup storage '{variable_name}'",
     params=(ErrorParam("variable_name", ParamKind.STRING),),
     fix_hint=(
-        "Declare '{variable_name}' in the kernel or LOOM_TEMPLATE_DEF body "
-        "and pass it to the helper by pointer"
+        "Declare '{variable_name}' in the kernel and pass it to the helper by pointer"
     ),
 )
 

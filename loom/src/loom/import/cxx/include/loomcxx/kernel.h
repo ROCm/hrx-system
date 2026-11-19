@@ -38,8 +38,9 @@
 #define LOOM_KERNEL [[loom::kernel]]
 #define LOOM_DEVICE [[loom::device]]
 // Declares fixed-size, uninitialized storage shared by every invocation in a
-// workgroup. The kernel or LOOM_TEMPLATE_DEF body owns the declaration.
-// Helpers receive a pointer to the storage.
+// workgroup. Helpers receive a pointer from the kernel. If a LOOM_TEMPLATE_DEF
+// declares workgroup storage, each use must be reachable from a kernel, even
+// when a library function applies the template.
 #define LOOM_WORKGROUP [[loom::workgroup]]
 #define LOOM_INLINE [[loom::inline]] inline
 

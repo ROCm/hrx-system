@@ -227,7 +227,7 @@ kernel.def @update() {
 
 // ====
 // RUN: verify
-// Workgroup lifetime belongs to a kernel or selected template body.
+// A helper borrows its workgroup storage from the calling kernel.
 #include <loomcxx/kernel.h>
 void helper() {
   // ERROR@+1: LOWERING/075 {variable_name="slot"}

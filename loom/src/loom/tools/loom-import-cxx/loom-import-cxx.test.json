@@ -115,7 +115,7 @@
           "-:2:27: error [LOWERING/075]: a helper cannot declare workgroup storage 'tile'",
           "  [[loom::workgroup]] int tile[64];",
           "^^^^",
-          "= help: Declare 'tile' in the kernel or LOOM_TEMPLATE_DEF body and pass it to the helper by pointer"
+          "= help: Declare 'tile' in the kernel and pass it to the helper by pointer"
         ]
       }
     },
