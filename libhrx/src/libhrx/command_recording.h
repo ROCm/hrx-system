@@ -81,7 +81,7 @@ typedef struct hrx_command_copy_t {
 } hrx_command_copy_t;
 
 typedef struct hrx_command_copy_strided_t {
-  // Ordinary copy prefix; each row is one contiguous operation.
+  // Ordinary copy prefix; length is the useful byte count in each row.
   hrx_command_copy_t copy;
   // Number of rows in each slice.
   iree_device_size_t row_count;

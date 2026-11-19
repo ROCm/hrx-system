@@ -89,30 +89,34 @@ static iree_status_t hrx_command_record_copy(
         copy->flags);
   }
   const hrx_command_copy_strided_t* strided = (const void*)copy;
-  iree_status_t status = iree_ok_status();
-  for (iree_device_size_t z = 0;
-       iree_status_is_ok(status) && z < strided->slice_count; ++z) {
-    iree_device_size_t source_offset =
-        copy->source_offset + z * strided->source_slice_stride;
-    iree_device_size_t target_offset =
-        copy->target_offset + z * strided->target_slice_stride;
-    for (iree_device_size_t y = 0;
-         iree_status_is_ok(status) && y < strided->row_count; ++y) {
-      if (copy->source_buffer != copy->target_buffer ||
-          source_offset != target_offset) {
-        status = iree_hal_command_buffer_copy_buffer_linear(
-            command_buffer,
-            iree_hal_make_buffer_ref(copy->source_buffer, source_offset,
-                                     copy->length),
-            iree_hal_make_buffer_ref(copy->target_buffer, target_offset,
-                                     copy->length),
-            copy->flags);
-      }
-      source_offset += strided->source_row_stride;
-      target_offset += strided->target_row_stride;
-    }
+  if (copy->source_buffer == copy->target_buffer &&
+      copy->source_offset == copy->target_offset &&
+      (strided->row_count <= 1 ||
+       strided->source_row_stride == strided->target_row_stride) &&
+      (strided->slice_count <= 1 ||
+       strided->source_slice_stride == strided->target_slice_stride)) {
+    return iree_ok_status();
   }
-  return status;
+  const iree_hal_transfer_region_t region = {
+      .row_length = copy->length,
+      .row_count = strided->row_count,
+      .slice_count = strided->slice_count,
+      .source_strides = {strided->source_row_stride,
+                         strided->source_slice_stride},
+      .target_strides = {strided->target_row_stride,
+                         strided->target_slice_stride},
+  };
+  return iree_hal_command_buffer_copy_buffer(
+      command_buffer,
+      iree_hal_make_buffer_ref(copy->source_buffer, copy->source_offset,
+                               iree_hal_transfer_range_length(
+                                   region.row_length, region.row_count,
+                                   region.slice_count, &region.source_strides)),
+      iree_hal_make_buffer_ref(copy->target_buffer, copy->target_offset,
+                               iree_hal_transfer_range_length(
+                                   region.row_length, region.row_count,
+                                   region.slice_count, &region.target_strides)),
+      &region, copy->flags);
 }
 
 static iree_status_t hrx_graph_record_commands(
