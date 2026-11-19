@@ -24,6 +24,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_catalog.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_compile.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_replacement.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/code_banks.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/control_packet.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
 #include "loom/target/arch/amd/xdna/error_catalog.h"
@@ -93,6 +94,9 @@ struct loom_aie2p_configuration_plan_t {
   loom_aie2p_array_program_t* program;
   // Resident program loads in initialization order.
   loom_aie2p_configuration_load_t* loads;
+  // Original physical data reservations shared by all oversized pipeline
+  // workers.
+  const loom_aie2p_execution_plan_t* replacement_scope;
   // Fixed resident storage reservations indexed by physical tile.
   loom_aie2p_configuration_memory_t* memories;
   // Workers already counted in this plan's optional pipeline report.
@@ -1025,6 +1029,12 @@ static iree_status_t loom_aie2p_configuration_prepare_workers(
         !entry) {
       continue;
     }
+    // Only pipeline construction can attach a physical plan. It owns one
+    // transport scope per configuration and leaves the cores reset during load.
+    IREE_ASSERT(entry->scope->type == &loom_aie2p_execution_plan_type);
+    IREE_ASSERT(!plan->replacement_scope ||
+                &plan->replacement_scope->base == entry->scope);
+    plan->replacement_scope = (const loom_aie2p_execution_plan_t*)entry->scope;
     if (!maximum_lengths && entry->scope->lifetimes.loop_depths) {
       scope = entry->scope;
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -1074,16 +1084,23 @@ static iree_status_t loom_aie2p_configuration_begin_report(
   return iree_ok_status();
 }
 
+typedef struct loom_aie2p_catalog_rejection_t {
+  // Configuration load whose sender could not be placed.
+  const loom_op_t* op;
+  // Physical transport requirement reported if both bank orders fail.
+  iree_string_view_t requirement;
+} loom_aie2p_catalog_rejection_t;
+
 static iree_status_t loom_aie2p_configuration_place_workers(
     loom_aie2p_configuration_plan_t* plan,
     loom_aie2p_program_compiler_t* compiler,
     loom_aie2p_configuration_worker_set_t* worker_set,
-    const iree_host_size_t* code_owners,
+    const loom_aie2p_program_layout_t* layouts, const iree_host_size_t* order,
+    bool provisional, loom_aie2p_catalog_rejection_t* out_rejection,
     loom_target_compile_report_t* pending_reports, bool* out_materialized) {
   *out_materialized = false;
   const loom_aie2p_xdna_artifact_request_t* request = plan->request;
   loom_aie2p_xdna_tile_t* tiles = NULL;
-  const loom_pipeline_entry_scope_t* replacement_scope = NULL;
   loom_aie2p_code_transport_t transport = {0};
   loom_aie2p_program_catalog_t* catalogs = NULL;
   if (request->compile_report) {
@@ -1103,7 +1120,11 @@ static iree_status_t loom_aie2p_configuration_place_workers(
         request->scratch_arena, plan->entry->tile_count, sizeof(*tiles),
         (void**)&tiles));
   }
-  for (iree_host_size_t i = 0; i < plan->entry->tile_count; ++i) {
+  for (iree_host_size_t placement = 0; placement < plan->entry->tile_count;
+       ++placement) {
+    // Initialization records, tile payloads, reports, and catalogs all retain
+    // the authored load ordinal, independently of physical bank placement.
+    const iree_host_size_t i = order ? order[placement] : placement;
     const loom_aie2p_configuration_load_t* load = &plan->loads[i];
     loom_aie2p_program_object_t* program =
         worker_set->programs_by_symbol[load->source->symbol.symbol_id];
@@ -1113,19 +1134,10 @@ static iree_status_t loom_aie2p_configuration_place_workers(
         loom_xdna_array_tile_facts(plan->family, load->coordinate);
     if (program->contribution.realization.code.byte_length >
         facts->memory.program_capacity) {
-      const loom_pipeline_entry_binding_t* entry = load->source->pipeline_entry;
-      if (entry) {
-        IREE_RETURN_IF_ERROR(iree_arena_allocate(request->scratch_arena,
-                                                 sizeof(*program_layout),
-                                                 (void**)&program_layout));
-        IREE_RETURN_IF_ERROR(loom_aie2p_program_replacement_prepare(
-            load->source, load->function_owners, code_owners,
-            request->scratch_arena, program_layout));
-      }
       // A single lifetime cannot reuse instruction storage. Reject its exact
       // native size before reserving transport or compiling loading support.
-      if (!program_layout || program_layout->group_count == 1) {
-        if (code_owners) {
+      if (!layouts || layouts[i].group_count <= 1) {
+        if (provisional) {
           return iree_ok_status();
         }
         bool admitted = false;
@@ -1136,28 +1148,27 @@ static iree_status_t loom_aie2p_configuration_place_workers(
         ++plan->error_count;
         return iree_ok_status();
       }
-      // Pipeline construction owns one complete initialization/transport scope
-      // per configuration entry. Its initialization leaves cores reset; source
-      // IR cannot manufacture this retained binding on arbitrary register code.
-      IREE_ASSERT(entry->scope->type == &loom_aie2p_execution_plan_type);
-      if (!replacement_scope) {
-        replacement_scope = entry->scope;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(request->scratch_arena,
+                                               sizeof(*program_layout),
+                                               (void**)&program_layout));
+      *program_layout = layouts[i];
+      if (!catalogs) {
         IREE_RETURN_IF_ERROR(loom_aie2p_code_transport_initialize(
-            (const loom_aie2p_execution_plan_t*)replacement_scope,
-            plan->entry->tile_count, request->scratch_arena, &transport));
+            plan->replacement_scope, plan->entry->tile_count,
+            request->scratch_arena, &transport));
         IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
             request->scratch_arena, plan->entry->tile_count, sizeof(*catalogs),
             (void**)&catalogs));
         memset(catalogs, 0, plan->entry->tile_count * sizeof(*catalogs));
       }
-      IREE_ASSERT(entry->scope == replacement_scope);
       iree_string_view_t requirement;
       loom_aie2p_code_transport_select(&transport, load->coordinate,
                                        program_layout->group_count - 1,
                                        &binding, &requirement);
       if (!iree_string_view_is_empty(requirement)) {
-        return loom_aie2p_configuration_require(plan, load->op, requirement,
-                                                code_owners != NULL);
+        *out_rejection =
+            (loom_aie2p_catalog_rejection_t){load->op, requirement};
+        return iree_ok_status();
       }
       uint32_t* descriptors = NULL;
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -1185,7 +1196,7 @@ static iree_status_t loom_aie2p_configuration_place_workers(
         ++plan->error_count;
         return iree_ok_status();
       }
-      if (code_owners &&
+      if (provisional &&
           program_layout->byte_length > facts->memory.program_capacity) {
         return iree_ok_status();
       }
@@ -1194,7 +1205,7 @@ static iree_status_t loom_aie2p_configuration_place_workers(
           &requirement);
       if (!iree_string_view_is_empty(requirement)) {
         return loom_aie2p_configuration_require(plan, load->op, requirement,
-                                                code_owners != NULL);
+                                                provisional);
       }
       program = &program_layout->program;
     }
@@ -1216,7 +1227,7 @@ static iree_status_t loom_aie2p_configuration_place_workers(
         loom_xdna_array_physical_tile_index(plan->family, load->coordinate);
     IREE_RETURN_IF_ERROR(loom_aie2p_configuration_link(
         plan, load->op, &plan->memories[memory_index], program_layout,
-        code_owners != NULL, &tiles[i]));
+        provisional, &tiles[i]));
     if (!tiles[i].linked_tile) {
       return iree_ok_status();
     }
@@ -1227,7 +1238,7 @@ static iree_status_t loom_aie2p_configuration_place_workers(
           request->scratch_arena, &catalogs[i], &requirement));
       if (!iree_string_view_is_empty(requirement)) {
         return loom_aie2p_configuration_require(plan, load->op, requirement,
-                                                code_owners != NULL);
+                                                provisional);
       }
       if (plan->report) {
         const loom_source_storage_packing_range_t range = {
@@ -1237,13 +1248,13 @@ static iree_status_t loom_aie2p_configuration_place_workers(
       }
     }
   }
-  if (replacement_scope) {
+  if (catalogs) {
     iree_string_view_t requirement;
     IREE_RETURN_IF_ERROR(loom_aie2p_code_transport_finish(
         &transport, request->scratch_arena, &requirement));
     if (!iree_string_view_is_empty(requirement)) {
       return loom_aie2p_configuration_require(plan, plan->loads[0].op,
-                                              requirement, code_owners != NULL);
+                                              requirement, provisional);
     }
     IREE_RETURN_IF_ERROR(loom_aie2p_program_catalog_install(
         &transport, catalogs, plan->entry->tile_count, request->scratch_arena,
@@ -1255,6 +1266,106 @@ static iree_status_t loom_aie2p_configuration_place_workers(
         plan->report, (uint32_t)plan->entry->binding_count));
   }
   *out_materialized = true;
+  return iree_ok_status();
+}
+
+// Native retention can shrink a selected catalog. Try the ordinary binding
+// order first so programs it already admits retain their exact image. Failed
+// placement owns all of its temporary routes, linked objects, and report rows.
+static iree_status_t loom_aie2p_configuration_try_placement(
+    loom_aie2p_configuration_plan_t* plan,
+    loom_aie2p_program_compiler_t* compiler,
+    loom_aie2p_configuration_worker_set_t* worker_set,
+    const loom_aie2p_program_layout_t* layouts, const iree_host_size_t* order,
+    bool provisional, loom_aie2p_catalog_rejection_t* out_rejection,
+    bool* out_materialized) {
+  *out_rejection = (loom_aie2p_catalog_rejection_t){0};
+  const loom_aie2p_xdna_artifact_request_t* request = plan->request;
+  const iree_arena_checkpoint_t checkpoint =
+      iree_arena_checkpoint_save(request->scratch_arena);
+  const iree_host_size_t count = plan->entry->tile_count;
+  loom_target_compile_report_t* pending = NULL;
+  if (request->compile_report) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        request->scratch_arena, count, sizeof(*pending), (void**)&pending));
+    memset(pending, 0, count * sizeof(*pending));
+  }
+  iree_status_t status = loom_aie2p_configuration_place_workers(
+      plan, compiler, worker_set, layouts, order, provisional, out_rejection,
+      pending, out_materialized);
+  if (pending) {
+    for (iree_host_size_t i = 0; i < count; ++i) {
+      if (*out_materialized && iree_status_is_ok(status) &&
+          plan->loads[i].function_owners) {
+        status = loom_target_compile_report_record_entry_report(
+            request->compile_report, &pending[i]);
+      }
+      loom_target_compile_report_deinitialize(&pending[i]);
+    }
+  }
+  if (!*out_materialized && iree_status_is_ok(status) && !plan->error_count) {
+    for (iree_host_size_t i = 0; i < count; ++i) {
+      plan->memories[loom_xdna_array_physical_tile_index(
+                         plan->family, plan->loads[i].coordinate)]
+          .packing = NULL;
+    }
+    plan->report = NULL;
+    plan->reported_workers_by_symbol = NULL;
+    iree_arena_checkpoint_restore(&checkpoint);
+  }
+  return status;
+}
+
+static iree_status_t loom_aie2p_configuration_place_cut(
+    loom_aie2p_configuration_plan_t* plan,
+    loom_aie2p_program_compiler_t* compiler,
+    loom_aie2p_configuration_worker_set_t* worker_set,
+    const iree_host_size_t* code_owners, bool* out_materialized) {
+  iree_arena_allocator_t* arena = plan->request->scratch_arena;
+  const iree_arena_checkpoint_t checkpoint = iree_arena_checkpoint_save(arena);
+  const iree_host_size_t count = plan->entry->tile_count;
+  loom_aie2p_program_layout_t* layouts = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, count, sizeof(*layouts),
+                                                 (void**)&layouts));
+  memset(layouts, 0, count * sizeof(*layouts));
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    const loom_aie2p_configuration_load_t* load = &plan->loads[i];
+    if (load->function_owners) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_program_replacement_prepare(
+          load->source, load->function_owners, code_owners, arena,
+          &layouts[i]));
+    }
+  }
+  loom_aie2p_catalog_rejection_t rejected;
+  IREE_RETURN_IF_ERROR(loom_aie2p_configuration_try_placement(
+      plan, compiler, worker_set, layouts, NULL, code_owners != NULL, &rejected,
+      out_materialized));
+  if (rejected.op) {
+    loom_aie2p_code_catalog_demand_t* demands = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, count, sizeof(*demands), (void**)&demands));
+    for (iree_host_size_t i = 0; i < count; ++i) {
+      demands[i] = (loom_aie2p_code_catalog_demand_t){
+          .column = plan->loads[i].coordinate.column,
+          .descriptor_count =
+              layouts[i].group_count ? layouts[i].group_count - 1 : 0};
+    }
+    iree_host_size_t* order = NULL;
+    IREE_RETURN_IF_ERROR(loom_aie2p_code_banks_order(
+        plan->replacement_scope, demands, count, arena, &order));
+    if (order) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_configuration_try_placement(
+          plan, compiler, worker_set, layouts, order, code_owners != NULL,
+          &rejected, out_materialized));
+    }
+    if (rejected.op) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_configuration_require(
+          plan, rejected.op, rejected.requirement, code_owners != NULL));
+    }
+  }
+  if (!*out_materialized && !plan->error_count) {
+    iree_arena_checkpoint_restore(&checkpoint);
+  }
   return iree_ok_status();
 }
 
@@ -1276,47 +1387,22 @@ iree_status_t loom_aie2p_configuration_plan_materialize(
   const iree_host_size_t* code_owners = NULL;
   IREE_RETURN_IF_ERROR(loom_aie2p_configuration_prepare_workers(
       plan, compiler, worker_set, &code_owners));
-
   if (plan->error_count) {
     return iree_ok_status();
   }
-  if (code_owners) {
-    const iree_arena_checkpoint_t checkpoint =
-        iree_arena_checkpoint_save(request->scratch_arena);
-    const iree_host_size_t count = plan->entry->tile_count;
-    loom_target_compile_report_t* pending = NULL;
-    if (request->compile_report) {
-      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          request->scratch_arena, count, sizeof(*pending), (void**)&pending));
-      memset(pending, 0, count * sizeof(*pending));
-    }
-    iree_status_t status = loom_aie2p_configuration_place_workers(
-        plan, compiler, worker_set, code_owners, pending, out_materialized);
-    if (pending) {
-      for (iree_host_size_t i = 0; i < count; ++i) {
-        if (*out_materialized && iree_status_is_ok(status) &&
-            plan->loads[i].function_owners) {
-          status = loom_target_compile_report_record_entry_report(
-              request->compile_report, &pending[i]);
-        }
-        loom_target_compile_report_deinitialize(&pending[i]);
-      }
-    }
-    if (!iree_status_is_ok(status) || *out_materialized || plan->error_count) {
-      return status;
-    }
-    // The proposed overlay exceeded a physical limit after native relocation
-    // or transport admission. Keep the original construction grouping as a
-    // bounded alternative. Data reservations and detached leaves stay valid.
-    for (iree_host_size_t i = 0; i < count; ++i) {
-      plan->memories[loom_xdna_array_physical_tile_index(
-                         plan->family, plan->loads[i].coordinate)]
-          .packing = NULL;
-    }
-    plan->report = NULL;
-    plan->reported_workers_by_symbol = NULL;
-    iree_arena_checkpoint_restore(&checkpoint);
+  if (!plan->replacement_scope) {
+    loom_aie2p_catalog_rejection_t rejected;
+    return loom_aie2p_configuration_place_workers(plan, compiler, worker_set,
+                                                  NULL, NULL, false, &rejected,
+                                                  NULL, out_materialized);
   }
-  return loom_aie2p_configuration_place_workers(plan, compiler, worker_set,
-                                                NULL, NULL, out_materialized);
+  if (code_owners) {
+    IREE_RETURN_IF_ERROR(loom_aie2p_configuration_place_cut(
+        plan, compiler, worker_set, code_owners, out_materialized));
+    if (*out_materialized || plan->error_count) {
+      return iree_ok_status();
+    }
+  }
+  return loom_aie2p_configuration_place_cut(plan, compiler, worker_set, NULL,
+                                            out_materialized);
 }

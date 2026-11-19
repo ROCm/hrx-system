@@ -185,6 +185,15 @@ void loom_aie2p_code_transport_select(
       return;
     }
     engine = occupancy->mm2s_count;
+    // Data routes may have exhausted this parity without consuming its last
+    // engine. A code-only sender can start on the other bank directly.
+    if (descriptor_count >
+            bank_capacity - occupancy->descriptor_counts[engine & 1] &&
+        engine + 1 < facts->dma.channel_count_per_direction &&
+        descriptor_count <=
+            bank_capacity - occupancy->descriptor_counts[(engine + 1) & 1]) {
+      ++engine;
+    }
   }
   const uint16_t bank = engine & 1;
   if (descriptor_count > bank_capacity - occupancy->descriptor_counts[bank]) {
@@ -254,9 +263,10 @@ void loom_aie2p_code_transport_bind(
                                                        memory)];
   loom_aie2p_code_transport_sender_t* sender =
       &transport->senders[compute.column];
-  if (binding->engine == occupancy->mm2s_count) {
+  if (binding->engine >= occupancy->mm2s_count) {
     sender->tree = (loom_aie2p_array_route_tree_t){0};
-    sender->engine = occupancy->mm2s_count++;
+    sender->engine = binding->engine;
+    occupancy->mm2s_count = sender->engine + 1;
     sender->worker_count = 0;
   }
   occupancy->descriptor_counts[binding->engine & 1] += descriptor_count;

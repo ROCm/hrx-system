@@ -435,13 +435,14 @@ static iree_status_t loom_aie2p_program_replacement_compile_impl(
     // sizes, not the screening estimate, determine whether to keep the change.
     // The original native closure remains available with all loading calls.
     *out_selected = &candidates[0];
+    IREE_RETURN_IF_ERROR(loom_aie2p_program_layout_copy(
+        layout, native->function_count, arena, &selected_layout));
     IREE_RETURN_IF_ERROR(
-        loom_aie2p_program_layout_retain(native, 1, arena, layout));
-    IREE_RETURN_IF_ERROR(
-        loom_aie2p_program_replacement_compose(*out_selected, arena, layout));
-  } else {
-    *layout = selected_layout;
+        loom_aie2p_program_layout_retain(native, 1, arena, &selected_layout));
+    IREE_RETURN_IF_ERROR(loom_aie2p_program_replacement_compose(
+        *out_selected, arena, &selected_layout));
   }
+  *layout = selected_layout;
   loom_target_compile_report_t* report =
       request->compile_report ? &(*out_selected)->report : NULL;
   if (report) {

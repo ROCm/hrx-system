@@ -474,6 +474,13 @@ TEST_F(ExecutionPlanTest, CodeRequestsShareCommandsOnASaturatedColumn) {
       &context.routing, context.switches, &context.connections,
       &source_arena_));
   std::vector<loom_aie2p_execution_tile_t> occupancy(tile_count);
+  // Input DMA owns the even descriptors. Its MM2S sibling is idle, while the
+  // odd MM2S engine and its bank can carry all four code catalogs.
+  occupancy[1].descriptor_counts[0] =
+      loom_xdna_array_tile_kind_facts(family, LOOM_XDNA_TILE_KIND_MEMORY)
+          ->dma.buffer_descriptor_count /
+      2;
+  occupancy[1].s2mm_count = 1;
   const loom_aie2p_execution_plan_t selected = {
       .tiles = occupancy.data(),
       .routing = context.routing,
@@ -505,11 +512,14 @@ TEST_F(ExecutionPlanTest, CodeRequestsShareCommandsOnASaturatedColumn) {
     ASSERT_TRUE(iree_string_view_is_empty(requirement));
     EXPECT_EQ(binding.queue_packet, row == 3 ? 6u : 0u);
     EXPECT_EQ(binding.code_packet, row - 2u);
-    EXPECT_EQ(binding.engine, 0u);
+    EXPECT_EQ(binding.engine, 1u);
+    EXPECT_EQ(binding.first_descriptor, 24u + 2u * (row - 2u));
   }
   EXPECT_EQ(
       transport.plan.routing.link_channels.southbound[family->column_count],
       15u);
+  EXPECT_EQ(transport.plan.tiles[1].mm2s_count, 2u);
+  EXPECT_EQ(transport.plan.tiles[1].descriptor_counts[1], 8u);
   EXPECT_EQ(transport.plan.connections.group_count, 22u);
   bool saw_converged_request = false;
   for (size_t i = 0; i < transport.plan.routing.route_count; ++i) {
