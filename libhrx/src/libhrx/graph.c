@@ -2,29 +2,34 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "hrx_internal.h"
+#include "transfer.h"
 
 //===----------------------------------------------------------------------===//
 // Node and block allocation helpers
 //===----------------------------------------------------------------------===//
 
-static iree_status_t hrx_graph_allocate_node(iree_allocator_t allocator,
-                                             iree_host_size_t dependency_count,
-                                             iree_host_size_t extra_data_size,
-                                             hrx_graph_node_s** out_node,
-                                             uint8_t** out_extra_data) {
+static iree_status_t hrx_graph_allocate_node(
+    iree_allocator_t allocator, uint32_t payload_size,
+    const hrx_graph_node_t* dependencies, iree_host_size_t dependency_count,
+    iree_host_size_t extra_data_size, hrx_graph_node_s** out_node,
+    uint8_t** out_extra_data) {
   IREE_ASSERT_ARGUMENT(out_node);
   *out_node = NULL;
   if (out_extra_data) {
     *out_extra_data = NULL;
   }
 
+  if (dependency_count && !dependencies) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "graph dependencies require source storage");
+  }
   iree_host_size_t dependencies_size = 0;
   iree_host_size_t total_size = 0;
   if (dependency_count > UINT32_MAX ||
       !iree_host_size_checked_mul(dependency_count, sizeof(hrx_graph_node_s*),
                                   &dependencies_size) ||
-      !iree_host_size_checked_add(sizeof(hrx_graph_node_s), dependencies_size,
-                                  &total_size)) {
+      !iree_host_size_checked_add(sizeof(hrx_graph_node_s) + payload_size,
+                                  dependencies_size, &total_size)) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         "graph node dependencies exceed addressable storage");
@@ -46,6 +51,11 @@ static iree_status_t hrx_graph_allocate_node(iree_allocator_t allocator,
   hrx_graph_node_s* node = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(allocator, total_size, (void**)&node));
+  node->payload_size = payload_size;
+  node->dependency_count = (uint32_t)dependency_count;
+  if (dependency_count) {
+    memcpy(hrx_graph_node_dependencies(node), dependencies, dependencies_size);
+  }
   *out_node = node;
   if (out_extra_data && extra_data_size) {
     *out_extra_data = (uint8_t*)node + extra_data_offset;
@@ -227,14 +237,10 @@ hrx_status_t hrx_graph_add_empty_node(hrx_graph_t graph,
 
   hrx_graph_node_s* node = NULL;
   HRX_RETURN_AND_END_ZONE_IF_IREE_ERROR(
-      z0, hrx_graph_allocate_node(graph->arena_allocator, dep_count, 0, &node,
-                                  NULL));
+      z0, hrx_graph_allocate_node(graph->arena_allocator, 0, deps, dep_count, 0,
+                                  &node, NULL));
 
   node->type = HRX_GRAPH_NODE_TYPE_INTERNAL_EMPTY;
-  node->dependency_count = dep_count;
-  if (dep_count > 0) {
-    memcpy(node->dependencies, deps, dep_count * sizeof(*deps));
-  }
 
   iree_status_t status = hrx_graph_add_node_internal(graph, node);
   if (iree_status_is_ok(status) && out_node) {
@@ -284,16 +290,13 @@ hrx_status_t hrx_graph_add_kernel_node(
   uint8_t* extra_data = NULL;
   hrx_graph_node_s* node = NULL;
   HRX_RETURN_AND_END_ZONE_IF_IREE_ERROR(
-      z0, hrx_graph_allocate_node(graph->arena_allocator, dep_count, extra_size,
-                                  &node, &extra_data));
+      z0, hrx_graph_allocate_node(graph->arena_allocator,
+                                  sizeof(hrx_command_dispatch_t), deps,
+                                  dep_count, extra_size, &node, &extra_data));
 
   node->type = HRX_GRAPH_NODE_TYPE_INTERNAL_KERNEL;
-  node->dependency_count = dep_count;
-  if (dep_count > 0) {
-    memcpy(node->dependencies, deps, dep_count * sizeof(*deps));
-  }
 
-  hrx_command_dispatch_t* k = &node->attrs.kernel;
+  hrx_command_dispatch_t* k = (void*)node->payload;
   k->command.kind = HRX_COMMAND_DISPATCH;
   k->executable = attrs->executable->hal_executable;
   k->export_ordinal = attrs->export_ordinal;
@@ -350,7 +353,7 @@ static hrx_status_t hrx_graph_validate_buffer_ref(hrx_graph_t graph,
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                            "graph buffer belongs to another device group");
   }
-  if (ref.length == 0 || ref.offset > ref.buffer->size ||
+  if (ref.offset > ref.buffer->size ||
       ref.length > ref.buffer->size - ref.offset) {
     return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
                            "graph buffer reference is out of range");
@@ -360,32 +363,46 @@ static hrx_status_t hrx_graph_validate_buffer_ref(hrx_graph_t graph,
 
 static hrx_status_t hrx_graph_add_copy_buffer_node_internal(
     hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
-    hrx_buffer_ref_t src, hrx_buffer_ref_t dst, hrx_graph_node_t* out_node) {
+    const hrx_graph_copy_buffer_node_attrs_t* attrs,
+    const iree_hal_transfer_region_t* region, hrx_graph_node_t* out_node) {
+  const bool linear = iree_hal_transfer_range_is_linear(
+                          region->row_length, region->row_count,
+                          region->slice_count, &region->source_strides) &&
+                      iree_hal_transfer_range_is_linear(
+                          region->row_length, region->row_count,
+                          region->slice_count, &region->target_strides);
   hrx_graph_node_s* node = NULL;
+  const uint32_t payload_size =
+      linear ? sizeof(hrx_command_copy_t) : sizeof(hrx_command_copy_strided_t);
   iree_status_t allocation_status = hrx_graph_allocate_node(
-      graph->arena_allocator, dep_count, 0, &node, NULL);
+      graph->arena_allocator, payload_size, deps, dep_count, 0, &node, NULL);
   if (!iree_status_is_ok(allocation_status)) {
     return hrx_status_from_iree(allocation_status);
   }
-
   node->type = HRX_GRAPH_NODE_TYPE_INTERNAL_MEMCPY;
-  node->dependency_count = dep_count;
-  if (dep_count > 0) {
-    memcpy(node->dependencies, deps, dep_count * sizeof(*deps));
-  }
-
-  node->attrs.memcpy = (hrx_command_copy_t){
+  hrx_command_copy_t* copy = (void*)node->payload;
+  *copy = (hrx_command_copy_t){
       .command.kind = HRX_COMMAND_COPY,
-      .source_buffer = src.buffer->hal_buffer,
-      .source_offset = src.offset,
-      .target_buffer = dst.buffer->hal_buffer,
-      .target_offset = dst.offset,
-      .length = src.length,
+      .strided = !linear,
+      .source_buffer = attrs->src.buffer->hal_buffer,
+      .source_offset = attrs->src.offset,
+      .target_buffer = attrs->dst.buffer->hal_buffer,
+      .target_offset = attrs->dst.offset,
+      .length =
+          linear ? iree_hal_transfer_region_length(region) : region->row_length,
   };
-
-  iree_status_t status = hrx_graph_capture_buffer(graph, src.buffer);
+  if (!linear) {
+    hrx_command_copy_strided_t* strided = (void*)copy;
+    strided->row_count = region->row_count;
+    strided->slice_count = region->slice_count;
+    strided->source_row_stride = region->source_strides.row_stride;
+    strided->source_slice_stride = region->source_strides.slice_stride;
+    strided->target_row_stride = region->target_strides.row_stride;
+    strided->target_slice_stride = region->target_strides.slice_stride;
+  }
+  iree_status_t status = hrx_graph_capture_buffer(graph, attrs->src.buffer);
   if (iree_status_is_ok(status)) {
-    status = hrx_graph_capture_buffer(graph, dst.buffer);
+    status = hrx_graph_capture_buffer(graph, attrs->dst.buffer);
   }
   if (iree_status_is_ok(status)) {
     status = hrx_graph_add_node_internal(graph, node);
@@ -398,30 +415,39 @@ static hrx_status_t hrx_graph_add_copy_buffer_node_internal(
 
 static hrx_status_t hrx_graph_add_fill_buffer_node_internal(
     hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
-    hrx_buffer_ref_t dst, uint32_t pattern, size_t pattern_size,
-    hrx_graph_node_t* out_node) {
+    const hrx_graph_fill_buffer_node_attrs_t* attrs,
+    const iree_hal_fill_region_t* region, hrx_graph_node_t* out_node) {
+  const bool linear = iree_hal_transfer_range_is_linear(
+      region->row_length, region->row_count, region->slice_count,
+      &region->target_strides);
   hrx_graph_node_s* node = NULL;
+  const uint32_t payload_size =
+      linear ? sizeof(hrx_command_fill_t) : sizeof(hrx_command_fill_strided_t);
   iree_status_t allocation_status = hrx_graph_allocate_node(
-      graph->arena_allocator, dep_count, 0, &node, NULL);
+      graph->arena_allocator, payload_size, deps, dep_count, 0, &node, NULL);
   if (!iree_status_is_ok(allocation_status)) {
     return hrx_status_from_iree(allocation_status);
   }
-
   node->type = HRX_GRAPH_NODE_TYPE_INTERNAL_MEMSET;
-  node->dependency_count = dep_count;
-  if (dep_count > 0) {
-    memcpy(node->dependencies, deps, dep_count * sizeof(*deps));
-  }
-
-  node->attrs.memset = (hrx_command_fill_t){
+  hrx_command_fill_t* fill = (void*)node->payload;
+  *fill = (hrx_command_fill_t){
       .command.kind = HRX_COMMAND_FILL,
-      .target = iree_hal_make_buffer_ref(dst.buffer->hal_buffer, dst.offset,
-                                         dst.length),
-      .pattern = pattern,
-      .pattern_size = (uint8_t)pattern_size,
+      .pattern_size = (uint8_t)attrs->pattern_size,
+      .strided = !linear,
+      .pattern = attrs->pattern,
+      .target = iree_hal_make_buffer_ref(
+          attrs->dst.buffer->hal_buffer, attrs->dst.offset,
+          linear ? region->row_length * region->row_count * region->slice_count
+                 : region->row_length),
   };
-
-  iree_status_t status = hrx_graph_capture_buffer(graph, dst.buffer);
+  if (!linear) {
+    hrx_command_fill_strided_t* strided = (void*)fill;
+    strided->row_count = region->row_count;
+    strided->slice_count = region->slice_count;
+    strided->target_row_stride = region->target_strides.row_stride;
+    strided->target_slice_stride = region->target_strides.slice_stride;
+  }
+  iree_status_t status = hrx_graph_capture_buffer(graph, attrs->dst.buffer);
   if (iree_status_is_ok(status)) {
     status = hrx_graph_add_node_internal(graph, node);
   }
@@ -444,13 +470,27 @@ hrx_status_t hrx_graph_add_copy_buffer_node(
     status = hrx_graph_validate_buffer_ref(graph, attrs->dst,
                                            "copy destination buffer is NULL");
   }
-  if (hrx_status_is_ok(status) && attrs->src.length != attrs->dst.length) {
-    status = hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                             "copy source and destination lengths differ");
+  iree_hal_transfer_region_t region =
+      hrx_transfer_region_to_hal(&attrs->region);
+  if (!region.row_length || !region.row_count || !region.slice_count) {
+    region = (iree_hal_transfer_region_t){.row_count = 1, .slice_count = 1};
+  }
+  uint64_t length = 0;
+  if (hrx_status_is_ok(status) &&
+      (!iree_checked_mul_u64(region.row_length, region.row_count, &length) ||
+       !iree_checked_mul_u64(length, region.slice_count, &length) ||
+       !iree_hal_transfer_range_fits(0, region.row_length, region.row_count,
+                                     region.slice_count, &region.source_strides,
+                                     attrs->src.length) ||
+       !iree_hal_transfer_range_fits(0, region.row_length, region.row_count,
+                                     region.slice_count, &region.target_strides,
+                                     attrs->dst.length))) {
+    status = hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                             "copy geometry exceeds its buffer windows");
   }
   if (hrx_status_is_ok(status)) {
-    status = hrx_graph_add_copy_buffer_node_internal(
-        graph, deps, dep_count, attrs->src, attrs->dst, out_node);
+    status = hrx_graph_add_copy_buffer_node_internal(graph, deps, dep_count,
+                                                     attrs, &region, out_node);
   }
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -470,16 +510,33 @@ hrx_status_t hrx_graph_add_fill_buffer_node(
     status = hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                              "fill pattern size must be 1, 2, or 4");
   }
+  iree_hal_fill_region_t region = hrx_fill_region_to_hal(&attrs->region);
+  if (!region.row_length || !region.row_count || !region.slice_count) {
+    region = (iree_hal_fill_region_t){.row_count = 1, .slice_count = 1};
+  }
+  uint64_t length = 0;
   if (hrx_status_is_ok(status) &&
+      (!iree_checked_mul_u64(region.row_length, region.row_count, &length) ||
+       !iree_checked_mul_u64(length, region.slice_count, &length) ||
+       !iree_hal_transfer_range_fits(0, region.row_length, region.row_count,
+                                     region.slice_count, &region.target_strides,
+                                     attrs->dst.length))) {
+    status = hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                             "fill geometry exceeds its buffer window");
+  }
+  if (hrx_status_is_ok(status) && length &&
       (attrs->dst.offset % attrs->pattern_size != 0 ||
-       attrs->dst.length % attrs->pattern_size != 0)) {
+       region.row_length % attrs->pattern_size != 0 ||
+       (region.row_count > 1 &&
+        region.target_strides.row_stride % attrs->pattern_size != 0) ||
+       (region.slice_count > 1 &&
+        region.target_strides.slice_stride % attrs->pattern_size != 0))) {
     status = hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                              "fill range is not aligned to its pattern size");
   }
   if (hrx_status_is_ok(status)) {
-    status = hrx_graph_add_fill_buffer_node_internal(
-        graph, deps, dep_count, attrs->dst, attrs->pattern, attrs->pattern_size,
-        out_node);
+    status = hrx_graph_add_fill_buffer_node_internal(graph, deps, dep_count,
+                                                     attrs, &region, out_node);
   }
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -495,16 +552,14 @@ hrx_status_t hrx_graph_add_host_call_node(
 
   hrx_graph_node_s* node = NULL;
   HRX_RETURN_AND_END_ZONE_IF_IREE_ERROR(
-      z0, hrx_graph_allocate_node(graph->arena_allocator, dep_count, 0, &node,
-                                  NULL));
+      z0,
+      hrx_graph_allocate_node(graph->arena_allocator,
+                              sizeof(hrx_graph_host_call_node_attrs_internal_t),
+                              deps, dep_count, 0, &node, NULL));
 
   node->type = HRX_GRAPH_NODE_TYPE_INTERNAL_HOST_CALL;
-  node->dependency_count = dep_count;
-  if (dep_count > 0) {
-    memcpy(node->dependencies, deps, dep_count * sizeof(*deps));
-  }
 
-  hrx_graph_host_call_node_attrs_internal_t* h = &node->attrs.host;
+  hrx_graph_host_call_node_attrs_internal_t* h = (void*)node->payload;
   h->fn = attrs->fn;
   h->user_data = attrs->user_data;
 
@@ -570,11 +625,11 @@ iree_status_t hrx_graph_schedule_nodes(hrx_graph_node_block_t* node_blocks,
     for (iree_host_size_t i = 0; i < block->count; ++i) {
       hrx_graph_node_s* node = block->nodes[i];
       const uint32_t index = node->node_index;
-      analysis.sources[index] = &node->attrs;
+      analysis.sources[index] = node->payload;
       analysis.offsets[index + 1] = node->dependency_count;
       edge_count += node->dependency_count;
       if (hrx_graph_node_is_recordable(node->type)) {
-        const hrx_command_t* command = (const void*)&node->attrs;
+        const hrx_command_t* command = (const void*)node->payload;
         analysis.flags[index] =
             HRX_GRAPH_ANALYSIS_NODE_RECORDABLE |
             (command->kind << HRX_GRAPH_ANALYSIS_NODE_COMMAND_SHIFT);
@@ -591,8 +646,8 @@ iree_status_t hrx_graph_schedule_nodes(hrx_graph_node_block_t* node_blocks,
        iree_status_is_ok(status) && edge; edge = edge->next) {
     if (!edge->from || !edge->to || edge->from->node_index >= node_count ||
         edge->to->node_index >= node_count ||
-        analysis.sources[edge->from->node_index] != &edge->from->attrs ||
-        analysis.sources[edge->to->node_index] != &edge->to->attrs) {
+        analysis.sources[edge->from->node_index] != edge->from->payload ||
+        analysis.sources[edge->to->node_index] != edge->to->payload) {
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "dependency node does not belong to the graph");
     } else {
@@ -611,12 +666,13 @@ iree_status_t hrx_graph_schedule_nodes(hrx_graph_node_block_t* node_blocks,
   for (uint32_t i = 0; iree_status_is_ok(status) && i < analysis.node_count;
        ++i) {
     const hrx_graph_node_s* node =
-        iree_containerof(analysis.sources[i], hrx_graph_node_s, attrs);
+        iree_containerof(analysis.sources[i], hrx_graph_node_s, payload);
     for (uint32_t j = 0;
          iree_status_is_ok(status) && j < node->dependency_count; ++j) {
-      const hrx_graph_node_s* predecessor = node->dependencies[j];
+      const hrx_graph_node_s* predecessor =
+          hrx_graph_node_dependencies(node)[j];
       if (!predecessor || predecessor->node_index >= node_count ||
-          analysis.sources[predecessor->node_index] != &predecessor->attrs) {
+          analysis.sources[predecessor->node_index] != predecessor->payload) {
         status =
             iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                              "dependency node does not belong to the graph");

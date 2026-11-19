@@ -102,13 +102,28 @@ typedef struct hrx_command_fill_t {
   hrx_command_t command;
   // Size of the pattern in bytes, validated at construction.
   uint8_t pattern_size;
+  // Nonzero when inline row/slice geometry follows this structure.
+  uint8_t strided;
   // Repeated pattern value.
   uint32_t pattern;
   // Already translated HAL fill flags; no truncation.
   iree_hal_fill_flags_t flags;
-  // Exact destination range, including the resolved byte length.
+  // Destination origin and linear byte length, or row width when strided.
   iree_hal_buffer_ref_t target;
 } hrx_command_fill_t;
+
+typedef struct hrx_command_fill_strided_t {
+  // Ordinary fill prefix; target.length is the useful byte count in each row.
+  hrx_command_fill_t fill;
+  // Number of rows in each slice.
+  iree_device_size_t row_count;
+  // Number of slices.
+  iree_device_size_t slice_count;
+  // Destination byte displacement between rows.
+  iree_device_size_t target_row_stride;
+  // Destination byte displacement between slices.
+  iree_device_size_t target_slice_stride;
+} hrx_command_fill_strided_t;
 
 // Operation represented by one atomic batch entry.
 typedef enum hrx_atomic_operation_kind_e {

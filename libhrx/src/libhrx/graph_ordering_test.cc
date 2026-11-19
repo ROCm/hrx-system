@@ -193,6 +193,12 @@ class GraphOrderingTest : public ::testing::Test {
           .dst = {buffer_, i * sizeof(uint32_t), sizeof(uint32_t)},
           .pattern = static_cast<uint32_t>(i + 1),
           .pattern_size = sizeof(uint32_t),
+          .region =
+              {
+                  .row_length = sizeof(uint32_t),
+                  .row_count = 1,
+                  .slice_count = 1,
+              },
       };
       IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_fill_buffer_node(
           graph_, dependency ? &dependency : nullptr, dependency ? 1 : 0,
@@ -565,6 +571,12 @@ TEST_P(GraphStreamWaitTest, CompletedExternalWaitPreservesPendingStreamWork) {
   const hrx_graph_copy_buffer_node_attrs_t copy = {
       .src = {buffer_, 0, sizeof(pattern)},
       .dst = {buffer_, sizeof(pattern), sizeof(pattern)},
+      .region =
+          {
+              .row_length = sizeof(pattern),
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   IREE_ASSERT_OK(hrx_status_to_iree(
       hrx_graph_add_copy_buffer_node(graph_, nullptr, 0, &copy, nullptr)));

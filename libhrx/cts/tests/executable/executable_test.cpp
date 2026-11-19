@@ -436,6 +436,12 @@ TEST_CASE_METHOD(GraphVisibilityTest,
       .dst = {buffer_, 0, sizeof(uint32_t)},
       .pattern = kInput,
       .pattern_size = sizeof(uint32_t),
+      .region =
+          {
+              .row_length = sizeof(uint32_t),
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   hrx_graph_node_t fill = nullptr;
   REQUIRE_OK(
@@ -443,6 +449,12 @@ TEST_CASE_METHOD(GraphVisibilityTest,
   const hrx_graph_copy_buffer_node_attrs_t input_copy_attrs = {
       .src = {buffer_, 0, sizeof(uint32_t)},
       .dst = {buffer_, 64 * sizeof(uint32_t), sizeof(uint32_t)},
+      .region =
+          {
+              .row_length = sizeof(uint32_t),
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   hrx_graph_node_t input_copy = nullptr;
   REQUIRE_OK(hrx().graph_add_copy_buffer_node(graph_, &fill, 1,
@@ -452,6 +464,12 @@ TEST_CASE_METHOD(GraphVisibilityTest,
   const hrx_graph_copy_buffer_node_attrs_t output_copy_attrs = {
       .src = {buffer_, 192 * sizeof(uint32_t), sizeof(uint32_t)},
       .dst = {buffer_, 224 * sizeof(uint32_t), sizeof(uint32_t)},
+      .region =
+          {
+              .row_length = sizeof(uint32_t),
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   REQUIRE_OK(hrx().graph_add_copy_buffer_node(graph_, &second_dispatch, 1,
                                               &output_copy_attrs, nullptr));

@@ -158,6 +158,12 @@ TEST_CASE_METHOD(HrxTestFixture,
     const hrx_graph_copy_buffer_node_attrs_t copy = {
         .src = {resources.source, 0, sizeof(input)},
         .dst = {resources.target, 0, sizeof(output)},
+        .region =
+            {
+                .row_length = sizeof(input),
+                .row_count = 1,
+                .slice_count = 1,
+            },
     };
     hrx_graph_node_t copy_node = nullptr;
     REQUIRE_OK(hrx().graph_add_copy_buffer_node(resources.graph, nullptr, 0,
@@ -166,6 +172,12 @@ TEST_CASE_METHOD(HrxTestFixture,
         .dst = {resources.target, 16 * sizeof(uint32_t), 8 * sizeof(uint32_t)},
         .pattern = 0xAABBCCDD,
         .pattern_size = sizeof(uint32_t),
+        .region =
+            {
+                .row_length = 8 * sizeof(uint32_t),
+                .row_count = 1,
+                .slice_count = 1,
+            },
     };
     REQUIRE_OK(hrx().graph_add_fill_buffer_node(resources.graph, &copy_node, 1,
                                                 &fill, nullptr));
@@ -223,6 +235,12 @@ TEST_CASE_METHOD(HrxTestFixture,
       .dst = {resources.target, 0, sizeof(output)},
       .pattern = 0xAABBCCDD,
       .pattern_size = sizeof(uint32_t),
+      .region =
+          {
+              .row_length = sizeof(output),
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   REQUIRE_OK(hrx().graph_add_fill_buffer_node(resources.graph, nullptr, 0,
                                               &fill, nullptr));

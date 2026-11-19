@@ -263,6 +263,12 @@ TEST(DeviceGroupTest, SharedReservationHasPerDeviceAddressesAndGraphAccess) {
       .dst = {buffer, 0, 256},
       .pattern = 0xA5A5A5A5u,
       .pattern_size = 4,
+      .region =
+          {
+              .row_length = 256,
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   hrx_graph_node_t node = nullptr;
   ASSERT_TRUE(
@@ -443,6 +449,12 @@ TEST_F(DeviceGroupLifetimeTest, GraphKeepsRecordingAndExecutionOwnersAlive) {
       .dst = {buffer, 0, sizeof(values)},
       .pattern = 0xA5A5A5A5u,
       .pattern_size = 4,
+      .region =
+          {
+              .row_length = sizeof(values),
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   hrx_graph_node_t node = nullptr;
   ASSERT_TRUE(

@@ -227,6 +227,12 @@ TEST_F(StreamTest, GraphReplayUsesAnotherQueueInTheRecordingFamily) {
       .dst = {buffer.get(), 0, 64},
       .pattern = 0xAABBCCDD,
       .pattern_size = sizeof(uint32_t),
+      .region =
+          {
+              .row_length = 64,
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   IREE_ASSERT_OK(hrx_status_to_iree(
       hrx_graph_add_fill_buffer_node(graph.get(), nullptr, 0, &fill, nullptr)));

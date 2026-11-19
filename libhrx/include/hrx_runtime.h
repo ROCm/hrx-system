@@ -411,7 +411,7 @@ typedef struct hrx_buffer_ref_t {
   hrx_buffer_t buffer;
   // First byte relative to the buffer.
   size_t offset;
-  // Number of bytes accessed.
+  // Accessible byte count from offset; geometry may leave padding untouched.
   size_t length;
 } hrx_buffer_ref_t;
 
@@ -916,26 +916,31 @@ typedef struct hrx_graph_kernel_node_attrs_t {
   uint32_t flags;
 } hrx_graph_kernel_node_attrs_t;
 
-// Native handle-based buffer copy. Source and destination lengths must be
-// equal and nonzero. The graph retains the native buffer handles;
-// the caller keeps their pools and allocation epochs live for every launch.
+// Native handle-based buffer copy. Geometry is captured when the node is added;
+// each reference independently bounds its addressed span. The graph retains
+// the native buffer handles; the caller keeps their pools and allocation
+// epochs live for every launch.
 typedef struct hrx_graph_copy_buffer_node_attrs_t {
-  // Source byte range.
+  // Accessible source byte window, including any inter-row padding.
   hrx_buffer_ref_t src;
-  // Destination byte range, with the same length as |src|.
+  // Accessible destination byte window, independent of the source window.
   hrx_buffer_ref_t dst;
+  // Useful byte extent and independent endpoint strides, copied into the node.
+  hrx_transfer_region_t region;
 } hrx_graph_copy_buffer_node_attrs_t;
 
 // Native handle-based buffer fill. |pattern_size| must be 1, 2, or 4 and the
-// destination offset and length must be integral multiples of it. Pattern
-// bytes are copied into the graph node during recording.
+// destination offset, row length, and used strides must be multiples of it.
+// Pattern bytes are copied into the graph node during recording.
 typedef struct hrx_graph_fill_buffer_node_attrs_t {
-  // Destination byte range.
+  // Accessible destination byte window, including any inter-row padding.
   hrx_buffer_ref_t dst;
   // Repeated pattern, using the first |pattern_size| bytes.
   uint32_t pattern;
   // Number of pattern bytes: 1, 2, or 4.
   size_t pattern_size;
+  // Useful byte extent and destination strides, copied into the node.
+  hrx_fill_region_t region;
 } hrx_graph_fill_buffer_node_attrs_t;
 
 typedef struct hrx_graph_host_call_node_attrs_t {

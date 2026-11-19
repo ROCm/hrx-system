@@ -285,6 +285,12 @@ class HrxRuntime {
             .src = {buffer_, ((value_bias + 1) * count + i) * byte_length,
                     byte_length},
             .dst = binding,
+            .region =
+                {
+                    .row_length = byte_length,
+                    .row_count = 1,
+                    .slice_count = 1,
+                },
         };
         Check(api_.graph_add_copy_buffer_node(*out_graph,
                                               previous ? &previous : nullptr,
@@ -294,6 +300,12 @@ class HrxRuntime {
             .dst = binding,
             .pattern = value,
             .pattern_size = sizeof(value),
+            .region =
+                {
+                    .row_length = binding.length,
+                    .row_count = 1,
+                    .slice_count = 1,
+                },
         };
         Check(api_.graph_add_fill_buffer_node(*out_graph,
                                               previous ? &previous : nullptr,

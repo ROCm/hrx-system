@@ -119,6 +119,33 @@ static iree_status_t hrx_command_record_copy(
       &region, copy->flags);
 }
 
+static iree_status_t hrx_command_record_fill(
+    iree_hal_command_buffer_t* command_buffer, const hrx_command_fill_t* fill) {
+  if (!fill->target.length) {
+    return iree_ok_status();
+  }
+  if (!fill->strided) {
+    return iree_hal_command_buffer_fill_buffer_linear(
+        command_buffer, fill->target, &fill->pattern, fill->pattern_size,
+        fill->flags);
+  }
+  const hrx_command_fill_strided_t* strided = (const void*)fill;
+  const iree_hal_fill_region_t region = {
+      .row_length = fill->target.length,
+      .row_count = strided->row_count,
+      .slice_count = strided->slice_count,
+      .target_strides = {strided->target_row_stride,
+                         strided->target_slice_stride},
+  };
+  iree_hal_buffer_ref_t target = fill->target;
+  target.length = iree_hal_transfer_range_length(
+      region.row_length, region.row_count, region.slice_count,
+      &region.target_strides);
+  return iree_hal_command_buffer_fill_buffer(command_buffer, target,
+                                             &fill->pattern, fill->pattern_size,
+                                             &region, fill->flags);
+}
+
 static iree_status_t hrx_graph_record_commands(
     const hrx_graph_schedule_t* schedule, uint32_t node_start_index,
     uint32_t node_count, uint8_t stream_index,
@@ -156,9 +183,7 @@ static iree_status_t hrx_graph_record_commands(
       }
       case HRX_COMMAND_FILL: {
         const hrx_command_fill_t* fill = (const void*)command;
-        status = iree_hal_command_buffer_fill_buffer_linear(
-            command_buffer, fill->target, &fill->pattern, fill->pattern_size,
-            fill->flags);
+        status = hrx_command_record_fill(command_buffer, fill);
         break;
       }
       case HRX_COMMAND_ATOMIC_BATCH: {
