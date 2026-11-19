@@ -641,7 +641,7 @@ amdf_memory_query_access_info(amdf_memory_t* memory, uint32_t access_ordinal,
   if (memory == NULL) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
-  const amdf_status_t status = amdf_structure_validate_output_extension(
+  const amdf_status_t status = amdf_structure_validate_extension(
       out_info, AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
       (uint32_t)sizeof(amdf_memory_access_info_t),
       AMDF_STRUCTURE_TYPE_MEMORY_PROGRAM_ATOMICS,
@@ -818,7 +818,7 @@ amdf_memory_query_pair_info(const amdf_memory_site_t* producer_site,
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  status = amdf_structure_validate_output_extension(
+  status = amdf_structure_validate_extension(
       out_info, AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
       (uint32_t)sizeof(amdf_memory_pair_info_t),
       AMDF_STRUCTURE_TYPE_MEMORY_PAIR_ATOMICS,

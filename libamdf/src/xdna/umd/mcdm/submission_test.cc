@@ -92,18 +92,10 @@ TEST_P(WindowsXdnaSubmissionProtocolTest,
       direct ? 120
              : (GetParam() == AMDF_WINDOWS_XDNA_PROTOCOL_METADATA ? 104 : 88);
   const size_t response_offset = direct ? 0x38 : 0x30;
-  amdf_xdna_transaction_interpreter_packet_t packet = {};
-  amdf_xdna_transaction_interpreter_packet_build(UINT64_C(0x04008000), 300,
-                                                 &packet);
-  EXPECT_EQ(ReadU32(packet.bytes, 0x00), 0x30010001u);
-  EXPECT_EQ(ReadU32(packet.bytes, 0x04), 1u);
-  EXPECT_EQ(ReadU32(packet.bytes, 0x08), 3u);
-  EXPECT_EQ(ReadU64(packet.bytes, 0x10), UINT64_C(0x04008000));
-  EXPECT_EQ(ReadU32(packet.bytes, 0x18), 75u);
-  for (size_t i = 0x1C; i < sizeof(packet); ++i) {
-    EXPECT_EQ(packet.bytes[i], 0);
-  }
-
+  const amdf_xdna_umd_kernel_command_t instructions = {
+      .instruction_address = UINT64_C(0x123404008000),
+      .instruction_byte_length = 300,
+  };
   std::array<uint8_t, 32768> command_bytes = {};
   amdf_windows_xdna_private_allocation_t execution = {};
   execution.allocation = 0x30;
@@ -112,26 +104,52 @@ TEST_P(WindowsXdnaSubmissionProtocolTest,
   command.device_address = UINT64_C(0x100000000);
   command.host_pointer = command_bytes.data();
   amdf_windows_xdna_submission_t submission = {};
-  for (uint32_t cell_offset : {0u, 8u, 4096u, 32760u}) {
-    SCOPED_TRACE(cell_offset);
-    amdf_windows_xdna_submission_build_execute(
-        GetParam(), &execution, &command, cell_offset, &packet, &submission);
-    EXPECT_EQ(submission.byte_length, header_length + 512u);
-    EXPECT_EQ(ReadU64(submission.bytes, 0x00), 3u);
-    EXPECT_EQ(ReadU64(submission.bytes, 0x08), 0x30u);
-    EXPECT_EQ(ReadU64(submission.bytes, 0x10), 68u);
-    EXPECT_EQ(ReadU64(submission.bytes, 0x28), 0x20u);
-    if (direct) {
-      EXPECT_EQ(ReadU64(submission.bytes, 0x30), command.device_address);
+  for (bool elf : {false, true}) {
+    SCOPED_TRACE(elf);
+    for (uint32_t cell_offset : {0u, 8u, 4096u, 32760u}) {
+      SCOPED_TRACE(cell_offset);
+      alignas(uint32_t) std::array<uint8_t, 512> packet;
+      packet.fill(0xA5);
+      const uint32_t length = amdf_windows_xdna_submission_build_execute(
+          GetParam(), elf, &execution, &command, cell_offset, &instructions,
+          packet.data(), &submission);
+      ASSERT_EQ(length, elf ? 48u : 68u);
+      EXPECT_EQ(packet[length], 0xA5u);
+      EXPECT_EQ(ReadU32(packet.data(), 0), elf ? 0x3B00B001u : 0x30010001u);
+      EXPECT_EQ(ReadU32(packet.data(), 4), 1u);
+      EXPECT_EQ(ReadU64(packet.data(), elf ? 8 : 16),
+                instructions.instruction_address);
+      EXPECT_EQ(ReadU32(packet.data(), elf ? 32 : 24), elf ? 300u : 75u);
+      if (elf) {
+        // A recycled slot must not supply save/restore addresses or lengths.
+        EXPECT_EQ(ReadU64(packet.data(), 16), 0u);
+        EXPECT_EQ(ReadU64(packet.data(), 24), 0u);
+        EXPECT_EQ(ReadU64(packet.data(), 36), 0u);
+        EXPECT_EQ(ReadU32(packet.data(), 44), 0u);
+      } else {
+        EXPECT_EQ(ReadU32(packet.data(), 8), 3u);
+        for (size_t i = 28; i < length; ++i) {
+          EXPECT_EQ(packet[i], 0u);
+        }
+      }
+      EXPECT_EQ(submission.byte_length, header_length + 512u);
+      EXPECT_EQ(ReadU64(submission.bytes, 0x00), 3u);
+      EXPECT_EQ(ReadU64(submission.bytes, 0x08), 0x30u);
+      EXPECT_EQ(ReadU64(submission.bytes, 0x10), length);
+      EXPECT_EQ(ReadU64(submission.bytes, 0x28), 0x20u);
+      if (direct) {
+        EXPECT_EQ(ReadU64(submission.bytes, 0x30), command.device_address);
+      }
+      EXPECT_EQ(ReadU64(submission.bytes, 0x48), 0u);
+      EXPECT_EQ(ReadU32(submission.bytes, response_offset), cell_offset);
+      EXPECT_EQ(ReadU32(submission.bytes, response_offset + 4), 8u);
+      EXPECT_EQ(
+          ReadU64(submission.bytes, response_offset + 8),
+          reinterpret_cast<uintptr_t>(command_bytes.data() + cell_offset));
+      EXPECT_EQ(
+          std::memcmp(submission.bytes + header_length, packet.data(), length),
+          0);
     }
-    EXPECT_EQ(ReadU64(submission.bytes, 0x48), 0u);
-    EXPECT_EQ(ReadU32(submission.bytes, response_offset), cell_offset);
-    EXPECT_EQ(ReadU32(submission.bytes, response_offset + 4), 8u);
-    EXPECT_EQ(ReadU64(submission.bytes, response_offset + 8),
-              reinterpret_cast<uintptr_t>(command_bytes.data() + cell_offset));
-    EXPECT_EQ(std::memcmp(submission.bytes + header_length, packet.bytes,
-                          sizeof(packet.bytes)),
-              0);
   }
 }
 

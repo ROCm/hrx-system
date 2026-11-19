@@ -11,9 +11,10 @@
 
 amdf_status_t amdf_xdna_umd_kernel_queue_create(
     amdf_xdna_umd_context_t* context, uint32_t capacity,
+    amdf_xdna_instruction_features_t required_features,
     amdf_xdna_umd_kernel_queue_t** out_queue) {
   const amdf_status_t status = amdf_windows_xdna_kernel_execution_acquire_queue(
-      context->kernel_execution, capacity);
+      context->kernel_execution, capacity, required_features);
   if (amdf_status_is_ok(status)) {
     // One public queue exclusively leases this context's native execution
     // state. The lease owns its packet storage; it needs no additional owner.

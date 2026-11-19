@@ -68,13 +68,4 @@ TEST_P(Aie2pNpu2Test, RejectsInvalidContextWidths) {
   EXPECT_EQ(target.context.column_count, 3u);
 }
 
-TEST_P(Aie2pNpu2Test, RejectsUnknownDeviceWithoutPublishing) {
-  iree_hal_amd_xdna_aie2p_target_t target = MakeTarget();
-  IREE_EXPECT_STATUS_IS(StatusCode::kUnimplemented,
-                        iree_hal_amd_xdna_aie2p_npu2_target_initialize(
-                            IREE_SV("amd.xdna.strix.17f0_ff"), 1, &target));
-  EXPECT_EQ(target.identity.device_profile_id, GetParam().identity);
-  EXPECT_EQ(target.context.column_count, 3u);
-}
-
 }  // namespace

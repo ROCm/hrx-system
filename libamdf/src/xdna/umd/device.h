@@ -46,6 +46,8 @@ typedef struct amdf_xdna_umd_device_result_t {
   uint64_t reset_epoch;
   // Effective binding context placement contracts after native qualification.
   amdf_xdna_placement_modes_t placement_modes;
+  // Transaction operations admitted by the active native command transport.
+  amdf_xdna_instruction_features_t instruction_features;
   // Native layout used by all contexts created on this device.
   amdf_xdna_umd_tile_metadata_t tiles;
 } amdf_xdna_umd_device_result_t;
@@ -56,8 +58,6 @@ typedef struct amdf_xdna_umd_context_capabilities_t {
   amdf_xdna_scheduling_modes_t scheduling_modes;
   // Binding physical placement contracts available to those contexts.
   amdf_xdna_placement_modes_t placement_modes;
-  // Optional transaction operations implemented by this admission path.
-  amdf_xdna_instruction_features_t instruction_features;
 } amdf_xdna_umd_context_capabilities_t;
 
 // Returns expected context admission contracts from the profile and implemented

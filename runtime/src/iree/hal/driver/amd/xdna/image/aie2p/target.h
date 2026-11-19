@@ -19,7 +19,7 @@ typedef struct iree_hal_amd_xdna_aie2p_target_t {
   struct {
     // Incompatible revision of the device profile.
     uint32_t device_profile_revision;
-    // Complete execution-profile identity.
+    // Profile embedded in native Loom ELFs, or zero for an unassigned endpoint.
     uint64_t device_profile_id;
     // Native firmware protocol identity.
     uint64_t firmware_abi_id;

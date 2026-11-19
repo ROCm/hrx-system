@@ -92,10 +92,10 @@ amdf_cc_library(
         ":buffer",
         ":context_state",
         ":device_state",
-        ":elf_packet",
         "//libamdf/src:allocator",
         "//libamdf/src/platform/linux:file",
         "//libamdf/src/platform/linux:host_cache",
+        "//libamdf/src/xdna:elf_packet",
         "//libamdf/src/xdna/umd:context",
         "//third_party:linux_xdna_uapi",
     ],
@@ -177,7 +177,6 @@ amdf_cc_library(
         ":context",
         ":context_state",
         ":device_state",
-        ":elf_packet",
         "//libamdf/src:allocator",
         "//libamdf/src:atomics",
         "//libamdf/src:wait",
@@ -185,6 +184,7 @@ amdf_cc_library(
         "//libamdf/src/platform:wait",
         "//libamdf/src/platform/linux:file",
         "//libamdf/src/platform/linux:native_event",
+        "//libamdf/src/xdna:elf_packet",
         "//libamdf/src/xdna/umd:kernel_queue",
         "//third_party:linux_xdna_uapi",
     ],
@@ -212,11 +212,11 @@ amdf_cc_test(
     target_compatible_with = DRM_COMPATIBILITY,
     deps = [
         ":context_state",
-        ":elf_packet",
         ":kernel_queue",
         "//libamdf/src:allocator",
         "//libamdf/src:atomics",
         "//libamdf/src:wait",
+        "//libamdf/src/xdna:elf_packet",
         "//libamdf/src/xdna/umd:kernel_queue",
         "//third_party:google_test",
         "//third_party:google_test_main",
@@ -252,13 +252,6 @@ amdf_cc_test(
         "//third_party:linux_drm_uapi",
         "//third_party:linux_xdna_uapi",
     ],
-)
-
-amdf_cc_library(
-    name = "elf_packet",
-    srcs = ["elf_packet.c"],
-    hdrs = ["elf_packet.h"],
-    target_compatible_with = DRM_COMPATIBILITY,
 )
 
 amdf_cc_library(

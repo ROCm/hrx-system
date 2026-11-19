@@ -166,7 +166,7 @@ class XdnaKernelQueueTest : public ::testing::Test {
     ASSERT_EQ(CreateQueue(0), AMDF_STATUS_OK);
   }
 
-  amdf_status_t CreateQueue(uint32_t capacity) {
+  amdf_status_t CreateQueue(uint32_t capacity, const void* next = nullptr) {
     if (queue) {
       const auto status = amdf_kernel_queue_destroy(queue);
       if (!amdf_status_is_ok(status)) {
@@ -177,6 +177,7 @@ class XdnaKernelQueueTest : public ::testing::Test {
     amdf_xdna_kernel_queue_create_info_t create = {
         .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_CREATE_INFO,
         .structure_size = sizeof(create),
+        .next = next,
         .maximum_pending_submission_count = capacity,
     };
     return amdf_xdna_kernel_queue_create(
@@ -279,6 +280,28 @@ TEST_P(XdnaKernelQueueCapacityTest, HoldsAnEntirePendingWindow) {
 
 INSTANTIATE_TEST_SUITE_P(DefaultAndExplicit, XdnaKernelQueueCapacityTest,
                          ::testing::Values(0u, 4096u));
+
+TEST_F(XdnaKernelQueueTest, RequiresAllRequestedInstructionFeatures) {
+  amdf_xdna_kernel_queue_instruction_requirements_t requirements = {
+      .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_INSTRUCTION_REQUIREMENTS,
+      .structure_size = sizeof(requirements),
+      .features = AMDF_XDNA_INSTRUCTION_FEATURE_LOAD_PDI,
+  };
+  const auto unsupported = amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  EXPECT_EQ(CreateQueue(1, &requirements), unsupported);
+  EXPECT_EQ(queue, nullptr);
+  device.profile.execution_capabilities |=
+      AMDF_XDNA_EXECUTION_CAPABILITY_ELF_INSTRUCTIONS;
+  requirements.features |= UINT32_C(1) << 31;
+  EXPECT_EQ(CreateQueue(1, &requirements), unsupported);
+  EXPECT_EQ(queue, nullptr);
+  requirements.features = AMDF_XDNA_INSTRUCTION_FEATURE_LOAD_PDI;
+  --requirements.structure_size;
+  EXPECT_EQ(CreateQueue(1, &requirements),
+            amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+  ++requirements.structure_size;
+  EXPECT_EQ(CreateQueue(1, &requirements), AMDF_STATUS_OK);
+}
 
 TEST_F(XdnaKernelQueueTest, WrapsAndReclaimsResultsWithoutHostWaits) {
   ASSERT_EQ(CreateQueue(3), AMDF_STATUS_OK);
@@ -1035,7 +1058,9 @@ amdf_memory_scope_t* amdf_xdna_context_get_memory_scope(
 }
 amdf_status_t amdf_xdna_umd_kernel_queue_create(
     amdf_xdna_umd_context_t* context, uint32_t capacity,
+    amdf_xdna_instruction_features_t required_features,
     amdf_xdna_umd_kernel_queue_t** out_queue) {
+  (void)required_features;
   context->queue.slots.resize(capacity);
   *out_queue = &context->queue;
   return AMDF_STATUS_OK;

@@ -19,7 +19,7 @@ typedef uint64_t amdf_xdna_execution_capabilities_t;
 enum amdf_xdna_execution_capability_bits_e {
   // Version 1 transaction interpreter, command packet, and bootstrap contract.
   AMDF_XDNA_EXECUTION_CAPABILITY_TRANSACTION_INTERPRETER_V1 = UINT64_C(1) << 0,
-  // Native ERT ELF instruction-range submission without a bootstrap CU.
+  // Native ERT ELF packet can address a transaction directly.
   AMDF_XDNA_EXECUTION_CAPABILITY_ELF_INSTRUCTIONS = UINT64_C(1) << 1,
 };
 

@@ -885,7 +885,7 @@ static amdf_status_t amdf_memory_scope_query_access_profile(
     return status;
   }
   for (uint32_t i = 0; amdf_status_is_ok(status) && i < query->count; ++i) {
-    status = amdf_structure_validate_output_extension(
+    status = amdf_structure_validate_extension(
         &out_access_capabilities[i],
         AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
         sizeof(out_access_capabilities[i]),
@@ -1172,7 +1172,7 @@ amdf_status_t AMDF_CALL amdf_memory_scope_query_pair_info(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  status = amdf_structure_validate_output_extension(
+  status = amdf_structure_validate_extension(
       out_info, AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO, sizeof(*out_info),
       AMDF_STRUCTURE_TYPE_MEMORY_PAIR_ATOMICS,
       sizeof(amdf_memory_pair_atomics_t));

@@ -82,6 +82,7 @@ iree_runtime_cc_test(
     deps = [
         ":image",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/driver/amd/xdna/image/aie2p:npu2",
         "//runtime/src/iree/hal/driver/amd/xdna/image/testdata/aie:full_elf_42",
         "//runtime/src/iree/hal/driver/amd/xdna/image/testing:image_fixture",
         "//runtime/src/iree/testing:gtest",

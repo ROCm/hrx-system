@@ -98,6 +98,20 @@ TEST(ImageTest, RejectsIncompatibleExecutionContracts) {
   }
 }
 
+TEST(ImageTest, UnassignedProfileCannotAdmitNativeImage) {
+  ImageFixture fixture;
+  fixture.header.device_profile_id = 0;
+  auto source = MakeOwnedByteSequence(fixture.Build());
+  auto target = MakeImageTarget();
+  target.identity.device_profile_id = 0;
+  iree_hal_amd_xdna_image_t* image = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      StatusCode::kFailedPrecondition,
+      iree_hal_amd_xdna_image_allocate(source.get(), &target,
+                                       iree_allocator_system(), &image));
+  iree_hal_amd_xdna_image_free(image);
+}
+
 TEST(ImageTest, RejectsMalformedBackingAndReferences) {
   const std::function<void(ImageFixture&)> mutations[] = {
       [](auto& f) { f.header.magic = 0; },

@@ -48,6 +48,10 @@ typedef struct amdf_xdna_context_t amdf_xdna_context_t;
 #define AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_CREATE_INFO \
   ((amdf_structure_type_t)0x00010008u)
 
+/// An `amdf_xdna_kernel_queue_instruction_requirements_t` input extension.
+#define AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_INSTRUCTION_REQUIREMENTS \
+  ((amdf_structure_type_t)0x00010011u)
+
 /// An `amdf_xdna_kernel_queue_submission_info_t` input structure.
 #define AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO \
   ((amdf_structure_type_t)0x00010009u)
@@ -245,8 +249,9 @@ typedef struct amdf_xdna_device_info_t {
     uint32_t byte_length_granularity;
     /// Native encoding supplied by the caller, never parsed by libamdf.
     amdf_xdna_binary_format_info_t format;
-    /// Optional operations supported by the active submission path. Initialize
-    /// to zero before querying providers that predate this field.
+    /// Optional operations guaranteed on every queue of this device. A caller
+    /// can request additional operations when creating a particular queue.
+    /// Initialize to zero before querying providers that predate this field.
     amdf_xdna_instruction_features_t features;
   } instruction;
 } amdf_xdna_device_info_t;
@@ -322,7 +327,7 @@ typedef struct amdf_xdna_kernel_queue_create_info_t {
   amdf_structure_type_t type;
   /// Must be at least `sizeof(amdf_xdna_kernel_queue_create_info_t)`.
   uint32_t structure_size;
-  /// Optional input extension chain. No extensions are currently defined.
+  /// Optional `amdf_xdna_kernel_queue_instruction_requirements_t` input.
   const void* next;
   /// Endpoint-local XDNA family supporting kernel publication.
   uint32_t queue_family_ordinal;
@@ -334,6 +339,22 @@ typedef struct amdf_xdna_kernel_queue_create_info_t {
   /// submission bound. Query the created queue's maximum_command_count.
   uint32_t maximum_pending_submission_count;
 } amdf_xdna_kernel_queue_create_info_t;
+
+/// Requires all selected operations for the lifetime of the new queue.
+/// A provider that cannot admit the requested transport returns UNSUPPORTED.
+/// On a context with a single fixed instruction aperture, allocate its
+/// instruction backing first so the provider can execute its admission
+/// command. Missing backing for a required operation is FAILED_PRECONDITION.
+typedef struct amdf_xdna_kernel_queue_instruction_requirements_t {
+  /// Must be `AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_INSTRUCTION_REQUIREMENTS`.
+  amdf_structure_type_t type;
+  /// Size of this structure in bytes.
+  uint32_t structure_size;
+  /// Optional input extension chain. No extensions are currently defined.
+  const void* next;
+  /// Optional instruction operations required by the caller.
+  amdf_xdna_instruction_features_t features;
+} amdf_xdna_kernel_queue_instruction_requirements_t;
 
 /// One caller-owned target-native instruction range.
 typedef struct amdf_xdna_kernel_command_t {
@@ -435,6 +456,8 @@ typedef struct amdf_xdna_api_t {
   /// retires a provider-owned no-effect transaction to qualify the direct
   /// instruction transport. This check is independent of optional profiling
   /// services and is not repeated when a queue is reacquired on that context.
+  /// A Windows queue requested with LOAD_PDI checks the native ELF command
+  /// and its firmware result before returning the queue.
   amdf_status_t(AMDF_CALL* kernel_queue_create)(
       amdf_xdna_context_t* context,
       const amdf_xdna_kernel_queue_create_info_t* create_info,

@@ -241,17 +241,29 @@ class XdnaKernelQueueTest : public XdnaContextFixture {
     return UINT32_MAX;
   }
 
-  void CreateQueue(uint32_t capacity = 0) {
+  void CreateQueue(uint32_t capacity = 0, bool request_load_pdi = false) {
     std::cerr << "[XDNA] Acquiring queue and admitting firmware" << std::endl;
+    const amdf_xdna_kernel_queue_instruction_requirements_t requirements = {
+        .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_INSTRUCTION_REQUIREMENTS,
+        .structure_size = sizeof(requirements),
+        .features = AMDF_XDNA_INSTRUCTION_FEATURE_LOAD_PDI,
+    };
     amdf_xdna_kernel_queue_create_info_t create_info = {
         .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_CREATE_INFO,
         .structure_size = sizeof(create_info),
+        .next = request_load_pdi ? &requirements : nullptr,
         .queue_family_ordinal = QueryKernelQueueFamily(),
         .maximum_pending_submission_count = capacity,
     };
     ASSERT_NE(create_info.queue_family_ordinal, UINT32_MAX);
-    ASSERT_TRUE(amdf_status_is_ok(
-        xdna_api_->kernel_queue_create(context_, &create_info, &queue_)));
+    auto status =
+        xdna_api_->kernel_queue_create(context_, &create_info, &queue_);
+    if (request_load_pdi &&
+        status == amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
+      create_info.next = nullptr;
+      status = xdna_api_->kernel_queue_create(context_, &create_info, &queue_);
+    }
+    ASSERT_EQ(status, AMDF_STATUS_OK);
   }
 
   void RunPipelinedTransactions(uint32_t capacity,
@@ -282,7 +294,8 @@ class XdnaKernelQueueTest : public XdnaContextFixture {
                               UINT32_MAX);
     }
     ASSERT_NO_FATAL_FAILURE(CreateInstructions(first, second));
-    ASSERT_NO_FATAL_FAILURE(CreateQueue(capacity));
+    ASSERT_NO_FATAL_FAILURE(
+        CreateQueue(capacity, commands_per_submission == 0));
     amdf_kernel_queue_info_t info = {
         .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO,
         .structure_size = sizeof(info),

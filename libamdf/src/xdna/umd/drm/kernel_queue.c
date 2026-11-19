@@ -15,8 +15,8 @@
 #include "libamdf/src/platform/linux/file.h"
 #include "libamdf/src/platform/native_event.h"
 #include "libamdf/src/platform/wait.h"
+#include "libamdf/src/xdna/elf_packet.h"
 #include "libamdf/src/xdna/umd/drm/context.h"
-#include "libamdf/src/xdna/umd/drm/elf_packet.h"
 
 enum {
   AMDF_LINUX_XDNA_FIRST_POINT_UNCAPTURED = 0,
@@ -249,7 +249,9 @@ static amdf_status_t amdf_linux_xdna_kernel_queue_release_storage(
 
 amdf_status_t amdf_xdna_umd_kernel_queue_create(
     amdf_xdna_umd_context_t* context, uint32_t capacity,
+    amdf_xdna_instruction_features_t required_features,
     amdf_xdna_umd_kernel_queue_t** out_queue) {
+  (void)required_features;
   amdf_xdna_umd_device_t* device = context->device;
   amdf_xdna_umd_kernel_queue_t* queue = NULL;
   const size_t slot_count = capacity;
@@ -366,9 +368,9 @@ amdf_status_t amdf_xdna_umd_kernel_queue_submit(
   }
   for (uint32_t i = 0; i < command_count; ++i) {
     amdf_linux_xdna_buffer_t* packet = &queue->slots[next_packet].packet;
-    amdf_linux_xdna_elf_packet_build(commands[i].instruction_address,
-                                     commands[i].instruction_byte_length,
-                                     packet->host_pointer);
+    amdf_xdna_elf_packet_build(commands[i].instruction_address,
+                               commands[i].instruction_byte_length,
+                               packet->host_pointer);
     if (command_count > 1) {
       const uint64_t handle = packet->handle;
       memcpy((uint8_t*)root->host_pointer + 28 + i * sizeof(handle), &handle,

@@ -224,11 +224,25 @@ amdf_status_t AMDF_CALL amdf_xdna_kernel_queue_create(
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
   amdf_device_t* device = amdf_xdna_context_get_device(context);
-  amdf_status_t status = amdf_structure_validate_input(
+  amdf_status_t status = amdf_structure_validate_extension(
       create_info, AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_CREATE_INFO,
-      (uint32_t)sizeof(amdf_xdna_kernel_queue_create_info_t));
+      sizeof(*create_info),
+      AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_INSTRUCTION_REQUIREMENTS,
+      sizeof(amdf_xdna_kernel_queue_instruction_requirements_t));
   if (!amdf_status_is_ok(status)) {
     return status;
+  }
+  amdf_xdna_instruction_features_t required_features = 0;
+  if (create_info->next != NULL) {
+    const amdf_xdna_kernel_queue_instruction_requirements_t* requirements =
+        create_info->next;
+    required_features = requirements->features;
+    if ((required_features & ~AMDF_XDNA_INSTRUCTION_FEATURE_LOAD_PDI) != 0 ||
+        (required_features != 0 &&
+         !(amdf_xdna_device_get_profile(device)->execution_capabilities &
+           AMDF_XDNA_EXECUTION_CAPABILITY_ELF_INSTRUCTIONS))) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+    }
   }
   amdf_queue_family_info_t family_info = {
       .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
@@ -290,7 +304,8 @@ amdf_status_t AMDF_CALL amdf_xdna_kernel_queue_create(
   if (amdf_status_is_ok(status)) {
     queue->context = context;
     status = amdf_xdna_umd_kernel_queue_create(
-        amdf_xdna_context_get_umd(context), capacity, &queue->umd);
+        amdf_xdna_context_get_umd(context), capacity, required_features,
+        &queue->umd);
   }
   if (amdf_status_is_ok(status)) {
     queue->base.info.maximum_command_count =
