@@ -236,13 +236,23 @@ TEST_F(DeviceGroupTest, ExplicitPlacementPreservesNativeDomainThroughReuse) {
         buffer = fixed_buffers_[i];
       }
       const uint32_t pattern = 0x12345678u + cycle;
+      const iree_hal_fill_region_t operations_region_0 = {
+          .row_length = sizeof(pattern),
+          .row_count = 1,
+          .slice_count = 1,
+      };
+      const iree_hal_transfer_region_t operations_region_1 = {
+          .row_length = sizeof(output_[i]),
+          .row_count = 1,
+          .slice_count = 1,
+      };
       const iree_hal_transfer_operation_t operations[] = {
           {
               .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
               .fill =
                   {
                       .target_buffer = buffer,
-                      .length = sizeof(pattern),
+                      .region = &operations_region_0,
                       .pattern = &pattern,
                       .pattern_length = sizeof(pattern),
                   },
@@ -253,7 +263,7 @@ TEST_F(DeviceGroupTest, ExplicitPlacementPreservesNativeDomainThroughReuse) {
                   {
                       .source_buffer = buffer,
                       .target = &output_[i],
-                      .length = sizeof(output_[i]),
+                      .region = &operations_region_1,
                   },
           },
       };
@@ -341,15 +351,25 @@ TEST_F(DeviceGroupTest, SeparateBudgetsAndWholeGroupLifetime) {
                                                         &executions_[i]));
     auto* buffer = loom_runtime_virtual_buffer_handle(reservations_[i]);
     const uint32_t pattern = 0x12345678u + i;
+    const iree_hal_fill_region_t fill_region = {
+        .row_length = sizeof(pattern),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t fill = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
         .fill =
             {
                 .target_buffer = buffer,
-                .length = sizeof(pattern),
+                .region = &fill_region,
                 .pattern = &pattern,
                 .pattern_length = sizeof(pattern),
             },
+    };
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = sizeof(output_[i]),
+        .row_count = 1,
+        .slice_count = 1,
     };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
@@ -357,7 +377,7 @@ TEST_F(DeviceGroupTest, SeparateBudgetsAndWholeGroupLifetime) {
             {
                 .source_buffer = buffer,
                 .target = &output_[i],
-                .length = sizeof(output_[i]),
+                .region = &download_region,
             },
     };
     uint64_t value = 0;

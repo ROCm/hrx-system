@@ -60,6 +60,13 @@ iree_status_t iree_hal_vulkan_builtins_initialize(
 void iree_hal_vulkan_builtins_deinitialize(
     iree_hal_vulkan_builtins_t* builtins);
 
+// Records a copy using bounded native region arrays. Dense endpoints use one
+// native region; rectangular copies allocate no per-row storage or pipelines.
+void iree_hal_vulkan_builtins_record_copy_region(
+    const iree_hal_vulkan_device_syms_t* syms, VkCommandBuffer command_buffer,
+    VkBuffer source, VkDeviceSize source_offset, VkBuffer target,
+    VkDeviceSize target_offset, const iree_hal_transfer_region_t* region);
+
 // Returns a rectangular tile fitting one descriptor and native dispatch grid.
 // The descriptor alignment allowance makes the tile independent of binding
 // offsets, so recording can count descriptors before resolving indirect refs.
@@ -69,10 +76,12 @@ iree_hal_fill_region_t iree_hal_vulkan_builtins_fill_tile(
 
 // Records a rectangular fill using the same pipeline as linear edge patches.
 // Each native tile owns one descriptor; no storage is allocated per row.
+// Uses supplied descriptor_sets, or allocates them from descriptor_pool when
+// NULL. The caller provides one descriptor per native fill tile.
 iree_status_t iree_hal_vulkan_builtins_record_fill_region(
     const iree_hal_vulkan_builtins_t* builtins, VkCommandBuffer command_buffer,
-    VkDescriptorPool descriptor_pool, VkBuffer target_buffer,
-    VkDeviceSize target_offset, const uint8_t* pattern,
+    VkDescriptorPool descriptor_pool, const VkDescriptorSet* descriptor_sets,
+    VkBuffer target_buffer, VkDeviceSize target_offset, const uint8_t* pattern,
     iree_host_size_t pattern_length, const iree_hal_fill_region_t* region);
 
 // Records shader patches for the unaligned edges of a buffer fill.

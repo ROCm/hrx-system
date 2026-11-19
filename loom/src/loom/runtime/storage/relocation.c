@@ -13,6 +13,11 @@ iree_status_t loom_runtime_block_region_relocate(
   *out_copied_bytes = 0;
   // Maintenance metadata stays bounded independently of the model's plane
   // and block counts. Successive batches have queue edges, not host waits.
+  const iree_hal_transfer_region_t copy_region = {
+      .row_length = region->block_bytes,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   iree_hal_transfer_operation_t copies[64];
   iree_host_size_t copy_count = 0;
   uint64_t completion = 0;
@@ -34,7 +39,7 @@ iree_status_t loom_runtime_block_region_relocate(
                    .source_offset = origin + source * region->block_bytes,
                    .target_buffer = buffer,
                    .target_offset = target_offset,
-                   .length = region->block_bytes}};
+                   .region = &copy_region}};
       if (copy_count == IREE_ARRAYSIZE(copies)) {
         status = loom_runtime_execution_transfer(execution, copy_count, copies,
                                                  &completion);

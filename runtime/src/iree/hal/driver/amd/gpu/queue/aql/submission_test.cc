@@ -561,13 +561,18 @@ TEST(AqlTransferSubmissionTest, RejectedSuffixWaitsForAcceptedHostWrites) {
   iree_hal_memory_contract_t contract = {.scopes = scopes.data()};
   buffer.base.memory.contract = &contract;
   std::array<uint8_t, 8> target = {};
+  const iree_hal_transfer_region_t operation_region = {
+      .row_length = target.size(),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
           {
               .source_buffer = &buffer.base,
               .target = target.data(),
-              .length = target.size(),
+              .region = &operation_region,
           },
   };
   uint64_t value = 1;

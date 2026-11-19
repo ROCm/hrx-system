@@ -27,6 +27,7 @@ static iree_status_t loom_run_hal_testbench_staging_allocate_metadata(
   iree_host_size_t storage_size = 0;
   iree_host_size_t transfers_offset = 0;
   iree_host_size_t operations_offset = 0;
+  iree_host_size_t regions_offset = 0;
   iree_host_size_t mappings_offset = 0;
   iree_host_size_t requests_offset = 0;
   iree_host_size_t buffers_offset = 0;
@@ -36,6 +37,7 @@ static iree_status_t loom_run_hal_testbench_staging_allocate_metadata(
                         &transfers_offset),
       IREE_STRUCT_FIELD(capacity, iree_hal_transfer_operation_t,
                         &operations_offset),
+      IREE_STRUCT_FIELD(capacity, iree_hal_transfer_region_t, &regions_offset),
       IREE_STRUCT_FIELD(capacity, iree_hal_buffer_mapping_t, &mappings_offset),
       IREE_STRUCT_FIELD(capacity, iree_hal_pool_reservation_request_t,
                         &requests_offset),
@@ -49,6 +51,8 @@ static iree_status_t loom_run_hal_testbench_staging_allocate_metadata(
       (iree_hal_transfer_operation_t*)(storage + transfers_offset);
   staging->copies.operations =
       (iree_hal_transfer_operation_t*)(storage + operations_offset);
+  staging->copies.regions =
+      (iree_hal_transfer_region_t*)(storage + regions_offset);
   staging->copies.mappings =
       (iree_hal_buffer_mapping_t*)(storage + mappings_offset);
   staging->copies.requests =
@@ -86,18 +90,19 @@ static iree_status_t loom_run_hal_testbench_staging_prepare_transfers(
         &staging->copies.mappings[*out_mapping_count];
     status = iree_hal_buffer_map_range(
         transfer->copy.source_buffer, IREE_HAL_MAPPING_MODE_SCOPED, access,
-        IREE_HAL_BUFFER_MAP_FLAG_NONE, 0, transfer->copy.length, mapping);
+        IREE_HAL_BUFFER_MAP_FLAG_NONE, 0, transfer->copy.region->row_length,
+        mapping);
     if (iree_status_is_ok(status)) {
       ++*out_mapping_count;
       *operation = (iree_hal_transfer_operation_t){.type = type};
       if (type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD) {
         operation->upload.source = mapping->contents.data;
         operation->upload.target_buffer = transfer->copy.target_buffer;
-        operation->upload.length = transfer->copy.length;
+        operation->upload.region = transfer->copy.region;
       } else {
         operation->download.source_buffer = transfer->copy.target_buffer;
         operation->download.target = mapping->contents.data;
-        operation->download.length = transfer->copy.length;
+        operation->download.region = transfer->copy.region;
       }
     }
   }
@@ -182,13 +187,19 @@ iree_status_t loom_run_hal_testbench_staging_initialize(
       ++transfer_index;
     }
     if (transfer_index == out_staging->copies.count) {
+      out_staging->copies.regions[transfer_index] =
+          (iree_hal_transfer_region_t){
+              .row_length = iree_hal_buffer_byte_length(allocation),
+              .row_count = 1,
+              .slice_count = 1,
+          };
       out_staging->copies.transfers[transfer_index] =
           (iree_hal_transfer_operation_t){
               .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
               .copy =
                   {
                       .source_buffer = allocation,
-                      .length = iree_hal_buffer_byte_length(allocation),
+                      .region = &out_staging->copies.regions[transfer_index],
                   },
           };
       out_staging->copies.requests[transfer_index] =

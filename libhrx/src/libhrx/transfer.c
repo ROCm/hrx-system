@@ -108,6 +108,11 @@ hrx_status_t hrx_synchronous_h2d(hrx_queue_t queue, const void* host_src,
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
+  const iree_hal_transfer_region_t operation_region = {
+      .row_length = (iree_device_size_t)size,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
       .upload =
@@ -115,7 +120,7 @@ hrx_status_t hrx_synchronous_h2d(hrx_queue_t queue, const void* host_src,
               .source = host_src,
               .target_buffer = dst->hal_buffer,
               .target_offset = (iree_device_size_t)dst_offset,
-              .length = (iree_device_size_t)size,
+              .region = &operation_region,
           },
   };
   HRX_RETURN_AND_END_ZONE(
@@ -149,6 +154,11 @@ hrx_status_t hrx_synchronous_d2h(hrx_queue_t queue, hrx_buffer_t src,
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
+  const iree_hal_transfer_region_t operation_region = {
+      .row_length = (iree_device_size_t)size,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
@@ -156,7 +166,7 @@ hrx_status_t hrx_synchronous_d2h(hrx_queue_t queue, hrx_buffer_t src,
               .source_buffer = src->hal_buffer,
               .source_offset = (iree_device_size_t)src_offset,
               .target = host_dst,
-              .length = (iree_device_size_t)size,
+              .region = &operation_region,
           },
   };
   HRX_RETURN_AND_END_ZONE(
@@ -184,6 +194,11 @@ hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream, const void* host_src,
                            "transfer exceeds buffer size");
   }
 
+  const iree_hal_transfer_region_t operation_region = {
+      .row_length = (iree_device_size_t)size,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
       .upload =
@@ -191,7 +206,7 @@ hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream, const void* host_src,
               .source = host_src,
               .target_buffer = dst->hal_buffer,
               .target_offset = (iree_device_size_t)dst_offset,
-              .length = (iree_device_size_t)size,
+              .region = &operation_region,
           },
   };
   return hrx_stream_transfer(stream, &operation);
@@ -212,6 +227,11 @@ hrx_status_t hrx_stream_copy_d2h(hrx_stream_t stream, hrx_buffer_t src,
                            "transfer exceeds buffer size");
   }
 
+  const iree_hal_transfer_region_t operation_region = {
+      .row_length = (iree_device_size_t)size,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
@@ -219,7 +239,7 @@ hrx_status_t hrx_stream_copy_d2h(hrx_stream_t stream, hrx_buffer_t src,
               .source_buffer = src->hal_buffer,
               .source_offset = (iree_device_size_t)src_offset,
               .target = host_dst,
-              .length = (iree_device_size_t)size,
+              .region = &operation_region,
           },
   };
   return hrx_stream_transfer(stream, &operation);

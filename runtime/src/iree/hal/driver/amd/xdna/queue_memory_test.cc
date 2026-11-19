@@ -171,7 +171,12 @@ TEST(XdnaQueueTest, QueueTransfersUsePrivateCachedPoolMapping) {
   };
   upload.upload.source = expected.data();
   upload.upload.target_buffer = buffer;
-  upload.upload.length = sizeof(expected);
+  const iree_hal_transfer_region_t upload_transfer_region = {
+      .row_length = sizeof(expected),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  upload.upload.region = &upload_transfer_region;
   uint64_t upload_value = 2;
   IREE_ASSERT_OK(iree_hal_queue_transfer(harness.queue, {1, &progress, &value},
                                          {1, &progress, &upload_value}, 1,
@@ -183,7 +188,12 @@ TEST(XdnaQueueTest, QueueTransfersUsePrivateCachedPoolMapping) {
   };
   download.download.source_buffer = buffer;
   download.download.target = actual.data();
-  download.download.length = sizeof(actual);
+  const iree_hal_transfer_region_t download_transfer_region = {
+      .row_length = sizeof(actual),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  download.download.region = &download_transfer_region;
   uint64_t download_value = 3;
   IREE_ASSERT_OK(iree_hal_queue_transfer(
       harness.queue, {1, &progress, &upload_value},
@@ -231,18 +241,32 @@ TEST(XdnaQueueTest, LargeAllocationBatchRetainsTransfersUntilRetirement) {
   std::vector<uint32_t> expected(kBufferCount);
   std::vector<uint32_t> actual(kBufferCount);
   std::vector<iree_hal_transfer_operation_t> uploads(kBufferCount);
+  std::vector<iree_hal_transfer_region_t> uploads_transfer_regions(
+      kBufferCount);
   std::vector<iree_hal_transfer_operation_t> downloads(kBufferCount);
+  std::vector<iree_hal_transfer_region_t> downloads_transfer_regions(
+      kBufferCount);
   for (size_t i = 0; i < kBufferCount; ++i) {
     ASSERT_NE(buffers[i], nullptr);
     expected[i] = 0x12340000u + static_cast<uint32_t>(i);
     uploads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
     uploads[i].upload.source = &expected[i];
     uploads[i].upload.target_buffer = buffers[i];
-    uploads[i].upload.length = sizeof(expected[i]);
+    uploads_transfer_regions[i] = {
+        .row_length = sizeof(expected[i]),
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    uploads[i].upload.region = &uploads_transfer_regions[i];
     downloads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
     downloads[i].download.source_buffer = buffers[i];
     downloads[i].download.target = &actual[i];
-    downloads[i].download.length = sizeof(actual[i]);
+    downloads_transfer_regions[i] = {
+        .row_length = sizeof(actual[i]),
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    downloads[i].download.region = &downloads_transfer_regions[i];
   }
   uint64_t uploaded_value = 2;
   uint64_t downloaded_value = 3;
@@ -486,7 +510,12 @@ TEST(XdnaQueueMemoryTest, CachedWorkPassesPendingBackingOnSameQueue) {
   };
   upload.upload.source = expected.data();
   upload.upload.target_buffer = ready;
-  upload.upload.length = sizeof(expected);
+  const iree_hal_transfer_region_t upload_transfer_region = {
+      .row_length = sizeof(expected),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  upload.upload.region = &upload_transfer_region;
   uint64_t uploaded_value = 3;
   IREE_ASSERT_OK(iree_hal_queue_transfer(
       harness.queue, {1, &progress, &allocated_value},
@@ -496,7 +525,12 @@ TEST(XdnaQueueMemoryTest, CachedWorkPassesPendingBackingOnSameQueue) {
   };
   download.download.source_buffer = ready;
   download.download.target = actual.data();
-  download.download.length = sizeof(actual);
+  const iree_hal_transfer_region_t download_transfer_region = {
+      .row_length = sizeof(actual),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  download.download.region = &download_transfer_region;
   uint64_t downloaded_value = 4;
   IREE_ASSERT_OK(iree_hal_queue_transfer(
       harness.queue, {1, &progress, &uploaded_value},
@@ -727,7 +761,12 @@ TEST(XdnaQueueMemoryTest, NativeGrowthLeavesCachedMemoryAndExecutionReady) {
   };
   upload.upload.source = expected.data();
   upload.upload.target_buffer = cached;
-  upload.upload.length = sizeof(expected);
+  const iree_hal_transfer_region_t upload_transfer_region = {
+      .row_length = sizeof(expected),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  upload.upload.region = &upload_transfer_region;
   uint64_t uploaded = 3;
   IREE_ASSERT_OK(
       iree_hal_queue_transfer(harness.queue, {1, &progress, &allocated},
@@ -743,7 +782,12 @@ TEST(XdnaQueueMemoryTest, NativeGrowthLeavesCachedMemoryAndExecutionReady) {
   };
   download.download.source_buffer = cached;
   download.download.target = actual.data();
-  download.download.length = sizeof(actual);
+  const iree_hal_transfer_region_t download_transfer_region = {
+      .row_length = sizeof(actual),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  download.download.region = &download_transfer_region;
   uint64_t downloaded = 5;
   IREE_ASSERT_OK(iree_hal_queue_transfer(
       harness.queue, {1, &progress, &dispatched}, {1, &progress, &downloaded},

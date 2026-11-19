@@ -152,13 +152,18 @@ class WorkspaceTest : public ::testing::TestWithParam<uint32_t> {
 
   iree_status_t DownloadAndRelease(
       loom_runtime_test_workspace_domain_t& domain) {
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = sizeof(domain.output),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
             {
                 .source_buffer = domain.buffer,
                 .target = domain.output.data(),
-                .length = sizeof(domain.output),
+                .region = &download_region,
             },
     };
     uint64_t value = 0;
@@ -177,12 +182,17 @@ class WorkspaceTest : public ::testing::TestWithParam<uint32_t> {
   iree_status_t CompleteIndependentWork() {
     IREE_RETURN_IF_ERROR(Allocate(independent_));
     const uint32_t pattern = 0x13579BDF;
+    const iree_hal_fill_region_t fill_region = {
+        .row_length = sizeof(independent_.output),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t fill = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
         .fill =
             {
                 .target_buffer = independent_.buffer,
-                .length = sizeof(independent_.output),
+                .region = &fill_region,
                 .pattern = &pattern,
                 .pattern_length = sizeof(pattern),
             },
@@ -319,10 +329,16 @@ TEST_P(WorkspaceTest, BatchReusesInputWhileOutputRemainsLive) {
 
   const uint32_t patterns[] = {0x12345678, 0x87654321, 0xabcdef01};
   iree_hal_transfer_operation_t fills[IREE_ARRAYSIZE(requests)] = {};
+  iree_hal_fill_region_t fills_fill_regions[IREE_ARRAYSIZE(requests)] = {};
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(fills); ++i) {
     fills[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
     fills[i].fill.target_buffer = buffers[i];
-    fills[i].fill.length = requests[i].allocation_size;
+    fills_fill_regions[i] = {
+        .row_length = requests[i].allocation_size,
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    fills[i].fill.region = &fills_fill_regions[i];
     fills[i].fill.pattern = &patterns[i];
     fills[i].fill.pattern_length = sizeof(patterns[i]);
   }
@@ -429,12 +445,17 @@ TEST_P(WorkspaceTest, TrimReturnsUnusedSlabsAndPreservesLiveContents) {
         loom_runtime_execution_wait(domain->execution, frontier.values[0]));
   }
   const uint32_t pattern = 0x13579BDF;
+  const iree_hal_fill_region_t fill_region = {
+      .row_length = sizeof(producer_.output),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t fill = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
       .fill =
           {
               .target_buffer = producer_.buffer,
-              .length = sizeof(producer_.output),
+              .region = &fill_region,
               .pattern = &pattern,
               .pattern_length = sizeof(pattern),
           },
@@ -484,13 +505,18 @@ TEST_P(WorkspaceTest,
   EXPECT_TRUE(loom_runtime_workspace_trim_idle(workspace_, distant, timeout));
   EXPECT_EQ(loom_runtime_workspace_statistics(workspace_).reservation_count,
             1u);
+  const iree_hal_transfer_region_t upload_region = {
+      .row_length = sizeof(input_),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t upload = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
       .upload =
           {
               .source = input_.data(),
               .target_buffer = producer_.buffer,
-              .length = sizeof(input_),
+              .region = &upload_region,
           },
   };
   uint64_t value = 0;
@@ -537,12 +563,17 @@ TEST_P(WorkspaceTest, PersistentStateDoesNotKeepTransientWorkspaceActive) {
   EXPECT_EQ(allocated.values[0],
             loom_runtime_execution_frontier(producer_.execution).values[0]);
   const uint32_t pattern = 0x2468ACE0;
+  const iree_hal_fill_region_t fill_region = {
+      .row_length = sizeof(consumer_.output),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   iree_hal_transfer_operation_t fill = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
       .fill =
           {
               .target_buffer = consumer_.buffer,
-              .length = sizeof(consumer_.output),
+              .region = &fill_region,
               .pattern = &pattern,
               .pattern_length = sizeof(pattern),
           },
@@ -581,13 +612,18 @@ TEST_P(WorkspaceTest, PersistentStateDoesNotKeepTransientWorkspaceActive) {
   }
   EXPECT_EQ(loom_runtime_workspace_statistics(workspace_).bytes_committed, 0u);
 
+  const iree_hal_transfer_region_t download_region = {
+      .row_length = sizeof(consumer_.output),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
           {
               .source_buffer = consumer_.buffer,
               .target = consumer_.output.data(),
-              .length = sizeof(consumer_.output),
+              .region = &download_region,
           },
   };
   IREE_ASSERT_OK(loom_runtime_execution_transfer(producer_.execution, 1,
@@ -618,13 +654,18 @@ TEST_P(WorkspaceTest,
   for (size_t i = 0; i < input_.size(); ++i) {
     input_[i] = 17 + i * i;
   }
+  const iree_hal_transfer_region_t upload_region = {
+      .row_length = sizeof(input_),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t upload = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
       .upload =
           {
               .source = input_.data(),
               .target_buffer = producer_.buffer,
-              .length = sizeof(input_),
+              .region = &upload_region,
           },
   };
   uint64_t value = 0;
@@ -635,13 +676,18 @@ TEST_P(WorkspaceTest,
   uint64_t wait_values[] = {produced.values[0], 1};
   IREE_ASSERT_OK(loom_runtime_execution_barrier(consumer_.execution,
                                                 {2, waits, wait_values}));
+  const iree_hal_transfer_region_t copy_region = {
+      .row_length = sizeof(input_),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t copy = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
       .copy =
           {
               .source_buffer = producer_.buffer,
               .target_buffer = consumer_.buffer,
-              .length = sizeof(input_),
+              .region = &copy_region,
           },
   };
   IREE_ASSERT_OK(
@@ -741,12 +787,17 @@ TEST_P(WorkspaceTest, ReleasedExecutionPreservesPendingRawAllocationOwnership) {
 TEST_P(WorkspaceTest, LiveEscapeDoesNotRetainRetiredGeneration) {
   IREE_ASSERT_OK(Allocate(producer_));
   const uint32_t pattern = 0x2468ACE0;
+  const iree_hal_fill_region_t fill_region = {
+      .row_length = sizeof(producer_.output),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t fill = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
       .fill =
           {
               .target_buffer = producer_.buffer,
-              .length = sizeof(producer_.output),
+              .region = &fill_region,
               .pattern = &pattern,
               .pattern_length = sizeof(pattern),
           },
@@ -810,12 +861,17 @@ TEST_P(WorkspaceTest, OutputLifetimeDoesNotPinIndependentWorkspace) {
     std::unique_ptr<iree_hal_buffer_t, decltype(&iree_hal_buffer_release)>
         workspace(buffers[1], &iree_hal_buffer_release);
     const uint32_t pattern = 0x2468ACE0;
+    const iree_hal_fill_region_t fill_region = {
+        .row_length = kOutputBytes,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t fill = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
         .fill =
             {
                 .target_buffer = producer_.buffer,
-                .length = kOutputBytes,
+                .region = &fill_region,
                 .pattern = &pattern,
                 .pattern_length = sizeof(pattern),
             },
@@ -828,13 +884,18 @@ TEST_P(WorkspaceTest, OutputLifetimeDoesNotPinIndependentWorkspace) {
     uint64_t wait_values[] = {produced.values[0], gate_value};
     IREE_ASSERT_OK(loom_runtime_execution_barrier(consumer_.execution,
                                                   {2, waits, wait_values}));
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = kOutputBytes,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
             {
                 .source_buffer = producer_.buffer,
                 .target = consumer_.output.data(),
-                .length = kOutputBytes,
+                .region = &download_region,
             },
     };
     uint64_t consumed = 0;
@@ -864,12 +925,17 @@ TEST_P(WorkspaceTest, OutputLifetimeDoesNotPinIndependentWorkspace) {
     EXPECT_EQ(loom_runtime_workspace_statistics(workspace_).bytes_committed,
               (combined ? 2 : 1) * kSlabBytes);
     const uint32_t workspace_pattern = 0x13579BDF;
+    const iree_hal_fill_region_t overwrite_region = {
+        .row_length = kWorkspaceBytes,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t overwrite = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
         .fill =
             {
                 .target_buffer = independent_.buffer,
-                .length = kWorkspaceBytes,
+                .region = &overwrite_region,
                 .pattern = &workspace_pattern,
                 .pattern_length = sizeof(workspace_pattern),
             },
@@ -920,12 +986,17 @@ TEST_P(WorkspaceTest, CaptureCompactionPreservesLiveRootsAcrossRingWrap) {
                                                  &request, &buffer));
     buffers.emplace_back(buffer, &iree_hal_buffer_release);
     const uint32_t pattern = i + 1;
+    const iree_hal_fill_region_t fill_region = {
+        .row_length = 64,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t fill = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
         .fill =
             {
                 .target_buffer = buffer,
-                .length = 64,
+                .region = &fill_region,
                 .pattern = &pattern,
                 .pattern_length = sizeof(pattern),
             },
@@ -942,13 +1013,18 @@ TEST_P(WorkspaceTest, CaptureCompactionPreservesLiveRootsAcrossRingWrap) {
   EXPECT_EQ(loom_runtime_workspace_statistics(workspace_).reservation_count,
             17u);
   for (size_t i = 1; i < buffers.size(); i += 2) {
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = sizeof(uint32_t),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
             {
                 .source_buffer = buffers[i].get(),
                 .target = &consumer_.output[i / 2],
-                .length = sizeof(uint32_t),
+                .region = &download_region,
             },
     };
     IREE_ASSERT_OK(loom_runtime_execution_transfer(producer_.execution, 1,

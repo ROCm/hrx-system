@@ -1671,72 +1671,82 @@ static iree_host_size_t iree_hal_task_queue_transfer_active_operation_count(
   return active_operation_count;
 }
 
-static iree_status_t iree_hal_task_queue_execute_transfer_copy(
-    const iree_hal_transfer_operation_t* transfer_operation) {
-  iree_byte_span_t source;
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_native_host_span(
-      transfer_operation->copy.source_buffer,
-      transfer_operation->copy.source_offset, transfer_operation->copy.length,
-      &source));
-  iree_byte_span_t target;
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_native_host_span(
-      transfer_operation->copy.target_buffer,
-      transfer_operation->copy.target_offset, transfer_operation->copy.length,
-      &target));
-  memcpy(target.data, source.data, source.data_length);
-  return iree_ok_status();
-}
-
 static iree_status_t iree_hal_task_queue_execute_transfer_operation(
-    const iree_hal_transfer_operation_t* transfer_operation) {
-  iree_byte_span_t span;
-  switch (transfer_operation->type) {
+    const iree_hal_transfer_operation_t* operation) {
+  const iree_hal_transfer_region_t region =
+      iree_hal_transfer_operation_region(operation);
+  const uint64_t source_length = iree_hal_transfer_range_length(
+      region.row_length, region.row_count, region.slice_count,
+      &region.source_strides);
+  const uint64_t target_length = iree_hal_transfer_range_length(
+      region.row_length, region.row_count, region.slice_count,
+      &region.target_strides);
+  iree_byte_span_t source;
+  iree_byte_span_t target;
+  switch (operation->type) {
     case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL: {
       IREE_RETURN_IF_ERROR(iree_hal_buffer_native_host_span(
-          transfer_operation->fill.target_buffer,
-          transfer_operation->fill.target_offset,
-          transfer_operation->fill.length, &span));
-      if (transfer_operation->fill.pattern_length == 1 ||
-          memcmp(transfer_operation->fill.pattern, &(const uint32_t){0},
-                 transfer_operation->fill.pattern_length) == 0) {
-        memset(span.data, *(const uint8_t*)transfer_operation->fill.pattern,
-               span.data_length);
-      } else {
-        for (iree_host_size_t offset = 0; offset < span.data_length;
-             offset += transfer_operation->fill.pattern_length) {
-          memcpy(span.data + offset, transfer_operation->fill.pattern,
-                 transfer_operation->fill.pattern_length);
+          operation->fill.target_buffer, operation->fill.target_offset,
+          target_length, &target));
+      const uint64_t row_stride =
+          region.row_count > 1 ? region.target_strides.row_stride : 0;
+      const uint64_t slice_stride =
+          region.slice_count > 1 ? region.target_strides.slice_stride : 0;
+      const bool single_byte_pattern =
+          operation->fill.pattern_length == 1 ||
+          memcmp(operation->fill.pattern, &(const uint32_t){0},
+                 operation->fill.pattern_length) == 0;
+      for (uint64_t z = 0; z < region.slice_count; ++z) {
+        for (uint64_t y = 0; y < region.row_count; ++y) {
+          uint8_t* row = target.data + z * slice_stride + y * row_stride;
+          if (single_byte_pattern) {
+            memset(row, *(const uint8_t*)operation->fill.pattern,
+                   (size_t)region.row_length);
+          } else {
+            for (uint64_t offset = 0; offset < region.row_length;
+                 offset += operation->fill.pattern_length) {
+              memcpy(row + offset, operation->fill.pattern,
+                     operation->fill.pattern_length);
+            }
+          }
         }
       }
       break;
     }
     case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE: {
       IREE_RETURN_IF_ERROR(iree_hal_buffer_native_host_span(
-          transfer_operation->update.target_buffer,
-          transfer_operation->update.target_offset,
-          transfer_operation->update.length, &span));
-      memcpy(span.data,
-             (const uint8_t*)transfer_operation->update.source_buffer +
-                 transfer_operation->update.source_offset,
-             span.data_length);
+          operation->update.target_buffer, operation->update.target_offset,
+          target_length, &target));
+      iree_hal_transfer_copy_host(
+          (const uint8_t*)operation->update.source_buffer +
+              operation->update.source_offset,
+          target.data, &region);
       break;
     }
-    case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
-      return iree_hal_task_queue_execute_transfer_copy(transfer_operation);
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY: {
+      IREE_RETURN_IF_ERROR(iree_hal_buffer_native_host_span(
+          operation->copy.source_buffer, operation->copy.source_offset,
+          source_length, &source));
+      IREE_RETURN_IF_ERROR(iree_hal_buffer_native_host_span(
+          operation->copy.target_buffer, operation->copy.target_offset,
+          target_length, &target));
+      iree_hal_transfer_copy_host(source.data, target.data, &region);
+      break;
+    }
     case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD: {
       IREE_RETURN_IF_ERROR(iree_hal_buffer_native_host_span(
-          transfer_operation->upload.target_buffer,
-          transfer_operation->upload.target_offset,
-          transfer_operation->upload.length, &span));
-      memcpy(span.data, transfer_operation->upload.source, span.data_length);
+          operation->upload.target_buffer, operation->upload.target_offset,
+          target_length, &target));
+      iree_hal_transfer_copy_host(operation->upload.source, target.data,
+                                  &region);
       break;
     }
     case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD: {
       IREE_RETURN_IF_ERROR(iree_hal_buffer_native_host_span(
-          transfer_operation->download.source_buffer,
-          transfer_operation->download.source_offset,
-          transfer_operation->download.length, &span));
-      memcpy(transfer_operation->download.target, span.data, span.data_length);
+          operation->download.source_buffer, operation->download.source_offset,
+          source_length, &source));
+      iree_hal_transfer_copy_host(source.data, operation->download.target,
+                                  &region);
       break;
     }
   }
@@ -1778,18 +1788,22 @@ static iree_status_t iree_hal_task_queue_build_transfer_recording_operation(
     iree_hal_cmd_block_builder_t* builder) {
   iree_hal_cmd_fixup_t* fixups = NULL;
   iree_hal_cmd_build_token_t token;
+  const iree_hal_transfer_region_t region =
+      iree_hal_transfer_operation_region(transfer_operation);
+  const uint64_t source_length = iree_hal_transfer_range_length(
+      region.row_length, region.row_count, region.slice_count,
+      &region.source_strides);
+  const uint64_t target_length = iree_hal_transfer_range_length(
+      region.row_length, region.row_count, region.slice_count,
+      &region.target_strides);
   if (transfer_operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_FILL) {
-    const iree_hal_fill_region_t region = {
-        .row_length = transfer_operation->fill.length,
-        .row_count = 1,
-        .slice_count = 1};
     IREE_RETURN_IF_ERROR(iree_hal_cmd_build_fill(
-        builder, &region, transfer_operation->fill.pattern,
+        builder, transfer_operation->fill.region,
+        transfer_operation->fill.pattern,
         transfer_operation->fill.pattern_length, &fixups, &token));
     return iree_hal_task_queue_resolve_buffer_fixup(
         transfer_operation->fill.target_buffer,
-        transfer_operation->fill.target_offset, transfer_operation->fill.length,
-        &fixups[0]);
+        transfer_operation->fill.target_offset, target_length, &fixups[0]);
   }
 
   const void* source_host_ptr = NULL;
@@ -1798,8 +1812,6 @@ static iree_status_t iree_hal_task_queue_build_transfer_recording_operation(
   void* target_host_ptr = NULL;
   iree_hal_buffer_t* target_buffer = NULL;
   iree_device_size_t target_offset = 0;
-  const iree_device_size_t length =
-      iree_hal_transfer_operation_length(transfer_operation);
   switch (transfer_operation->type) {
     case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
       source_host_ptr =
@@ -1825,26 +1837,24 @@ static iree_status_t iree_hal_task_queue_build_transfer_recording_operation(
       target_host_ptr = transfer_operation->download.target;
       break;
     case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "fill reached copy recording path");
+      IREE_BUILTIN_UNREACHABLE();
   }
 
-  const iree_hal_transfer_region_t region = {
-      .row_length = length, .row_count = 1, .slice_count = 1};
   IREE_RETURN_IF_ERROR(
       iree_hal_cmd_build_copy(builder, &region, &fixups, &token));
   if (source_buffer) {
     IREE_RETURN_IF_ERROR(iree_hal_task_queue_resolve_buffer_fixup(
-        source_buffer, source_offset, length, &fixups[0]));
+        source_buffer, source_offset, source_length, &fixups[0]));
   } else {
     iree_hal_task_queue_set_buffer_fixup(&fixups[0], (void*)source_host_ptr,
-                                         length);
+                                         source_length);
   }
   if (target_buffer) {
     IREE_RETURN_IF_ERROR(iree_hal_task_queue_resolve_buffer_fixup(
-        target_buffer, target_offset, length, &fixups[1]));
+        target_buffer, target_offset, target_length, &fixups[1]));
   } else {
-    iree_hal_task_queue_set_buffer_fixup(&fixups[1], target_host_ptr, length);
+    iree_hal_task_queue_set_buffer_fixup(&fixups[1], target_host_ptr,
+                                         target_length);
   }
   return iree_ok_status();
 }
@@ -3421,10 +3431,15 @@ static iree_status_t iree_hal_task_queue_capture_transfer_operation(
         if (!iree_status_is_ok(status)) {
           break;
         }
-        memcpy(source_copy,
-               (const uint8_t*)transfer_operation->update.source_buffer +
-                   transfer_operation->update.source_offset,
-               (size_t)length);
+        iree_hal_transfer_region_t* region =
+            (iree_hal_transfer_region_t*)transfer_operation->update.region;
+        iree_hal_transfer_gather_host(
+            (const uint8_t*)transfer_operation->update.source_buffer +
+                transfer_operation->update.source_offset,
+            region, 0, (iree_host_size_t)length, source_copy);
+        region->source_strides.row_stride = region->row_length;
+        region->source_strides.slice_stride =
+            region->row_length * region->row_count;
         transfer_operation->update.source_buffer = source_copy;
         transfer_operation->update.source_offset = 0;
       }
@@ -3466,7 +3481,9 @@ static iree_status_t iree_hal_task_queue_submit_transfer(
   iree_host_size_t operations_length = 0;
   if (iree_status_is_ok(status) && operation_count != 0 &&
       IREE_UNLIKELY(!iree_host_size_checked_mul(
-          operation_count, sizeof(*transfer_operations), &operations_length))) {
+          operation_count,
+          sizeof(*transfer_operations) + sizeof(iree_hal_transfer_region_t),
+          &operations_length))) {
     status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "transfer operation storage overflows");
   }
@@ -3476,7 +3493,15 @@ static iree_status_t iree_hal_task_queue_submit_transfer(
   }
   if (iree_status_is_ok(status) && operation_count != 0) {
     memcpy(operation->transfer.operations, transfer_operations,
-           operations_length);
+           operation_count * sizeof(*transfer_operations));
+    uint8_t* geometry =
+        (uint8_t*)(operation->transfer.operations + operation_count);
+    for (iree_host_size_t i = 0; i < operation_count; ++i) {
+      iree_hal_transfer_operation_t* captured =
+          &operation->transfer.operations[i];
+      iree_hal_transfer_operation_capture_region(captured, geometry);
+      geometry += sizeof(iree_hal_transfer_region_t);
+    }
     operation->transfer.operation_count = operation_count;
   }
 

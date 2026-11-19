@@ -190,13 +190,18 @@ void GpuNativeQueueLifetimeTest::MembershipProgress(
       nullptr, 0));
   pause.Join();
   std::array<uint32_t, 64> observed = {};
+  const iree_hal_transfer_region_t download_region = {
+      .row_length = sizeof(observed),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
           {
               .source_buffer = output,
               .target = observed.data(),
-              .length = sizeof(observed),
+              .region = &download_region,
           },
   };
   uint64_t two = 2;
@@ -281,13 +286,18 @@ void GpuNativeQueueLifetimeTest::FrontierAllocationProgress(bool fail) {
         queues_[0], {1, &start_handle, &one}, {1, &filled_handle, &one}, output,
         0, 256, &pattern, sizeof(pattern), nullptr, 0));
     std::array<uint32_t, 64> observed = {};
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = sizeof(observed),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
             {
                 .source_buffer = output,
                 .target = observed.data(),
-                .length = sizeof(observed),
+                .region = &download_region,
             },
     };
     IREE_ASSERT_OK(iree_hal_queue_transfer(
@@ -379,13 +389,18 @@ void GpuNativeQueueLifetimeTest::AllocationReleaseProgress(
     EXPECT_EQ(current.entries[0].axis, previous.entries[0].axis);
     EXPECT_GT(current.entries[0].epoch, previous.entries[0].epoch);
     std::array<uint32_t, 64> observed = {};
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = sizeof(observed),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
             {
                 .source_buffer = output,
                 .target = observed.data(),
-                .length = sizeof(observed),
+                .region = &download_region,
             },
     };
     IREE_ASSERT_OK(iree_hal_queue_transfer(
@@ -549,13 +564,18 @@ TEST_P(GpuNativeQueueLifetimeTest,
     IREE_ASSERT_OK(iree_hal_queue_execute(acquired[2], {}, {1, &handle, &one},
                                           recording, {}, 0));
     std::array<uint32_t, 64> observed = {};
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = sizeof(observed),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
             {
                 .source_buffer = output,
                 .target = observed.data(),
-                .length = sizeof(observed),
+                .region = &download_region,
             },
     };
     IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], {1, &handle, &one},
@@ -849,13 +869,18 @@ TEST_P(GpuNativeQueueLifetimeTest,
   pause.Join();
 
   std::array<uint32_t, 64> observed = {};
+  const iree_hal_transfer_region_t download_region = {
+      .row_length = sizeof(observed),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
           {
               .source_buffer = output,
               .target = observed.data(),
-              .length = sizeof(observed),
+              .region = &download_region,
           },
   };
   IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[1], {1, &joined_handle, &one},

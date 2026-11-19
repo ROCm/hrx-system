@@ -391,10 +391,16 @@ TEST_F(XdnaNativeTest, ConsumerBeforeProducerCapturesArguments) {
   }
   const auto expected_lhs = lhs, expected_rhs = rhs;
   iree_hal_transfer_operation_t uploads[2] = {};
+  iree_hal_transfer_region_t uploads_transfer_regions[2] = {};
   uploads[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE;
   uploads[0].update.source_buffer = lhs.data();
   uploads[0].update.target_buffer = lhs_buffer;
-  uploads[0].update.length = kBytes;
+  uploads_transfer_regions[0] = {
+      .row_length = kBytes,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  uploads[0].update.region = &uploads_transfer_regions[0];
   uploads[1] = uploads[0];
   uploads[1].update.source_buffer = rhs.data();
   uploads[1].update.target_buffer = rhs_buffer;
@@ -794,11 +800,17 @@ TEST_P(XdnaFirstWriterTest, NativeConstructionPreparesFirstDeviceWrite) {
   ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&progress));
   uint64_t uploaded = 1, dispatched = 2, downloaded = 3;
   iree_hal_transfer_operation_t uploads[2] = {};
+  iree_hal_transfer_region_t uploads_transfer_regions[2] = {};
   for (size_t i = 0; i < IREE_ARRAYSIZE(uploads); ++i) {
     uploads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE;
     uploads[i].update.source_buffer = i == 0 ? lhs.data() : rhs.data();
     uploads[i].update.target_buffer = buffers[i];
-    uploads[i].update.length = kBytes;
+    uploads_transfer_regions[i] = {
+        .row_length = kBytes,
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    uploads[i].update.region = &uploads_transfer_regions[i];
   }
   IREE_ASSERT_OK(iree_hal_queue_transfer(queue_, {}, {1, &progress, &uploaded},
                                          IREE_ARRAYSIZE(uploads), uploads,
@@ -894,10 +906,16 @@ TEST_P(XdnaNativeSlabTest, ExecutesThroughPreparedBindings) {
 
   const uint8_t guard = 0xA5;
   std::array<iree_hal_transfer_operation_t, 3> fills = {};
+  std::array<iree_hal_fill_region_t, 3> fills_fill_regions = {};
   for (size_t i = 0; i < fills.size(); ++i) {
     fills[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
     fills[i].fill.target_buffer = roots[i];
-    fills[i].fill.length = requests[i].allocation_size;
+    fills_fill_regions[i] = {
+        .row_length = requests[i].allocation_size,
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    fills[i].fill.region = &fills_fill_regions[i];
     fills[i].fill.pattern = &guard;
     fills[i].fill.pattern_length = sizeof(guard);
   }
@@ -913,11 +931,17 @@ TEST_P(XdnaNativeSlabTest, ExecutesThroughPreparedBindings) {
     rhs[i] = static_cast<uint32_t>(0xFFFFFF00u + i * 11);
   }
   std::array<iree_hal_transfer_operation_t, 2> updates = {};
+  std::array<iree_hal_transfer_region_t, 2> updates_transfer_regions = {};
   for (size_t i = 0; i < updates.size(); ++i) {
     updates[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE;
     updates[i].update.source_buffer = i == 0 ? lhs.data() : rhs.data();
     updates[i].update.target_buffer = bindings[i];
-    updates[i].update.length = kBytes;
+    updates_transfer_regions[i] = {
+        .row_length = kBytes,
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    updates[i].update.region = &updates_transfer_regions[i];
   }
   wait_value = progress_value;
   ++progress_value;
@@ -1008,7 +1032,12 @@ TEST_P(XdnaNativeSlabTest, ExecutesThroughPreparedBindings) {
   };
   download.download.source_buffer = roots[2];
   download.download.target = output.data();
-  download.download.length = sizeof(output);
+  const iree_hal_transfer_region_t download_transfer_region = {
+      .row_length = sizeof(output),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  download.download.region = &download_transfer_region;
   wait_value = progress_value;
   ++progress_value;
   IREE_ASSERT_OK(iree_hal_queue_transfer(queue_, {1, &progress, &wait_value},
@@ -1329,10 +1358,16 @@ TEST_F(XdnaNativeTest, FilesRoundTripThroughDeferredDeviceOnlyBuffers) {
       IREE_HAL_READ_FLAG_NONE));
   const uint8_t guard = 0xA5;
   std::array<iree_hal_transfer_operation_t, 3> fills = {};
+  std::array<iree_hal_fill_region_t, 3> fills_fill_regions = {};
   for (size_t i = 0; i < fills.size(); ++i) {
     fills[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
     fills[i].fill.target_buffer = roots[i];
-    fills[i].fill.length = 3 * kBytes;
+    fills_fill_regions[i] = {
+        .row_length = 3 * kBytes,
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    fills[i].fill.region = &fills_fill_regions[i];
     fills[i].fill.pattern = &guard;
     fills[i].fill.pattern_length = sizeof(guard);
   }
@@ -1616,23 +1651,45 @@ TEST_F(XdnaNativeTest, TransfersCaptureAndBorrowAtTheirDeclaredBoundary) {
   uint32_t pattern = 0x12345678;
   std::array<uint32_t, 16> upload = {}, download = {};
   iree_hal_transfer_operation_t operations[4] = {};
+  iree_hal_transfer_region_t operations_transfer_regions[4] = {};
+  iree_hal_fill_region_t operations_fill_regions[4] = {};
   operations[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
   operations[0].upload.source = upload.data();
   operations[0].upload.target_buffer = source;
-  operations[0].upload.length = kBytes;
+  operations_transfer_regions[0] = {
+      .row_length = kBytes,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  operations[0].upload.region = &operations_transfer_regions[0];
   operations[1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
   operations[1].copy.source_buffer = source;
   operations[1].copy.target_buffer = target;
-  operations[1].copy.length = kBytes;
+  operations_transfer_regions[1] = {
+      .row_length = kBytes,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  operations[1].copy.region = &operations_transfer_regions[1];
   operations[2].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
   operations[2].fill.target_buffer = target;
-  operations[2].fill.length = sizeof(pattern);
+  operations_fill_regions[2] = {
+      .row_length = sizeof(pattern),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  operations[2].fill.region = &operations_fill_regions[2];
   operations[2].fill.pattern = &pattern;
   operations[2].fill.pattern_length = sizeof(pattern);
   operations[3].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
   operations[3].download.source_buffer = target;
   operations[3].download.target = download.data();
-  operations[3].download.length = kBytes;
+  operations_transfer_regions[3] = {
+      .row_length = kBytes,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  operations[3].download.region = &operations_transfer_regions[3];
   IREE_ASSERT_OK(iree_hal_queue_transfer(queue_, {1, &ready, &value},
                                          {1, &done, &value}, 4, operations,
                                          /*barriers=*/NULL));
@@ -1659,15 +1716,42 @@ TEST_F(XdnaNativeTest, EmptyTransfersIgnoreUnusedPayloads) {
       IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
   };
   iree_hal_transfer_operation_t operations[5];
+  iree_hal_fill_region_t operations_fill_regions[5] = {};
+  iree_hal_transfer_region_t operations_transfer_regions[5] = {};
   for (size_t i = 0; i < 5; ++i) {
     memset(&operations[i], 0xA5, sizeof(operations[i]));
     operations[i].type = types[i];
   }
-  operations[0].fill.length = 0;
-  operations[1].update.length = 0;
-  operations[2].copy.length = 0;
-  operations[3].upload.length = 0;
-  operations[4].download.length = 0;
+  operations_fill_regions[0] = {
+      .row_length = 0,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  operations[0].fill.region = &operations_fill_regions[0];
+  operations_transfer_regions[1] = {
+      .row_length = 0,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  operations[1].update.region = &operations_transfer_regions[1];
+  operations_transfer_regions[2] = {
+      .row_length = 0,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  operations[2].copy.region = &operations_transfer_regions[2];
+  operations_transfer_regions[3] = {
+      .row_length = 0,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  operations[3].upload.region = &operations_transfer_regions[3];
+  operations_transfer_regions[4] = {
+      .row_length = 0,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  operations[4].download.region = &operations_transfer_regions[4];
   IREE_ASSERT_OK(iree_hal_queue_transfer(queue_, {}, {1, &done, &value}, 5,
                                          operations, /*barriers=*/NULL));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(done, value, iree_infinite_timeout(),

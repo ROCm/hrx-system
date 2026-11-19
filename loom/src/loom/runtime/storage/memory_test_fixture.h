@@ -396,6 +396,16 @@ class MemoryTest : public ::testing::Test {
 
   void RoundTrip(iree_hal_buffer_t* buffer, uint64_t offset, uint32_t value) {
     std::array<uint32_t, 64> observed = {};
+    const iree_hal_fill_region_t operations_region_0 = {
+        .row_length = sizeof(observed),
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    const iree_hal_transfer_region_t operations_region_1 = {
+        .row_length = sizeof(observed),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t operations[] = {
         {
             .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
@@ -403,7 +413,7 @@ class MemoryTest : public ::testing::Test {
                 {
                     .target_buffer = buffer,
                     .target_offset = offset,
-                    .length = sizeof(observed),
+                    .region = &operations_region_0,
                     .pattern = &value,
                     .pattern_length = sizeof(value),
                 },
@@ -415,7 +425,7 @@ class MemoryTest : public ::testing::Test {
                     .source_buffer = buffer,
                     .source_offset = offset,
                     .target = observed.data(),
-                    .length = sizeof(observed),
+                    .region = &operations_region_1,
                 },
         },
     };
@@ -508,6 +518,11 @@ class MemoryTest : public ::testing::Test {
   void CheckRetained(iree_hal_buffer_t* buffer, uint64_t offset,
                      uint32_t value) {
     std::array<uint32_t, 64> observed = {};
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = sizeof(observed),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
@@ -515,7 +530,7 @@ class MemoryTest : public ::testing::Test {
                 .source_buffer = buffer,
                 .source_offset = offset,
                 .target = observed.data(),
-                .length = sizeof(observed),
+                .region = &download_region,
             },
     };
     uint64_t completion = 0;

@@ -1505,13 +1505,20 @@ TEST_P(GpuNativeProfileTest,
   std::array<iree_hal_transfer_operation_t, 2> transfers = {};
   uint32_t pattern = 0xABCDEF00, update = 0x13579BDF;
   transfers[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
-  transfers[0].fill = {buffer, 0, 4, &pattern, 4};
+  const auto fill_region =
+      iree_hal_fill_region_t{.row_length = 4, .row_count = 1, .slice_count = 1};
+  const auto update_region = iree_hal_transfer_region_t{
+      .row_length = 4,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  transfers[0].fill = {buffer, 0, &fill_region, &pattern, 4};
   transfers[1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE;
   transfers[1].update = {
       .source_buffer = &update,
       .target_buffer = buffer,
       .target_offset = 4,
-      .length = 4,
+      .region = &update_region,
   };
   IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], point(1), point(2),
                                          transfers.size(), transfers.data(),
@@ -1665,10 +1672,11 @@ TEST_P(GpuNativeProfileTest, EmptyOperationsPreservePublicIdentities) {
   auto* timeline = done.get();
   uint64_t one = 1, two = 2;
   const uint32_t pattern = 0x12345678;
+  const iree_hal_fill_region_t regions[] = {{0, 1, 1}, {4, 1, 1}};
   std::array<iree_hal_transfer_operation_t, 3> transfers = {};
   for (size_t i = 0; i < transfers.size(); ++i) {
     transfers[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
-    transfers[i].fill = {buffer, 0, i == 1 ? 4u : 0u, &pattern, 4};
+    transfers[i].fill = {buffer, 0, &regions[i == 1], &pattern, 4};
   }
   IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], {}, {1, &timeline, &one},
                                          transfers.size(), transfers.data(),

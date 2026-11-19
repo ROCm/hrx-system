@@ -134,14 +134,25 @@ void RunSubgroupExecution(
   const iree_hal_semaphore_list_t dispatched = {1, &semaphore, &dispatch_value};
   const iree_hal_semaphore_list_t downloaded = {1, &semaphore, &download_value};
   iree_hal_transfer_operation_t uploads[2] = {};
+  iree_hal_transfer_region_t uploads_regions[IREE_ARRAYSIZE(uploads)];
   uploads[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
   uploads[0].upload.source = input.data();
   uploads[0].upload.target_buffer = input_buffer;
-  uploads[0].upload.length = sizeof(input);
+  uploads_regions[0] = iree_hal_transfer_region_t{
+      .row_length = sizeof(input),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  uploads[0].upload.region = &uploads_regions[0];
   uploads[1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
   uploads[1].upload.source = output.data();
   uploads[1].upload.target_buffer = output_buffer;
-  uploads[1].upload.length = sizeof(output);
+  uploads_regions[1] = iree_hal_transfer_region_t{
+      .row_length = sizeof(output),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  uploads[1].upload.region = &uploads_regions[1];
   uint64_t completion_value = 0;
   iree_status_t status = iree_hal_queue_transfer(
       execution.transfer_queue, iree_hal_semaphore_list_empty(), uploaded,

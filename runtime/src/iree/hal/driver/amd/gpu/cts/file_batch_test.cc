@@ -223,11 +223,13 @@ class GpuNativeFileBatchTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
     const uint8_t padding = 0xCD;
     const uint8_t invalid = 0xFF;
     uint64_t one = 1;
+    const iree_hal_fill_region_t payload_region = {kBufferLength, 1, 1};
+    const iree_hal_fill_region_t metadata_region = {kMetadataLength, 1, 1};
     iree_hal_transfer_operation_t initialization[2] = {};
     initialization[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
-    initialization[0].fill = {payload, 0, kBufferLength, &padding, 1};
+    initialization[0].fill = {payload, 0, &payload_region, &padding, 1};
     initialization[1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
-    initialization[1].fill = {metadata, 0, kMetadataLength, &invalid, 1};
+    initialization[1].fill = {metadata, 0, &metadata_region, &invalid, 1};
     IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], {},
                                            {1, &initialized_handle, &one}, 2,
                                            initialization, nullptr));

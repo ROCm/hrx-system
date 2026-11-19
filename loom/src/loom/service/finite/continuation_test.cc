@@ -353,6 +353,11 @@ class ContinuingSource {
       IREE_RETURN_IF_ERROR(
           loom_runtime_execution_barrier(execution, {1, &gate, &one}));
     }
+    const auto uploads_region = iree_hal_transfer_region_t{
+        .row_length = 40,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     iree_hal_transfer_operation_t uploads[4] = {};
     size_t upload_count = 0;
     for (size_t i = 0; i < count_; ++i) {
@@ -367,7 +372,7 @@ class ContinuingSource {
                     .source = data.data,
                     .target_buffer = state_,
                     .target_offset = packet_[1 + i * 4] * 40,
-                    .length = 40,
+                    .region = &uploads_region,
                 },
         };
         input_bytes += 40;
@@ -383,13 +388,18 @@ class ContinuingSource {
         iree_hal_make_pool_reservation_request(16, 16)};
     IREE_RETURN_IF_ERROR(
         loom_runtime_execution_alloca(execution, 2, allocations, buffers));
+    const iree_hal_transfer_region_t packet_region = {
+        .row_length = sizeof(packet_),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t packet = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
         .upload =
             {
                 .source = packet_.data(),
                 .target_buffer = buffers[0],
-                .length = sizeof(packet_),
+                .region = &packet_region,
             },
     };
     iree_status_t status =

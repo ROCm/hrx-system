@@ -683,6 +683,58 @@ static inline bool iree_hal_transfer_range_is_linear(
          (slice_count <= 1 || strides->slice_stride == row_length * row_count);
 }
 
+// Returns a rectangular prefix of an admitted useful-byte interval, with
+// endpoint displacements from the original origins. Capacity and remaining
+// useful bytes are nonzero. A partial row ends that chunk; whole rows/slices
+// use the largest prefix fitting capacity. No rows are expanded into owners.
+static inline iree_hal_transfer_region_t iree_hal_transfer_region_slice(
+    const iree_hal_transfer_region_t* region, uint64_t offset,
+    uint64_t capacity, uint64_t* out_source_offset,
+    uint64_t* out_target_offset) {
+  if (iree_hal_transfer_range_is_linear(region->row_length, region->row_count,
+                                        region->slice_count,
+                                        &region->source_strides) &&
+      iree_hal_transfer_range_is_linear(region->row_length, region->row_count,
+                                        region->slice_count,
+                                        &region->target_strides)) {
+    *out_source_offset = *out_target_offset = offset;
+    return (iree_hal_transfer_region_t){
+        .row_length = iree_min(
+            capacity, iree_hal_transfer_region_length(region) - offset),
+        .row_count = 1,
+        .slice_count = 1,
+    };
+  }
+  const uint64_t column = offset % region->row_length;
+  const uint64_t row_index = offset / region->row_length;
+  const uint64_t row = row_index % region->row_count;
+  const uint64_t slice = row_index / region->row_count;
+  *out_source_offset =
+      column +
+      (region->row_count > 1 ? row * region->source_strides.row_stride : 0) +
+      (region->slice_count > 1 ? slice * region->source_strides.slice_stride
+                               : 0);
+  *out_target_offset =
+      column +
+      (region->row_count > 1 ? row * region->target_strides.row_stride : 0) +
+      (region->slice_count > 1 ? slice * region->target_strides.slice_stride
+                               : 0);
+  iree_hal_transfer_region_t chunk = *region;
+  chunk.row_length = iree_min(capacity, region->row_length - column);
+  chunk.row_count = 1;
+  chunk.slice_count = 1;
+  if (!column && chunk.row_length == region->row_length) {
+    chunk.row_count =
+        iree_min(capacity / chunk.row_length, region->row_count - row);
+    if (!row && chunk.row_count == region->row_count) {
+      chunk.slice_count =
+          iree_min(capacity / (chunk.row_length * chunk.row_count),
+                   region->slice_count - slice);
+    }
+  }
+  return chunk;
+}
+
 // Copies a validated rectangle between host-accessible origins. Useful bytes
 // must not alias writes, and both addressed spans remain live through return.
 // No resource mapping, allocation, synchronization, or padding copy occurs.
@@ -878,8 +930,8 @@ typedef struct iree_hal_transfer_operation_t {
       // Byte offset into |target_buffer| where the fill begins.
       iree_device_size_t target_offset;
 
-      // Number of bytes to fill.
-      iree_device_size_t length;
+      // Geometry captured before iree_hal_queue_transfer returns.
+      const iree_hal_fill_region_t* region;
 
       // Pattern bytes captured before iree_hal_queue_transfer returns.
       const void* pattern;
@@ -905,8 +957,8 @@ typedef struct iree_hal_transfer_operation_t {
       // Byte offset into |target_buffer| where the update begins.
       iree_device_size_t target_offset;
 
-      // Number of bytes to update.
-      iree_device_size_t length;
+      // Geometry captured before iree_hal_queue_transfer returns.
+      const iree_hal_transfer_region_t* region;
 
       // Flags controlling update behavior.
       iree_hal_update_flags_t flags;
@@ -926,8 +978,8 @@ typedef struct iree_hal_transfer_operation_t {
       // Byte offset into |target_buffer| where the copy begins.
       iree_device_size_t target_offset;
 
-      // Number of bytes to copy.
-      iree_device_size_t length;
+      // Geometry captured before iree_hal_queue_transfer returns.
+      const iree_hal_transfer_region_t* region;
 
       // Flags controlling copy behavior.
       iree_hal_copy_flags_t flags;
@@ -945,8 +997,8 @@ typedef struct iree_hal_transfer_operation_t {
       // Byte offset into |target_buffer| where the upload begins.
       iree_device_size_t target_offset;
 
-      // Number of bytes to upload.
-      iree_device_size_t length;
+      // Geometry captured before iree_hal_queue_transfer returns.
+      const iree_hal_transfer_region_t* region;
     } upload;
 
     // IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD payload.
@@ -961,29 +1013,71 @@ typedef struct iree_hal_transfer_operation_t {
       // waits. It remains live and inaccessible to the caller until retirement.
       void* target;
 
-      // Number of bytes to download.
-      iree_device_size_t length;
+      // Geometry captured before iree_hal_queue_transfer returns.
+      const iree_hal_transfer_region_t* region;
     } download;
   };
 } iree_hal_transfer_operation_t;
 
-// Number of payload bytes transferred by an operation. A zero-length operation
-// has no buffer or host-memory requirements.
-static inline iree_device_size_t iree_hal_transfer_operation_length(
+// Returns the admitted operation geometry by value. Fills have no source
+// strides. This trusted query does not validate, allocate, or retain storage.
+static inline iree_hal_transfer_region_t iree_hal_transfer_operation_region(
     const iree_hal_transfer_operation_t* operation) {
   switch (operation->type) {
     case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
-      return operation->fill.length;
+      return (iree_hal_transfer_region_t){
+          .row_length = operation->fill.region->row_length,
+          .row_count = operation->fill.region->row_count,
+          .slice_count = operation->fill.region->slice_count,
+          .target_strides = operation->fill.region->target_strides,
+      };
     case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
-      return operation->update.length;
+      return *operation->update.region;
     case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
-      return operation->copy.length;
+      return *operation->copy.region;
     case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
-      return operation->upload.length;
+      return *operation->upload.region;
     case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
-      return operation->download.length;
+      return *operation->download.region;
   }
-  return 0;
+  IREE_BUILTIN_UNREACHABLE();
+}
+
+// Copies an admitted descriptor's geometry into caller-owned storage and
+// redirects the descriptor to it. Storage is aligned for and large enough for
+// iree_hal_transfer_region_t; its lifetime encloses the captured descriptor.
+static inline void iree_hal_transfer_operation_capture_region(
+    iree_hal_transfer_operation_t* operation, void* storage) {
+  switch (operation->type) {
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
+      *(iree_hal_fill_region_t*)storage = *operation->fill.region;
+      operation->fill.region = (const iree_hal_fill_region_t*)storage;
+      break;
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
+      *(iree_hal_transfer_region_t*)storage = *operation->update.region;
+      operation->update.region = (const iree_hal_transfer_region_t*)storage;
+      break;
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
+      *(iree_hal_transfer_region_t*)storage = *operation->copy.region;
+      operation->copy.region = (const iree_hal_transfer_region_t*)storage;
+      break;
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
+      *(iree_hal_transfer_region_t*)storage = *operation->upload.region;
+      operation->upload.region = (const iree_hal_transfer_region_t*)storage;
+      break;
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
+      *(iree_hal_transfer_region_t*)storage = *operation->download.region;
+      operation->download.region = (const iree_hal_transfer_region_t*)storage;
+      break;
+  }
+}
+
+// Useful byte count of a publicly validated operation, excluding padding.
+static inline uint64_t iree_hal_transfer_operation_length(
+    const iree_hal_transfer_operation_t* operation) {
+  const iree_hal_transfer_region_t region =
+      iree_hal_transfer_operation_region(operation);
+  return iree_hal_transfer_region_length(&region);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1318,14 +1412,16 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_dealloca(
 // transaction is a semaphore barrier.
 //
 // Implementations validate and capture the complete transaction before
-// returning. Fill patterns and update source bytes are copied during capture.
+// returning. Geometry, fill patterns, and useful update source bytes are copied
+// during capture. Padding is not read or written.
 // A synchronous failure captures no operations, schedules no work, and does not
 // modify the signal semaphores. Asynchronous failures after successful capture
 // are reported through the signal semaphores.
 //
-// Zero-length operations are ignored and their remaining payload fields are not
-// inspected. A transaction containing only zero-length operations is therefore
-// a semaphore barrier.
+// Each operation requires a non-NULL region. Any zero geometry extent makes
+// the operation empty; its endpoints, offsets, strides, and flags are ignored.
+// A transaction containing only empty operations still executes its barriers
+// between waits and signals.
 //
 // Non-empty uploads and downloads borrow their host ranges from the start of
 // this call until the transaction retires and require at least one signal
@@ -1347,6 +1443,17 @@ iree_hal_queue_transfer(iree_hal_queue_t* queue,
                         const iree_hal_transfer_operation_t* operations,
                         const iree_hal_queue_barriers_t* barriers);
 
+// Fills useful rows with a captured 1/2/4-byte repeating pattern.
+// Geometry and transaction lifetime follow iree_hal_queue_transfer.
+IREE_API_EXPORT iree_status_t iree_hal_queue_fill(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    const void* pattern, iree_host_size_t pattern_length,
+    const iree_hal_fill_region_t* region,
+    const iree_hal_queue_barriers_t* barriers, iree_hal_fill_flags_t flags);
+
 // Enqueues a scalar fill as a one-operation transfer transaction.
 IREE_API_EXPORT iree_status_t iree_hal_queue_fill_linear(
     iree_hal_queue_t* queue,
@@ -1356,6 +1463,18 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_fill_linear(
     iree_device_size_t length, const void* pattern,
     iree_host_size_t pattern_length, const iree_hal_queue_barriers_t* barriers,
     iree_hal_fill_flags_t flags);
+
+// Captures useful host source bytes before returning, then updates the
+// target after its waits. Caller source storage may be reused on return.
+// Geometry and transaction lifetime follow iree_hal_queue_transfer.
+IREE_API_EXPORT iree_status_t iree_hal_queue_update(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    const void* source_buffer, iree_host_size_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    const iree_hal_transfer_region_t* region,
+    const iree_hal_queue_barriers_t* barriers, iree_hal_update_flags_t flags);
 
 // Enqueues a scalar captured update as a one-operation transfer transaction.
 // The source range must be readable and unmodified from the start of the call
@@ -1370,6 +1489,17 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_update_linear(
     iree_device_size_t length, const iree_hal_queue_barriers_t* barriers,
     iree_hal_update_flags_t flags);
 
+// Copies useful bytes between independently strided buffer windows.
+// Geometry and transaction lifetime follow iree_hal_queue_transfer.
+IREE_API_EXPORT iree_status_t iree_hal_queue_copy(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    const iree_hal_transfer_region_t* region,
+    const iree_hal_queue_barriers_t* barriers, iree_hal_copy_flags_t flags);
+
 // Enqueues a scalar device buffer copy as a one-operation transaction.
 IREE_API_EXPORT iree_status_t iree_hal_queue_copy_linear(
     iree_hal_queue_t* queue,
@@ -1379,6 +1509,17 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_copy_linear(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, const iree_hal_queue_barriers_t* barriers,
     iree_hal_copy_flags_t flags);
+
+// Uploads useful bytes from borrowed host storage. The source is readable
+// when this call starts and remains live and unchanged through retirement.
+// Geometry and transaction lifetime follow iree_hal_queue_transfer.
+IREE_API_EXPORT iree_status_t iree_hal_queue_upload(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list, const void* source,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    const iree_hal_transfer_region_t* region,
+    const iree_hal_queue_barriers_t* barriers);
 
 // Enqueues a scalar upload from borrowed host memory.
 // The non-empty |source| range must be initialized and readable when this call
@@ -1391,6 +1532,17 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_upload_linear(
     const iree_hal_semaphore_list_t signal_semaphore_list, const void* source,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, const iree_hal_queue_barriers_t* barriers);
+
+// Downloads useful bytes into borrowed host storage. The target is writable
+// when this call starts and remains live and caller-inaccessible until
+// retirement. Geometry and transaction lifetime follow iree_hal_queue_transfer.
+IREE_API_EXPORT iree_status_t iree_hal_queue_download(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
+    void* target, const iree_hal_transfer_region_t* region,
+    const iree_hal_queue_barriers_t* barriers);
 
 // Enqueues a scalar download into borrowed host memory.
 // The non-empty |target| range must be writable by HAL when this call starts

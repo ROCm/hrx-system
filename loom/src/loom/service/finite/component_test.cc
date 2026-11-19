@@ -402,6 +402,11 @@ class FiniteComponentTest : public ::testing::Test {
         consumer_, {2, ready.semaphores, ready.values}));
     const auto row = loom_service_finite_result_row(results_[ordinal], 0, 0);
     ASSERT_EQ(row.length, sizeof(output_));
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = row.length,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
@@ -409,7 +414,7 @@ class FiniteComponentTest : public ::testing::Test {
                 .source_buffer = row.buffer,
                 .source_offset = row.offset,
                 .target = output_.data(),
-                .length = row.length,
+                .region = &download_region,
             },
     };
     uint64_t value = 0;
@@ -869,6 +874,11 @@ TEST_F(FiniteComponentTest, PeerAdmissionWaitsForCapturedOutputRetirement) {
   IREE_ASSERT_OK(
       loom_runtime_execution_barrier(consumer_, {1, &gate_, &gate_value}));
   const auto row = loom_service_finite_result_row(results_[0], 0, 0);
+  const iree_hal_transfer_region_t download_region = {
+      .row_length = row.length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
@@ -876,7 +886,7 @@ TEST_F(FiniteComponentTest, PeerAdmissionWaitsForCapturedOutputRetirement) {
               .source_buffer = row.buffer,
               .source_offset = row.offset,
               .target = output_.data(),
-              .length = row.length,
+              .region = &download_region,
           },
   };
   uint64_t value = 0;

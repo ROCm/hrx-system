@@ -124,6 +124,7 @@ iree_status_t loom_serve_text_capture_submit(
   capture->buffer = iree_hal_buffer_allocated_buffer(output);
   iree_hal_buffer_retain(capture->buffer);
   iree_hal_transfer_operation_t operations[64];
+  iree_hal_transfer_region_t operations_regions[IREE_ARRAYSIZE(operations)];
   iree_host_size_t operation_count = 0;
   iree_device_size_t offset = 0;
   uint64_t completion = 0;
@@ -132,13 +133,16 @@ iree_status_t loom_serve_text_capture_submit(
        i < capture->range_count && iree_status_is_ok(status); ++i) {
     const iree_hal_buffer_range_t range =
         capture->ranges[capture->span_count + i];
-    operations[operation_count++] = (iree_hal_transfer_operation_t){
+    operations_regions[operation_count] = (iree_hal_transfer_region_t){
+        .row_length = range.byte_length, .row_count = 1, .slice_count = 1};
+    operations[operation_count] = (iree_hal_transfer_operation_t){
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
         .copy = {.source_buffer = residual,
                  .source_offset = range.byte_offset,
                  .target_buffer = output,
                  .target_offset = offset,
-                 .length = range.byte_length}};
+                 .region = &operations_regions[operation_count]}};
+    ++operation_count;
     offset += range.byte_length;
     if (operation_count == IREE_ARRAYSIZE(operations)) {
       status = loom_runtime_execution_transfer(execution, operation_count,
@@ -227,11 +231,16 @@ iree_status_t loom_serve_text_capture_download(
       capture->host_allocator, &source);
   if (iree_status_is_ok(status)) {
     iree_atomic_ref_count_inc(&snapshot->ref_count);
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = capture->length,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download = {.source_buffer = source,
                      .target = snapshot->ranges + snapshot->span_count,
-                     .length = capture->length}};
+                     .region = &download_region}};
     uint64_t value = 0;
     status = loom_runtime_execution_feedback(capture->execution, 1, &download,
                                              &value);

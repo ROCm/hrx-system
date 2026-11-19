@@ -39,6 +39,11 @@ TEST(TransferTest, ProgramPromotionRequiresAnExecutingFamily) {
                              IREE_HAL_MEMORY_ACCESS_ALL,
                              IREE_HAL_BUFFER_USAGE_TRANSFER, &vtable, &buffer);
   buffer.memory = {.contract = contract, .bindings = &native};
+  const auto operations_region = iree_hal_transfer_region_t{
+      .row_length = 16,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   std::array<iree_hal_transfer_operation_t, 2> operations = {};
   for (uint32_t i = 0; i < operations.size(); ++i) {
     operations[i] = {
@@ -49,7 +54,7 @@ TEST(TransferTest, ProgramPromotionRequiresAnExecutingFamily) {
                 .source_offset = i * 16,
                 .target_buffer = &buffer,
                 .target_offset = 32 + i * 16,
-                .length = 16,
+                .region = &operations_region,
             },
     };
   }

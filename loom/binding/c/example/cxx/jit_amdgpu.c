@@ -381,15 +381,17 @@ static iree_status_t execute_kernel(jit_state_t* state, const char* name,
   const iree_hal_semaphore_list_t dispatched = {1, &semaphore, &dispatch};
   const iree_hal_semaphore_list_t downloaded = {1, &semaphore, &download};
   if (iree_status_is_ok(status)) {
+    const iree_hal_transfer_region_t input_region = {sizeof(input), 1, 1};
+    const iree_hal_transfer_region_t output_region = {sizeof(output), 1, 1};
     const iree_hal_transfer_operation_t operations[] = {
         {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
          .upload = {.source = input,
                     .target_buffer = input_buffer,
-                    .length = sizeof(input)}},
+                    .region = &input_region}},
         {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
          .upload = {.source = output,
                     .target_buffer = output_buffer,
-                    .length = sizeof(output)}},
+                    .region = &output_region}},
     };
     status = iree_hal_queue_transfer(
         state->transfer_queue, iree_hal_semaphore_list_empty(), uploaded,

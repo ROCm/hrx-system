@@ -924,17 +924,22 @@ static iree_status_t loom_serve_text_submit_compaction(
     const iree_device_size_t length = state->row_count *
                                       state->storage.blocks_per_row *
                                       sizeof(*state->cache.maps);
+    const iree_hal_transfer_region_t uploads_region = {
+        .row_length = length,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t uploads[] = {
         {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
          .upload = {.source = state->cache.maps,
                     .target_buffer = state->epoch.buffers[2],
                     .target_offset = state->storage.map_origin,
-                    .length = length}},
+                    .region = &uploads_region}},
         {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
          .upload = {.source = state->cache.maps,
                     .target_buffer = state->draft.row_table,
                     .target_offset = state->storage.map_origin,
-                    .length = length}},
+                    .region = &uploads_region}},
     };
     uint64_t completion = 0;
     status = loom_runtime_execution_transfer(

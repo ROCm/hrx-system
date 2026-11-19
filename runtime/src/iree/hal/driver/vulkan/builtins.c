@@ -244,6 +244,57 @@ void iree_hal_vulkan_builtins_deinitialize(
   memset(builtins, 0, sizeof(*builtins));
 }
 
+void iree_hal_vulkan_builtins_record_copy_region(
+    const iree_hal_vulkan_device_syms_t* syms, VkCommandBuffer command_buffer,
+    VkBuffer source, VkDeviceSize source_offset, VkBuffer target,
+    VkDeviceSize target_offset, const iree_hal_transfer_region_t* region) {
+  if (iree_hal_transfer_range_is_linear(region->row_length, region->row_count,
+                                        region->slice_count,
+                                        &region->source_strides) &&
+      iree_hal_transfer_range_is_linear(region->row_length, region->row_count,
+                                        region->slice_count,
+                                        &region->target_strides)) {
+    const VkBufferCopy copy = {.srcOffset = source_offset,
+                               .dstOffset = target_offset,
+                               .size = iree_hal_transfer_region_length(region)};
+    iree_vkCmdCopyBuffer(IREE_VULKAN_DEVICE(syms), command_buffer, source,
+                         target, 1, &copy);
+    return;
+  }
+  VkBufferCopy copies[64];
+  uint32_t count = 0;
+  for (uint64_t slice = 0; slice < region->slice_count; ++slice) {
+    for (uint64_t row = 0; row < region->row_count; ++row) {
+      copies[count++] = (VkBufferCopy){
+          .srcOffset =
+              source_offset +
+              (region->row_count > 1 ? row * region->source_strides.row_stride
+                                     : 0) +
+              (region->slice_count > 1
+                   ? slice * region->source_strides.slice_stride
+                   : 0),
+          .dstOffset =
+              target_offset +
+              (region->row_count > 1 ? row * region->target_strides.row_stride
+                                     : 0) +
+              (region->slice_count > 1
+                   ? slice * region->target_strides.slice_stride
+                   : 0),
+          .size = region->row_length,
+      };
+      if (count == IREE_ARRAYSIZE(copies)) {
+        iree_vkCmdCopyBuffer(IREE_VULKAN_DEVICE(syms), command_buffer, source,
+                             target, count, copies);
+        count = 0;
+      }
+    }
+  }
+  if (count) {
+    iree_vkCmdCopyBuffer(IREE_VULKAN_DEVICE(syms), command_buffer, source,
+                         target, count, copies);
+  }
+}
+
 iree_hal_fill_region_t iree_hal_vulkan_builtins_fill_tile(
     const iree_hal_vulkan_builtins_t* builtins,
     const iree_hal_fill_region_t* region) {
@@ -274,8 +325,8 @@ iree_hal_fill_region_t iree_hal_vulkan_builtins_fill_tile(
 
 iree_status_t iree_hal_vulkan_builtins_record_fill_region(
     const iree_hal_vulkan_builtins_t* builtins, VkCommandBuffer command_buffer,
-    VkDescriptorPool descriptor_pool, VkBuffer target_buffer,
-    VkDeviceSize target_offset, const uint8_t* pattern,
+    VkDescriptorPool descriptor_pool, const VkDescriptorSet* descriptor_sets,
+    VkBuffer target_buffer, VkDeviceSize target_offset, const uint8_t* pattern,
     iree_host_size_t pattern_length, const iree_hal_fill_region_t* region) {
   uint32_t expanded_pattern = 0;
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_fill_unaligned_expand_pattern(
@@ -317,17 +368,21 @@ iree_status_t iree_hal_vulkan_builtins_record_fill_region(
                                 : 0,
         };
         VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
-        const VkDescriptorSetAllocateInfo allocate_info = {
-            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-            .descriptorPool = descriptor_pool,
-            .descriptorSetCount = 1,
-            .pSetLayouts = &builtins->storage_buffer_descriptor_set_layout,
-        };
-        status = iree_vkAllocateDescriptorSets(
-            IREE_VULKAN_DEVICE(&builtins->syms), builtins->logical_device,
-            &allocate_info, &descriptor_set);
-        if (!iree_status_is_ok(status)) {
-          break;
+        if (descriptor_sets) {
+          descriptor_set = *descriptor_sets++;
+        } else {
+          const VkDescriptorSetAllocateInfo allocate_info = {
+              .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+              .descriptorPool = descriptor_pool,
+              .descriptorSetCount = 1,
+              .pSetLayouts = &builtins->storage_buffer_descriptor_set_layout,
+          };
+          status = iree_vkAllocateDescriptorSets(
+              IREE_VULKAN_DEVICE(&builtins->syms), builtins->logical_device,
+              &allocate_info, &descriptor_set);
+          if (!iree_status_is_ok(status)) {
+            break;
+          }
         }
         const VkDescriptorBufferInfo buffer_info = {
             .buffer = target_buffer,

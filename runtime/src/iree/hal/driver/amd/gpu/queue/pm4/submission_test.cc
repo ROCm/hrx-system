@@ -1027,6 +1027,11 @@ TEST_P(SubmissionTest, CopyBatchesCaptureProgramCompatibilityAndKeepOwnership) {
               iree_allocator_system(), &buffers[i]));
           buffers[i]->memory = {.contract = contracts[i], .bindings = bindings};
         }
+        const iree_hal_transfer_region_t operations_region = {
+            .row_length = 4,
+            .row_count = 1,
+            .slice_count = 1,
+        };
         const iree_hal_transfer_operation_t operations[] = {
             {
                 .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
@@ -1035,7 +1040,7 @@ TEST_P(SubmissionTest, CopyBatchesCaptureProgramCompatibilityAndKeepOwnership) {
                         .source_buffer = buffers[0],
                         .target_buffer = buffers[0],
                         .target_offset = 4,
-                        .length = 4,
+                        .region = &operations_region,
                     },
             },
             {
@@ -1045,7 +1050,7 @@ TEST_P(SubmissionTest, CopyBatchesCaptureProgramCompatibilityAndKeepOwnership) {
                         .source_buffer = buffers[source ? 1 : 0],
                         .target_buffer = buffers[source ? 0 : 1],
                         .target_offset = 8,
-                        .length = 4,
+                        .region = &operations_region,
                     },
             },
         };
@@ -1116,13 +1121,18 @@ TEST_P(SubmissionTest, RejectedDownloadSuffixJoinsBeforeFailingPublicSignals) {
                              IREE_HAL_BUFFER_USAGE_TRANSFER, &vtable, &buffer);
   buffer.memory = {.contract = contract, .bindings = &binding};
   std::array<uint8_t, 8> output = {};
+  const iree_hal_transfer_region_t operation_region = {
+      .row_length = output.size(),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
           {
               .source_buffer = &buffer,
               .target = output.data(),
-              .length = output.size(),
+              .region = &operation_region,
           },
   };
   uint64_t value = 1;

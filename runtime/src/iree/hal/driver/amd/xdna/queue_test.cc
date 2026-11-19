@@ -1313,7 +1313,12 @@ TEST(XdnaQueueTest, HostProducerProgressesWithFullNativeQueue) {
   };
   transfer.update.target_buffer = buffer;
   transfer.update.source_buffer = &payload;
-  transfer.update.length = sizeof(payload);
+  const iree_hal_transfer_region_t transfer_transfer_region = {
+      .row_length = sizeof(payload),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  transfer.update.region = &transfer_transfer_region;
   uint64_t value = 1;
   IREE_ASSERT_OK(iree_hal_queue_transfer(harness.queue, {},
                                          {1, &produced, &value}, 1, &transfer,
@@ -1366,7 +1371,12 @@ TEST(XdnaQueueTest, BlockedNativePublicationDoesNotBlockHostOrProactor) {
   };
   transfer.update.target_buffer = buffer;
   transfer.update.source_buffer = &payload;
-  transfer.update.length = sizeof(payload);
+  const iree_hal_transfer_region_t transfer_transfer_region = {
+      .row_length = sizeof(payload),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  transfer.update.region = &transfer_transfer_region;
   uint64_t value = 1;
   IREE_ASSERT_OK(iree_hal_queue_transfer(harness.queue, {},
                                          {1, &host_completion, &value}, 1,
@@ -1626,7 +1636,12 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
     };
     transfer.update.source_buffer = source.data;
     transfer.update.target_buffer = transfer_buffer;
-    transfer.update.length = source.data_length;
+    const iree_hal_transfer_region_t transfer_transfer_region = {
+        .row_length = source.data_length,
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    transfer.update.region = &transfer_transfer_region;
     for (uint64_t iteration = 1; iteration <= kTotalIterations; ++iteration) {
       if (iteration == kWarmupIterations + 1) {
         before = SnapshotHostAllocations(allocation_counters);

@@ -1398,6 +1398,7 @@ TEST_F(MemoryTest, RecommittedSlabsPublishEveryWordOfTheNewGeneration) {
   std::vector<uint32_t> observed(2 * kWordsPerSlab);
   std::vector<uint32_t> captured(2 * kWordsPerSlab);
   uint64_t completion = 0;
+  const iree_hal_transfer_region_t slab_region = {kSlabSize, 1, 1};
   for (size_t generation = 0; generation < kGenerationCount; ++generation) {
     SCOPED_TRACE(generation);
     const uint64_t offset = kOrigin + (generation % 2) * 2 * kSlabSize;
@@ -1410,10 +1411,11 @@ TEST_F(MemoryTest, RecommittedSlabsPublishEveryWordOfTheNewGeneration) {
     for (size_t i = 0; i < handles.size(); ++i) {
       uploads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
       uploads[i].upload = {expected[generation].data() + i * kWordsPerSlab,
-                           handles[i], offset, kSlabSize};
+                           handles[i], offset, &slab_region};
       downloads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
       downloads[i].download = {handles[i], offset,
-                               observed.data() + i * kWordsPerSlab, kSlabSize};
+                               observed.data() + i * kWordsPerSlab,
+                               &slab_region};
     }
     bool admitted = false;
     IREE_ASSERT_OK(loom_runtime_memory_pool_try_commit(

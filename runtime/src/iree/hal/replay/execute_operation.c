@@ -193,9 +193,31 @@ static iree_status_t iree_hal_replay_executor_validate_transfer_operation(
         "replay queue transfer operation reserved fields must be zero");
   }
 
+  iree_hal_transfer_region_t region;
+  static_assert(sizeof(payload->region) == sizeof(region),
+                "transfer wire geometry size");
+  memcpy(&region, &payload->region, sizeof(region));
+  uint64_t length = 0;
+  if (region.row_length && region.row_count && region.slice_count &&
+      (!iree_checked_mul_u64(region.row_length, region.row_count, &length) ||
+       !iree_checked_mul_u64(length, region.slice_count, &length) ||
+       !iree_hal_transfer_range_fits(0, region.row_length, region.row_count,
+                                     region.slice_count, &region.source_strides,
+                                     payload->source_ref.buffer_id
+                                         ? payload->source_ref.length
+                                         : length) ||
+       !iree_hal_transfer_range_fits(0, region.row_length, region.row_count,
+                                     region.slice_count, &region.target_strides,
+                                     payload->target_ref.buffer_id
+                                         ? payload->target_ref.length
+                                         : length))) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "replay transfer geometry exceeds its endpoints");
+  }
+
   switch (payload->type) {
     case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_FILL: {
-      if (payload->target_ref.length == 0) {
+      if (length == 0) {
         return iree_hal_replay_executor_validate_empty_transfer_operation(
             payload);
       }
@@ -212,13 +234,13 @@ static iree_status_t iree_hal_replay_executor_validate_transfer_operation(
                                                          &fill_data);
     }
     case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_UPDATE: {
-      if (payload->target_ref.length == 0) {
+      if (length == 0) {
         return iree_hal_replay_executor_validate_empty_transfer_operation(
             payload);
       }
       if (IREE_UNLIKELY(!iree_hal_replay_buffer_ref_payload_is_empty(
                             &payload->source_ref) ||
-                        payload->data_length != payload->target_ref.length)) {
+                        payload->data_length != length)) {
         return iree_make_status(IREE_STATUS_DATA_LOSS,
                                 "replay update operation payload is invalid");
       }
@@ -227,26 +249,25 @@ static iree_status_t iree_hal_replay_executor_validate_transfer_operation(
                                                          &update_data);
     }
     case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_COPY:
-      if (payload->source_ref.length == 0 && payload->target_ref.length == 0) {
+      if (length == 0) {
         return iree_hal_replay_executor_validate_empty_transfer_operation(
             payload);
       }
-      if (IREE_UNLIKELY(
-              payload->source_ref.length != payload->target_ref.length ||
-              payload->data_offset != 0 || payload->data_length != 0)) {
+      if (IREE_UNLIKELY(payload->data_offset != 0 ||
+                        payload->data_length != 0)) {
         return iree_make_status(IREE_STATUS_DATA_LOSS,
                                 "replay copy operation payload is invalid");
       }
       return iree_ok_status();
     case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_UPLOAD: {
-      if (payload->target_ref.length == 0) {
+      if (length == 0) {
         return iree_hal_replay_executor_validate_empty_transfer_operation(
             payload);
       }
       if (IREE_UNLIKELY(payload->flags != 0 ||
                         !iree_hal_replay_buffer_ref_payload_is_empty(
                             &payload->source_ref) ||
-                        payload->data_length != payload->target_ref.length)) {
+                        payload->data_length != length)) {
         return iree_make_status(IREE_STATUS_DATA_LOSS,
                                 "replay upload operation payload is invalid");
       }
@@ -255,20 +276,19 @@ static iree_status_t iree_hal_replay_executor_validate_transfer_operation(
                                                          &upload_data);
     }
     case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_DOWNLOAD:
-      if (payload->source_ref.length == 0) {
+      if (length == 0) {
         return iree_hal_replay_executor_validate_empty_transfer_operation(
             payload);
       }
-      if (IREE_UNLIKELY(payload->flags != 0 ||
-                        !iree_hal_replay_buffer_ref_payload_is_empty(
-                            &payload->target_ref) ||
-                        payload->data_offset != 0 ||
-                        payload->data_length != 0 ||
-                        payload->source_ref.length > IREE_HOST_SIZE_MAX ||
-                        !iree_host_size_checked_add(
-                            *inout_download_data_length,
-                            (iree_host_size_t)payload->source_ref.length,
-                            inout_download_data_length))) {
+      if (IREE_UNLIKELY(
+              payload->flags != 0 ||
+              !iree_hal_replay_buffer_ref_payload_is_empty(
+                  &payload->target_ref) ||
+              payload->data_offset != 0 || payload->data_length != 0 ||
+              length > IREE_HOST_SIZE_MAX ||
+              !iree_host_size_checked_add(*inout_download_data_length,
+                                          (iree_host_size_t)length,
+                                          inout_download_data_length))) {
         return iree_make_status(IREE_STATUS_DATA_LOSS,
                                 "replay download operation payload is invalid");
       }
@@ -403,18 +423,31 @@ static iree_status_t iree_hal_replay_executor_queue_transfer(
   }
 
   iree_hal_transfer_operation_t* operations = NULL;
+  typedef union iree_hal_replay_transfer_region_storage_t {
+    // Geometry for a fill, with only destination strides.
+    iree_hal_fill_region_t fill;
+    // Geometry for a copy or host transfer.
+    iree_hal_transfer_region_t transfer;
+  } iree_hal_replay_transfer_region_storage_t;
+  iree_hal_replay_transfer_region_storage_t* regions = NULL;
   iree_host_size_t operations_size = 0;
-  if (iree_status_is_ok(status) && operation_count != 0 &&
-      IREE_UNLIKELY(!iree_host_size_checked_mul(
-          operation_count, sizeof(*operations), &operations_size))) {
-    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "replay transfer operation storage overflow");
+  iree_host_size_t regions_offset = 0;
+  if (iree_status_is_ok(status)) {
+    status = IREE_STRUCT_LAYOUT(
+        0, &operations_size,
+        IREE_STRUCT_FIELD(operation_count, iree_hal_transfer_operation_t, NULL),
+        IREE_STRUCT_FIELD(operation_count,
+                          iree_hal_replay_transfer_region_storage_t,
+                          &regions_offset));
   }
-  if (iree_status_is_ok(status) && operations_size != 0) {
+  if (iree_status_is_ok(status) && operations_size) {
     status = iree_allocator_malloc(executor->host_allocator, operations_size,
                                    (void**)&operations);
     if (iree_status_is_ok(status)) {
       memset(operations, 0, operations_size);
+      regions =
+          (iree_hal_replay_transfer_region_storage_t*)((uint8_t*)operations +
+                                                       regions_offset);
     }
   }
   const iree_host_size_t upload_data_length =
@@ -449,12 +482,23 @@ static iree_status_t iree_hal_replay_executor_queue_transfer(
            operation_payloads + i * sizeof(operation_payload),
            sizeof(operation_payload));
     iree_hal_transfer_operation_t* operation = &operations[i];
+    memcpy(&regions[i].transfer, &operation_payload.region,
+           sizeof(regions[i].transfer));
     iree_hal_buffer_ref_t source_ref = {0};
     iree_hal_buffer_ref_t target_ref = {0};
     iree_const_byte_span_t operation_data = iree_make_const_byte_span(NULL, 0);
     switch (operation_payload.type) {
       case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_FILL:
         operation->type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
+        regions[i].fill = (iree_hal_fill_region_t){
+            .row_length = operation_payload.region.row_length,
+            .row_count = operation_payload.region.row_count,
+            .slice_count = operation_payload.region.slice_count,
+            .target_strides =
+                {operation_payload.region.target_strides.row_stride,
+                 operation_payload.region.target_strides.slice_stride},
+        };
+        operation->fill.region = &regions[i].fill;
         if (operation_payload.target_ref.length == 0) {
           break;
         }
@@ -467,7 +511,6 @@ static iree_status_t iree_hal_replay_executor_queue_transfer(
         if (iree_status_is_ok(status)) {
           operation->fill.target_buffer = target_ref.buffer;
           operation->fill.target_offset = target_ref.offset;
-          operation->fill.length = target_ref.length;
           operation->fill.pattern = operation_data.data;
           operation->fill.pattern_length = operation_data.data_length;
           operation->fill.flags = operation_payload.flags;
@@ -475,6 +518,7 @@ static iree_status_t iree_hal_replay_executor_queue_transfer(
         break;
       case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_UPDATE:
         operation->type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE;
+        operation->update.region = &regions[i].transfer;
         if (operation_payload.target_ref.length == 0) {
           break;
         }
@@ -488,12 +532,12 @@ static iree_status_t iree_hal_replay_executor_queue_transfer(
           operation->update.source_buffer = operation_data.data;
           operation->update.target_buffer = target_ref.buffer;
           operation->update.target_offset = target_ref.offset;
-          operation->update.length = target_ref.length;
           operation->update.flags = operation_payload.flags;
         }
         break;
       case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_COPY:
         operation->type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
+        operation->copy.region = &regions[i].transfer;
         if (operation_payload.source_ref.length == 0) {
           break;
         }
@@ -508,12 +552,12 @@ static iree_status_t iree_hal_replay_executor_queue_transfer(
           operation->copy.source_offset = source_ref.offset;
           operation->copy.target_buffer = target_ref.buffer;
           operation->copy.target_offset = target_ref.offset;
-          operation->copy.length = source_ref.length;
           operation->copy.flags = operation_payload.flags;
         }
         break;
       case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_UPLOAD:
         operation->type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
+        operation->upload.region = &regions[i].transfer;
         if (operation_payload.target_ref.length == 0) {
           break;
         }
@@ -527,11 +571,11 @@ static iree_status_t iree_hal_replay_executor_queue_transfer(
           operation->upload.source = operation_data.data;
           operation->upload.target_buffer = target_ref.buffer;
           operation->upload.target_offset = target_ref.offset;
-          operation->upload.length = target_ref.length;
         }
         break;
       case IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_DOWNLOAD:
         operation->type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+        operation->download.region = &regions[i].transfer;
         if (operation_payload.source_ref.length == 0) {
           break;
         }
@@ -541,8 +585,9 @@ static iree_status_t iree_hal_replay_executor_queue_transfer(
           operation->download.source_buffer = source_ref.buffer;
           operation->download.source_offset = source_ref.offset;
           operation->download.target = download_data + download_data_offset;
-          operation->download.length = source_ref.length;
-          download_data_offset += (iree_host_size_t)source_ref.length;
+          download_data_offset +=
+              (iree_host_size_t)iree_hal_transfer_region_length(
+                  &regions[i].transfer);
         }
         break;
       default:

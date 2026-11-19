@@ -959,6 +959,40 @@ typedef struct iree_hal_replay_queue_dealloca_payload_t {
 static_assert(sizeof(iree_hal_replay_queue_dealloca_payload_t) == 32,
               "queue dealloca replay header must be 32 bytes");
 
+// Fixed-width byte strides in a serialized transfer endpoint.
+typedef struct iree_hal_replay_transfer_strides_t {
+  // Byte distance between rows; ignored for one row.
+  uint64_t row_stride;
+  // Byte distance between slices; ignored for one slice.
+  uint64_t slice_stride;
+} iree_hal_replay_transfer_strides_t;
+
+// Fixed-width geometry for copy-like buffer transfers.
+typedef struct iree_hal_replay_transfer_region_t {
+  // Useful bytes in each row.
+  uint64_t row_length;
+  // Rows in each slice.
+  uint64_t row_count;
+  // Number of slices.
+  uint64_t slice_count;
+  // Displacements relative to the source origin.
+  iree_hal_replay_transfer_strides_t source_strides;
+  // Displacements relative to the target origin.
+  iree_hal_replay_transfer_strides_t target_strides;
+} iree_hal_replay_transfer_region_t;
+
+// Fixed-width geometry for buffer fills.
+typedef struct iree_hal_replay_fill_region_t {
+  // Useful bytes in each row.
+  uint64_t row_length;
+  // Rows in each slice.
+  uint64_t row_count;
+  // Number of slices.
+  uint64_t slice_count;
+  // Displacements relative to the target origin.
+  iree_hal_replay_transfer_strides_t target_strides;
+} iree_hal_replay_fill_region_t;
+
 // One operation in a captured exact-queue transfer transaction.
 typedef struct iree_hal_replay_queue_transfer_operation_payload_t {
   // iree_hal_replay_queue_transfer_operation_type_t value.
@@ -971,13 +1005,15 @@ typedef struct iree_hal_replay_queue_transfer_operation_payload_t {
   iree_hal_replay_buffer_ref_payload_t source_ref;
   // Target buffer range, or zero when the operation has no device target.
   iree_hal_replay_buffer_ref_payload_t target_ref;
+  // Geometry of useful bytes; captured host endpoints are densely packed.
+  iree_hal_replay_transfer_region_t region;
   // Byte offset into the transaction captured-data segment.
   uint64_t data_offset;
   // Byte length within the transaction captured-data segment.
   uint64_t data_length;
 } iree_hal_replay_queue_transfer_operation_payload_t;
-static_assert(sizeof(iree_hal_replay_queue_transfer_operation_payload_t) == 96,
-              "queue transfer replay operation must be 96 bytes");
+static_assert(sizeof(iree_hal_replay_queue_transfer_operation_payload_t) == 152,
+              "queue transfer replay operation must be 152 bytes");
 
 // Language-level object alignment. On SysV i386 Clang's __alignof__ reports
 // the preferred alignment of uint64_t (8) instead of its ABI alignment (4).
@@ -1291,40 +1327,6 @@ typedef struct iree_hal_replay_queue_timestamp_payload_t {
 } iree_hal_replay_queue_timestamp_payload_t;
 static_assert(sizeof(iree_hal_replay_queue_timestamp_payload_t) == 56,
               "queue timestamp replay payload must be 56 bytes");
-
-// Fixed-width byte strides in a serialized transfer endpoint.
-typedef struct iree_hal_replay_transfer_strides_t {
-  // Byte distance between rows; ignored for one row.
-  uint64_t row_stride;
-  // Byte distance between slices; ignored for one slice.
-  uint64_t slice_stride;
-} iree_hal_replay_transfer_strides_t;
-
-// Fixed-width geometry for copy-like buffer transfers.
-typedef struct iree_hal_replay_transfer_region_t {
-  // Useful bytes in each row.
-  uint64_t row_length;
-  // Rows in each slice.
-  uint64_t row_count;
-  // Number of slices.
-  uint64_t slice_count;
-  // Displacements relative to the source origin.
-  iree_hal_replay_transfer_strides_t source_strides;
-  // Displacements relative to the target origin.
-  iree_hal_replay_transfer_strides_t target_strides;
-} iree_hal_replay_transfer_region_t;
-
-// Fixed-width geometry for buffer fills.
-typedef struct iree_hal_replay_fill_region_t {
-  // Useful bytes in each row.
-  uint64_t row_length;
-  // Rows in each slice.
-  uint64_t row_count;
-  // Number of slices.
-  uint64_t slice_count;
-  // Displacements relative to the target origin.
-  iree_hal_replay_transfer_strides_t target_strides;
-} iree_hal_replay_fill_region_t;
 
 // Payload describing a command buffer fill operation followed by the fill
 // pattern bytes.

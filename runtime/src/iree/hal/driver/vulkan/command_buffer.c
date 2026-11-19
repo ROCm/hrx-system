@@ -1747,44 +1747,6 @@ static void iree_hal_vulkan_command_buffer_record_native_copy(
                        &copy_region);
 }
 
-static void iree_hal_vulkan_command_buffer_record_copy_region(
-    const iree_hal_vulkan_device_syms_t* syms, VkCommandBuffer command_buffer,
-    VkBuffer source, VkDeviceSize source_offset, VkBuffer target,
-    VkDeviceSize target_offset, const iree_hal_transfer_region_t* region) {
-  VkBufferCopy copies[64];
-  uint32_t count = 0;
-  for (uint64_t slice = 0; slice < region->slice_count; ++slice) {
-    for (uint64_t row = 0; row < region->row_count; ++row) {
-      copies[count++] = (VkBufferCopy){
-          .srcOffset =
-              source_offset +
-              (region->row_count > 1 ? row * region->source_strides.row_stride
-                                     : 0) +
-              (region->slice_count > 1
-                   ? slice * region->source_strides.slice_stride
-                   : 0),
-          .dstOffset =
-              target_offset +
-              (region->row_count > 1 ? row * region->target_strides.row_stride
-                                     : 0) +
-              (region->slice_count > 1
-                   ? slice * region->target_strides.slice_stride
-                   : 0),
-          .size = region->row_length,
-      };
-      if (count == IREE_ARRAYSIZE(copies)) {
-        iree_vkCmdCopyBuffer(IREE_VULKAN_DEVICE(syms), command_buffer, source,
-                             target, count, copies);
-        count = 0;
-      }
-    }
-  }
-  if (count) {
-    iree_vkCmdCopyBuffer(IREE_VULKAN_DEVICE(syms), command_buffer, source,
-                         target, count, copies);
-  }
-}
-
 static iree_status_t
 iree_hal_vulkan_command_buffer_resolve_transfer_staging_range(
     const iree_hal_vulkan_command_buffer_t* command_buffer,
@@ -1858,7 +1820,7 @@ static iree_status_t iree_hal_vulkan_command_buffer_record_copy_native_refs(
       IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET));
 
   if (region) {
-    iree_hal_vulkan_command_buffer_record_copy_region(
+    iree_hal_vulkan_builtins_record_copy_region(
         syms, native_command_buffer, source_handle, source_offset,
         target_handle, target_offset, region);
   } else {
@@ -1959,7 +1921,7 @@ static iree_status_t iree_hal_vulkan_command_buffer_record_fill_native(
         (const iree_hal_fill_region_t*)(fill_buffer + 1);
     if (fill_buffer->staging_offset == IREE_DEVICE_SIZE_MAX) {
       return iree_hal_vulkan_builtins_record_fill_region(
-          builtins, native_command_buffer, descriptor_pool, target_handle,
+          builtins, native_command_buffer, descriptor_pool, NULL, target_handle,
           target_offset, fill_buffer->pattern, fill_buffer->pattern_length,
           region);
     }
@@ -2099,7 +2061,7 @@ static iree_status_t iree_hal_vulkan_command_buffer_record_update_native(
             update_buffer->source_data_length, &staging_handle,
             &staging_offset));
     if (update_buffer->rectangular) {
-      iree_hal_vulkan_command_buffer_record_copy_region(
+      iree_hal_vulkan_builtins_record_copy_region(
           syms, native_command_buffer, staging_handle, staging_offset,
           target_handle, target_offset,
           (const iree_hal_transfer_region_t*)(update_buffer + 1));

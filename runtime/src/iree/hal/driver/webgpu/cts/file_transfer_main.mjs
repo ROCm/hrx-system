@@ -63,6 +63,12 @@ try {
   assert.equal(api.begin_buffer(), 0, 'recorded rectangular transfers');
   assert.equal(await waitFor(0), 1, 'recorded transfer completion');
   assert.equal(api.finish(), 0, 'captured bytes and untouched padding');
+  assert.equal(api.begin_queue(), 0, 'immediate rectangular transfers');
+  assert.equal(await waitFor(1), 1, 'independent queue transaction');
+  assert.equal(api.query(0), 0, 'transfers wait for their producer');
+  assert.equal(api.open_gate(), 0, 'release captured update');
+  assert.equal(await waitFor(0), 1, 'host scatter completion');
+  assert.equal(api.finish(), 0, 'queue capture, padding, and host scatter');
   for (const form of [0, 1, 2, 3, 4, 5, 6, 7]) {
     const length = api.file_length(form);
     for (const count of form & 4 ? [form & 1 ? 2 : 1] : [0, 1, 65]) {

@@ -221,13 +221,18 @@ class FileReads {
       if (!lane.length) {
         continue;
       }
+      const iree_hal_transfer_region_t operation_region = {
+          .row_length = lane.length,
+          .row_count = 1,
+          .slice_count = 1,
+      };
       const iree_hal_transfer_operation_t operation = {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
           .download =
               {
                   .source_buffer = lane.buffer,
                   .target = verification_.data(),
-                  .length = lane.length,
+                  .region = &operation_region,
               },
       };
       uint64_t next = lane.value + 1;

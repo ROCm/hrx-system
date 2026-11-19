@@ -266,13 +266,18 @@ TEST_F(GpuProtocolInteropTest, ConsumerFirstHandoffsPreserveSharedBacking) {
             {1, &timelines[first], &produced}, buffer, kOffsets[0], kRangeBytes,
             &pattern, sizeof(pattern), nullptr, 0));
         std::array<uint32_t, kWordCount> output = {};
+        const iree_hal_transfer_region_t download_region = {
+            .row_length = sizeof(output),
+            .row_count = 1,
+            .slice_count = 1,
+        };
         const iree_hal_transfer_operation_t download = {
             .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
             .download =
                 {
                     .source_buffer = buffer,
                     .target = output.data(),
-                    .length = sizeof(output),
+                    .region = &download_region,
                 },
         };
         IREE_ASSERT_OK(iree_hal_queue_transfer(

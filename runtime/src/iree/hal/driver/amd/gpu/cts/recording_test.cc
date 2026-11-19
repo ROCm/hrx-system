@@ -554,6 +554,11 @@ TEST_P(GpuNativeRecordingSizeTest,
   IREE_ASSERT_OK(iree_hal_queue_execute(queues_[1], {1, &done, &two},
                                         {1, &done, &three}, recording, {}, 0));
   iree_hal_command_buffer_release(recording);
+  const iree_hal_transfer_region_t download_region = {
+      .row_length = sizeof(value),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
@@ -561,7 +566,7 @@ TEST_P(GpuNativeRecordingSizeTest,
               .source_buffer = output,
               .source_offset = 4,
               .target = &value,
-              .length = sizeof(value),
+              .region = &download_region,
           },
   };
   IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], {1, &done, &three},
@@ -645,13 +650,18 @@ TEST_F(GpuNativeRecordingTest, TransferBarriersJoinOnlyPendingCopies) {
         IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
     iree_hal_command_buffer_release(recording);
     std::vector<uint32_t> actual(kLength / sizeof(uint32_t));
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = kLength,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
             {
                 .source_buffer = output,
                 .target = actual.data(),
-                .length = kLength,
+                .region = &download_region,
             },
     };
     IREE_ASSERT_OK(iree_hal_queue_transfer(
@@ -961,6 +971,11 @@ TEST_F(GpuNativeRecordingTest, TransfersAndDispatchSharePendingNativeBindings) {
     table.fill({});
     iree_hal_command_buffer_release(recording);
     std::array<uint32_t, 8> actual;
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = sizeof(actual),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
@@ -968,7 +983,7 @@ TEST_F(GpuNativeRecordingTest, TransfersAndDispatchSharePendingNativeBindings) {
                 .source_buffer = output,
                 .source_offset = 8,
                 .target = actual.data(),
-                .length = sizeof(actual),
+                .region = &download_region,
             },
     };
     IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], {1, &done, &two},
@@ -1266,13 +1281,23 @@ TEST_P(GpuNativeIndirectTest,
         shared_recording = recording;
       }
     }
+    const auto fill_region = iree_hal_fill_region_t{
+        .row_length = 4096,
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    const auto update_region = iree_hal_transfer_region_t{
+        .row_length = 12,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const std::array<iree_hal_transfer_operation_t, 2> initialize = {{
         {
             .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
             .fill =
                 {
                     .target_buffer = buffers[1],
-                    .length = 4096,
+                    .region = &fill_region,
                     .pattern = &zero,
                     .pattern_length = 4,
                 },
@@ -1284,7 +1309,7 @@ TEST_P(GpuNativeIndirectTest,
                     .source_buffer = shapes[invocation].data(),
                     .target_buffer = buffers[0],
                     .target_offset = 4,
-                    .length = 12,
+                    .region = &update_region,
                 },
         },
     }};
@@ -1320,6 +1345,11 @@ TEST_P(GpuNativeIndirectTest,
           consumer, config, constants, bindings, nullptr, flags));
     }
     submitted_values_[invocation] = four;
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = kLength,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
@@ -1327,7 +1357,7 @@ TEST_P(GpuNativeIndirectTest,
                 .source_buffer = buffers[1],
                 .source_offset = 4,
                 .target = actual_[invocation].data(),
-                .length = kLength,
+                .region = &download_region,
             },
     };
     IREE_ASSERT_OK(iree_hal_queue_transfer(
@@ -1471,13 +1501,23 @@ TEST_P(GpuNativePacketTest, ShaderObservesCompleteInvocationOwnedPacket) {
     const iree_hal_buffer_ref_list_t bindings =
         argument_mode == 1 ? iree_hal_buffer_ref_list_empty()
                            : iree_hal_buffer_ref_list_t{1, &binding};
+    const auto fill_region = iree_hal_fill_region_t{
+        .row_length = kResultLength,
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    const auto update_region = iree_hal_transfer_region_t{
+        .row_length = 12,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const std::array<iree_hal_transfer_operation_t, 3> initialize = {{
         {
             .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
             .fill =
                 {
                     .target_buffer = buffers[1],
-                    .length = kResultLength,
+                    .region = &fill_region,
                     .pattern = &zero,
                     .pattern_length = 4,
                 },
@@ -1488,7 +1528,7 @@ TEST_P(GpuNativePacketTest, ShaderObservesCompleteInvocationOwnedPacket) {
                 {
                     .source_buffer = shapes[invocation].data(),
                     .target_buffer = buffers[0],
-                    .length = 12,
+                    .region = &update_region,
                 },
         },
         {
@@ -1498,7 +1538,7 @@ TEST_P(GpuNativePacketTest, ShaderObservesCompleteInvocationOwnedPacket) {
                     .source_buffer = &native,
                     .target_buffer = buffers[0],
                     .target_offset = 64,
-                    .length = 12,
+                    .region = &update_region,
                 },
         },
     }};
@@ -1600,13 +1640,18 @@ TEST_P(GpuNativePacketTest, ShaderObservesCompleteInvocationOwnedPacket) {
           executable_, consumer, config, constants, bindings, nullptr, flags));
     }
     submitted_values_[invocation] = three;
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = kResultLength,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
             {
                 .source_buffer = buffers[1],
                 .target = actual_[invocation].data(),
-                .length = kResultLength,
+                .region = &download_region,
             },
     };
     IREE_ASSERT_OK(iree_hal_queue_transfer(

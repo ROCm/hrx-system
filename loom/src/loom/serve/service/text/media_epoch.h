@@ -57,8 +57,10 @@ typedef struct loom_serve_text_media_epoch_t {
   uint32_t device_length;
   // Temporary enqueue state, borrowing result owners only during submit.
   struct {
-    // One allocation containing copy operations followed by cohort pointers.
+    // One allocation containing copy operations, geometry, and cohort pointers.
     iree_hal_transfer_operation_t* operations;
+    // Mutable geometry for coalescing adjacent copy ranges.
+    iree_hal_transfer_region_t* regions;
     // Coalesced device feature copies; source control uploads are independent.
     iree_host_size_t operation_count;
     // Borrowed producer results for intersecting images.

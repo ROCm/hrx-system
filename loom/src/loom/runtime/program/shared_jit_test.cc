@@ -221,9 +221,10 @@ class SharedJitTest : public loom_runtime::testing::JitTest {
           iree_hal_queue_family(loom_runtime_device_dispatch_queue(owner)),
           IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, nullptr, nullptr, &command));
     }
+    const iree_hal_transfer_region_t upload_region_0 = {sizeof(input_), 1, 1};
     const iree_hal_transfer_operation_t upload = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
-        .upload = {input_.data(), *buffer, 0, sizeof(input_)},
+        .upload = {input_.data(), *buffer, 0, &upload_region_0},
     };
     uint64_t completion = 0;
     auto status =
@@ -240,9 +241,11 @@ class SharedJitTest : public loom_runtime::testing::JitTest {
       }
     }
     iree_hal_command_buffer_release(command);
+    const iree_hal_transfer_region_t download_region_0 = {sizeof(output_), 1,
+                                                          1};
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
-        .download = {*buffer, 0, output_.data(), sizeof(output_)},
+        .download = {*buffer, 0, output_.data(), &download_region_0},
     };
     if (iree_status_is_ok(status)) {
       status =

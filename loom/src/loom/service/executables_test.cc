@@ -301,13 +301,18 @@ class ExecutablesTest : public loom_runtime::testing::WeightsTest {
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
     IREE_ASSERT_OK(status);
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = sizeof(output_),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
             {
                 .source_buffer = output_buffer_,
                 .target = output_.data(),
-                .length = sizeof(output_),
+                .region = &download_region,
             },
     };
     uint64_t completion = 0;
@@ -948,13 +953,18 @@ class ArenaExecutablesTest : public ExecutablesTest {
         iree_infinite_timeout(), &workspace_));
     auto* residency = loom_service_executables_residency(executables_);
     IREE_ASSERT_OK(loom_runtime_residency_acquire_wait(residency));
+    const iree_hal_transfer_region_t upload_region = {
+        .row_length = payload.size(),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t upload = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
         .upload =
             {
                 .source = payload.data(),
                 .target_buffer = workspace_,
-                .length = payload.size(),
+                .region = &upload_region,
             },
     };
     uint64_t completion = 0;
@@ -972,13 +982,18 @@ class ArenaExecutablesTest : public ExecutablesTest {
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
     IREE_ASSERT_OK(status);
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = sizeof(output_),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
             {
                 .source_buffer = output_buffer_,
                 .target = output_.data(),
-                .length = sizeof(output_),
+                .region = &download_region,
             },
     };
     IREE_ASSERT_OK(

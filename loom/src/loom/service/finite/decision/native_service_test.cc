@@ -449,6 +449,11 @@ TEST_F(NativeDecisionServiceTest, DeviceOutputEscapesBeforeServiceRetirement) {
   const auto row =
       loom_service_finite_result_row(second->result, second->request_index, 0);
   ASSERT_EQ(row.length, sizeof(values_));
+  const iree_hal_transfer_region_t copy_region = {
+      .row_length = row.length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t copy = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
       .copy =
@@ -456,18 +461,23 @@ TEST_F(NativeDecisionServiceTest, DeviceOutputEscapesBeforeServiceRetirement) {
               .source_buffer = row.buffer,
               .source_offset = row.offset,
               .target_buffer = target_,
-              .length = row.length,
+              .region = &copy_region,
           },
   };
   uint64_t value = 0;
   IREE_ASSERT_OK(loom_runtime_execution_transfer(consumer_, 1, &copy, &value));
+  const iree_hal_transfer_region_t download_region = {
+      .row_length = sizeof(values_),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
           {
               .source_buffer = target_,
               .target = values_.data(),
-              .length = sizeof(values_),
+              .region = &download_region,
           },
   };
   IREE_ASSERT_OK(
@@ -509,24 +519,34 @@ TEST_F(NativeDecisionServiceTest, DeviceOutputEscapesBeforeServiceRetirement) {
   IREE_ASSERT_OK(
       loom_runtime_execution_alloca(consumer_, 1, &full_allocation, &target_));
   const float pattern = 0.5f;
+  const iree_hal_fill_region_t fill_region = {
+      .row_length = sizeof(values_),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t fill = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
       .fill =
           {
               .target_buffer = target_,
-              .length = sizeof(values_),
+              .region = &fill_region,
               .pattern = &pattern,
               .pattern_length = sizeof(pattern),
           },
   };
   IREE_ASSERT_OK(loom_runtime_execution_transfer(consumer_, 1, &fill, &value));
+  const iree_hal_transfer_region_t readback_region = {
+      .row_length = sizeof(values_),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t readback = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
           {
               .source_buffer = target_,
               .target = values_.data(),
-              .length = sizeof(values_),
+              .region = &readback_region,
           },
   };
   IREE_ASSERT_OK(

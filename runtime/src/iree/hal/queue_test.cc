@@ -8,6 +8,56 @@
 
 namespace {
 
+TEST(TransferGeometryTest, BoundedSlicesPreserveEveryAddress) {
+  // The oracle enumerates addressed byte pairs, independently of how the
+  // implementation partitions whole slices, rows, and partial rows.
+  const iree_hal_transfer_region_t regions[] = {
+      {7, 5, 3, {7, 35}, {7, 35}},
+      {7, 5, 3, {11, 61}, {13, 73}},
+      {7, 5, 3, {0, 0}, {13, 73}},
+      {7, 1, 3, {UINT64_MAX, 11}, {UINT64_MAX, 13}},
+      {7, 5, 1, {11, UINT64_MAX}, {13, UINT64_MAX}},
+  };
+  for (const auto& region : regions) {
+    for (uint64_t capacity : {1, 6, 7, 8, 34, 35, 36, 69, 70, 105, 128}) {
+      const uint64_t length =
+          region.row_length * region.row_count * region.slice_count;
+      uint64_t cursor = 0;
+      while (cursor < length) {
+        uint64_t source_offset = 0, target_offset = 0;
+        const auto chunk = iree_hal_transfer_region_slice(
+            &region, cursor, capacity, &source_offset, &target_offset);
+        const uint64_t count =
+            chunk.row_length * chunk.row_count * chunk.slice_count;
+        ASSERT_GT(count, 0u);
+        ASSERT_LE(count, capacity);
+        ASSERT_LE(count, length - cursor);
+        for (uint64_t z = 0; z < chunk.slice_count; ++z) {
+          for (uint64_t y = 0; y < chunk.row_count; ++y) {
+            for (uint64_t x = 0; x < chunk.row_length; ++x, ++cursor) {
+              const uint64_t column = cursor % region.row_length;
+              const uint64_t row =
+                  (cursor / region.row_length) % region.row_count;
+              const uint64_t slice =
+                  cursor / (region.row_length * region.row_count);
+              EXPECT_EQ(source_offset + x +
+                            y * chunk.source_strides.row_stride +
+                            z * chunk.source_strides.slice_stride,
+                        column + row * region.source_strides.row_stride +
+                            slice * region.source_strides.slice_stride);
+              EXPECT_EQ(target_offset + x +
+                            y * chunk.target_strides.row_stride +
+                            z * chunk.target_strides.slice_stride,
+                        column + row * region.target_strides.row_stride +
+                            slice * region.target_strides.slice_stride);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST(TransferGeometryTest, IndependentPaddedWindows) {
   const iree_hal_transfer_region_t region = {
       .row_length = 256,

@@ -208,6 +208,16 @@ static iree_status_t loom_runtime_storage_module_start(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "storage transfer buffer is null");
     }
+    const iree_hal_fill_region_t fill_region = {
+        .row_length = iree_vm_call_value_argument_load(call, 1),
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    const iree_hal_transfer_region_t copy_region = {
+        .row_length = iree_vm_call_value_argument_load(call, 2),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     iree_hal_transfer_operation_t operation = {0};
     const uint32_t pattern =
         (uint32_t)iree_vm_call_value_argument_load(call, 2);
@@ -216,7 +226,7 @@ static iree_status_t loom_runtime_storage_module_start(
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
           .fill = {.target_buffer = source.object,
                    .target_offset = iree_vm_call_value_argument_load(call, 0),
-                   .length = iree_vm_call_value_argument_load(call, 1),
+                   .region = &fill_region,
                    .pattern = &pattern,
                    .pattern_length = sizeof(pattern)}};
     } else {
@@ -232,7 +242,7 @@ static iree_status_t loom_runtime_storage_module_start(
                    .source_offset = iree_vm_call_value_argument_load(call, 0),
                    .target_buffer = target.object,
                    .target_offset = iree_vm_call_value_argument_load(call, 1),
-                   .length = iree_vm_call_value_argument_load(call, 2)}};
+                   .region = &copy_region}};
     }
     uint64_t value = 0;
     IREE_RETURN_IF_ERROR(loom_runtime_execution_transfer(

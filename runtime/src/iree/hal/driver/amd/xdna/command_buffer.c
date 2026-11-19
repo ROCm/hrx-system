@@ -262,6 +262,15 @@ static iree_status_t iree_hal_amd_xdna_command_buffer_transfer(
     iree_hal_buffer_ref_t target, const void* pattern,
     iree_host_size_t pattern_length, iree_const_byte_span_t update,
     const iree_hal_transfer_region_t* region) {
+  // Direct ranges are fixed at recording. Binding-table resolution only
+  // resolves remaining lengths for indirect references during execution.
+  if (target.buffer && target.length == IREE_HAL_WHOLE_BUFFER) {
+    target.length = iree_hal_buffer_byte_length(target.buffer) - target.offset;
+  }
+  if (kind == IREE_HAL_AMD_XDNA_RECORD_COPY && source.buffer &&
+      source.length == IREE_HAL_WHOLE_BUFFER) {
+    source.length = iree_hal_buffer_byte_length(source.buffer) - source.offset;
+  }
   if (!target.length) {
     return iree_ok_status();
   }

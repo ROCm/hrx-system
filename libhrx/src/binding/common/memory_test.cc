@@ -980,12 +980,18 @@ TEST_F(CpuStreamingMemoryTest, BulkBatchCountsItsSmallRows) {
   std::memset(buffer_->host_ptr, 0x42, kLength);
   std::vector<uint8_t> host(kLength + 16, 0xcd);
   iree_hal_transfer_operation_t operations[2] = {};
+  iree_hal_transfer_region_t operations_transfer_regions[2] = {};
   for (size_t i = 0; i < 2; ++i) {
     operations[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
     operations[i].download.source_buffer = buffer_->buffer;
     operations[i].download.source_offset = i * kRowLength;
     operations[i].download.target = host.data() + i * kRowLength;
-    operations[i].download.length = kRowLength;
+    operations_transfer_regions[i] = {
+        .row_length = kRowLength,
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    operations[i].download.region = &operations_transfer_regions[i];
   }
   IREE_ASSERT_OK(
       iree_hal_streaming_direct_transfer_and_wait(stream_, 2, operations));

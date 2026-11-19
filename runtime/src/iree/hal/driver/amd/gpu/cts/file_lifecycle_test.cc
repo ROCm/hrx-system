@@ -211,13 +211,18 @@ class FileLifecycleTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
         iree_hal_queue_read_linear(queue, {}, {1, &progress_handle, &one}, file,
                                    0, buffer, 0, source.size(), nullptr, 0));
     std::vector<uint8_t> target(source.size(), 0xCD);
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = target.size(),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
             {
                 .source_buffer = buffer,
                 .target = target.data(),
-                .length = target.size(),
+                .region = &download_region,
             },
     };
     IREE_ASSERT_OK(iree_hal_queue_transfer(queue, {1, &progress_handle, &one},

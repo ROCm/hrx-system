@@ -148,6 +148,16 @@ TEST_P(RetirementTest, NestedQueueViewsOutliveFailedReadiness) {
   for (size_t i = 0; i < payload.input.size(); ++i) {
     payload.input[i] = static_cast<uint32_t>(i * 17 + 13);
   }
+  const iree_hal_transfer_region_t operations_region_0 = {
+      .row_length = sizeof(payload.input),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  const iree_hal_transfer_region_t operations_region_1 = {
+      .row_length = sizeof(payload.output),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t operations[] = {
       {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
@@ -155,7 +165,7 @@ TEST_P(RetirementTest, NestedQueueViewsOutliveFailedReadiness) {
               {
                   .source = payload.input.data(),
                   .target_buffer = child,
-                  .length = sizeof(payload.input),
+                  .region = &operations_region_0,
               },
       },
       {
@@ -164,7 +174,7 @@ TEST_P(RetirementTest, NestedQueueViewsOutliveFailedReadiness) {
               {
                   .source_buffer = child,
                   .target = payload.output.data(),
-                  .length = sizeof(payload.output),
+                  .region = &operations_region_1,
               },
       },
   };

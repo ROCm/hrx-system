@@ -360,10 +360,12 @@ static iree_status_t iree_hal_replay_recorder_queue_analyze_transfer(
   iree_host_size_t data_length = 0;
   for (iree_host_size_t i = 0; i < operation_count; ++i) {
     const iree_hal_transfer_operation_t* operation = &operations[i];
+    const iree_device_size_t length =
+        iree_hal_transfer_operation_length(operation);
     iree_host_size_t operation_data_length = 0;
     switch (operation->type) {
       case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
-        if (operation->fill.length == 0) {
+        if (length == 0) {
           break;
         }
         can_record &= iree_hal_replay_recorder_queue_has_captured_buffer(
@@ -371,15 +373,15 @@ static iree_status_t iree_hal_replay_recorder_queue_analyze_transfer(
         operation_data_length = operation->fill.pattern_length;
         break;
       case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
-        if (operation->update.length == 0) {
+        if (length == 0) {
           break;
         }
         can_record &= iree_hal_replay_recorder_queue_has_captured_buffer(
             queue->recorder, operation->update.target_buffer);
-        operation_data_length = (iree_host_size_t)operation->update.length;
+        operation_data_length = (iree_host_size_t)length;
         break;
       case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
-        if (operation->copy.length == 0) {
+        if (length == 0) {
           break;
         }
         can_record &= iree_hal_replay_recorder_queue_has_captured_buffer(
@@ -388,15 +390,15 @@ static iree_status_t iree_hal_replay_recorder_queue_analyze_transfer(
                           queue->recorder, operation->copy.target_buffer);
         break;
       case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
-        if (operation->upload.length == 0) {
+        if (length == 0) {
           break;
         }
         can_record &= iree_hal_replay_recorder_queue_has_captured_buffer(
             queue->recorder, operation->upload.target_buffer);
-        operation_data_length = (iree_host_size_t)operation->upload.length;
+        operation_data_length = (iree_host_size_t)length;
         break;
       case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
-        if (operation->download.length == 0) {
+        if (length == 0) {
           break;
         }
         can_record &= iree_hal_replay_recorder_queue_has_captured_buffer(
@@ -1129,13 +1131,26 @@ static iree_status_t iree_hal_replay_recorder_queue_prepare_transfer(
         &storage->temporary_buffers[i * 2];
     iree_hal_buffer_t** temporary_target_buffer =
         &storage->temporary_buffers[i * 2 + 1];
-    base_operation->type = operation->type;
+    *base_operation = *operation;
+    const iree_hal_transfer_region_t region =
+        iree_hal_transfer_operation_region(operation);
+    const iree_device_size_t length = iree_hal_transfer_region_length(&region);
+    const iree_device_size_t source_length = iree_hal_transfer_range_length(
+        region.row_length, region.row_count, region.slice_count,
+        &region.source_strides);
+    const iree_device_size_t target_length = iree_hal_transfer_range_length(
+        region.row_length, region.row_count, region.slice_count,
+        &region.target_strides);
+    if (can_record && length) {
+      static_assert(sizeof(operation_payload->region) == sizeof(region),
+                    "transfer wire geometry size");
+      memcpy(&operation_payload->region, &region, sizeof(region));
+    }
     switch (operation->type) {
       case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL: {
-        if (operation->fill.length == 0) {
+        if (length == 0) {
           break;
         }
-        *base_operation = *operation;
         IREE_RETURN_IF_ERROR(iree_hal_replay_recorder_buffer_unwrap_for_call(
             operation->fill.target_buffer, queue->host_allocator,
             &base_operation->fill.target_buffer, temporary_target_buffer));
@@ -1145,7 +1160,7 @@ static iree_status_t iree_hal_replay_recorder_queue_prepare_transfer(
           operation_payload->flags = operation->fill.flags;
           iree_hal_replay_recorder_queue_make_buffer_ref_payload(
               queue, operation->fill.target_buffer,
-              operation->fill.target_offset, operation->fill.length,
+              operation->fill.target_offset, target_length,
               &operation_payload->target_ref);
           operation_payload->data_offset = data_offset;
           operation_payload->data_length = operation->fill.pattern_length;
@@ -1156,10 +1171,9 @@ static iree_status_t iree_hal_replay_recorder_queue_prepare_transfer(
         break;
       }
       case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE: {
-        if (operation->update.length == 0) {
+        if (length == 0) {
           break;
         }
-        *base_operation = *operation;
         IREE_RETURN_IF_ERROR(iree_hal_replay_recorder_buffer_unwrap_for_call(
             operation->update.target_buffer, queue->host_allocator,
             &base_operation->update.target_buffer, temporary_target_buffer));
@@ -1169,23 +1183,26 @@ static iree_status_t iree_hal_replay_recorder_queue_prepare_transfer(
           operation_payload->flags = operation->update.flags;
           iree_hal_replay_recorder_queue_make_buffer_ref_payload(
               queue, operation->update.target_buffer,
-              operation->update.target_offset, operation->update.length,
+              operation->update.target_offset, target_length,
               &operation_payload->target_ref);
           operation_payload->data_offset = data_offset;
-          operation_payload->data_length = operation->update.length;
-          memcpy(storage->data + data_offset,
-                 (const uint8_t*)operation->update.source_buffer +
-                     operation->update.source_offset,
-                 (iree_host_size_t)operation->update.length);
-          data_offset += (iree_host_size_t)operation->update.length;
+          operation_payload->data_length = length;
+          iree_hal_transfer_gather_host(
+              (const uint8_t*)operation->update.source_buffer +
+                  operation->update.source_offset,
+              &region, 0, length, storage->data + data_offset);
+          operation_payload->region.source_strides.row_stride =
+              region.row_length;
+          operation_payload->region.source_strides.slice_stride =
+              region.row_length * region.row_count;
+          data_offset += (iree_host_size_t)length;
         }
         break;
       }
       case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY: {
-        if (operation->copy.length == 0) {
+        if (length == 0) {
           break;
         }
-        *base_operation = *operation;
         IREE_RETURN_IF_ERROR(iree_hal_replay_recorder_buffer_unwrap_for_call(
             operation->copy.source_buffer, queue->host_allocator,
             &base_operation->copy.source_buffer, temporary_source_buffer));
@@ -1198,20 +1215,19 @@ static iree_status_t iree_hal_replay_recorder_queue_prepare_transfer(
           operation_payload->flags = operation->copy.flags;
           iree_hal_replay_recorder_queue_make_buffer_ref_payload(
               queue, operation->copy.source_buffer,
-              operation->copy.source_offset, operation->copy.length,
+              operation->copy.source_offset, source_length,
               &operation_payload->source_ref);
           iree_hal_replay_recorder_queue_make_buffer_ref_payload(
               queue, operation->copy.target_buffer,
-              operation->copy.target_offset, operation->copy.length,
+              operation->copy.target_offset, target_length,
               &operation_payload->target_ref);
         }
         break;
       }
       case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD: {
-        if (operation->upload.length == 0) {
+        if (length == 0) {
           break;
         }
-        *base_operation = *operation;
         IREE_RETURN_IF_ERROR(iree_hal_replay_recorder_buffer_unwrap_for_call(
             operation->upload.target_buffer, queue->host_allocator,
             &base_operation->upload.target_buffer, temporary_target_buffer));
@@ -1220,30 +1236,37 @@ static iree_status_t iree_hal_replay_recorder_queue_prepare_transfer(
               IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_UPLOAD;
           iree_hal_replay_recorder_queue_make_buffer_ref_payload(
               queue, operation->upload.target_buffer,
-              operation->upload.target_offset, operation->upload.length,
+              operation->upload.target_offset, target_length,
               &operation_payload->target_ref);
           operation_payload->data_offset = data_offset;
-          operation_payload->data_length = operation->upload.length;
-          memcpy(storage->data + data_offset, operation->upload.source,
-                 (iree_host_size_t)operation->upload.length);
-          data_offset += (iree_host_size_t)operation->upload.length;
+          operation_payload->data_length = length;
+          iree_hal_transfer_gather_host(operation->upload.source, &region, 0,
+                                        length, storage->data + data_offset);
+          operation_payload->region.source_strides.row_stride =
+              region.row_length;
+          operation_payload->region.source_strides.slice_stride =
+              region.row_length * region.row_count;
+          data_offset += (iree_host_size_t)length;
         }
         break;
       }
       case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD: {
-        if (operation->download.length == 0) {
+        if (length == 0) {
           break;
         }
-        *base_operation = *operation;
         IREE_RETURN_IF_ERROR(iree_hal_replay_recorder_buffer_unwrap_for_call(
             operation->download.source_buffer, queue->host_allocator,
             &base_operation->download.source_buffer, temporary_source_buffer));
         if (can_record) {
           operation_payload->type =
               IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+          operation_payload->region.target_strides.row_stride =
+              region.row_length;
+          operation_payload->region.target_strides.slice_stride =
+              region.row_length * region.row_count;
           iree_hal_replay_recorder_queue_make_buffer_ref_payload(
               queue, operation->download.source_buffer,
-              operation->download.source_offset, operation->download.length,
+              operation->download.source_offset, source_length,
               &operation_payload->source_ref);
         }
         break;

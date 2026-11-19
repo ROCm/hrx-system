@@ -72,7 +72,9 @@ typedef struct iree_hal_amd_gpu_transfer_staging_limits_t {
 typedef struct iree_hal_amd_gpu_transfer_layout_t {
   // Number of nonempty operation descriptors.
   iree_host_size_t count;
-  // Descriptor and captured update-byte extent, in bytes.
+  // Number of captured rectangular geometries; linear entries need none.
+  iree_host_size_t region_count;
+  // Descriptor, geometry, and captured update-byte extent, in bytes.
   iree_host_size_t byte_length;
 } iree_hal_amd_gpu_transfer_layout_t;
 
@@ -88,7 +90,7 @@ typedef struct iree_hal_amd_gpu_transfer_cursor_t {
 typedef struct iree_hal_amd_gpu_transfer_t {
   // Initialized descriptors whose retained buffers belong to this capture.
   iree_host_size_t count;
-  // Inline immutable descriptors followed by captured update bytes.
+  // Inline immutable descriptors followed by geometry and captured updates.
   iree_hal_amd_gpu_transfer_operation_t* operations;
   // Unpublished suffix, advanced only after a successful native publication.
   iree_hal_amd_gpu_transfer_cursor_t cursor;

@@ -1521,6 +1521,11 @@ TEST_F(KernelQueueTest, NativeCompletionWaitsForProducerHostRetirement) {
 }
 
 TEST_F(KernelQueueTest, TransferPrefixRetiresBeforeItsTerminalSignal) {
+  const auto operations_region = iree_hal_fill_region_t{
+      .row_length = sizeof(uint32_t),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   std::array<iree_hal_transfer_operation_t, 80> operations = {};
   auto buffer = Buffer(operations.size() * sizeof(uint32_t));
   const uint32_t pattern = 0x71717171u;
@@ -1531,7 +1536,7 @@ TEST_F(KernelQueueTest, TransferPrefixRetiresBeforeItsTerminalSignal) {
             {
                 .target_buffer = buffer,
                 .target_offset = i * sizeof(uint32_t),
-                .length = sizeof(uint32_t),
+                .region = &operations_region,
                 .pattern = &pattern,
                 .pattern_length = sizeof(uint32_t),
             },

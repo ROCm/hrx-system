@@ -949,6 +949,7 @@ static void BM_FillBatch(benchmark::State& state) {
   std::vector<uint8_t> received(expected.size());
   std::vector<uint32_t> patterns(operation_count);
   std::vector<iree_hal_transfer_operation_t> operations(operation_count);
+  std::vector<iree_hal_fill_region_t> regions(operation_count);
   iree_hal_buffer_t* buffer = nullptr;
   iree_hal_buffer_t* view = nullptr;
   IREE_CHECK_OK(iree_hal_pool_allocate_buffer(
@@ -964,8 +965,12 @@ static void BM_FillBatch(benchmark::State& state) {
     operation.fill.target_offset = i * 32;
     operation.fill.pattern = &patterns[i];
     operation.fill.pattern_length = iree_host_size_t{1} << (i % 3);
-    operation.fill.length =
-        view_offset ? operation.fill.pattern_length * 5 : 20;
+    regions[i] = {
+        .row_length = view_offset ? operation.fill.pattern_length * 5 : 20,
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    operation.fill.region = &regions[i];
   }
   iree_hal_semaphore_t* timeline = nullptr;
   IREE_CHECK_OK(iree_hal_semaphore_create(
@@ -980,7 +985,7 @@ static void BM_FillBatch(benchmark::State& state) {
       patterns[i] = 0xC37E4A00u + static_cast<uint8_t>(value + i);
       const auto* pattern = reinterpret_cast<const uint8_t*>(&patterns[i]);
       const auto& fill = operations[i].fill;
-      for (iree_device_size_t j = 0; j < fill.length; ++j) {
+      for (iree_device_size_t j = 0; j < fill.region->row_length; ++j) {
         expected[view_offset + fill.target_offset + j] =
             pattern[j % fill.pattern_length];
       }

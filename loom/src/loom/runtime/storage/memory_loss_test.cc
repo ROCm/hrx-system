@@ -286,13 +286,23 @@ class MemoryLossTest : public ::testing::Test {
   void CheckContents(size_t index, uint32_t value, bool fill = false) {
     auto* buffer = loom_runtime_virtual_buffer_handle(buffers_[index]);
     std::array<uint32_t, 16> observed = {};
+    const iree_hal_fill_region_t operations_region_0 = {
+        .row_length = sizeof(observed),
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    const iree_hal_transfer_region_t operations_region_1 = {
+        .row_length = sizeof(observed),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t operations[] = {
         {
             .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
             .fill =
                 {
                     .target_buffer = buffer,
-                    .length = sizeof(observed),
+                    .region = &operations_region_0,
                     .pattern = &value,
                     .pattern_length = sizeof(value),
                 },
@@ -303,7 +313,7 @@ class MemoryLossTest : public ::testing::Test {
                 {
                     .source_buffer = buffer,
                     .target = observed.data(),
-                    .length = sizeof(observed),
+                    .region = &operations_region_1,
                 },
         },
     };

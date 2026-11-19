@@ -341,7 +341,9 @@ class SpeechReadinessTest : public ::testing::Test {
     iree_status_t status = iree_ok_status();
     bool held = false;
     std::array<iree_hal_transfer_operation_t, 4> uploads = {};
+    std::array<iree_hal_transfer_region_t, 4> uploads_regions;
     std::array<iree_hal_transfer_operation_t, 4> downloads = {};
+    std::array<iree_hal_transfer_region_t, 4> downloads_regions;
     for (size_t i = 0; i < batch_.size() && iree_status_is_ok(status); ++i) {
       auto& invocation = *batch_[i];
       const auto reservation =
@@ -349,14 +351,24 @@ class SpeechReadinessTest : public ::testing::Test {
       status = loom_runtime_execution_alloca(execution_, 1, &reservation,
                                              &invocation.buffer);
       held |= invocation.block == held_block_;
+      uploads_regions[i] = iree_hal_transfer_region_t{
+          .row_length = invocation.input.size(),
+          .row_count = 1,
+          .slice_count = 1,
+      };
       uploads[i] = {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
           .upload =
               {
                   .source = invocation.input.data(),
                   .target_buffer = invocation.buffer,
-                  .length = invocation.input.size(),
+                  .region = &uploads_regions[i],
               },
+      };
+      downloads_regions[i] = iree_hal_transfer_region_t{
+          .row_length = invocation.output.size(),
+          .row_count = 1,
+          .slice_count = 1,
       };
       downloads[i] = {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
@@ -364,7 +376,7 @@ class SpeechReadinessTest : public ::testing::Test {
               {
                   .source_buffer = invocation.buffer,
                   .target = invocation.output.data(),
-                  .length = invocation.output.size(),
+                  .region = &downloads_regions[i],
               },
       };
     }

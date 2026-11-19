@@ -482,11 +482,17 @@ TEST_P(GpuNativeOrderedAllocationTest,
   }
   if (!fail_producer) {
     std::array<iree_hal_transfer_operation_t, 2> downloads = {};
+    std::array<iree_hal_transfer_region_t, 2> downloads_transfer_regions = {};
     for (size_t i = 0; i < downloads.size(); ++i) {
       downloads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
       downloads[i].download.source_buffer = snapshots[i];
       downloads[i].download.target = actual[i].data();
-      downloads[i].download.length = sizeof(actual[i]);
+      downloads_transfer_regions[i] = {
+          .row_length = sizeof(actual[i]),
+          .row_count = 1,
+          .slice_count = 1,
+      };
+      downloads[i].download.region = &downloads_transfer_regions[i];
     }
     IREE_ASSERT_OK(iree_hal_queue_transfer(
         queues_[1], {1, &semaphores_[2], &one}, {1, &semaphores_[2], &two},
@@ -554,17 +560,30 @@ TEST_F(GpuNativeAllocationTest, PendingSubspansSurviveCrossQueueTransfers) {
 
   std::array<std::array<uint8_t, 257>, 2> actual = {};
   const std::array<uint8_t, 2> patterns = {0xA7, 0x53};
-  std::array<iree_hal_transfer_operation_t, 2> fills = {}, downloads = {};
+  std::array<iree_hal_transfer_operation_t, 2> fills = {};
+  std::array<iree_hal_fill_region_t, 2> fills_fill_regions = {};
+  std::array<iree_hal_transfer_operation_t, 2> downloads = {};
+  std::array<iree_hal_transfer_region_t, 2> downloads_transfer_regions = {};
   for (size_t i = 0; i < roots.size(); ++i) {
     fills[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
     fills[i].fill.target_buffer = spans[i];
-    fills[i].fill.length = actual[i].size();
+    fills_fill_regions[i] = {
+        .row_length = actual[i].size(),
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    fills[i].fill.region = &fills_fill_regions[i];
     fills[i].fill.pattern = &patterns[i];
     fills[i].fill.pattern_length = 1;
     downloads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
     downloads[i].download.source_buffer = spans[i];
     downloads[i].download.target = actual[i].data();
-    downloads[i].download.length = actual[i].size();
+    downloads_transfer_regions[i] = {
+        .row_length = actual[i].size(),
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    downloads[i].download.region = &downloads_transfer_regions[i];
   }
   IREE_ASSERT_OK(iree_hal_queue_transfer(
       queues_[1], {1, &semaphores_[1], &one}, {1, &semaphores_[1], &two},
@@ -883,13 +902,18 @@ TEST_P(GpuNativeRecordingProgressTest,
   Wait(semaphores_[3]);
   // Verification transport may acquire its own native payload backing.
   std::array<uint32_t, kFillCount> observed = {};
+  const iree_hal_transfer_region_t download_region = {
+      .row_length = sizeof(observed),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
           {
               .source_buffer = output,
               .target = observed.data(),
-              .length = sizeof(observed),
+              .region = &download_region,
           },
   };
   IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[1], {1, &semaphores_[1], &one},
@@ -982,6 +1006,11 @@ TEST_P(GpuNativeRecordingProgressTest,
     EXPECT_EQ(iree_atomic_ref_count_load(&output.get()->resource.ref_count), 1);
   }
   std::array<uint32_t, 2 * kCopyCount> observed = {};
+  const iree_hal_transfer_region_t download_region = {
+      .row_length = sizeof(observed),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
@@ -989,7 +1018,7 @@ TEST_P(GpuNativeRecordingProgressTest,
               .source_buffer = output,
               .source_offset = kCopyLength,
               .target = observed.data(),
-              .length = sizeof(observed),
+              .region = &download_region,
           },
   };
   uint64_t two = 2;
@@ -1195,13 +1224,18 @@ TEST_F(GpuNativeMemoryProgressTest,
   Wait(semaphores_[3]);
   // Verification transport may acquire its own native payload backing.
   uint32_t observed = 0;
+  const iree_hal_transfer_region_t download_region = {
+      .row_length = sizeof(observed),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
           {
               .source_buffer = reused,
               .target = &observed,
-              .length = sizeof(observed),
+              .region = &download_region,
           },
   };
   IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], {1, &semaphores_[1], &two},

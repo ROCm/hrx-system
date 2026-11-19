@@ -570,11 +570,21 @@ class NativeQueue {
     uint64_t before = lane.epoch, after = lane.epoch + 1;
     const uint32_t value = static_cast<uint32_t>(after);
     iree_hal_transfer_operation_t operation = {.type = type};
+    const auto fill_region = iree_hal_fill_region_t{
+        .row_length = 4,
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    const auto region = iree_hal_transfer_region_t{
+        .row_length = 4,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     switch (type) {
       case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
         operation.fill = {
             .target_buffer = lane.output,
-            .length = 4,
+            .region = &fill_region,
             .pattern = &value,
             .pattern_length = 4,
         };
@@ -583,7 +593,7 @@ class NativeQueue {
         operation.update = {
             .source_buffer = &value,
             .target_buffer = lane.output,
-            .length = 4,
+            .region = &region,
         };
         break;
       case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
@@ -591,21 +601,21 @@ class NativeQueue {
             .source_buffer = lane.output,
             .source_offset = 4,
             .target_buffer = lane.output,
-            .length = 4,
+            .region = &region,
         };
         break;
       case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
         operation.upload = {
             .source = &lane.host_value,
             .target_buffer = lane.output,
-            .length = 4,
+            .region = &region,
         };
         break;
       case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
         operation.download = {
             .source_buffer = lane.output,
             .target = &lane.downloaded,
-            .length = 4,
+            .region = &region,
         };
         break;
     }
@@ -638,23 +648,28 @@ class NativeQueue {
     auto& lane = lanes_[0];
     uint64_t before = lane.epoch, after = before + 1;
     iree_hal_transfer_operation_t operation = {.type = type};
+    const auto region = iree_hal_transfer_region_t{
+        .row_length = bytes.data_length,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     if (type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD) {
       operation.download = {
           .source_buffer = lane.output,
           .target = bytes.data,
-          .length = bytes.data_length,
+          .region = &region,
       };
     } else if (type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE) {
       operation.update = {
           .source_buffer = bytes.data,
           .target_buffer = lane.output,
-          .length = bytes.data_length,
+          .region = &region,
       };
     } else {
       operation.upload = {
           .source = bytes.data,
           .target_buffer = lane.output,
-          .length = bytes.data_length,
+          .region = &region,
       };
     }
     IREE_RETURN_IF_ERROR(iree_hal_queue_transfer(

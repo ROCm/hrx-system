@@ -662,10 +662,17 @@ TEST(ReplayRecorderTest, RecordsExactQueueTransferTransaction) {
   const uint8_t upload_data[] = {0x31, 0x32, 0x33, 0x34};
   uint8_t download_data[4] = {};
   iree_hal_transfer_operation_t operations[5] = {};
+  iree_hal_fill_region_t operations_fill_regions[5] = {};
+  iree_hal_transfer_region_t operations_transfer_regions[5] = {};
   operations[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
   operations[0].fill.target_buffer = target_buffer;
   operations[0].fill.target_offset = 0;
-  operations[0].fill.length = 4;
+  operations_fill_regions[0] = {
+      .row_length = 4,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  operations[0].fill.region = &operations_fill_regions[0];
   operations[0].fill.pattern = &fill_pattern;
   operations[0].fill.pattern_length = sizeof(fill_pattern);
   operations[1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE;
@@ -673,23 +680,43 @@ TEST(ReplayRecorderTest, RecordsExactQueueTransferTransaction) {
   operations[1].update.source_offset = 1;
   operations[1].update.target_buffer = target_buffer;
   operations[1].update.target_offset = 4;
-  operations[1].update.length = 4;
+  operations_transfer_regions[1] = {
+      .row_length = 4,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  operations[1].update.region = &operations_transfer_regions[1];
   operations[2].type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
   operations[2].copy.source_buffer = source_buffer;
   operations[2].copy.source_offset = 0;
   operations[2].copy.target_buffer = target_buffer;
   operations[2].copy.target_offset = 8;
-  operations[2].copy.length = 4;
+  operations_transfer_regions[2] = {
+      .row_length = 4,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  operations[2].copy.region = &operations_transfer_regions[2];
   operations[3].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
   operations[3].upload.source = upload_data;
   operations[3].upload.target_buffer = target_buffer;
   operations[3].upload.target_offset = 12;
-  operations[3].upload.length = 4;
+  operations_transfer_regions[3] = {
+      .row_length = 4,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  operations[3].upload.region = &operations_transfer_regions[3];
   operations[4].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
   operations[4].download.source_buffer = source_buffer;
   operations[4].download.source_offset = 4;
   operations[4].download.target = download_data;
-  operations[4].download.length = sizeof(download_data);
+  operations_transfer_regions[4] = {
+      .row_length = sizeof(download_data),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  operations[4].download.region = &operations_transfer_regions[4];
   IREE_ASSERT_OK(iree_hal_queue_transfer(
       queue, iree_hal_semaphore_list_empty(), signal_list,
       IREE_ARRAYSIZE(operations), operations, /*barriers=*/NULL));

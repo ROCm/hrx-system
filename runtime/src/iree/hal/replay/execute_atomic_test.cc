@@ -1508,6 +1508,7 @@ TEST_F(ReplayAtomicExecutionTest,
   iree_hal_replay_queue_transfer_operation_payload_t operation = {
       .type = IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_UPLOAD,
       .target_ref = DirectTarget(/*offset=*/0, /*length=*/4),
+      .region = {.row_length = 4, .row_count = 1, .slice_count = 1},
       .data_length = 4,
   };
   record.AppendPayload(operation);

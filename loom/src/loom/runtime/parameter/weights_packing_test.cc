@@ -67,13 +67,18 @@ class WeightPackingTest : public WeightsTest {
     const auto* program = loom_runtime_jit_stage_program(compiled_[0]);
     std::vector<uint16_t> packed(iree_hal_buffer_byte_length(buffers_[0][0]) /
                                  sizeof(uint16_t));
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = packed.size() * sizeof(uint16_t),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
             {
                 .source_buffer = buffers_[0][0],
                 .target = packed.data(),
-                .length = packed.size() * sizeof(uint16_t),
+                .region = &download_region,
             },
     };
     uint64_t completion = 0;

@@ -44,19 +44,19 @@ static iree_device_size_t iree_hal_amd_xdna_profile_transfer(
   switch (transfer->type) {
     case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
       *out_type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_FILL;
-      return transfer->fill.length;
+      return iree_hal_transfer_operation_length(transfer);
     case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
       *out_type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_UPDATE;
-      return transfer->update.length;
+      return iree_hal_transfer_operation_length(transfer);
     case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
       *out_type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_COPY;
-      return transfer->copy.length;
+      return iree_hal_transfer_operation_length(transfer);
     case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
       *out_type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_UPDATE;
-      return transfer->upload.length;
+      return iree_hal_transfer_operation_length(transfer);
     case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
       *out_type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_COPY;
-      return transfer->download.length;
+      return iree_hal_transfer_operation_length(transfer);
   }
   IREE_BUILTIN_UNREACHABLE();
 }

@@ -206,31 +206,39 @@ static iree_status_t iree_hal_task_queue_barrier_default_range(
 static iree_status_t iree_hal_task_queue_barrier_default_transfer(
     const iree_hal_transfer_operation_t* transfer,
     iree_hal_memory_access_t access) {
+  const iree_hal_transfer_region_t region =
+      iree_hal_transfer_operation_region(transfer);
+  const uint64_t source_length = iree_hal_transfer_range_length(
+      region.row_length, region.row_count, region.slice_count,
+      &region.source_strides);
+  const uint64_t target_length = iree_hal_transfer_range_length(
+      region.row_length, region.row_count, region.slice_count,
+      &region.target_strides);
   switch (transfer->type) {
     case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
       return iree_hal_task_queue_barrier_default_range(
           transfer->fill.target_buffer, transfer->fill.target_offset,
-          transfer->fill.length, IREE_HAL_MEMORY_ACCESS_WRITE, access);
+          target_length, IREE_HAL_MEMORY_ACCESS_WRITE, access);
     case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
       return iree_hal_task_queue_barrier_default_range(
           transfer->update.target_buffer, transfer->update.target_offset,
-          transfer->update.length, IREE_HAL_MEMORY_ACCESS_WRITE, access);
+          target_length, IREE_HAL_MEMORY_ACCESS_WRITE, access);
     case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY: {
       IREE_RETURN_IF_ERROR(iree_hal_task_queue_barrier_default_range(
           transfer->copy.source_buffer, transfer->copy.source_offset,
-          transfer->copy.length, IREE_HAL_MEMORY_ACCESS_READ, access));
+          source_length, IREE_HAL_MEMORY_ACCESS_READ, access));
       return iree_hal_task_queue_barrier_default_range(
           transfer->copy.target_buffer, transfer->copy.target_offset,
-          transfer->copy.length, IREE_HAL_MEMORY_ACCESS_WRITE, access);
+          target_length, IREE_HAL_MEMORY_ACCESS_WRITE, access);
     }
     case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
       return iree_hal_task_queue_barrier_default_range(
           transfer->upload.target_buffer, transfer->upload.target_offset,
-          transfer->upload.length, IREE_HAL_MEMORY_ACCESS_WRITE, access);
+          target_length, IREE_HAL_MEMORY_ACCESS_WRITE, access);
     case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
       return iree_hal_task_queue_barrier_default_range(
           transfer->download.source_buffer, transfer->download.source_offset,
-          transfer->download.length, IREE_HAL_MEMORY_ACCESS_READ, access);
+          source_length, IREE_HAL_MEMORY_ACCESS_READ, access);
   }
   IREE_ASSERT_UNREACHABLE("unhandled transfer operation");
   return iree_ok_status();

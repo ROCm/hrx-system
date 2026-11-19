@@ -507,7 +507,12 @@ TEST_P(CpuXdnaNativeTest, CpuNpuCpuKernelsShareOneBacking) {
     };
     download.download.source_buffer = root;
     download.download.target = result.data();
-    download.download.length = sizeof(result);
+    const iree_hal_transfer_region_t download_transfer_region = {
+        .row_length = sizeof(result),
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    download.download.region = &download_transfer_region;
     IREE_ASSERT_OK(iree_hal_queue_transfer(
         cpu_queue_, {1, &progress, &consumed}, {1, &progress, &downloaded}, 1,
         &download, &no_payload_barriers));
@@ -559,7 +564,12 @@ TEST_P(CpuXdnaNativeTest, CpuNpuCpuKernelsShareOneBacking) {
     };
     upload.update.source_buffer = initial.data();
     upload.update.target_buffer = root;
-    upload.update.length = sizeof(initial);
+    const iree_hal_transfer_region_t upload_transfer_region = {
+        .row_length = sizeof(initial),
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    upload.update.region = &upload_transfer_region;
     IREE_ASSERT_OK(iree_hal_queue_transfer(
         cpu_queue_, {1, &progress, &previous}, {1, &progress, &initialized}, 1,
         &upload, /*barriers=*/nullptr));

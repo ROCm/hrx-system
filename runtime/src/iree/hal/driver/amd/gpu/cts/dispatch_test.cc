@@ -192,13 +192,18 @@ TEST_P(GpuNativeDispatchTest, ExecutableGlobalsPreservePlacementAndVisibility) {
       IREE_ASSERT_OK(
           iree_hal_buffer_map_write(global, 0, &values[i], sizeof(values[i])));
     } else {
+      const iree_hal_transfer_region_t update_region = {
+          .row_length = sizeof(values[i]),
+          .row_count = 1,
+          .slice_count = 1,
+      };
       const iree_hal_transfer_operation_t update = {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE,
           .update =
               {
                   .source_buffer = &values[i],
                   .target_buffer = global,
-                  .length = sizeof(values[i]),
+                  .region = &update_region,
               },
       };
       uint64_t ready = completed + 1;
@@ -233,13 +238,18 @@ TEST_P(GpuNativeDispatchTest, ExecutableGlobalsPreservePlacementAndVisibility) {
           iree_hal_buffer_map_read(global, 0, &observed, sizeof(observed)));
       completed = after;
     } else {
+      const iree_hal_transfer_region_t download_region = {
+          .row_length = sizeof(observed),
+          .row_count = 1,
+          .slice_count = 1,
+      };
       const iree_hal_transfer_operation_t download = {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
           .download =
               {
                   .source_buffer = global,
                   .target = &observed,
-                  .length = sizeof(observed),
+                  .region = &download_region,
               },
       };
       completed = after + 1;

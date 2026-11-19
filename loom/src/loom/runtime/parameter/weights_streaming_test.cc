@@ -55,6 +55,11 @@ class WindowedWeightsTest : public WeightsTest {
     std::vector<int32_t> values(524296);
     for (uint32_t i = 0; i < program->parameters.count; ++i) {
       const auto parameter = loom_cmd_program_parameter_at(program, i);
+      const iree_hal_transfer_region_t download_region = {
+          .row_length = parameter.byte_length,
+          .row_count = 1,
+          .slice_count = 1,
+      };
       const iree_hal_transfer_operation_t download = {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
           .download =
@@ -62,7 +67,7 @@ class WindowedWeightsTest : public WeightsTest {
                   .source_buffer = buffers_[0][0],
                   .source_offset = parameter.byte_offset,
                   .target = values.data(),
-                  .length = parameter.byte_length,
+                  .region = &download_region,
               },
       };
       uint64_t completion = 0;

@@ -166,6 +166,9 @@ static iree_status_t iree_hal_replay_dump_append_text_queue_transfer_operations(
             " slot=%" PRIu32 "}"
             " target={buffer_id=%" PRIu64 " offset=%" PRIu64 " length=%" PRIu64
             " slot=%" PRIu32 "}"
+            " row_length=%" PRIu64 " rows=%" PRIu64 " slices=%" PRIu64
+            " source_strides=[%" PRIu64 ",%" PRIu64 "]"
+            " target_strides=[%" PRIu64 ",%" PRIu64 "]"
             " data_range=[%" PRIu64 ", +%" PRIu64 "]}",
             iree_hal_replay_dump_queue_transfer_operation_type_string(
                 operation.type),
@@ -173,7 +176,12 @@ static iree_status_t iree_hal_replay_dump_append_text_queue_transfer_operations(
             operation.source_ref.offset, operation.source_ref.length,
             operation.source_ref.buffer_slot, operation.target_ref.buffer_id,
             operation.target_ref.offset, operation.target_ref.length,
-            operation.target_ref.buffer_slot,
+            operation.target_ref.buffer_slot, operation.region.row_length,
+            operation.region.row_count, operation.region.slice_count,
+            operation.region.source_strides.row_stride,
+            operation.region.source_strides.slice_stride,
+            operation.region.target_strides.row_stride,
+            operation.region.target_strides.slice_stride,
             payload_range->offset + layout->data_offset + operation.data_offset,
             operation.data_length));
   }

@@ -242,16 +242,43 @@ export function createImports(context) {
         parameters, parameterOffset);
   }
 
-  // Two instances per finite group bound native staging independently of file
-  // size and record capacity. The C owner keeps piece records stable until the
-  // proactor completion and reuses this window only after that completion.
-  class FileTransferWindow {
+  // Largest rectangular prefix fitting a bounded host window. Each native
+  // copy/shader still covers many rows; padding consumes no staging bytes.
+  function sliceTransfer(region, cursor, capacity) {
+    const [width, rows, slices, sourceRow, sourceSlice, targetRow, targetSlice] = region;
+    const length = width * rows * slices;
+    if ((rows === 1 || sourceRow === width && targetRow === width) &&
+        (slices === 1 || sourceSlice === width * rows && targetSlice === width * rows)) {
+      return {shape: [Math.min(capacity, length - cursor), 1, 1, 0, 0, 0, 0],
+        sourceOrigin: cursor, targetOrigin: cursor};
+    }
+    const column = cursor % width;
+    const row = Math.floor(cursor / width) % rows;
+    const slice = Math.floor(cursor / (width * rows));
+    const chunkWidth = Math.min(width - column, capacity);
+    let chunkRows = 1, chunkSlices = 1;
+    if (column === 0 && chunkWidth === width) {
+      chunkRows = Math.min(rows - row, Math.floor(capacity / width));
+      if (row === 0 && chunkRows === rows) {
+        chunkSlices = Math.min(slices - slice, Math.floor(capacity / (width * rows)));
+      }
+    }
+    return {shape: [chunkWidth, chunkRows, chunkSlices,
+      sourceRow, sourceSlice, targetRow, targetSlice],
+      sourceOrigin: column + row * sourceRow + slice * sourceSlice,
+      targetOrigin: column + row * targetRow + slice * targetSlice};
+  }
+
+  // Finite file groups reuse two windows; each queue transaction owns one.
+  // Staging stays bounded independently of transfer size and record count. The C
+  // owner keeps records stable until native work and host scatter both complete.
+  class TransferWindow {
     constructor(device, queue, builtins) {
       this.device = device;
       this.queue = queue;
       this.builtins = builtins;
       this.download = null;
-      this.upload = null;
+      this.storage = null;
       this.uploadBytes = null;
       this.parameters = null;
       this.parameterWords = null;
@@ -261,7 +288,7 @@ export function createImports(context) {
 
     destroy() {
       this.download?.destroy();
-      this.upload?.destroy();
+      this.storage?.destroy();
       this.parameters?.destroy();
     }
 
@@ -274,14 +301,20 @@ export function createImports(context) {
       return this.download;
     }
 
+    prepareStorage(length) {
+      if (!this.storage || this.storage.size < length) {
+        this.storage?.destroy();
+        this.storage = this.device.createBuffer({usage: 0x0080 | 0x0008 | 0x0004,
+          size: length}); // STORAGE | COPY_DST | COPY_SRC
+      }
+    }
+
     prepareUpload(length, count) {
-      if (!this.upload || this.upload.size < length) {
-        this.upload?.destroy();
-        this.upload = this.device.createBuffer({usage: 0x0080 | 0x0008,
-          size: length});  // STORAGE | COPY_DST
+      this.prepareStorage(length);
+      if (!this.uploadBytes || this.uploadBytes.length < length) {
         this.uploadBytes = new Uint8Array(length);
       }
-      if (!this.parameters || this.parameters.size < this.parameterStride * count) {
+      if (count && (!this.parameters || this.parameters.size < this.parameterStride * count)) {
         this.parameters?.destroy();
         this.parameters = this.device.createBuffer({usage: 0x0040 | 0x0008,
           size: this.parameterStride * count});
@@ -366,7 +399,7 @@ export function createImports(context) {
         }
       }
       if (uploadLength) {
-        this.queue.writeBuffer(this.upload, 0, this.uploadBytes, 0, uploadLength);
+        this.queue.writeBuffer(this.storage, 0, this.uploadBytes, 0, uploadLength);
         this.queue.writeBuffer(this.parameters, 0, this.parameterWords, 0,
             count * this.parameterStride / 4);
         const encoder = this.device.createCommandEncoder();
@@ -376,7 +409,7 @@ export function createImports(context) {
           const length = words[base + 3];
           if (offset % 4 === 0 && length % 4 === 0) continue;
           encodeByteCopy(this.device, encoder, this.builtins,
-              this.upload, words[base + 8], handles.get(words[base]),
+              this.storage, words[base + 8], handles.get(words[base]),
               offset, length, this.parameters, i * this.parameterStride);
         }
         this.queue.submit([encoder.finish()]);
@@ -418,6 +451,155 @@ export function createImports(context) {
           download.unmap();
         }
       });
+    }
+
+    // Consumes queue records in order. Only a download suspends publication:
+    // its host scatter must finish before a later operation can consume those
+    // bytes. Other queue transactions remain independently runnable.
+    async transfer(recordsPointer, count) {
+      const capacity = Math.min(16 * 1024 * 1024,
+          this.device.limits.maxBufferSize,
+          this.device.limits.maxStorageBufferBindingSize) - 4;
+      let index = 0;
+      let cursor = 0;
+      while (index < count) {
+        this.device.pushErrorScope('out-of-memory');
+        this.device.pushErrorScope('validation');
+        let encoder = null;
+        const owned = [];
+        const flush = () => {
+          if (encoder) {
+            this.queue.submit([encoder.finish()]);
+            encoder = null;
+          }
+          for (const buffer of owned) buffer.destroy();
+          owned.length = 0;
+        };
+        let readback = null;
+        let failure = null;
+        try {
+          while (index < count) {
+            // Refresh after mapAsync: unrelated wasm work can grow memory.
+            const words = u32();
+            const base = recordsPointer / 4 + index * 24;
+            const type = words[base];
+            const source = handles.get(words[base + 1]);
+            const target = handles.get(words[base + 2]);
+            const pattern = words[base + 3];
+            const sourceOffset = readSize(words, base + 4);
+            const targetOffset = readSize(words, base + 6);
+            const hostAddress = readSize(words, base + 8);
+            const region = readTransferRegion(words, base + 10);
+            const length = region[0] * region[1] * region[2];
+            if (type === 0 || type === 2) { // FILL / COPY
+              encoder ??= this.device.createCommandEncoder();
+              encodeTransfer(this.device, encoder, this.builtins, source,
+                  sourceOffset, target, targetOffset, region, pattern, owned);
+              ++index;
+              continue;
+            }
+            flush();
+            const {shape, sourceOrigin, targetOrigin} =
+                sliceTransfer(region, cursor, capacity);
+            const [width, rows, slices, sourceRow, sourceSlice,
+              targetRow, targetSlice] = shape;
+            const chunkLength = width * rows * slices;
+            if (type === 1 || type === 3) { // UPDATE / UPLOAD
+              const sourceLinear = (rows === 1 || sourceRow === width) &&
+                  (slices === 1 || sourceSlice === width * rows);
+              const targetLinear = (rows === 1 || targetRow === width) &&
+                  (slices === 1 || targetSlice === width * rows);
+              if (sourceLinear && targetLinear &&
+                  (targetOffset + targetOrigin) % 4 === 0 && chunkLength % 4 === 0) {
+                this.queue.writeBuffer(target, targetOffset + targetOrigin,
+                    u8(), hostAddress + sourceOrigin, chunkLength);
+              } else {
+                this.prepareUpload(Math.ceil(chunkLength / 4) * 4, 0);
+                const host = u8();
+                let packed = 0;
+                for (let z = 0; z < slices; ++z) {
+                  for (let y = 0; y < rows; ++y) {
+                    const start = hostAddress + sourceOrigin +
+                        z * sourceSlice + y * sourceRow;
+                    this.uploadBytes.set(host.subarray(start, start + width), packed);
+                    packed += width;
+                  }
+                }
+                this.queue.writeBuffer(this.storage, 0, this.uploadBytes, 0,
+                    Math.ceil(chunkLength / 4) * 4);
+                encoder = this.device.createCommandEncoder();
+                encodeTransfer(this.device, encoder, this.builtins,
+                    this.storage, 0, target, targetOffset + targetOrigin,
+                    [width, rows, slices, width, width * rows, targetRow, targetSlice],
+                    0, owned);
+                flush();
+              }
+            } else { // DOWNLOAD
+              encoder = this.device.createCommandEncoder();
+              const linear = (rows === 1 || sourceRow === width) &&
+                  (slices === 1 || sourceSlice === width * rows);
+              const bias = linear ? (sourceOffset + sourceOrigin) % 4 : 0;
+              const mapLength = Math.ceil((bias + chunkLength) / 4) * 4;
+              const download = this.prepareDownload(mapLength);
+              if (linear) {
+                encoder.copyBufferToBuffer(source,
+                    sourceOffset + sourceOrigin - bias, download, 0, mapLength);
+              } else {
+                this.prepareStorage(mapLength);
+                encodeTransfer(this.device, encoder, this.builtins,
+                    source, sourceOffset + sourceOrigin, this.storage, 0,
+                    [width, rows, slices, sourceRow, sourceSlice, width, width * rows],
+                    0, owned);
+                encoder.copyBufferToBuffer(this.storage, 0, download, 0, mapLength);
+              }
+              flush();
+              readback = download.mapAsync(MAP_READ, 0, mapLength).then(() => {
+                try {
+                  const mapped = new Uint8Array(download.getMappedRange(0, mapLength));
+                  const host = u8();
+                  let packed = bias;
+                  for (let z = 0; z < slices; ++z) {
+                    for (let y = 0; y < rows; ++y) {
+                      host.set(mapped.subarray(packed, packed + width),
+                          hostAddress + targetOrigin + z * targetSlice + y * targetRow);
+                      packed += width;
+                    }
+                  }
+                } finally {
+                  download.unmap();
+                }
+              });
+            }
+            cursor += chunkLength;
+            if (cursor === length) {
+              cursor = 0;
+              ++index;
+            }
+            if (readback) break;
+          }
+          flush();
+        } catch (error) {
+          failure = error;
+          for (const buffer of owned) buffer.destroy();
+        }
+        // Pop scopes before suspending so independent transactions cannot
+        // inherit them. A native rejection still joins earlier accepted work.
+        const validation = this.device.popErrorScope();
+        const allocation = this.device.popErrorScope();
+        const results = await Promise.allSettled([
+          readback || this.queue.onSubmittedWorkDone(), validation, allocation,
+        ]);
+        for (let i = 0; i < results.length; ++i) {
+          if (results[i].status === 'rejected') failure ??= results[i].reason;
+          else if (i !== 0 && results[i].value) failure ??= results[i].value;
+        }
+        if (failure) {
+          // A rejected map may precede retirement of earlier accepted commands.
+          // Keep captured data and native buffers until that work is finished.
+          await this.queue.onSubmittedWorkDone();
+          throw failure;
+        }
+      }
     }
 
     acquire(buffer, offset, length, destination, token) {
@@ -1124,6 +1306,15 @@ export function createImports(context) {
       );
     },
 
+    queue_transfer(deviceHandle, queueHandle, builtinsPointer,
+        recordsPointer, count, token) {
+      const window = new TransferWindow(handles.get(deviceHandle),
+          handles.get(queueHandle), readBuiltins(builtinsPointer));
+      window.transfer(recordsPointer, count).then(
+        () => { window.destroy(); complete(token, STATUS_OK); },
+        () => { window.destroy(); complete(token, STATUS_INTERNAL); });
+    },
+
     queue_write_buffer(
         queueHandle, bufferHandle, bufferOffset, dataPtr, dataSize) {
       const queue = handles.get(queueHandle);
@@ -1139,7 +1330,7 @@ export function createImports(context) {
     //==========================================================================
 
     file_transfer_window_create(deviceHandle, queueHandle, builtinsPointer) {
-      return handles.insert(new FileTransferWindow(handles.get(deviceHandle),
+      return handles.insert(new TransferWindow(handles.get(deviceHandle),
           handles.get(queueHandle), readBuiltins(builtinsPointer)));
     },
 

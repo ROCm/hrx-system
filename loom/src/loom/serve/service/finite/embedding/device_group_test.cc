@@ -81,24 +81,34 @@ TEST_F(GroupEmbeddingServiceTest, EmbeddingsCompleteBeforeOtherDeviceRetires) {
   IREE_ASSERT_OK(
       loom_runtime_execution_barrier(execution_, {1, &gate_, &value}));
   const uint32_t pattern = 0x13579BDF;
+  const iree_hal_fill_region_t fill_region = {
+      .row_length = sizeof(output_),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t fill = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
       .fill =
           {
               .target_buffer = workspace_,
-              .length = sizeof(output_),
+              .region = &fill_region,
               .pattern = &pattern,
               .pattern_length = sizeof(pattern),
           },
   };
   IREE_ASSERT_OK(loom_runtime_execution_transfer(execution_, 1, &fill, &value));
+  const iree_hal_transfer_region_t download_region = {
+      .row_length = sizeof(output_),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
           {
               .source_buffer = workspace_,
               .target = output_.data(),
-              .length = sizeof(output_),
+              .region = &download_region,
           },
   };
   IREE_ASSERT_OK(

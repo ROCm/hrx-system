@@ -19,24 +19,8 @@ static bool iree_hal_streaming_direct_transfer_is_bulk(
     const iree_hal_transfer_operation_t* operations) {
   iree_device_size_t remaining = IREE_HAL_STREAMING_SMALL_TRANSFER_MAX_LENGTH;
   for (iree_host_size_t i = 0; i < operation_count; ++i) {
-    iree_device_size_t length = 0;
-    switch (operations[i].type) {
-      case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
-        length = operations[i].fill.length;
-        break;
-      case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
-        length = operations[i].update.length;
-        break;
-      case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
-        length = operations[i].copy.length;
-        break;
-      case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
-        length = operations[i].upload.length;
-        break;
-      case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
-        length = operations[i].download.length;
-        break;
-    }
+    const iree_device_size_t length =
+        iree_hal_transfer_operation_length(&operations[i]);
     if (length > remaining) {
       return true;
     }
@@ -183,6 +167,11 @@ iree_status_t iree_hal_streaming_direct_transfer_h2d(
   IREE_RETURN_IF_ERROR(
       iree_hal_buffer_validate_range(target_buffer, target_offset, length));
 
+  const iree_hal_transfer_region_t operation_region = {
+      .row_length = length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
       .upload =
@@ -190,7 +179,7 @@ iree_status_t iree_hal_streaming_direct_transfer_h2d(
               .source = source,
               .target_buffer = target_buffer,
               .target_offset = target_offset,
-              .length = length,
+              .region = &operation_region,
           },
   };
   return iree_hal_streaming_direct_transfer_context_and_wait(
@@ -210,6 +199,11 @@ iree_status_t iree_hal_streaming_direct_transfer_d2h(
   IREE_RETURN_IF_ERROR(
       iree_hal_buffer_validate_range(source_buffer, source_offset, length));
 
+  const iree_hal_transfer_region_t operation_region = {
+      .row_length = length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
@@ -217,7 +211,7 @@ iree_status_t iree_hal_streaming_direct_transfer_d2h(
               .source_buffer = source_buffer,
               .source_offset = source_offset,
               .target = target,
-              .length = length,
+              .region = &operation_region,
           },
   };
   return iree_hal_streaming_direct_transfer_context_and_wait(
@@ -236,6 +230,11 @@ iree_status_t iree_hal_streaming_direct_transfer_d2d(
   IREE_RETURN_IF_ERROR(
       iree_hal_buffer_validate_range(target_buffer, target_offset, length));
 
+  const iree_hal_transfer_region_t operation_region = {
+      .row_length = length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
       .copy =
@@ -244,7 +243,7 @@ iree_status_t iree_hal_streaming_direct_transfer_d2d(
               .source_offset = source_offset,
               .target_buffer = target_buffer,
               .target_offset = target_offset,
-              .length = length,
+              .region = &operation_region,
               .flags = IREE_HAL_COPY_FLAG_NONE,
           },
   };

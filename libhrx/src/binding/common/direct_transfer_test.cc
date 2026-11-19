@@ -94,6 +94,16 @@ class ContextTransferTest : public ::testing::TestWithParam<bool> {
 TEST_P(ContextTransferTest, BatchesPreserveOffsetsAndFollowingDownloads) {
   const std::array<uint8_t, 7> first = {1, 19, 3, 67, 5, 241, 7};
   const std::array<uint8_t, 3> second = {17, 85, 241};
+  const iree_hal_transfer_region_t uploads_region_0 = {
+      .row_length = first.size(),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  const iree_hal_transfer_region_t uploads_region_1 = {
+      .row_length = second.size(),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t uploads[] = {
       {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
@@ -102,7 +112,7 @@ TEST_P(ContextTransferTest, BatchesPreserveOffsetsAndFollowingDownloads) {
                   .source = first.data(),
                   .target_buffer = buffer_->buffer,
                   .target_offset = 3,
-                  .length = first.size(),
+                  .region = &uploads_region_0,
               },
       },
       {
@@ -112,13 +122,18 @@ TEST_P(ContextTransferTest, BatchesPreserveOffsetsAndFollowingDownloads) {
                   .source = second.data(),
                   .target_buffer = buffer_->buffer,
                   .target_offset = 39,
-                  .length = second.size(),
+                  .region = &uploads_region_1,
               },
       },
   };
   IREE_ASSERT_OK(iree_hal_streaming_direct_transfer_on_context_and_wait(
       contexts_[0], stream_, IREE_ARRAYSIZE(uploads), uploads));
   std::array<uint8_t, 64> result = {};
+  const iree_hal_transfer_region_t download_region = {
+      .row_length = result.size(),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
@@ -126,7 +141,7 @@ TEST_P(ContextTransferTest, BatchesPreserveOffsetsAndFollowingDownloads) {
               .source_buffer = buffer_->buffer,
               .source_offset = 0,
               .target = result.data(),
-              .length = result.size(),
+              .region = &download_region,
           },
   };
   IREE_ASSERT_OK(iree_hal_streaming_direct_transfer_on_context_and_wait(
@@ -151,6 +166,16 @@ TEST_P(ContextTransferTest, FailedPredecessorPreservesBothEndpoints) {
           stream_,
           +[](void*) { return iree_status_from_code(IREE_STATUS_ABORTED); },
           nullptr));
+  const iree_hal_transfer_region_t operations_region_0 = {
+      .row_length = input.size(),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  const iree_hal_transfer_region_t operations_region_1 = {
+      .row_length = output.size(),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t operations[] = {
       {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
@@ -159,7 +184,7 @@ TEST_P(ContextTransferTest, FailedPredecessorPreservesBothEndpoints) {
                   .source = input.data(),
                   .target_buffer = buffer_->buffer,
                   .target_offset = 0,
-                  .length = input.size(),
+                  .region = &operations_region_0,
               },
       },
       {
@@ -169,7 +194,7 @@ TEST_P(ContextTransferTest, FailedPredecessorPreservesBothEndpoints) {
                   .source_buffer = buffer_->buffer,
                   .source_offset = 0,
                   .target = output.data(),
-                  .length = output.size(),
+                  .region = &operations_region_1,
               },
       },
   };

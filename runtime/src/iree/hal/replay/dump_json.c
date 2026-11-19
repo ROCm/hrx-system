@@ -247,6 +247,17 @@ static iree_status_t iree_hal_replay_dump_append_json_queue_transfer_operations(
         iree_hal_replay_dump_queue_transfer_operation_type_string(
             operation.type),
         operation.flags));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder,
+        ",\"row_length\":%" PRIu64 ",\"row_count\":%" PRIu64
+        ",\"slice_count\":%" PRIu64 ",\"source_strides\":[%" PRIu64 ",%" PRIu64
+        "],\"target_strides\":[%" PRIu64 ",%" PRIu64 "]",
+        operation.region.row_length, operation.region.row_count,
+        operation.region.slice_count,
+        operation.region.source_strides.row_stride,
+        operation.region.source_strides.slice_stride,
+        operation.region.target_strides.row_stride,
+        operation.region.target_strides.slice_stride));
     IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_buffer_ref(
         builder, "source_ref", &operation.source_ref));
     IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_json_buffer_ref(
