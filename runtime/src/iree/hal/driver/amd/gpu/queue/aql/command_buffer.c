@@ -878,8 +878,10 @@ static iree_status_t iree_hal_amd_gpu_aql_command_transfer(
   iree_hal_amd_gpu_aql_packet_t* packet = NULL;
   IREE_RETURN_IF_ERROR(
       iree_hal_amd_gpu_aql_command_packets(buffer, 1, &offset, &packet));
-  *packet = iree_hal_amd_gpu_aql_transfer_packet(buffer->pool->blit, 0, length,
-                                                 header);
+  const uint32_t workgroup_count[3] = {
+      iree_hal_amd_gpu_blit_workgroup_count(length), 1, 1};
+  *packet = iree_hal_amd_gpu_aql_transfer_packet(buffer->pool->blit, 0,
+                                                 workgroup_count, header);
   buffer->last_ordered = !buffer->last_header ||
                          (header & IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED) != 0;
   buffer->last_header = &packet->words[0];

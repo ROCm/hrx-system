@@ -8,6 +8,52 @@
 
 #include "iree/hal/device_spec.h"
 
+void iree_hal_amd_gpu_transfer_copy_host(
+    const iree_hal_amd_gpu_transfer_operation_t* operation, uint64_t offset,
+    iree_host_size_t length, void* staging) {
+  const bool download =
+      operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+  uint8_t* host = download ? operation->target.host : operation->source.host;
+  if (!operation->rectangular) {
+    if (download) {
+      memcpy(host + offset, staging, length);
+    } else {
+      memcpy(staging, host + offset, length);
+    }
+    return;
+  }
+  const iree_hal_transfer_region_t* region = operation->region;
+  const iree_hal_transfer_strides_t* strides =
+      download ? &region->target_strides : &region->source_strides;
+  const uint64_t slice_length = region->row_length * region->row_count;
+  uint64_t slice = offset / slice_length;
+  uint64_t row = (offset % slice_length) / region->row_length;
+  uint64_t column = offset % region->row_length;
+  uint8_t* bytes = staging;
+  while (length) {
+    uint64_t displacement = column;
+    if (region->row_count > 1) {
+      displacement += row * strides->row_stride;
+    }
+    if (region->slice_count > 1) {
+      displacement += slice * strides->slice_stride;
+    }
+    const iree_host_size_t part = iree_min(length, region->row_length - column);
+    if (download) {
+      memcpy(host + displacement, bytes, part);
+    } else {
+      memcpy(bytes, host + displacement, part);
+    }
+    bytes += part;
+    length -= part;
+    column = 0;
+    if (++row == region->row_count) {
+      row = 0;
+      ++slice;
+    }
+  }
+}
+
 void iree_hal_amd_gpu_download_complete(
     const iree_hal_amd_gpu_download_t* download) {
   const iree_hal_amd_gpu_transfer_operation_t* operation = download->operation;
@@ -15,9 +61,11 @@ void iree_hal_amd_gpu_download_complete(
   iree_device_size_t offset = download->offset;
   iree_host_size_t remaining = download->length;
   while (remaining) {
-    const iree_host_size_t length =
-        iree_min(remaining, operation->length - offset);
-    memcpy((uint8_t*)operation->target.host + offset, source, length);
+    const iree_host_size_t length = iree_min(
+        remaining,
+        iree_hal_amd_gpu_transfer_operation_length(operation) - offset);
+    iree_hal_amd_gpu_transfer_copy_host(operation, offset, length,
+                                        (void*)source);
     source += length;
     remaining -= length;
     ++operation;
@@ -48,8 +96,9 @@ void iree_hal_amd_gpu_transfer_profile(
     }
   }
   for (iree_host_size_t i = 0; i < transfer->count; ++i) {
-    event->payload_length += iree_min(transfer->operations[i].length,
-                                      UINT64_MAX - event->payload_length);
+    event->payload_length += iree_min(
+        iree_hal_amd_gpu_transfer_operation_length(&transfer->operations[i]),
+        UINT64_MAX - event->payload_length);
   }
 }
 
@@ -115,9 +164,11 @@ static void iree_hal_amd_gpu_transfer_append_operation(
         operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD
             ? staging_limits.download_capacity
             : staging_limits.upload_capacity;
-    transfer->staging_capacity = iree_max(
-        transfer->staging_capacity,
-        (uint32_t)iree_min(operation->length, maximum_staging_capacity));
+    transfer->staging_capacity =
+        iree_max(transfer->staging_capacity,
+                 (uint32_t)iree_min(
+                     iree_hal_amd_gpu_transfer_operation_length(operation),
+                     maximum_staging_capacity));
   }
 }
 

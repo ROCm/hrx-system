@@ -6,6 +6,58 @@
 
 #include "iree/hal/driver/amd/gpu/queue/blit.h"
 
+uint64_t iree_hal_amd_gpu_blit_prepare_region(
+    const iree_hal_transfer_region_t* region, uint64_t offset,
+    uint64_t capacity, iree_hal_amd_gpu_blit_arguments_t* out_arguments) {
+  *out_arguments = (iree_hal_amd_gpu_blit_arguments_t){0};
+  if (!capacity) {
+    return 0;
+  }
+
+  const uint64_t slice_length = region->row_length * region->row_count;
+  const uint64_t slice = offset / slice_length;
+  const uint64_t row = (offset % slice_length) / region->row_length;
+  const uint64_t column = offset % region->row_length;
+  uint64_t length = region->row_length;
+  uint64_t rows = 1, slices = 1;
+  // The kernel widens signed native indices when scaling byte strides. Leave
+  // room for its final iteration increment as well as every active index.
+  const uint64_t maximum_count = INT32_MAX - 255;
+  if (column || capacity < length) {
+    length = iree_min(length - column, capacity);
+  } else if (row || region->row_count > maximum_count ||
+             capacity < slice_length) {
+    rows = iree_min(region->row_count - row,
+                    iree_min(capacity / length, maximum_count));
+  } else {
+    rows = region->row_count;
+    slices = iree_min(region->slice_count - slice,
+                      iree_min(capacity / slice_length, maximum_count));
+  }
+  out_arguments->source = column;
+  out_arguments->target = column;
+  if (region->row_count > 1) {
+    out_arguments->source += row * region->source_strides.row_stride;
+    out_arguments->target += row * region->target_strides.row_stride;
+    out_arguments->source_row_stride = region->source_strides.row_stride;
+    out_arguments->target_row_stride = region->target_strides.row_stride;
+  }
+  if (region->slice_count > 1) {
+    out_arguments->source += slice * region->source_strides.slice_stride;
+    out_arguments->target += slice * region->target_strides.slice_stride;
+    out_arguments->source_slice_stride = region->source_strides.slice_stride;
+    out_arguments->target_slice_stride = region->target_strides.slice_stride;
+  }
+  out_arguments->length = length;
+  out_arguments->row_count = (uint32_t)rows;
+  out_arguments->slice_count = (uint32_t)slices;
+  const uint32_t groups_x = iree_hal_amd_gpu_blit_workgroup_count(length);
+  out_arguments->groups_y = (uint32_t)iree_min(rows, 256 / groups_x);
+  out_arguments->groups_z =
+      (uint32_t)iree_min(slices, 256 / groups_x / out_arguments->groups_y);
+  return length * rows * slices;
+}
+
 // Relocation-free instructions from blit.loom, checked with their complete
 // descriptors against source compilation for every supported ISA family.
 static const uint32_t iree_hal_amd_gpu_blit_gfx90a[] = {

@@ -54,31 +54,48 @@ iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
          iree_status_is_ok(status)) {
     const iree_hal_amd_gpu_transfer_operation_t* operation =
         &transfer->operations[out_chunk->next.index];
-    if (operation->type != IREE_HAL_TRANSFER_OPERATION_TYPE_COPY) {
+    const bool fill = operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
+    if (operation->type != IREE_HAL_TRANSFER_OPERATION_TYPE_COPY &&
+        !(fill && operation->rectangular)) {
       break;
     }
+    const uint64_t total_length =
+        iree_hal_amd_gpu_transfer_operation_length(operation);
+    uint64_t length = total_length - out_chunk->next.offset;
     iree_hal_amd_gpu_blit_arguments_t blit_arguments = {
-        .length = operation->length - out_chunk->next.offset,
+        .source = out_chunk->next.offset,
+        .target = out_chunk->next.offset,
+        .length = length,
         .row_count = 1,
         .slice_count = 1,
         .groups_y = 1,
         .groups_z = 1,
     };
-    status = iree_hal_amd_gpu_buffer_reference_resolve(
-        &operation->source.device, &blit_arguments.source);
-    if (iree_status_is_ok(status)) {
+    if (operation->rectangular) {
+      length = iree_hal_amd_gpu_blit_prepare_region(
+          operation->region, out_chunk->next.offset, length, &blit_arguments);
+    }
+    blit_arguments.pattern = operation->pattern;
+    blit_arguments.fill = fill;
+    uint64_t source = 0, target = 0;
+    if (!fill) {
       status = iree_hal_amd_gpu_buffer_reference_resolve(
-          &operation->target.device, &blit_arguments.target);
+          &operation->source.device, &source);
     }
     if (iree_status_is_ok(status)) {
-      blit_arguments.source += out_chunk->next.offset;
-      blit_arguments.target += out_chunk->next.offset;
+      status = iree_hal_amd_gpu_buffer_reference_resolve(
+          &operation->target.device, &target);
+    }
+    if (iree_status_is_ok(status)) {
+      blit_arguments.source += source;
+      blit_arguments.target += target;
       memcpy(arguments.data + *out_argument_length, &blit_arguments,
              sizeof(blit_arguments));
       const uint32_t size[3] = {64, 1, 1};
       const uint32_t partial[3] = {0, 0, 0};
       const uint32_t groups[3] = {
-          iree_hal_amd_gpu_blit_workgroup_count(blit_arguments.length), 1, 1};
+          iree_hal_amd_gpu_blit_workgroup_count(blit_arguments.length),
+          blit_arguments.groups_y, blit_arguments.groups_z};
       const iree_hal_amd_gpu_pm4_launch_inputs_t inputs = {
           .kernarg_pointer = argument_address + *out_argument_length,
       };
@@ -89,8 +106,11 @@ iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
           words, groups, launch->dispatch_initiator);
       out_chunk->word_count = (uint32_t)(words - out_chunk->words);
       *out_argument_length += sizeof(blit_arguments);
-      ++out_chunk->next.index;
-      out_chunk->next.offset = 0;
+      out_chunk->next.offset += length;
+      if (out_chunk->next.offset == total_length) {
+        ++out_chunk->next.index;
+        out_chunk->next.offset = 0;
+      }
     }
   }
   return status;

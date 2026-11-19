@@ -73,6 +73,35 @@ TEST_F(TransferTest, CopySplitsAtPacketLimitWithoutStaging) {
   Expect({0xC0055000, 0x60300000, 0x1FFFFF0, 0x1235, 0x2000003, 0x5678, 3});
 }
 
+TEST_F(TransferTest, DmaRectangleSplitsAtRowsWithIndependentEndpointStrides) {
+  const iree_hal_transfer_region_t region = {
+      .row_length = 5,
+      .row_count = 3,
+      .slice_count = 2,
+      .source_strides = {.row_stride = 8, .slice_stride = 32},
+      .target_strides = {.row_stride = 11, .slice_stride = 40},
+  };
+  const iree_hal_amd_gpu_dma_transfer_span_t span = {
+      .source_address = 0x123400001000,
+      .target_address = 0x567800002000,
+      .length = 30,
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
+      .region = &region,
+  };
+  for (uint32_t offset = 0; offset < 30; ++offset) {
+    SCOPED_TRACE(offset);
+    const auto packet = Emit(span, offset, 0);
+    const uint32_t length = 5 - offset % 5;
+    EXPECT_EQ(packet.length, length);
+    EXPECT_EQ(packet.staging_length, 0u);
+    Expect({0xC0055000, 0x60300000,
+            0x1000 + (offset / 15) * 32 + (offset % 15 / 5) * 8 + offset % 5,
+            0x1234,
+            0x2000 + (offset / 15) * 40 + (offset % 15 / 5) * 11 + offset % 5,
+            0x5678, length});
+  }
+}
+
 TEST_F(TransferTest, FillRotatesPatternAcrossStagedEdgesAndImmediateBody) {
   const iree_hal_amd_gpu_dma_transfer_span_t span = {
       .target_address = 0x567800001001,
@@ -529,6 +558,67 @@ TEST(TransferBatchTest, ProgramCopiesRespectPacketArgumentsAndOperationBounds) {
                         [](uint32_t word) { return word == 0xA5A5A5A5; }));
       }
     }
+  }
+}
+
+TEST(TransferBatchTest, ProgramRectanglesKeepOneLaunchForCopyAndFill) {
+  iree_hal_amd_gpu_image_kernel_t kernel;
+  iree_const_byte_span_t code;
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_blit_program_query({11, 0, 0}, &code, &kernel));
+  iree_hal_amd_gpu_pm4_launch_t launch;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_launch_initialize({11, 0, 0}, 0, &kernel,
+                                                        0x100000, &launch));
+  const iree_hal_buffer_native_binding_t binding = {.device_address = 0x1000};
+  iree_hal_buffer_t buffer = {};
+  buffer.memory.bindings = &binding;
+  const iree_hal_transfer_region_t region = {
+      .row_length = 37,
+      .row_count = 128,
+      .slice_count = 4,
+      .source_strides = {.row_stride = 48, .slice_stride = 8192},
+      .target_strides = {.row_stride = 64, .slice_stride = 12288},
+  };
+  for (auto type : {IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
+                    IREE_HAL_TRANSFER_OPERATION_TYPE_FILL}) {
+    SCOPED_TRACE(type);
+    iree_hal_amd_gpu_transfer_operation_t operation = {
+        .type = type,
+        .rectangular = true,
+        .pattern = 0xA5A5A5A5,
+        .region = &region,
+    };
+    operation.source.device = {
+        .buffer = &buffer,
+        .offset = 16,
+        .slot = {.index = 0, .type = IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS},
+    };
+    operation.target.device = operation.source.device;
+    operation.target.device.offset = 32;
+    const iree_hal_amd_gpu_transfer_t transfer = {
+        .count = 1,
+        .operations = &operation,
+    };
+    iree_hal_amd_gpu_dma_transfer_chunk_t chunk;
+    iree_hal_amd_gpu_blit_arguments_t arguments;
+    uint32_t argument_length = 0;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
+        &transfer, &launch, 31,
+        iree_make_byte_span(&arguments, sizeof(arguments)), 0x2000, &chunk,
+        &argument_length));
+    EXPECT_EQ(chunk.word_count, 31u);
+    EXPECT_EQ(chunk.next.index, 1u);
+    EXPECT_EQ(argument_length, sizeof(arguments));
+    EXPECT_EQ(arguments.target, 0x1020u);
+    EXPECT_EQ(arguments.length, 37u);
+    EXPECT_EQ(arguments.row_count, 128u);
+    EXPECT_EQ(arguments.slice_count, 4u);
+    EXPECT_EQ(arguments.target_row_stride, 64u);
+    EXPECT_EQ(arguments.target_slice_stride, 12288u);
+    EXPECT_EQ(arguments.fill, type == IREE_HAL_TRANSFER_OPERATION_TYPE_FILL);
+    const std::array<uint32_t, 4> dispatch = {0xC0031502, 1, 128, 2};
+    EXPECT_EQ(std::vector<uint32_t>(chunk.words + 26, chunk.words + 30),
+              std::vector<uint32_t>(dispatch.begin(), dispatch.end()));
   }
 }
 

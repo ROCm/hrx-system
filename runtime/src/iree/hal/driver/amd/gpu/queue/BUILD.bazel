@@ -877,6 +877,7 @@ iree_runtime_cc_library(
     hdrs = ["blit.h"],
     deps = [
         "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/driver/amd/gpu/image",
         "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
     ],

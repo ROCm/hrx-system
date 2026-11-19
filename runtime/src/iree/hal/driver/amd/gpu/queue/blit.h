@@ -9,6 +9,7 @@
 
 #include "iree/hal/driver/amd/gpu/image/image.h"
 #include "iree/hal/driver/amd/gpu/target/identity.h"
+#include "iree/hal/queue.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -54,6 +55,18 @@ static_assert(sizeof(iree_hal_amd_gpu_blit_arguments_t) == 80,
 static inline uint32_t iree_hal_amd_gpu_blit_workgroup_count(uint64_t length) {
   return length > 256 * 1024 ? 256 : (uint32_t)((length + 1023) / 1024);
 }
+
+// Prepares a rectangular prefix of the remaining useful bytes, starting at
+// |offset| in dense slice/row/byte order. Public admission has established a
+// nonempty region, nonoverflowing useful byte count, and valid address spans.
+// |capacity| bounds useful bytes, independently of either endpoint's padding.
+// Returns consumed useful bytes, or zero when capacity is zero. Source/target
+// contain relative byte displacements for the caller to add to native origins.
+// The grid has at most 256 groups in total. Native signed index limits split
+// large dimensions without narrowing the public geometry or expanding rows.
+uint64_t iree_hal_amd_gpu_blit_prepare_region(
+    const iree_hal_transfer_region_t* region, uint64_t offset,
+    uint64_t capacity, iree_hal_amd_gpu_blit_arguments_t* out_arguments);
 
 // Selects relocation-free native instructions and their descriptor. The cold
 // owner places this once; no compiler or HSACO parser is in the runtime path.

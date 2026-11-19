@@ -326,11 +326,14 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
   // Shader copies avoid CP-DMA's synchronous transfer and drain costs.
   // Incompatible program views and rings too small for one shader argument
   // record retain the queue path without extra backing.
+  const iree_hal_amd_gpu_transfer_operation_t* operation =
+      &transfer->operations[transfer->cursor.index];
   const bool program =
       transfer->program_accessible &&
       arguments->capacity >= sizeof(iree_hal_amd_gpu_blit_arguments_t) &&
-      transfer->operations[transfer->cursor.index].type ==
-          IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
+      (operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_COPY ||
+       (operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_FILL &&
+        operation->rectangular));
   iree_hal_amd_gpu_byte_storage_t* storage =
       program ? arguments : queue->producer.transfers.current;
   if (!program && transfer->staging_capacity &&
@@ -376,7 +379,8 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
           : IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_UPLOAD_LENGTH;
   const bool overlap = transfer->host_completion_required ||
                        (transfer->staging_capacity &&
-                        transfer->operations[transfer->cursor.index].length >
+                        iree_hal_amd_gpu_transfer_operation_length(
+                            &transfer->operations[transfer->cursor.index]) >
                             transfer->staging_capacity);
   const uint64_t staging_window_length =
       storage ? iree_min(overlap ? storage->capacity / 2 : storage->capacity,

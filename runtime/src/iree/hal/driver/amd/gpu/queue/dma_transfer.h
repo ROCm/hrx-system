@@ -51,6 +51,8 @@ typedef struct iree_hal_amd_gpu_dma_transfer_span_t {
   uint32_t pattern;
   // Admitted DMA family; no public HAL operation is replayed.
   iree_hal_transfer_operation_type_t type;
+  // Optional rectangle geometry borrowed through packet emission.
+  const iree_hal_transfer_region_t* region;
 } iree_hal_amd_gpu_dma_transfer_span_t;
 
 typedef struct iree_hal_amd_gpu_dma_transfer_packet_t {

@@ -125,4 +125,64 @@ TEST(DownloadTest, PartialEndpointsPreserveEveryDestinationAndGuard) {
   }
 }
 
+TEST(TransferTest,
+     HostRectanglesCopyOnlyUsefulBytesAcrossPartialRowsAndSlices) {
+  const iree_hal_transfer_region_t region = {
+      .row_length = 5,
+      .row_count = 3,
+      .slice_count = 2,
+      .source_strides = {.row_stride = 8, .slice_stride = 32},
+      .target_strides = {.row_stride = 11, .slice_stride = 40},
+  };
+  std::array<uint8_t, 80> source, target;
+  source.fill(0xCC);
+  std::array<uint8_t, 30> packed;
+  for (size_t i = 0; i < packed.size(); ++i) {
+    packed[i] = static_cast<uint8_t>(i + 1);
+    source[1 + (i / 15) * 32 + (i % 15 / 5) * 8 + i % 5] = packed[i];
+  }
+  for (size_t offset = 0; offset < packed.size(); ++offset) {
+    for (size_t length = 0; length <= packed.size() - offset; ++length) {
+      SCOPED_TRACE(::testing::Message() << offset << '+' << length);
+      for (auto type : {IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE,
+                        IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+                        IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD}) {
+        SCOPED_TRACE(type);
+        target.fill(0xCC);
+        std::array<uint8_t, 32> staging;
+        staging.fill(0xDD);
+        iree_hal_amd_gpu_transfer_operation_t operation = {
+            .type = type,
+            .rectangular = true,
+            .source = {.host = source.data() + 1},
+            .target = {.host = target.data() + 1},
+            .region = &region,
+        };
+        if (type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD) {
+          const iree_hal_amd_gpu_download_t download = {
+              .source = packed.data() + offset,
+              .operation = &operation,
+              .offset = offset,
+              .length = length,
+          };
+          iree_hal_amd_gpu_download_complete(&download);
+          auto expected = source;
+          expected.fill(0xCC);
+          for (size_t i = offset; i < offset + length; ++i) {
+            expected[1 + (i / 15) * 40 + (i % 15 / 5) * 11 + i % 5] = packed[i];
+          }
+          EXPECT_EQ(target, expected);
+        } else {
+          iree_hal_amd_gpu_transfer_copy_host(&operation, offset, length,
+                                              staging.data() + 1);
+          for (size_t i = 0; i < staging.size(); ++i) {
+            EXPECT_EQ(staging[i],
+                      i > 0 && i <= length ? packed[offset + i - 1] : 0xDD);
+          }
+        }
+      }
+    }
+  }
+}
+
 }  // namespace
