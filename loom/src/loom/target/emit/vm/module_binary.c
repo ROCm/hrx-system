@@ -9,6 +9,10 @@
 #include "iree/io/vec_stream.h"
 #include "iree/vm/bytecode/wire/core.h"
 
+// Tables derived during emission use bounded stack storage regardless of the
+// number of rows. Tables already in wire representation are written directly.
+#define LOOM_VM_METADATA_BATCH_BYTES 256u
+
 static iree_status_t loom_vm_section_begin(
     iree_io_stream_t* stream, iree_io_stream_pos_t base_offset,
     iree_vm_bytecode_section_type_t type,
@@ -48,12 +52,23 @@ static iree_status_t loom_vm_program_write_strings(
   const iree_vm_bytecode_v0_strings_header_t header = {plan->string_count};
   IREE_RETURN_IF_ERROR(iree_io_stream_write(stream, sizeof(header), &header));
   uint32_t offset = 0;
-  IREE_RETURN_IF_ERROR(iree_io_stream_write(stream, sizeof(offset), &offset));
+  uint32_t offsets[LOOM_VM_METADATA_BATCH_BYTES / sizeof(uint32_t)];
   iree_status_t status = iree_ok_status();
-  for (uint32_t i = 0; i < plan->string_count && iree_status_is_ok(status);
-       ++i) {
-    offset += (uint32_t)plan->strings[i].size;
-    status = iree_io_stream_write(stream, sizeof(offset), &offset);
+  for (uint32_t i = 0; i < plan->string_count && iree_status_is_ok(status);) {
+    // Reserve the last slot for the terminal offset in the final batch.
+    const uint32_t count =
+        iree_min(plan->string_count - i, (uint32_t)IREE_ARRAYSIZE(offsets) - 1);
+    for (uint32_t j = 0; j < count; ++j) {
+      offsets[j] = offset;
+      offset += (uint32_t)plan->strings[i + j].size;
+    }
+    i += count;
+    uint32_t offset_count = count;
+    if (i == plan->string_count) {
+      offsets[offset_count++] = offset;
+    }
+    status = iree_io_stream_write(stream, offset_count * sizeof(offsets[0]),
+                                  offsets);
   }
   for (uint32_t i = 0; i < plan->string_count && iree_status_is_ok(status);
        ++i) {
@@ -114,12 +129,21 @@ static iree_status_t loom_vm_program_write_signatures(
   IREE_RETURN_IF_ERROR(iree_io_stream_write(stream, sizeof(callables_header),
                                             &callables_header));
   iree_status_t status = iree_ok_status();
-  for (uint32_t i = 0; i < plan->signature_count && iree_status_is_ok(status);
-       ++i) {
-    const iree_vm_bytecode_v0_callable_type_row_t callable = {
-        .signature_ordinal_u16 = (uint16_t)i,
-    };
-    status = iree_io_stream_write(stream, sizeof(callable), &callable);
+  iree_vm_bytecode_v0_callable_type_row_t
+      callables[LOOM_VM_METADATA_BATCH_BYTES /
+                sizeof(iree_vm_bytecode_v0_callable_type_row_t)];
+  for (uint32_t i = 0;
+       i < plan->signature_count && iree_status_is_ok(status);) {
+    const uint32_t count = iree_min(plan->signature_count - i,
+                                    (uint32_t)IREE_ARRAYSIZE(callables));
+    for (uint32_t j = 0; j < count; ++j) {
+      callables[j] = (iree_vm_bytecode_v0_callable_type_row_t){
+          .signature_ordinal_u16 = (uint16_t)(i + j),
+      };
+    }
+    status =
+        iree_io_stream_write(stream, count * sizeof(callables[0]), callables);
+    i += count;
   }
   if (iree_status_is_ok(status)) {
     rows[1].byte_length_u64 = iree_io_stream_offset(stream) - start;
@@ -198,13 +222,22 @@ static iree_status_t loom_vm_program_write_rodata(
   };
   IREE_RETURN_IF_ERROR(iree_io_stream_write(stream, sizeof(header), &header));
   iree_status_t status = iree_ok_status();
-  for (uint32_t i = 0; i < plan->rodata_count && iree_status_is_ok(status);
-       ++i) {
-    const iree_vm_bytecode_v0_rodata_block_descriptor_t descriptor = {
-        .byte_length_u64 = plan->rodata[i].contents.data_length,
-        .minimum_alignment_u32 = plan->rodata[i].alignment,
-    };
-    status = iree_io_stream_write(stream, sizeof(descriptor), &descriptor);
+  iree_vm_bytecode_v0_rodata_block_descriptor_t
+      descriptors[LOOM_VM_METADATA_BATCH_BYTES /
+                  sizeof(iree_vm_bytecode_v0_rodata_block_descriptor_t)];
+  for (uint32_t i = 0; i < plan->rodata_count && iree_status_is_ok(status);) {
+    const uint32_t count =
+        iree_min(plan->rodata_count - i, (uint32_t)IREE_ARRAYSIZE(descriptors));
+    for (uint32_t j = 0; j < count; ++j) {
+      const loom_vm_rodata_plan_t* block = &plan->rodata[i + j];
+      descriptors[j] = (iree_vm_bytecode_v0_rodata_block_descriptor_t){
+          .byte_length_u64 = block->contents.data_length,
+          .minimum_alignment_u32 = block->alignment,
+      };
+    }
+    status = iree_io_stream_write(stream, count * sizeof(descriptors[0]),
+                                  descriptors);
+    i += count;
   }
   for (uint32_t i = 0; i < plan->rodata_count && iree_status_is_ok(status);
        ++i) {

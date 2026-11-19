@@ -7,10 +7,12 @@
 #include "loom/target/emit/vm/module_binary.h"
 
 #include <algorithm>
+#include <string>
 #include <vector>
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "iree/vm/bytecode/layout.h"
 
 namespace {
 
@@ -109,6 +111,61 @@ TEST(VMModuleBinaryTest,
   EXPECT_EQ(function_bytecode.destroy_count, 0);
   iree_byte_sequence_release(second_binary);
   EXPECT_EQ(function_bytecode.destroy_count, 1);
+}
+
+TEST(VMModuleBinaryTest, ReadsDerivedTablesAcrossBatchBoundaries) {
+  constexpr uint16_t kCount = 67;
+  const std::string text(kCount, 'x');
+  std::vector<iree_string_view_t> strings(kCount);
+  std::vector<iree_vm_bytecode_v0_signature_row_t> signatures(kCount);
+  std::vector<iree_vm_bytecode_v0_signature_descriptor_row_t> descriptors;
+  std::vector<loom_vm_rodata_plan_t> blocks(kCount);
+  for (uint16_t i = 0; i < kCount; ++i) {
+    strings[i] = iree_make_string_view(text.data(), i);
+    signatures[i].descriptor_base_u32 = (uint32_t)descriptors.size();
+    signatures[i].argument_count_u16 = i;
+    signatures[i].argument_value_count_u16 = i;
+    descriptors.insert(descriptors.end(), i,
+                       {.kind_u16 = IREE_VM_BYTECODE_SIGNATURE_KIND_I32});
+    blocks[i].contents = iree_make_const_byte_span(text.data(), i + 1);
+    blocks[i].alignment = 1u << (i % 4);
+  }
+  const loom_vm_program_plan_t program = {
+      .strings = strings.data(),
+      .string_count = kCount,
+      .signatures = signatures.data(),
+      .signature_count = kCount,
+      .signature_descriptors = descriptors.data(),
+      .signature_descriptor_count = (uint32_t)descriptors.size(),
+      .rodata = blocks.data(),
+      .rodata_count = kCount,
+      .rodata_alignment = 8,
+      .has_rodata_section = true,
+  };
+  iree_byte_sequence_t* binary = nullptr;
+  IREE_ASSERT_OK(
+      loom_vm_program_emit_binary(&program, iree_allocator_system(), &binary));
+  std::vector<uint8_t> bytes((size_t)iree_byte_sequence_length(binary));
+  IREE_EXPECT_OK(iree_byte_sequence_read(
+      binary, 0, iree_make_byte_span(bytes.data(), bytes.size())));
+  iree_byte_sequence_release(binary);
+
+  iree_vm_bytecode_module_plan_t loaded = {};
+  IREE_ASSERT_OK(iree_vm_bytecode_module_plan_build(
+      iree_make_const_byte_span(bytes.data(), bytes.size()), &loaded));
+  const auto& layout = loaded.layout;
+  ASSERT_EQ(layout.strings.count, kCount);
+  ASSERT_EQ(layout.callable_types.count, kCount);
+  ASSERT_EQ(layout.rodata.count, kCount);
+  for (uint16_t i = 0; i < kCount; ++i) {
+    EXPECT_TRUE(iree_string_view_equal(
+        iree_vm_bytecode_string_at(&layout.strings, i), strings[i]));
+    EXPECT_EQ(layout.callable_types.rows[i].signature_ordinal_u16, i);
+    EXPECT_EQ(layout.rodata.descriptors[i].byte_length_u64,
+              blocks[i].contents.data_length);
+    EXPECT_EQ(layout.rodata.descriptors[i].minimum_alignment_u32,
+              blocks[i].alignment);
+  }
 }
 
 }  // namespace
