@@ -247,12 +247,14 @@ static void loom_cfg_loop_number_tree(iree_host_size_t loop_count,
     }
     iree_host_size_t stack_count = 1;
     stack[0] = (uint16_t)(i - 1);
+    loops[i - 1].depth = 1;
     loops[i - 1].interval = position++;
     while (stack_count > 0) {
       uint16_t loop_index = stack[stack_count - 1];
       uint16_t child = states[loop_index].first_child;
       if (child != LOOM_CFG_LOOP_NEST_NONE) {
         states[loop_index].first_child = states[child].next_sibling;
+        loops[child].depth = (uint16_t)(stack_count + 1);
         loops[child].interval = position++;
         stack[stack_count++] = child;
       } else {

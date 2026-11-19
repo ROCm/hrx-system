@@ -11,6 +11,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/analysis/pipeline/invocations.h"
 #include "loom/analysis/source_storage_packing.h"
+#include "loom/util/cfg_loop_nest.h"
 
 namespace loom {
 namespace {
@@ -92,6 +93,21 @@ class PipelineConstructionStorageTest : public ::testing::Test {
   // Complete retained inventory.
   loom_pipeline_invocations_t invocations_ = {};
 };
+
+TEST_F(PipelineConstructionStorageTest,
+       NestedScheduleEntriesInheritEnclosingLoopDepth) {
+  EXPECT_EQ(invocations_.lifetimes.loop_depths, nullptr);
+  const uint16_t inner = 0;
+  const loom_cfg_natural_loop_t loop = {.depth = 1};
+  control_.loops = {
+      .loops = &loop, .innermost_loop_indices = &inner, .loop_count = 1};
+  IREE_ASSERT_OK(loom_pipeline_lifetimes_build(&invocations_, &arena_,
+                                               &invocations_.lifetimes));
+  const uint32_t expected[] = {0, 0, 0, 1, 2};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(expected); ++i) {
+    EXPECT_EQ(invocations_.lifetimes.loop_depths[i], expected[i]);
+  }
+}
 
 TEST_F(PipelineConstructionStorageTest,
        SharedUseJoinsTheNearestConstructionOwner) {

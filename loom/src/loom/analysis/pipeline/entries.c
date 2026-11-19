@@ -31,13 +31,21 @@ iree_status_t loom_pipeline_entry_scope_allocate(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, owner_count, sizeof(*owners), (void**)&owners));
   memcpy(owners, lifetimes->owners, owner_count * sizeof(*owners));
+  uint32_t* loop_depths = NULL;
+  if (lifetimes->loop_depths) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, owner_count, sizeof(*loop_depths), (void**)&loop_depths));
+    memcpy(loop_depths, lifetimes->loop_depths,
+           owner_count * sizeof(*loop_depths));
+  }
   *scope = (loom_pipeline_entry_scope_t){
       .type = type,
       .lifetimes = {.nodes = nodes,
                     .count = lifetimes->count,
                     .owners = owners,
                     .ancestry = ancestry,
-                    .has_serial = lifetimes->has_serial},
+                    .has_serial = lifetimes->has_serial,
+                    .loop_depths = loop_depths},
       .owner_count = owner_count,
   };
   *out_scope = scope;

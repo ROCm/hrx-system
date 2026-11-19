@@ -208,9 +208,34 @@ loom_cc_library(
         "//loom/src/loom/ops/channel:op_defs",
         "//loom/src/loom/ops/pipeline:op_defs",
         "//loom/src/loom/util:adaptive_sort",
+        "//loom/src/loom/util:cfg_loop_nest",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "lifetime_coalescing",
+    srcs = ["lifetime_coalescing.c"],
+    hdrs = ["lifetime_coalescing.h"],
+    deps = [
+        ":invocations",
+        "//loom/src/loom/util:adaptive_sort",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "lifetime_coalescing_test",
+    srcs = ["lifetime_coalescing_test.cc"],
+    deps = [
+        ":lifetime_coalescing",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -256,6 +281,7 @@ loom_cc_test(
         ":resources",
         ":schedule",
         "//loom/src/loom/analysis:source_storage_packing",
+        "//loom/src/loom/util:cfg_loop_nest",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
