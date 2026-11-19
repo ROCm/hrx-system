@@ -30,7 +30,8 @@ struct StreamTransferResources {
 
 }  // namespace
 
-TEST_CASE_METHOD(HrxTestFixture, "synchronous_h2d basic", "[transfer][h2d]") {
+TEST_CASE_METHOD(HrxTestFixture, "synchronous_h2d_linear basic",
+                 "[transfer][h2d]") {
   hrx_allocator_t alloc = hrx().device_allocator(device_);
 
   hrx_buffer_params_t params = {
@@ -44,7 +45,7 @@ TEST_CASE_METHOD(HrxTestFixture, "synchronous_h2d basic", "[transfer][h2d]") {
   uint8_t src[256];
   memset(src, 0x42, sizeof(src));
 
-  REQUIRE_OK(hrx().synchronous_h2d(transfer_queue_, src, buf, 0, 256));
+  REQUIRE_OK(hrx().synchronous_h2d_linear(transfer_queue_, src, buf, 0, 256));
 
   // Verify via map.
   void* mapped = nullptr;
@@ -55,7 +56,8 @@ TEST_CASE_METHOD(HrxTestFixture, "synchronous_h2d basic", "[transfer][h2d]") {
   hrx().buffer_release(buf);
 }
 
-TEST_CASE_METHOD(HrxTestFixture, "synchronous_d2h basic", "[transfer][d2h]") {
+TEST_CASE_METHOD(HrxTestFixture, "synchronous_d2h_linear basic",
+                 "[transfer][d2h]") {
   hrx_allocator_t alloc = hrx().device_allocator(device_);
 
   hrx_buffer_params_t params = {
@@ -72,9 +74,9 @@ TEST_CASE_METHOD(HrxTestFixture, "synchronous_d2h basic", "[transfer][d2h]") {
   memset(mapped, 0x99, 256);
   REQUIRE_OK(hrx().buffer_unmap(buf));
 
-  // Read back via synchronous_d2h.
+  // Read back via synchronous_d2h_linear.
   uint8_t dst[256] = {};
-  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, buf, 0, dst, 256));
+  REQUIRE_OK(hrx().synchronous_d2h_linear(transfer_queue_, buf, 0, dst, 256));
 
   for (int i = 0; i < 256; i++) {
     REQUIRE(dst[i] == 0x99);
@@ -101,13 +103,13 @@ TEST_CASE_METHOD(HrxTestFixture, "synchronous h2d then d2h roundtrip",
     pattern[i] = (uint32_t)i * 0x01010101;
   }
 
-  REQUIRE_OK(
-      hrx().synchronous_h2d(transfer_queue_, pattern, buf, 0, sizeof(pattern)));
+  REQUIRE_OK(hrx().synchronous_h2d_linear(transfer_queue_, pattern, buf, 0,
+                                          sizeof(pattern)));
 
   // Read back.
   uint32_t readback[256] = {};
-  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, buf, 0, readback,
-                                   sizeof(readback)));
+  REQUIRE_OK(hrx().synchronous_d2h_linear(transfer_queue_, buf, 0, readback,
+                                          sizeof(readback)));
 
   REQUIRE(memcmp(pattern, readback, sizeof(pattern)) == 0);
 
@@ -134,18 +136,20 @@ TEST_CASE_METHOD(HrxTestFixture,
       resources.stream, kBufferSize, HRX_MEMORY_TYPE_DEVICE_LOCAL,
       HRX_BUFFER_USAGE_DEFAULT, &resources.target_buffer));
 
-  REQUIRE_OK(hrx().stream_copy_h2d(resources.stream, source.data(),
-                                   resources.source_buffer, 0, source.size()));
-  REQUIRE_OK(hrx().stream_copy_buffer(resources.stream, resources.source_buffer,
-                                      0, resources.target_buffer, 0,
-                                      source.size()));
-  REQUIRE_OK(hrx().stream_copy_d2h(resources.stream, resources.target_buffer, 0,
-                                   target.data(), target.size()));
+  REQUIRE_OK(hrx().stream_copy_h2d_linear(resources.stream, source.data(),
+                                          resources.source_buffer, 0,
+                                          source.size()));
+  REQUIRE_OK(hrx().stream_copy_buffer_linear(
+      resources.stream, resources.source_buffer, 0, resources.target_buffer, 0,
+      source.size()));
+  REQUIRE_OK(hrx().stream_copy_d2h_linear(resources.stream,
+                                          resources.target_buffer, 0,
+                                          target.data(), target.size()));
   REQUIRE_OK(hrx().stream_synchronize(resources.stream));
   REQUIRE(target == source);
 }
 
-TEST_CASE_METHOD(HrxTestFixture, "synchronous_h2d out of range fails",
+TEST_CASE_METHOD(HrxTestFixture, "synchronous_h2d_linear out of range fails",
                  "[transfer][error]") {
   hrx_allocator_t alloc = hrx().device_allocator(device_);
 
@@ -159,21 +163,22 @@ TEST_CASE_METHOD(HrxTestFixture, "synchronous_h2d out of range fails",
 
   uint8_t src[128];
   // Try to write 128 bytes into a 64-byte buffer.
-  hrx_status_t s = hrx().synchronous_h2d(transfer_queue_, src, buf, 0, 128);
+  hrx_status_t s =
+      hrx().synchronous_h2d_linear(transfer_queue_, src, buf, 0, 128);
   REQUIRE(!hrx_status_is_ok(s));
   hrx().status_ignore(s);
 
   // Neither API selects a hidden device queue when execution is unspecified.
-  s = hrx().synchronous_h2d(nullptr, src, buf, 0, 4);
+  s = hrx().synchronous_h2d_linear(nullptr, src, buf, 0, 4);
   CHECK(hrx().status_code(s) == HRX_STATUS_INVALID_ARGUMENT);
   hrx().status_ignore(s);
-  s = hrx().synchronous_d2h(nullptr, buf, 0, src, 4);
+  s = hrx().synchronous_d2h_linear(nullptr, buf, 0, src, 4);
   CHECK(hrx().status_code(s) == HRX_STATUS_INVALID_ARGUMENT);
   hrx().status_ignore(s);
-  s = hrx().stream_copy_h2d(nullptr, src, buf, 0, 4);
+  s = hrx().stream_copy_h2d_linear(nullptr, src, buf, 0, 4);
   CHECK(hrx().status_code(s) == HRX_STATUS_INVALID_ARGUMENT);
   hrx().status_ignore(s);
-  s = hrx().stream_copy_d2h(nullptr, buf, 0, src, 4);
+  s = hrx().stream_copy_d2h_linear(nullptr, buf, 0, src, 4);
   CHECK(hrx().status_code(s) == HRX_STATUS_INVALID_ARGUMENT);
   hrx().status_ignore(s);
 

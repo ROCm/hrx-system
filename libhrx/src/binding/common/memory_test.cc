@@ -374,10 +374,10 @@ TEST_F(CpuStreamingMemoryTest, FrontendAllocationOwnsPublicPoolLifetime) {
     input.fill(0xA5);
     std::array<uint8_t, 256> output = {};
     hrx_queue_t queue = hrx_device_get_queue(device_entry_.hrx_device, 0, 0);
-    IREE_ASSERT_OK(HRX_CALL(hrx_synchronous_h2d(
+    IREE_ASSERT_OK(HRX_CALL(hrx_synchronous_h2d_linear(
         queue, input.data(), buffer_->hrx_buf, 0, input.size())));
-    IREE_ASSERT_OK(HRX_CALL(hrx_synchronous_d2h(queue, buffer_->hrx_buf, 0,
-                                                output.data(), output.size())));
+    IREE_ASSERT_OK(HRX_CALL(hrx_synchronous_d2h_linear(
+        queue, buffer_->hrx_buf, 0, output.data(), output.size())));
     EXPECT_EQ(output, input);
     iree_hal_streaming_memory_release_wrapped_buffer(buffer_);
     buffer_ = nullptr;

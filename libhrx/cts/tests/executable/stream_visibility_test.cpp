@@ -208,11 +208,11 @@ TEST_CASE_METHOD(StreamVisibilityTest,
   Initialize();
   const uint32_t pattern = 0xABCD1234u;
   expected_.fill(pattern);
-  REQUIRE_OK(hrx().stream_fill_buffer(streams_[0], buffers_[1], 0, kByteLength,
-                                      &pattern, sizeof(pattern)));
+  REQUIRE_OK(hrx().stream_fill_buffer_linear(
+      streams_[0], buffers_[1], 0, kByteLength, &pattern, sizeof(pattern)));
   Dispatch(streams_[0], 1, 2, 1);
-  REQUIRE_OK(hrx().stream_copy_buffer(streams_[0], buffers_[2], 0, buffers_[1],
-                                      0, kByteLength));
+  REQUIRE_OK(hrx().stream_copy_buffer_linear(streams_[0], buffers_[2], 0,
+                                             buffers_[1], 0, kByteLength));
   Dispatch(streams_[0], 1, 2, 2);
   Observe(streams_[0], Observation::kQuery);
 }
@@ -246,16 +246,16 @@ TEST_CASE_METHOD(StreamVisibilityTest,
     const hrx_semaphore_list_t signals = {&point.semaphore, &written, 1};
     const hrx_barrier_list_t empty = {};
     const hrx_queue_barriers_t bare = {&empty, &empty};
-    REQUIRE_OK(hrx().queue_fill(hrx().stream_get_queue(stream), nullptr,
-                                &signals, buffers_[2], 0, kByteLength, &pattern,
-                                sizeof(pattern), &bare));
+    REQUIRE_OK(hrx().queue_fill_linear(hrx().stream_get_queue(stream), nullptr,
+                                       &signals, buffers_[2], 0, kByteLength,
+                                       &pattern, sizeof(pattern), &bare));
     REQUIRE_OK(hrx().stream_advance_timeline(stream, &point.value));
     REQUIRE(point.value == written);
   } else {
     // A leading barrier and a following payload share the recording.
     REQUIRE_OK(hrx().stream_barrier(stream, nullptr));
-    REQUIRE_OK(hrx().stream_fill_buffer(stream, buffers_[2], 0, kByteLength,
-                                        &pattern, sizeof(pattern)));
+    REQUIRE_OK(hrx().stream_fill_buffer_linear(
+        stream, buffers_[2], 0, kByteLength, &pattern, sizeof(pattern)));
   }
   hrx_timeline_point_t before;
   REQUIRE_OK(hrx().stream_get_timeline_position(stream, &before));

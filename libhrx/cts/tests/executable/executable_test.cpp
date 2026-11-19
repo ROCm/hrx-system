@@ -312,8 +312,8 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch") {
   REQUIRE_OK(hrx().stream_synchronize(stream));
 
   uint32_t actual = 0;
-  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, output, 0, &actual,
-                                   sizeof(actual)));
+  REQUIRE_OK(hrx().synchronous_d2h_linear(transfer_queue_, output, 0, &actual,
+                                          sizeof(actual)));
   REQUIRE(actual == expected);
 
   // The direct API targets an exact queue without joining the stream timeline.
@@ -342,8 +342,8 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch") {
       &direct_expected, sizeof(direct_expected), bindings, std::size(bindings),
       &barriers, HRX_DISPATCH_FLAG_NONE));
   REQUIRE_OK(hrx().semaphore_wait(completion, completion_value, UINT64_MAX));
-  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, output, 0, &actual,
-                                   sizeof(actual)));
+  REQUIRE_OK(hrx().synchronous_d2h_linear(transfer_queue_, output, 0, &actual,
+                                          sizeof(actual)));
   REQUIRE(actual == direct_expected);
 
   // Invalid public bindings must unwind both inline and overflow translation

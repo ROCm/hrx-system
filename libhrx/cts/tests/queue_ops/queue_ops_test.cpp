@@ -164,14 +164,14 @@ TEST_CASE_METHOD(HrxTestFixture,
   const hrx_queue_barriers_t fill_barriers = {&empty, &release_list};
   const hrx_queue_barriers_t copy_barriers = {&acquire_list, nullptr};
   const hrx_queue_barriers_t empty_barriers = {&empty, &empty};
-  REQUIRE_OK(hrx().queue_fill(resources.queue, nullptr, &signals,
-                              resources.source, 0, kByteLength, &pattern,
-                              sizeof(pattern), &fill_barriers));
+  REQUIRE_OK(hrx().queue_fill_linear(resources.queue, nullptr, &signals,
+                                     resources.source, 0, kByteLength, &pattern,
+                                     sizeof(pattern), &fill_barriers));
   resources.completion_value = signal_value;
   wait_value = signal_value++;
-  REQUIRE_OK(hrx().queue_copy(transfer_queue_, &waits, &signals,
-                              resources.source, 0, resources.target, 0,
-                              kByteLength, &copy_barriers));
+  REQUIRE_OK(hrx().queue_copy_linear(transfer_queue_, &waits, &signals,
+                                     resources.source, 0, resources.target, 0,
+                                     kByteLength, &copy_barriers));
   resources.completion_value = signal_value;
   wait_value = signal_value++;
   REQUIRE_OK(
@@ -180,8 +180,8 @@ TEST_CASE_METHOD(HrxTestFixture,
   REQUIRE_OK(
       hrx().semaphore_wait(resources.completion, signal_value, UINT64_MAX));
   std::vector<uint32_t> result(kWordCount);
-  REQUIRE_OK(hrx().synchronous_d2h(resources.queue, resources.target, 0,
-                                   result.data(), kByteLength));
+  REQUIRE_OK(hrx().synchronous_d2h_linear(resources.queue, resources.target, 0,
+                                          result.data(), kByteLength));
   for (uint32_t value : result) {
     REQUIRE(value == pattern);
   }
@@ -235,14 +235,15 @@ TEST_CASE_METHOD(HrxTestFixture, "Queue fill signals completion semaphore",
       1,
   };
 
-  REQUIRE_OK(hrx().queue_fill(transfer_queue_, nullptr, &signal_list, buf, 0,
-                              kWordCount * sizeof(uint32_t), &kPattern,
-                              sizeof(kPattern), nullptr));
+  REQUIRE_OK(hrx().queue_fill_linear(transfer_queue_, nullptr, &signal_list,
+                                     buf, 0, kWordCount * sizeof(uint32_t),
+                                     &kPattern, sizeof(kPattern), nullptr));
   REQUIRE_OK(hrx().semaphore_wait(done, 1, UINT64_MAX));
 
   std::vector<uint32_t> readback(kWordCount);
-  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, buf, 0, readback.data(),
-                                   readback.size() * sizeof(uint32_t)));
+  REQUIRE_OK(hrx().synchronous_d2h_linear(transfer_queue_, buf, 0,
+                                          readback.data(),
+                                          readback.size() * sizeof(uint32_t)));
   for (uint32_t value : readback) {
     REQUIRE(value == kPattern);
   }
@@ -271,8 +272,8 @@ TEST_CASE_METHOD(HrxTestFixture, "Queue copy signals completion semaphore",
   for (size_t i = 0; i < expected.size(); ++i) {
     expected[i] = static_cast<uint8_t>((i * 13u + 7u) & 0xFFu);
   }
-  REQUIRE_OK(hrx().synchronous_h2d(transfer_queue_, expected.data(), src, 0,
-                                   expected.size()));
+  REQUIRE_OK(hrx().synchronous_h2d_linear(transfer_queue_, expected.data(), src,
+                                          0, expected.size()));
 
   hrx_semaphore_t done = nullptr;
   REQUIRE_OK(hrx().semaphore_create(device_, 0, &done));
@@ -284,13 +285,13 @@ TEST_CASE_METHOD(HrxTestFixture, "Queue copy signals completion semaphore",
       1,
   };
 
-  REQUIRE_OK(hrx().queue_copy(transfer_queue_, nullptr, &signal_list, src, 0,
-                              dst, 0, kByteCount, nullptr));
+  REQUIRE_OK(hrx().queue_copy_linear(transfer_queue_, nullptr, &signal_list,
+                                     src, 0, dst, 0, kByteCount, nullptr));
   REQUIRE_OK(hrx().semaphore_wait(done, 1, UINT64_MAX));
 
   std::vector<uint8_t> readback(kByteCount);
-  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, dst, 0, readback.data(),
-                                   readback.size()));
+  REQUIRE_OK(hrx().synchronous_d2h_linear(transfer_queue_, dst, 0,
+                                          readback.data(), readback.size()));
   REQUIRE(std::memcmp(readback.data(), expected.data(), expected.size()) == 0);
 
   hrx().semaphore_release(done);

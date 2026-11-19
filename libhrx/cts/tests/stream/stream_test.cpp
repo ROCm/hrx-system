@@ -95,9 +95,9 @@ TEST_CASE_METHOD(HrxTestFixture, "Events time completed queue work",
   const uint32_t pattern = 0xAABBCCDD;
   for (int iteration = 0; iteration < 3; ++iteration) {
     REQUIRE_OK(hrx().event_record(resources.start, resources.stream));
-    REQUIRE_OK(hrx().stream_fill_buffer(resources.stream, resources.buffer, 0,
-                                        sizeof(output), &pattern,
-                                        sizeof(pattern)));
+    REQUIRE_OK(hrx().stream_fill_buffer_linear(
+        resources.stream, resources.buffer, 0, sizeof(output), &pattern,
+        sizeof(pattern)));
     REQUIRE_OK(hrx().event_record(resources.stop, resources.stream));
     REQUIRE_OK(hrx().event_synchronize(resources.stop));
     float milliseconds = -1.0f;
@@ -108,8 +108,8 @@ TEST_CASE_METHOD(HrxTestFixture, "Events time completed queue work",
     REQUIRE_OK(
         hrx().event_elapsed_time(resources.stop, resources.start, &reversed));
     REQUIRE(reversed == -milliseconds);
-    REQUIRE_OK(hrx().synchronous_d2h(queue, resources.buffer, 0, output.data(),
-                                     sizeof(output)));
+    REQUIRE_OK(hrx().synchronous_d2h_linear(queue, resources.buffer, 0,
+                                            output.data(), sizeof(output)));
     for (uint32_t value : output) {
       REQUIRE(value == pattern);
     }
@@ -176,12 +176,13 @@ TEST_CASE_METHOD(HrxTestFixture,
       for (size_t i = 0; i < input.size(); ++i) {
         input[i] = iteration * 101 + i * 13;
       }
-      REQUIRE_OK(hrx().stream_copy_h2d(resources.stream, input.data(),
-                                       resources.source, 0, sizeof(input)));
+      REQUIRE_OK(hrx().stream_copy_h2d_linear(
+          resources.stream, input.data(), resources.source, 0, sizeof(input)));
       REQUIRE_OK(
           hrx().graph_exec_launch(resources.executable, resources.stream));
-      REQUIRE_OK(hrx().stream_copy_d2h(resources.stream, resources.target, 0,
-                                       output.data(), sizeof(output)));
+      REQUIRE_OK(hrx().stream_copy_d2h_linear(resources.stream,
+                                              resources.target, 0,
+                                              output.data(), sizeof(output)));
       REQUIRE_OK(hrx().stream_synchronize(resources.stream));
       for (size_t i = 0; i < output.size(); ++i) {
         REQUIRE(output[i] == (i >= 16 && i < 24 ? fill.pattern : input[i]));
@@ -228,9 +229,9 @@ TEST_CASE_METHOD(HrxTestFixture,
   REQUIRE_OK(hrx().graph_instantiate(resources.graph, transfer_queue_, 0,
                                      &resources.executable));
   const uint32_t pattern = 0x11223344;
-  REQUIRE_OK(hrx().stream_fill_buffer(resources.stream, resources.target, 0,
-                                      sizeof(output), &pattern,
-                                      sizeof(pattern)));
+  REQUIRE_OK(hrx().stream_fill_buffer_linear(resources.stream, resources.target,
+                                             0, sizeof(output), &pattern,
+                                             sizeof(pattern)));
   hrx_timeline_point_t before;
   REQUIRE_OK(hrx().stream_get_timeline_position(resources.stream, &before));
   hrx_status_t status =
@@ -241,8 +242,8 @@ TEST_CASE_METHOD(HrxTestFixture,
   REQUIRE_OK(hrx().stream_get_timeline_position(resources.stream, &after));
   REQUIRE(after.semaphore == before.semaphore);
   REQUIRE(after.value == before.value);
-  REQUIRE_OK(hrx().stream_copy_d2h(resources.stream, resources.target, 0,
-                                   output.data(), sizeof(output)));
+  REQUIRE_OK(hrx().stream_copy_d2h_linear(resources.stream, resources.target, 0,
+                                          output.data(), sizeof(output)));
   REQUIRE_OK(hrx().stream_synchronize(resources.stream));
   for (uint32_t value : output) {
     REQUIRE(value == pattern);

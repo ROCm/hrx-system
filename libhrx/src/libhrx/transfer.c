@@ -81,10 +81,10 @@ static hrx_status_t hrx_stream_transfer(
 // Synchronous data transfer
 //===----------------------------------------------------------------------===//
 
-hrx_status_t hrx_synchronous_h2d(hrx_queue_t queue, const void* host_src,
-                                 hrx_buffer_t dst, size_t dst_offset,
-                                 size_t size) {
-  HRX_TRACE_ZONE_BEGIN(z0, "hrx_synchronous_h2d");
+hrx_status_t hrx_synchronous_h2d_linear(hrx_queue_t queue, const void* host_src,
+                                        hrx_buffer_t dst, size_t dst_offset,
+                                        size_t size) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_synchronous_h2d_linear");
   HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
   if (!queue || !host_src || !dst) {
     HRX_RETURN_AND_END_ZONE(
@@ -128,10 +128,10 @@ hrx_status_t hrx_synchronous_h2d(hrx_queue_t queue, const void* host_src,
               queue->hal_queue, 1, &operation, IREE_ASYNC_WAIT_FLAG_NONE)));
 }
 
-hrx_status_t hrx_synchronous_d2h(hrx_queue_t queue, hrx_buffer_t src,
-                                 size_t src_offset, void* host_dst,
-                                 size_t size) {
-  HRX_TRACE_ZONE_BEGIN(z0, "hrx_synchronous_d2h");
+hrx_status_t hrx_synchronous_d2h_linear(hrx_queue_t queue, hrx_buffer_t src,
+                                        size_t src_offset, void* host_dst,
+                                        size_t size) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_synchronous_d2h_linear");
   HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
   if (!queue || !src || !host_dst) {
     HRX_RETURN_AND_END_ZONE(
@@ -178,9 +178,9 @@ hrx_status_t hrx_synchronous_d2h(hrx_queue_t queue, hrx_buffer_t src,
 // Async stream transfers
 //===----------------------------------------------------------------------===//
 
-hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream, const void* host_src,
-                                 hrx_buffer_t dst, size_t dst_offset,
-                                 size_t size) {
+hrx_status_t hrx_stream_copy_h2d_linear(hrx_stream_t stream,
+                                        const void* host_src, hrx_buffer_t dst,
+                                        size_t dst_offset, size_t size) {
   if (!stream || !host_src || !dst) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
   }
@@ -212,9 +212,9 @@ hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream, const void* host_src,
   return hrx_stream_transfer(stream, &operation);
 }
 
-hrx_status_t hrx_stream_copy_d2h(hrx_stream_t stream, hrx_buffer_t src,
-                                 size_t src_offset, void* host_dst,
-                                 size_t size) {
+hrx_status_t hrx_stream_copy_d2h_linear(hrx_stream_t stream, hrx_buffer_t src,
+                                        size_t src_offset, void* host_dst,
+                                        size_t size) {
   if (!stream || !src || !host_dst) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
   }

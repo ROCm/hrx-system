@@ -336,16 +336,18 @@ HRX_API hrx_status_t hrx_buffer_allocate(hrx_stream_t stream, size_t size,
 //
 // These execute on the supplied transfer-capable queue and block until that
 // transfer completes. They do not join any stream's timeline. For async
-// transfers, use stream operations (hrx_stream_copy_buffer, etc).
+// transfers, use stream operations (hrx_stream_copy_buffer_linear, etc).
 //===----------------------------------------------------------------------===//
 
-HRX_API hrx_status_t hrx_synchronous_h2d(hrx_queue_t queue,
-                                         const void* host_src, hrx_buffer_t dst,
-                                         size_t dst_offset, size_t size);
+HRX_API hrx_status_t hrx_synchronous_h2d_linear(hrx_queue_t queue,
+                                                const void* host_src,
+                                                hrx_buffer_t dst,
+                                                size_t dst_offset, size_t size);
 
-HRX_API hrx_status_t hrx_synchronous_d2h(hrx_queue_t queue, hrx_buffer_t src,
-                                         size_t src_offset, void* host_dst,
-                                         size_t size);
+HRX_API hrx_status_t hrx_synchronous_d2h_linear(hrx_queue_t queue,
+                                                hrx_buffer_t src,
+                                                size_t src_offset,
+                                                void* host_dst, size_t size);
 
 //===----------------------------------------------------------------------===//
 // Execution and memory barriers
@@ -455,21 +457,21 @@ typedef struct hrx_queue_barriers_t {
 // Stream operations (batched via pending command buffer)
 //===----------------------------------------------------------------------===//
 
-HRX_API hrx_status_t hrx_stream_fill_buffer(hrx_stream_t stream,
-                                            hrx_buffer_t buffer, size_t offset,
-                                            size_t size, const void* pattern,
-                                            size_t pattern_size);
+HRX_API hrx_status_t hrx_stream_fill_buffer_linear(hrx_stream_t stream,
+                                                   hrx_buffer_t buffer,
+                                                   size_t offset, size_t size,
+                                                   const void* pattern,
+                                                   size_t pattern_size);
 
-HRX_API hrx_status_t hrx_stream_copy_buffer(hrx_stream_t stream,
-                                            hrx_buffer_t src, size_t src_offset,
-                                            hrx_buffer_t dst, size_t dst_offset,
-                                            size_t size);
+HRX_API hrx_status_t hrx_stream_copy_buffer_linear(
+    hrx_stream_t stream, hrx_buffer_t src, size_t src_offset, hrx_buffer_t dst,
+    size_t dst_offset, size_t size);
 
-HRX_API hrx_status_t hrx_stream_update_buffer(hrx_stream_t stream,
-                                              const void* host_data,
-                                              size_t host_data_size,
-                                              hrx_buffer_t dst,
-                                              size_t dst_offset);
+HRX_API hrx_status_t hrx_stream_update_buffer_linear(hrx_stream_t stream,
+                                                     const void* host_data,
+                                                     size_t host_data_size,
+                                                     hrx_buffer_t dst,
+                                                     size_t dst_offset);
 
 //===----------------------------------------------------------------------===//
 // Direct queue operations (single-op, no command buffer)
@@ -502,17 +504,17 @@ HRX_API hrx_status_t hrx_queue_dealloca(hrx_queue_t queue,
                                         size_t buffer_count,
                                         const hrx_buffer_t* buffers);
 
-HRX_API hrx_status_t hrx_queue_fill(
+HRX_API hrx_status_t hrx_queue_fill_linear(
     hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
     const hrx_semaphore_list_t* signal_semaphores, hrx_buffer_t buffer,
     size_t offset, size_t size, const void* pattern, size_t pattern_size,
     const hrx_queue_barriers_t* barriers);
 
-HRX_API hrx_status_t
-hrx_queue_copy(hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
-               const hrx_semaphore_list_t* signal_semaphores, hrx_buffer_t src,
-               size_t src_offset, hrx_buffer_t dst, size_t dst_offset,
-               size_t size, const hrx_queue_barriers_t* barriers);
+HRX_API hrx_status_t hrx_queue_copy_linear(
+    hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
+    const hrx_semaphore_list_t* signal_semaphores, hrx_buffer_t src,
+    size_t src_offset, hrx_buffer_t dst, size_t dst_offset, size_t size,
+    const hrx_queue_barriers_t* barriers);
 
 HRX_API hrx_status_t hrx_queue_barrier(
     hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
@@ -767,18 +769,20 @@ HRX_API hrx_status_t hrx_buffer_lookup(hrx_device_t device,
 // Enqueues a host-to-device transfer after prior work in |stream|. |host_src|
 // remains live and unmodified until the stream reaches the transfer's timeline
 // point. The stream must be non-NULL. For a blocking transfer on an explicit
-// queue, use hrx_synchronous_h2d.
-HRX_API hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream,
-                                         const void* host_src, hrx_buffer_t dst,
-                                         size_t dst_offset, size_t size);
+// queue, use hrx_synchronous_h2d_linear.
+HRX_API hrx_status_t hrx_stream_copy_h2d_linear(hrx_stream_t stream,
+                                                const void* host_src,
+                                                hrx_buffer_t dst,
+                                                size_t dst_offset, size_t size);
 
 // Enqueues a device-to-host transfer after prior work in |stream|. |host_dst|
 // remains live and inaccessible until the stream reaches the transfer's
 // timeline point. The stream must be non-NULL. For a blocking transfer on an
-// explicit queue, use hrx_synchronous_d2h.
-HRX_API hrx_status_t hrx_stream_copy_d2h(hrx_stream_t stream, hrx_buffer_t src,
-                                         size_t src_offset, void* host_dst,
-                                         size_t size);
+// explicit queue, use hrx_synchronous_d2h_linear.
+HRX_API hrx_status_t hrx_stream_copy_d2h_linear(hrx_stream_t stream,
+                                                hrx_buffer_t src,
+                                                size_t src_offset,
+                                                void* host_dst, size_t size);
 
 //===----------------------------------------------------------------------===//
 // Graphs (CUDA/HIP-style execution graphs)

@@ -241,14 +241,15 @@ TEST_CASE_METHOD(HrxTestFixture,
   resources.Map(mappings.size(), mappings.data());
   hrx_buffer_t view = resources.reservation;
   const std::array<uint32_t, 4> expected = {7, 13, 19, 23};
-  REQUIRE_OK(hrx().synchronous_h2d(transfer_queue_, expected.data(), view, 0,
-                                   sizeof(expected)));
+  REQUIRE_OK(hrx().synchronous_h2d_linear(transfer_queue_, expected.data(),
+                                          view, 0, sizeof(expected)));
   std::array<uint32_t, 4> observed = {};
-  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, view, unit, observed.data(),
-                                   sizeof(observed)));
+  REQUIRE_OK(hrx().synchronous_d2h_linear(transfer_queue_, view, unit,
+                                          observed.data(), sizeof(observed)));
   CHECK(observed == expected);
-  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, resources.sources[0], 0,
-                                   observed.data(), sizeof(observed)));
+  REQUIRE_OK(hrx().synchronous_d2h_linear(transfer_queue_, resources.sources[0],
+                                          0, observed.data(),
+                                          sizeof(observed)));
   CHECK(observed == expected);
   if (capabilities.operations & (1u << HRX_MEMORY_MAPPING_OPERATION_PROTECT)) {
     for (auto& mapping : mappings) {
@@ -256,8 +257,8 @@ TEST_CASE_METHOD(HrxTestFixture,
       mapping.access = HRX_MEMORY_ACCESS_READ;
     }
     resources.Map(mappings.size(), mappings.data());
-    REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, view, unit,
-                                     observed.data(), sizeof(observed)));
+    REQUIRE_OK(hrx().synchronous_d2h_linear(transfer_queue_, view, unit,
+                                            observed.data(), sizeof(observed)));
     CHECK(observed == expected);
   }
   for (auto& mapping : mappings) {
@@ -336,13 +337,14 @@ TEST_CASE_METHOD(HrxTestFixture,
   const std::array<uint32_t, 4> expected = {11, 17, 29, 47};
   std::memcpy(host_address, expected.data(), sizeof(expected));
   std::array<uint32_t, 4> observed = {};
-  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, resources.reservation, unit,
-                                   observed.data(), sizeof(observed)));
+  REQUIRE_OK(hrx().synchronous_d2h_linear(transfer_queue_,
+                                          resources.reservation, unit,
+                                          observed.data(), sizeof(observed)));
   CHECK(observed == expected);
   const std::array<uint32_t, 4> update = {53, 71, 89, 97};
-  REQUIRE_OK(hrx().synchronous_h2d(transfer_queue_, update.data(),
-                                   resources.reservation, unit,
-                                   sizeof(update)));
+  REQUIRE_OK(hrx().synchronous_h2d_linear(transfer_queue_, update.data(),
+                                          resources.reservation, unit,
+                                          sizeof(update)));
   std::memcpy(observed.data(), host_address, sizeof(observed));
   CHECK(observed == update);
 }
@@ -412,20 +414,21 @@ TEST_CASE_METHOD(HrxTestFixture,
       .values = &copy_value,
       .count = 1,
   };
-  REQUIRE_OK(hrx().queue_copy(
+  REQUIRE_OK(hrx().queue_copy_linear(
       transfer_queue_, nullptr, &signals, resources.reservation, 2 * unit,
       resources.reservation, 0, sizeof(expected), nullptr));
   resources.completion_value = copy_value;
   REQUIRE_OK(hrx().semaphore_wait(resources.completion,
                                   resources.completion_value, UINT64_MAX));
   std::array<uint32_t, 4> observed = {};
-  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, resources.reservation, 0,
-                                   observed.data(), sizeof(observed)));
+  REQUIRE_OK(hrx().synchronous_d2h_linear(transfer_queue_,
+                                          resources.reservation, 0,
+                                          observed.data(), sizeof(observed)));
   CHECK(observed == expected);
   const std::array<uint32_t, 4> update = {59, 61, 67, 71};
-  REQUIRE_OK(hrx().synchronous_h2d(transfer_queue_, update.data(),
-                                   resources.reservation, 2 * unit,
-                                   sizeof(update)));
+  REQUIRE_OK(hrx().synchronous_h2d_linear(transfer_queue_, update.data(),
+                                          resources.reservation, 2 * unit,
+                                          sizeof(update)));
   std::memcpy(observed.data(), host_address, sizeof(observed));
   CHECK(observed == update);
 }

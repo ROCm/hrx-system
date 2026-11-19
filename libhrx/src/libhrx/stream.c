@@ -407,10 +407,11 @@ hrx_status_t hrx_stream_wait_on(hrx_stream_t stream,
 // Stream operations (record into pending CB)
 //===----------------------------------------------------------------------===//
 
-hrx_status_t hrx_stream_fill_buffer(hrx_stream_t stream, hrx_buffer_t buffer,
-                                    size_t offset, size_t size,
-                                    const void* pattern, size_t pattern_size) {
-  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_fill_buffer");
+hrx_status_t hrx_stream_fill_buffer_linear(hrx_stream_t stream,
+                                           hrx_buffer_t buffer, size_t offset,
+                                           size_t size, const void* pattern,
+                                           size_t pattern_size) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_fill_buffer_linear");
   HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
   if (!stream || !buffer || !pattern) {
     HRX_RETURN_AND_END_ZONE(
@@ -433,10 +434,11 @@ hrx_status_t hrx_stream_fill_buffer(hrx_stream_t stream, hrx_buffer_t buffer,
   HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(iree_status));
 }
 
-hrx_status_t hrx_stream_copy_buffer(hrx_stream_t stream, hrx_buffer_t src,
-                                    size_t src_offset, hrx_buffer_t dst,
-                                    size_t dst_offset, size_t size) {
-  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_copy_buffer");
+hrx_status_t hrx_stream_copy_buffer_linear(hrx_stream_t stream,
+                                           hrx_buffer_t src, size_t src_offset,
+                                           hrx_buffer_t dst, size_t dst_offset,
+                                           size_t size) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_copy_buffer_linear");
   HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
   if (!stream || !src || !dst) {
     HRX_RETURN_AND_END_ZONE(z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
@@ -461,11 +463,12 @@ hrx_status_t hrx_stream_copy_buffer(hrx_stream_t stream, hrx_buffer_t src,
   HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(iree_status));
 }
 
-hrx_status_t hrx_stream_update_buffer(hrx_stream_t stream,
-                                      const void* host_data,
-                                      size_t host_data_size, hrx_buffer_t dst,
-                                      size_t dst_offset) {
-  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_update_buffer");
+hrx_status_t hrx_stream_update_buffer_linear(hrx_stream_t stream,
+                                             const void* host_data,
+                                             size_t host_data_size,
+                                             hrx_buffer_t dst,
+                                             size_t dst_offset) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_update_buffer_linear");
   HRX_TRACE_ZONE_APPEND_BYTES(z0, host_data_size);
   if (!stream || !host_data || !dst) {
     HRX_RETURN_AND_END_ZONE(

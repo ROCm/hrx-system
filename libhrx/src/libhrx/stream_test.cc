@@ -96,7 +96,7 @@ class StreamTest : public ::testing::Test {
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_allocate(
         retained_consumer.get(), sizeof(target), HRX_MEMORY_TYPE_DEVICE_LOCAL,
         HRX_BUFFER_USAGE_DEFAULT, output.for_output())));
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_copy_h2d(
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_copy_h2d_linear(
         producer.get(), source.data(), input.get(), 0, sizeof(source))));
 
     EventPtr ready;
@@ -107,19 +107,19 @@ class StreamTest : public ::testing::Test {
     IREE_ASSERT_OK(hrx_status_to_iree(
         hrx_stream_wait_event(retained_consumer.get(), ready.get())));
     IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_stream_copy_buffer(retained_consumer.get(), input.get(), 0,
-                               output.get(), 0, sizeof(source))));
+        hrx_stream_copy_buffer_linear(retained_consumer.get(), input.get(), 0,
+                                      output.get(), 0, sizeof(source))));
     const uint32_t pattern = 0xAABBCCDD;
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer(
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer_linear(
         retained_consumer.get(), output.get(), 4 * sizeof(uint32_t),
         4 * sizeof(uint32_t), &pattern, sizeof(pattern))));
     const uint32_t update = 0x11223344;
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_update_buffer(
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_update_buffer_linear(
         retained_consumer.get(), &update, sizeof(update), output.get(),
         12 * sizeof(uint32_t))));
     IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_stream_copy_d2h(retained_consumer.get(), output.get(), 0,
-                            target.data(), sizeof(target))));
+        hrx_stream_copy_d2h_linear(retained_consumer.get(), output.get(), 0,
+                                   target.data(), sizeof(target))));
 
     // Final stream release joins its own work before dropping the acquired
     // queue. The readback storage remains live throughout that boundary.
@@ -238,7 +238,7 @@ TEST_F(StreamTest, GraphReplayUsesAnotherQueueInTheRecordingFamily) {
   graph.reset();
   IREE_ASSERT_OK(hrx_status_to_iree(
       hrx_graph_exec_launch(executable.get(), stream.get())));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_copy_d2h(
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_copy_d2h_linear(
       stream.get(), buffer.get(), 0, output.data(), sizeof(output))));
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream.get())));
   for (uint32_t value : output) {

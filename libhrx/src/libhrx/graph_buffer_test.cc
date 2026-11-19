@@ -127,8 +127,8 @@ TEST_F(GraphBufferTest, RetainedGraphDoesNotExtendExplicitAllocationEpoch) {
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
 
   uint8_t contents[64] = {};
-  IREE_ASSERT_OK(hrx_status_to_iree(
-      hrx_synchronous_d2h(queue, buffer, 0, contents, sizeof(contents))));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h_linear(
+      queue, buffer, 0, contents, sizeof(contents))));
   for (uint8_t byte : contents) {
     EXPECT_EQ(byte, 0xA5u);
   }
@@ -189,8 +189,8 @@ TEST_F(GraphBufferTest, DependentFillThenCopyProducesExpectedContents) {
 
   uint8_t contents[64] = {};
   IREE_ASSERT_OK(hrx_status_to_iree(
-      hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), destination_, 0,
-                          contents, sizeof(contents))));
+      hrx_synchronous_d2h_linear(hrx_device_get_queue(device_, 0, 0),
+                                 destination_, 0, contents, sizeof(contents))));
   for (uint8_t value : contents) {
     EXPECT_EQ(value, 0xA5u);
   }
@@ -201,7 +201,7 @@ TEST_F(GraphBufferTest, DependentFillThenCopyProducesExpectedContents) {
 
 TEST_F(GraphBufferTest, LaunchFlushesPendingStreamWorkBeforeGraphCommands) {
   const uint8_t pattern = 0x5Au;
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer(
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer_linear(
       stream_, source_, 0, 64, &pattern, sizeof(pattern))));
 
   hrx_graph_t graph = nullptr;
@@ -222,8 +222,8 @@ TEST_F(GraphBufferTest, LaunchFlushesPendingStreamWorkBeforeGraphCommands) {
 
   uint8_t contents[64] = {};
   IREE_ASSERT_OK(hrx_status_to_iree(
-      hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), destination_, 0,
-                          contents, sizeof(contents))));
+      hrx_synchronous_d2h_linear(hrx_device_get_queue(device_, 0, 0),
+                                 destination_, 0, contents, sizeof(contents))));
   for (uint8_t value : contents) {
     EXPECT_EQ(value, pattern);
   }
@@ -264,8 +264,8 @@ TEST_F(GraphBufferTest, AddedDependencyOrdersFillBeforeCopy) {
 
   uint8_t contents[64] = {};
   IREE_ASSERT_OK(hrx_status_to_iree(
-      hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), destination_, 0,
-                          contents, sizeof(contents))));
+      hrx_synchronous_d2h_linear(hrx_device_get_queue(device_, 0, 0),
+                                 destination_, 0, contents, sizeof(contents))));
   for (uint8_t value : contents) {
     EXPECT_EQ(value, 0x3Cu);
   }

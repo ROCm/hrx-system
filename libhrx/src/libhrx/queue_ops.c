@@ -327,13 +327,12 @@ static iree_status_t hrx_queue_host_call_thunk(
   return hrx_status_to_iree(status);
 }
 
-hrx_status_t hrx_queue_fill(hrx_queue_t queue,
-                            const hrx_semaphore_list_t* wait_semaphores,
-                            const hrx_semaphore_list_t* signal_semaphores,
-                            hrx_buffer_t buffer, size_t offset, size_t size,
-                            const void* pattern, size_t pattern_size,
-                            const hrx_queue_barriers_t* barriers) {
-  HRX_TRACE_ZONE_BEGIN(z0, "hrx_queue_fill");
+hrx_status_t hrx_queue_fill_linear(
+    hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
+    const hrx_semaphore_list_t* signal_semaphores, hrx_buffer_t buffer,
+    size_t offset, size_t size, const void* pattern, size_t pattern_size,
+    const hrx_queue_barriers_t* barriers) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_queue_fill_linear");
   HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
   if (!queue || !buffer || !pattern) {
     HRX_RETURN_AND_END_ZONE(
@@ -373,13 +372,12 @@ hrx_status_t hrx_queue_fill(hrx_queue_t queue,
   HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
 }
 
-hrx_status_t hrx_queue_copy(hrx_queue_t queue,
-                            const hrx_semaphore_list_t* wait_semaphores,
-                            const hrx_semaphore_list_t* signal_semaphores,
-                            hrx_buffer_t src, size_t src_offset,
-                            hrx_buffer_t dst, size_t dst_offset, size_t size,
-                            const hrx_queue_barriers_t* barriers) {
-  HRX_TRACE_ZONE_BEGIN(z0, "hrx_queue_copy");
+hrx_status_t hrx_queue_copy_linear(
+    hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
+    const hrx_semaphore_list_t* signal_semaphores, hrx_buffer_t src,
+    size_t src_offset, hrx_buffer_t dst, size_t dst_offset, size_t size,
+    const hrx_queue_barriers_t* barriers) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_queue_copy_linear");
   HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
   if (!queue || !src || !dst) {
     HRX_RETURN_AND_END_ZONE(z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,

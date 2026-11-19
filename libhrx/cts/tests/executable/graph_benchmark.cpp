@@ -191,8 +191,8 @@ class HrxRuntime {
       mapped_ = static_cast<uint32_t*>(mapped);
       std::copy(initial_values.begin(), initial_values.end(), mapped_);
     } else {
-      Check(api_.synchronous_h2d(transfer_queue_, initial_values.data(),
-                                 buffer_, 0, allocation_size));
+      Check(api_.synchronous_h2d_linear(transfer_queue_, initial_values.data(),
+                                        buffer_, 0, allocation_size));
     }
     value_bias_ = 0;
     BuildGraph(count, 0, &graph_);
@@ -243,8 +243,9 @@ class HrxRuntime {
     if (mapped_) {
       std::copy_n(mapped_, values_.size(), values_.begin());
     } else {
-      Check(api_.synchronous_d2h(transfer_queue_, buffer_, 0, values_.data(),
-                                 values_.size() * sizeof(uint32_t)));
+      Check(api_.synchronous_d2h_linear(transfer_queue_, buffer_, 0,
+                                        values_.data(),
+                                        values_.size() * sizeof(uint32_t)));
     }
     for (size_t i = 0; i < values_.size(); ++i) {
       Require(values_[i] == kOutputBase + i / words_per_node_ + value_bias_,

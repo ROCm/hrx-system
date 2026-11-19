@@ -358,7 +358,7 @@ TEST_F(CommandRecordingTest, StridedCopiesPreserveGapsAndSelectOneWorkstream) {
   for (size_t i = 0; i < source_contents.size(); ++i) {
     source_contents[i] = static_cast<uint8_t>(i + 1);
   }
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_h2d(
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_h2d_linear(
       queue_, source_contents.data(), source_, 0, source_contents.size())));
   hrx_command_fill_t clear = {
       .command = {HRX_COMMAND_FILL},
@@ -423,7 +423,7 @@ TEST_F(CommandRecordingTest, StridedCopiesPreserveGapsAndSelectOneWorkstream) {
       hrx_graph_record_partition(&schedule, &partition, 0, command_buffer_));
   Execute();
   std::array<uint8_t, 128> contents;
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h(
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h_linear(
       queue_, target_, 0, contents.data(), contents.size())));
   std::array<uint8_t, 128> expected = {};
   for (size_t slice = 0; slice < 2; ++slice) {
