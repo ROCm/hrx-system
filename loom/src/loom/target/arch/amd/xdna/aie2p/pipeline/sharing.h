@@ -58,8 +58,9 @@ typedef struct loom_aie2p_native_grant_t {
 // When a delivery path is available, records the terminal before another core
 // can assign that ID. A preferred ID is already bound to this endpoint in the
 // caller's column namespace; it may be reused even when occupied, provided the
-// delivery namespace agrees. UINT8_MAX requests a fresh ID. Returns UINT8_MAX
-// when no compatible identity remains.
+// delivery namespace agrees. UINT8_MAX supplies no preference. A second class
+// on a shared path then favors an ID one bit from the first so one switch
+// filter can forward both. Returns UINT8_MAX when no compatible ID remains.
 uint8_t loom_aie2p_native_delivery_packet(
     loom_aie2p_native_delivery_t* delivery, uint32_t occupied,
     const loom_aie2p_native_tile_t* tile, loom_xdna_stream_port_t port,

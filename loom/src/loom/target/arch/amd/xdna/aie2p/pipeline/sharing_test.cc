@@ -438,6 +438,38 @@ TEST(Aie2pSharingTest, IndependentCoresAgreeOnSharedPacketTerminals) {
             credit_packet);
 }
 
+TEST(Aie2pSharingTest, SecondTerminalFitsOneFilterOnTheSharedPrefix) {
+  const loom_aie2p_native_tile_t shim = {.coordinate = {0, 0}};
+  const loom_aie2p_native_tile_t memory = {.coordinate = {0, 1}};
+  loom_aie2p_native_delivery_t delivery = {};
+  const uint32_t local = UINT32_C(1) << 0;
+  const uint8_t shim_packet = loom_aie2p_native_delivery_packet(
+      &delivery, local, &shim, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0,
+      UINT8_MAX);
+  ASSERT_EQ(shim_packet, 1);
+  // Only ID 3 can share a masked filter with ID 1 without admitting ID 0.
+  const uint32_t available = (UINT32_C(1) << 2) | (UINT32_C(1) << 3);
+  const uint8_t memory_packet = loom_aie2p_native_delivery_packet(
+      &delivery, ~available, &memory, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0,
+      UINT8_MAX);
+  EXPECT_EQ(memory_packet, 3);
+  EXPECT_EQ(delivery.command_packets, (UINT32_C(1) << 1) | (UINT32_C(1) << 3));
+}
+
+TEST(Aie2pSharingTest, SecondTerminalCanUseADisjointFilter) {
+  const loom_aie2p_native_tile_t shim = {.coordinate = {0, 0}};
+  const loom_aie2p_native_tile_t memory = {.coordinate = {0, 1}};
+  loom_aie2p_native_delivery_t delivery = {};
+  ASSERT_EQ(loom_aie2p_native_delivery_packet(
+                &delivery, 0, &shim, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0,
+                UINT8_MAX),
+            0);
+  EXPECT_EQ(loom_aie2p_native_delivery_packet(
+                &delivery, ~(UINT32_C(1) << 7), &memory,
+                LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, UINT8_MAX),
+            7);
+}
+
 TEST(Aie2pSharingTest, UnsharedCorePacketsKeepIndependentIdentities) {
   const loom_aie2p_native_tile_t memory = {.coordinate = {0, 1}};
   const loom_aie2p_native_tile_t shim = {.coordinate = {0, 0}};
