@@ -24,6 +24,7 @@
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/test/ops.h"
+#include "loom/ops/type_registry.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
 #include "loom/util/fact_table.h"
@@ -322,6 +323,7 @@ class SourceMemoryPlanTest : public ::testing::Test {
   void ComputeFacts(loom_value_fact_table_t* out_facts) {
     IREE_ASSERT_OK(loom_value_fact_table_initialize(out_facts, &analysis_arena_,
                                                     module_->values.count));
+    loom_type_registry_configure_fact_context(&out_facts->context);
     IREE_ASSERT_OK(
         loom_value_fact_table_compute(out_facts, module_, function_));
   }
