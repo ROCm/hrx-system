@@ -285,6 +285,58 @@ def _remote_plan(base, cache, **kwargs):
     )
 
 
+def test_unfamiliar_transforms_only_require_support_for_acquired_files(
+    tmp_path, capsys
+):
+    card = _card()
+    payloads = {"code.loom": b"program", "weights.data": b"weights", "large.data": b"L"}
+    recipes = (
+        {"kind": "example.codec", "version": 1, "parameters": {"order": [2, 1]}},
+        {"kind": "xz", "version": 2},
+        {"kind": "xz", "version": 1, "window": 16},
+    )
+    lock = _lock(payloads)
+    for i, recipe in enumerate(recipes):
+        path = f"future-{i}.loombc"
+        card["programs"][path] = {
+            "inputs": [{"path": path, "transform": recipe}],
+            "libraries": [],
+        }
+        card["variants"]["v"]["services"]["text"]["programs"].append(path)
+        lock["files"].append(
+            {"origin": path, "transform": recipe, "size": 10, "sha256": "0" * 64}
+        )
+    with _server(card, payloads) as (base, requests, resources):
+        resources["/model.json.lock"] = json.dumps(lock).encode()
+        args = [base + "/model.json", "--cache", str(tmp_path / "cache"), "--no-input"]
+        assert main([*args, "--list", "--json"]) == 0
+        assert "future-2.loombc" in capsys.readouterr().out
+        for i, recipe in enumerate(recipes):
+            path = f"future-{i}.loombc"
+            assert main([*args, "--programs", path, "--preset=check"]) == 1
+            diagnostic = capsys.readouterr().err
+            assert path in diagnostic
+            assert f"{recipe['kind']!r} version {recipe['version']}" in diagnostic
+            if i == 2:
+                assert "window" in diagnostic
+        destination = tmp_path / "author.lock"
+        update = [
+            *args,
+            "--all-variants",
+            "--update-lock",
+            "--lockfile",
+            str(destination),
+        ]
+        assert main([*update, "--lock-scope=all"]) == 1
+        assert not destination.exists()
+        assert not set(requests) & {"/" + name for name in payloads}
+        # An asset-only lock computes no program transforms, even across all variants.
+        assert main([*update, "--lock-scope=assets"]) == 0
+        assert main([*args, "--preset=check", "--output", str(tmp_path / "model")]) == 0
+        assert (tmp_path / "model/code.loom").read_bytes() == payloads["code.loom"]
+        assert not any(request.startswith("/future-") for request in requests)
+
+
 @pytest.mark.parametrize(("scope", "preserve"), [("all", False), ("assets", True)])
 def test_xz_program_uses_decoded_identity_and_reinstalls_offline(
     tmp_path, scope, preserve

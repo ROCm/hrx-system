@@ -241,6 +241,13 @@ at a `.loombc.xz` download with `"transform": {"kind": "xz", "version": 1}`.
 `loom-fetch` installs the decoded `.loombc` at the declared `path`. The server
 reads that local file directly.
 
+An acquisition transform has a `kind`, a positive integer `version`, and
+options defined by that version. Catalogs, file listings, and locks can carry
+instructions for newer installers. `loom-fetch` checks the transforms needed
+by the selected files before transferring payloads. A different preset can
+therefore use a newer transform in the same publication. A native server
+opening an installed file reads its local path and format.
+
 ## Deployment fields
 
 | Field | Contract |

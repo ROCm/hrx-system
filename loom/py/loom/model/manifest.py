@@ -232,18 +232,14 @@ def _origin(value: Any, roots: dict, path: str, *, group: bool = False) -> None:
 
 
 def _transform(value: Any, path: str) -> dict:
-    if isinstance(value, dict) and value.get("kind") == "xz":
-        _object(value, path, ("kind", "version"))
-        if type(value["version"]) is not int or value["version"] != 1:
-            _fail(path, "expected xz version 1")
+    """Retains a versioned acquisition recipe, including opaque payload fields."""
+    _mapping(value, path)
+    kind = _string(value.get("kind"), path + ".kind")
+    version = value.get("version")
+    if type(version) is not int or version < 1:
+        _fail(path + ".version", "expected a positive integer")
+    if (kind, version) != ("safetensors", 1):
         return value
-    _object(value, path, ("kind", "version"), ("alignment", "tensors"))
-    if (
-        value["kind"] != "safetensors"
-        or type(value["version"]) is not int
-        or value["version"] != 1
-    ):
-        _fail(path, "supported transforms: safetensors version 1 and xz version 1")
     alignment = value.get("alignment", 8)
     if (
         type(alignment) is not int
@@ -251,7 +247,7 @@ def _transform(value: Any, path: str) -> dict:
         or alignment & (alignment - 1)
     ):
         _fail(path + ".alignment", "expected a power of two from 8 through 1048576")
-    result = {"kind": "safetensors", "version": 1, "alignment": alignment}
+    result = {**value, "alignment": alignment}
     if "tensors" in value:
         tensors = value["tensors"]
         if (
@@ -289,7 +285,8 @@ def _file(
         _origin(record["origin"], roots, path + ".origin")
     if "transform" in record:
         record["transform"] = _transform(record["transform"], path + ".transform")
-        if record["transform"]["kind"] == "safetensors" and (
+        recipe = record["transform"]
+        if (recipe["kind"], recipe["version"]) == ("safetensors", 1) and (
             not parameter or record.get("format") != "safetensors"
         ):
             _fail(

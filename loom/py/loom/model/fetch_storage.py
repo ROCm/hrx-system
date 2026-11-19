@@ -31,6 +31,24 @@ from .manifest import ManifestError, parse_json
 _DOCUMENT_LIMIT = 16 * 1024 * 1024
 _CHUNK_SIZE = 1024 * 1024
 
+_TRANSFORM_OPTIONS = {("xz", 1): (), ("safetensors", 1): ("alignment", "tensors")}
+
+
+def require_supported_transform(transform: dict, path: str) -> None:
+    """Checks acquisition capability without opening a source or cache entry."""
+    kind, version = transform["kind"], transform["version"]
+    options = _TRANSFORM_OPTIONS.get((kind, version))
+    if options is None:
+        raise ManifestError(
+            f"{path}: unsupported acquisition transform {kind!r} version {version}"
+        )
+    unknown = transform.keys() - {"kind", "version", *options}
+    if unknown:
+        raise ManifestError(
+            f"{path}: unsupported options for acquisition transform {kind!r} "
+            f"version {version}: {', '.join(sorted(unknown))}"
+        )
+
 
 def atomic_write(path: Path, content: bytes) -> None:
     """Replaces one caller-owned metadata file after its complete write."""
@@ -289,6 +307,7 @@ class ContentCache:
         preserve_sources: bool,
         progress=None,
     ) -> AcquiredFile:
+        require_supported_transform(transform, "source")
         progress = self.progress if progress is None else progress
         if self.cancelled.is_set():
             raise FetchError("model acquisition cancelled")

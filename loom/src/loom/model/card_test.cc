@@ -302,6 +302,14 @@ TEST_F(CardTest, UnknownRevisionFailsBeforeInterpretingNewFields) {
   EXPECT_EQ(card_, nullptr);
 }
 
+TEST_F(CardTest, InstalledProvidersIgnoreAcquisitionInstructions) {
+  IREE_ASSERT_OK(Parse(
+      Replace(R"({"kind": "xz", "version": 1})",
+              R"({"kind": "vendor.unpack", "version": 6, "layout": [2, 1]})")));
+  EXPECT_EQ(String(loom_model_card_selection(card_)->selector.programs),
+            "mixed");
+}
+
 TEST_F(CardTest, CanonicalOptionsBelongToTheSelectedService) {
   std::string json =
       Replace("\"execution\": {\"rows\": 2}",

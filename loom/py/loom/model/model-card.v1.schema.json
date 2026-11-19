@@ -269,7 +269,7 @@
               "description": "Format within the containing semantic role. Filename inference is permitted only when unambiguous for that role."
             },
             "transform": {
-              "$ref": "#/$defs/xzTransform"
+              "$ref": "#/$defs/fileTransform"
             }
           },
           "additionalProperties": false
@@ -294,7 +294,7 @@
               "$ref": "#/$defs/fileOrigin"
             },
             "transform": {
-              "$ref": "#/$defs/xzTransform"
+              "$ref": "#/$defs/fileTransform"
             },
             "format": {
               "$ref": "#/$defs/name"
@@ -691,20 +691,22 @@
       ]
     },
     "transform": {
-      "oneOf": [
-        {"$ref": "#/$defs/xzTransform"},
-        {"$ref": "#/$defs/safetensorsTransform"}
-      ]
-    },
-    "xzTransform": {
-      "description": "Install the decoded bytes of an XZ file. The destination path and lock describe the decoded file.",
+      "description": "Versioned acquisition instruction. Readers carry unfamiliar instructions. Materialization requires support for the selected kind, version, and options. XZ version 1 produces the decoded file and has no options.",
       "type": "object",
       "required": ["kind", "version"],
       "properties": {
-        "kind": {"const": "xz"},
-        "version": {"type": "integer", "const": 1}
+        "kind": {"$ref": "#/$defs/name"},
+        "version": {"type": "integer", "minimum": 1}
       },
-      "additionalProperties": false
+      "if": {"$ref": "#/$defs/safetensorsV1"},
+      "then": {"$ref": "#/$defs/safetensorsTransform"}
+    },
+    "fileTransform": {
+      "allOf": [{"$ref": "#/$defs/transform"}, {"not": {"$ref": "#/$defs/safetensorsV1"}}]
+    },
+    "safetensorsV1": {
+      "required": ["kind", "version"],
+      "properties": {"kind": {"const": "safetensors"}, "version": {"const": 1}}
     },
     "safetensorsTransform": {
       "type": "object",
@@ -755,7 +757,7 @@
           "description": "Select these complete named tensors. Omission preserves all tensors."
         }
       },
-      "additionalProperties": false
+      "description": "Readers retain additional operation-specific fields. The installer must understand each option before applying this transform."
     },
     "memory": {
       "type": "object",

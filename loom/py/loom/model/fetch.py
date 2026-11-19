@@ -36,6 +36,7 @@ from .fetch_storage import (
     ContentCache,
     atomic_write,
     installation_lock,
+    require_supported_transform,
 )
 from .lock import FileIdentity, ModelLock, file_digest, file_key, lock_files
 from .manifest import ManifestError, ModelCard, Selection, parse_json
@@ -133,9 +134,11 @@ def plan_fetch(
             "--no-verify-parameters requires ordinary locked acquisition; "
             "it cannot be combined with --no-lock or --update-lock"
         )
-    for path in selection.files:
+    for path, file in selection.files.items():
         if PurePosixPath(path).parts[0] in _RESERVED_PATHS:
             raise ManifestError(f"reserved installation path {path!r}")
+        if file.transform is not None:
+            require_supported_transform(file.transform, path)
     location = (
         document_location(lock_location)
         if lock_location
@@ -310,7 +313,7 @@ def plan_lock(
             root, offline=offline
         ),
     )
-    sources = {}
+    files = {}
     paths = {}
     transforms = {}
     local_inputs = set()
@@ -324,11 +327,13 @@ def plan_lock(
                 local_inputs.add(local)
         for name, file in lock_files(selected, lock_scope).items():
             key = file_key(file.origin, file.transform)
-            if key not in sources:
-                sources[key] = resolver.resolve(file.origin, None)
+            if key not in files:
+                files[key] = file
                 paths[key] = name
                 if file.transform is not None:
+                    require_supported_transform(file.transform, name)
                     transforms[key] = file.transform
+    sources = {key: resolver.resolve(file.origin, None) for key, file in files.items()}
     sources = _prepare_sources(
         sources, {}, cache, offline=offline, transforms=transforms
     )
