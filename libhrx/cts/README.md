@@ -255,17 +255,50 @@ and interleave the runtime comparisons. The generated benchmark smoke test runs
 one small case from each mode through HRX and checks its output; comparing HIP
 requires explicitly selecting the implementation DSO.
 
-## Download measurements
+## Transfer measurements
 
-`//libhrx/cts/tests/hip:hip_transfer_benchmark` compares device-to-host copies into
-ordinary CPU memory and the same kind of allocation registered with
-`hipHostRegister`. Each iteration includes the public copy call and stream
-completion. Contiguous and pitched rows cover 4 KiB, 1 MiB, and 64 MiB of useful
-data; pitched rows have 4 KiB payloads and distinct source and destination
-padding. The reported bandwidth counts payload bytes. Allocation, registration,
-source initialization, and full output/padding validation stay outside timing.
+`//libhrx/cts/tests/hip:hip_transfer_benchmark` covers host/device copies, device
+copies and fills, and captured copies and fills through public HIP entry points.
+All rows reuse one frontend, device, and stream. Allocation, registration, graph
+construction, and full output/padding validation stay outside transfer timing.
+Reported bandwidth counts useful bytes, excluding padding.
 
-All rows reuse one frontend, device, and stream. The benchmark has the same
-backend labels and `--hip_wait_mode` choices as the submission benchmark. These
-serial measurements establish copy latency and bandwidth; they do not establish
-progress or interference between concurrent streams.
+| Row family | Timed work |
+| --- | --- |
+| `HIP/Contiguous` | Chains of 1 or 32 linear copies, with explicit or inferred direction. `Submit` excludes the final wait; `Complete` includes it. Times are per chain. |
+| `HIP/Geometry` | Pitched 2D/3D copies and fills, submitted directly or replayed from a captured graph. `Submit` and `Complete` use the same completion boundary as contiguous copies. Times are per operation batch. |
+| `HIP/Upload`, `HIP/Download` | One public copy and its completion, with pageable or explicitly registered host storage. Sizes cover 4 KiB through 64 MiB, including points around transfer-size thresholds. |
+| `HIP/UploadHostInterval`, `HIP/DownloadHostInterval` | Completed copies with separate `submit_ns` and `wait_ns` host counters. No device events are added. |
+| `HIP/UploadDeviceInterval`, `HIP/DownloadDeviceInterval` | Device timestamps around one copy, plus encompassing host time in `host_ns`. The interval includes timestamp overhead and gaps between device commands, not just payload movement. |
+| `HIP/ReadAfterUpload` | Device reads after a one-time upload or device fill. Initialization and first-read counters expose their separate costs; timed iterations measure subsequent reads. Bytes include every read pass, not physical memory traffic. |
+
+Pitched upload/download rows normally use 4 KiB payloads with different source
+and destination pitches. Device-interval rows also vary the row width while
+holding useful byte counts equal. `Rotating` variants cycle through several
+host ranges to expose working sets beyond one repeatedly reused buffer.
+`PageableFresh` download rows replace the host mapping between iterations,
+outside timing, so persistent runtime treatment of a reused address does not
+hide its acquisition cost. Their `host_unmap_ns` counter reports cleanup
+separately. `Registered` upload/download rows use
+`hipHostRegister`; the registered `Contiguous` chains use `hipHostMalloc`.
+
+The benchmark uses the same backend labels and `--hip_wait_mode` choices as the
+submission benchmark. `HRX_TEST_LIBAMDHIP64` selects the exact frontend DSO;
+`--hip_native_runtime=true` supports the installed ROCm HIP library without
+requiring HRX's private teardown entry point. Output identifies the runtime
+version, GPU architecture, PCI address, and wait policy. A focused comparison
+can use the following arguments after building with `--config=opt` and selecting
+the qualified runner:
+
+```text
+--benchmark_filter=^HIP/(Upload/Registered|Download/RegisteredContiguous)/4194304/
+--benchmark_min_time=200x --benchmark_repetitions=5
+```
+
+Run the same filter, iteration count, and wait policy for each runtime on the
+same physical GPU. Interleaved runs reduce drift, and process CPU time on the
+upload/download rows exposes active-wait costs alongside elapsed time. These
+serial measurements establish latency and bandwidth; they do not establish
+progress or interference between concurrent streams. In particular, a pageable
+`Submit` row can include blocking inside the copy call even though it excludes
+the explicit final wait.
