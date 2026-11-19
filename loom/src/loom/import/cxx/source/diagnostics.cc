@@ -81,7 +81,7 @@ loom_source_range_t Diagnostics::source_range(
 
 void Diagnostics::emit(cxx::SourceLocation location,
                        loom_diagnostic_severity_t severity,
-                       const loom_error_def_t* error, std::string_view message,
+                       const loom_error_def_t* error, std::string_view argument,
                        const loom_diagnostic_related_location_t* related) {
   if (severity == LOOM_DIAGNOSTIC_ERROR) {
     has_error_ = true;
@@ -90,7 +90,7 @@ void Diagnostics::emit(cxx::SourceLocation location,
     return;
   }
   auto range = source_range(location);
-  loom_diagnostic_param_t parameter = loom_param_string(view(message));
+  loom_diagnostic_param_t parameter = loom_param_string(view(argument));
   loom_diagnostic_t diagnostic = {
       .severity = severity,
       .error = error,
@@ -144,7 +144,13 @@ void Diagnostics::reject(cxx::TranslationUnit& unit, cxx::AST* ast,
 
 void Diagnostics::reject(cxx::SourceLocation location,
                          std::string_view message) {
-  emit(location, LOOM_DIAGNOSTIC_ERROR, LOOM_ERR_LOWERING_059, message);
+  reject(location, LOOM_ERR_LOWERING_059, message);
+}
+
+void Diagnostics::reject(cxx::SourceLocation location,
+                         const loom_error_def_t* error,
+                         std::string_view argument) {
+  emit(location, LOOM_DIAGNOSTIC_ERROR, error, argument);
   finish();
   throw SourceRejected();
 }

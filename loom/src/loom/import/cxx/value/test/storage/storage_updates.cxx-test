@@ -227,11 +227,38 @@ kernel.def @update() {
 
 // ====
 // RUN: verify
-// Workgroup lifetime belongs to a kernel or selected template body.
+// A helper borrows its workgroup storage from the calling kernel.
 #include <loomcxx/kernel.h>
 void helper() {
-  // ERROR@+1: LOWERING/059 "requires a kernel or template definition body"
+  // ERROR@+1: LOWERING/075 {variable_name="slot"}
   LOOM_WORKGROUP unsigned slot;
+}
+
+// ====
+#include <hip/hip_runtime.h>
+
+template <class T>
+static __device__ __forceinline__ T* workspace() {
+  // ERROR@+1: LOWERING/075 {variable_name="tile"}
+  __shared__ T tile[64];
+  return tile;
+}
+
+[[loom::workgroup_size(64, 1, 1)]] __global__ void stage(unsigned value) {
+  workspace<unsigned>()[threadIdx.x] = value;
+}
+
+// ====
+#include <loomcxx/kernel.h>
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1)]] void copy(int* value) {
+  auto body = [=] {
+    // ERROR@+1: LOWERING/075 {variable_name="slot"}
+    [[loom::workgroup]] int slot;
+    slot = *value;
+    *value = slot;
+  };
+  body();
 }
 
 // ====

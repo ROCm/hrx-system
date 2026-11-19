@@ -106,6 +106,20 @@
       "files": [{"path": "{tmp}/rejected.loombc", "exists": false}]
     },
     {
+      "name": "shows where to move helper-owned workgroup storage",
+      "run": {"tool": "loom-import-cxx", "args": ["-"]},
+      "stdin": {"text": "int* workspace() {\n  [[loom::workgroup]] int tile[64];\n  return tile;\n}\n"},
+      "exit": {"code": 1},
+      "stderr": {
+        "contains": [
+          "-:2:27: error [LOWERING/075]: a helper cannot declare workgroup storage 'tile'",
+          "  [[loom::workgroup]] int tile[64];",
+          "^^^^",
+          "= help: Declare 'tile' in the kernel and pass it to the helper by pointer"
+        ]
+      }
+    },
+    {
       "name": "reports invalid command-line values",
       "run": {
         "tool": "loom-import-cxx",

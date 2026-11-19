@@ -778,6 +778,19 @@ ERR_LOWERING_074 = ErrorDef(
 )
 
 
+ERR_LOWERING_075 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=75,
+    severity=Severity.ERROR,
+    summary="A helper declares its own workgroup storage.",
+    message="a helper cannot declare workgroup storage '{variable_name}'",
+    params=(ErrorParam("variable_name", ParamKind.STRING),),
+    fix_hint=(
+        "Declare '{variable_name}' in the kernel and pass it to the helper by pointer"
+    ),
+)
+
+
 ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_022,
     ERR_LOWERING_023,
@@ -821,4 +834,5 @@ ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_072,
     ERR_LOWERING_073,
     ERR_LOWERING_074,
+    ERR_LOWERING_075,
 )

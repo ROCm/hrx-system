@@ -127,6 +127,7 @@ loom_cc_library(
         ":lifetimes",
         ":region_state",
         ":staged_calls",
+        "//loom/src/loom/error:error_defs",
         "//loom/src/loom/import/cxx/binding:assumptions",
         "//loom/src/loom/import/cxx/binding:check",
         "//loom/src/loom/import/cxx/binding:command_programs",
