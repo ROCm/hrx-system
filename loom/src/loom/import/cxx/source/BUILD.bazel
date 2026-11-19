@@ -46,6 +46,7 @@ iree_c_embed_data(
         "//loom/src/loom/import/cxx:include/loomcxx/fragment.h",
         "//loom/src/loom/import/cxx:include/loomcxx/index.h",
         "//loom/src/loom/import/cxx:include/loomcxx/kernel.h",
+        "//loom/src/loom/import/cxx:include/loomcxx/kernel_ref.h",
         "//loom/src/loom/import/cxx:include/loomcxx/low.h",
         "//loom/src/loom/import/cxx:include/loomcxx/math.h",
         "//loom/src/loom/import/cxx:include/loomcxx/numeric.h",

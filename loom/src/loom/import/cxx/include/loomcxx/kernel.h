@@ -9,6 +9,7 @@
 
 #include <loomcxx/buffer.h>
 #include <loomcxx/cache.h>
+#include <loomcxx/kernel_ref.h>
 #include <loomcxx/predicate.h>
 #include <loomcxx/template.h>
 #include <loomcxx/view.h>
