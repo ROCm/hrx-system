@@ -110,14 +110,16 @@ static uint32_t loom_target_residency_direct_resource_tier(
   const loom_target_residency_model_t* model = view.model;
   const loom_target_residency_cliff_range_t range =
       model->direct_resources.cliff_ranges[resource_id];
-  const loom_target_residency_cliff_t* cliffs =
-      range.count == 0 ? NULL : &model->direct_resources.cliffs[range.start];
+  if (range.count == 0) {
+    return view.tier_limit;
+  }
   const uint64_t units =
       loom_target_residency_direct_resource_units_with_overrides(
           direct_resource_units, resource_id, overrides, override_count);
   loom_target_residency_cliff_evaluation_t evaluation;
-  loom_target_residency_evaluate_cliffs(cliffs, range.count, model->best_tier,
-                                        units, &evaluation);
+  loom_target_residency_evaluate_cliffs(
+      &model->direct_resources.cliffs[range.start], range.count,
+      model->best_tier, units, &evaluation);
   return iree_min(view.tier_limit, evaluation.tier);
 }
 
@@ -129,16 +131,15 @@ static uint32_t loom_target_residency_derived_resource_tier(
   const loom_target_residency_model_t* model = view.model;
   const loom_target_residency_derived_resource_t* resource =
       &model->derived_resources.resources[resource_id];
+  if (resource->cliff_count == 0) {
+    return view.tier_limit;
+  }
   const uint64_t resource_units = loom_target_residency_derived_resource_units(
       model, resource_id, direct_resource_units, overrides, override_count);
-  const loom_target_residency_cliff_t* cliffs =
-      resource->cliff_count == 0
-          ? NULL
-          : &model->derived_resources.cliffs[resource->cliff_start];
   loom_target_residency_cliff_evaluation_t evaluation;
-  loom_target_residency_evaluate_cliffs(cliffs, resource->cliff_count,
-                                        model->best_tier, resource_units,
-                                        &evaluation);
+  loom_target_residency_evaluate_cliffs(
+      &model->derived_resources.cliffs[resource->cliff_start],
+      resource->cliff_count, model->best_tier, resource_units, &evaluation);
   return iree_min(view.tier_limit, evaluation.tier);
 }
 
@@ -150,15 +151,15 @@ static uint32_t loom_target_residency_evaluate_tier_impl(
   uint32_t tier = view.tier_limit;
   for (uint16_t resource_id = 0;
        resource_id < model->direct_resources.resource_count; ++resource_id) {
-    tier = iree_min(tier, loom_target_residency_direct_resource_tier(
-                              view, direct_resource_units, resource_id,
-                              overrides, override_count));
+    const uint32_t resource_tier = loom_target_residency_direct_resource_tier(
+        view, direct_resource_units, resource_id, overrides, override_count);
+    tier = iree_min(tier, resource_tier);
   }
   for (uint16_t resource_id = 0;
        resource_id < model->derived_resources.resource_count; ++resource_id) {
-    tier = iree_min(tier, loom_target_residency_derived_resource_tier(
-                              view, direct_resource_units, resource_id,
-                              overrides, override_count));
+    const uint32_t resource_tier = loom_target_residency_derived_resource_tier(
+        view, direct_resource_units, resource_id, overrides, override_count);
+    tier = iree_min(tier, resource_tier);
   }
   return tier;
 }
