@@ -22,16 +22,16 @@
 #include "iree/hal/driver/amd/gpu/queue/control_program.h"
 #include "iree/hal/driver/amd/gpu/queue/file_transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/host_call.h"
-#include "iree/hal/driver/amd/gpu/queue/host_wait.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/commands.h"
 #include "iree/hal/driver/amd/gpu/queue/user_queue.h"
 #include "iree/hal/driver/amd/status.h"
+#include "iree/hal/utils/host_wait.h"
 
 // Reusable admission sidecar. The wait set joins failure cancellation with
 // inline tracker completion before returning this storage to the capture.
 typedef struct iree_hal_amd_gpu_aql_pending_t {
   // Queue cancellation membership and terminal capture ownership.
-  iree_hal_amd_gpu_host_wait_entry_t entry;
+  iree_hal_host_wait_entry_t entry;
   // Queue whose accepted capture dominates this sidecar's lifetime.
   iree_hal_amd_gpu_aql_queue_t* queue;
   // Owned captured operation awaiting admission.
@@ -270,7 +270,7 @@ static void iree_hal_amd_gpu_aql_pending_begin(
     }
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_amd_gpu_host_wait_set_begin(
+    status = iree_hal_host_wait_set_begin(
         &queue->pending.waits,
         (iree_hal_semaphore_list_t){1, &pending->semaphore, &pending->value},
         iree_hal_amd_gpu_aql_pending_resume, pending,
@@ -337,7 +337,7 @@ void iree_hal_amd_gpu_aql_queue_capacity_available(
 
 void iree_hal_amd_gpu_aql_queue_notify_failure(iree_hal_queue_t* base) {
   iree_hal_amd_gpu_aql_queue_t* queue = (void*)base;
-  iree_hal_amd_gpu_host_wait_set_cancel(&queue->pending.waits);
+  iree_hal_host_wait_set_cancel(&queue->pending.waits);
   // The one-time failure notification resumes parked captures through the
   // publication FIFO; native retirement remains independent.
   iree_hal_amd_gpu_aql_queue_capacity_available(queue);
@@ -580,7 +580,7 @@ static bool iree_hal_amd_gpu_aql_record_failure(
   if (iree_atomic_compare_exchange_strong(&queue->failure, &expected, code,
                                           iree_memory_order_acq_rel,
                                           iree_memory_order_relaxed)) {
-    iree_hal_amd_gpu_host_wait_set_cancel(&queue->pending.waits);
+    iree_hal_host_wait_set_cancel(&queue->pending.waits);
     iree_hal_amd_gpu_aql_queue_capacity_available(queue);
     iree_hal_amd_gpu_aql_wake_terminal(queue);
     return true;
@@ -1676,8 +1676,8 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
                             &iree_hal_amd_gpu_aql_queue_vtable, &queue->base);
   iree_hal_amd_gpu_publisher_initialize(&queue->publisher);
   iree_async_semaphore_wait_context_initialize(&queue->wait_context);
-  iree_hal_amd_gpu_host_wait_set_initialize(&queue->wait_context,
-                                            &queue->pending.waits);
+  iree_hal_host_wait_set_initialize(&queue->wait_context,
+                                    &queue->pending.waits);
   iree_slim_mutex_initialize(&queue->pending.completion_mutex);
   iree_hal_amd_gpu_capture_pool_initialize(options->capture_block_size,
                                            host_allocator, &queue->captures);

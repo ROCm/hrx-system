@@ -19,7 +19,7 @@
 
 #include "iree/async/proactor_platform.h"
 #include "iree/base/threading/mutex.h"
-#include "iree/hal/driver/amd/gpu/queue/host_wait.h"
+#include "iree/hal/utils/host_wait.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -721,10 +721,10 @@ TEST_F(SemaphoreTest, EarlierConsumerProgressesWithoutLaterProducer) {
   iree_async_semaphore_wait_context_initialize(&context);
   uint64_t value = 1;
   Completion completion;
-  iree_hal_amd_gpu_host_wait_t wait;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_host_wait_begin(
-      &context, {1, &semaphore, &value}, Completion::Run, &completion,
-      iree_allocator_system(), &wait));
+  iree_hal_host_wait_t wait;
+  IREE_ASSERT_OK(iree_hal_host_wait_begin(&context, {1, &semaphore, &value},
+                                          Completion::Run, &completion,
+                                          iree_allocator_system(), &wait));
   EXPECT_EQ(completion.calls.load(), 0u);
   IREE_ASSERT_OK(
       iree_hal_amd_gpu_semaphore_publish_completed(semaphore, 1, nullptr));
@@ -822,10 +822,10 @@ TEST_F(SemaphoreTest, FuturePublicationResumesInlineBeforeCompletion) {
   iree_async_semaphore_wait_context_initialize(&context);
   uint64_t value = 1;
   Completion completion;
-  iree_hal_amd_gpu_host_wait_t wait;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_host_wait_begin(
-      &context, {1, &submission, &value}, Completion::Run, &completion,
-      iree_allocator_system(), &wait));
+  iree_hal_host_wait_t wait;
+  IREE_ASSERT_OK(iree_hal_host_wait_begin(&context, {1, &submission, &value},
+                                          Completion::Run, &completion,
+                                          iree_allocator_system(), &wait));
   EXPECT_EQ(completion.calls.load(), 0u);
   auto* signal = AcquireSignal();
   Publish(semaphore, value, signal);
@@ -932,15 +932,15 @@ TEST_F(SemaphoreTest, FutureWaitFailureAndCancellationJoinInline) {
     auto* submission = Submission(semaphore);
     uint64_t value = 1;
     Completion completion;
-    iree_hal_amd_gpu_host_wait_t wait;
-    IREE_ASSERT_OK(iree_hal_amd_gpu_host_wait_begin(
-        &context, {1, &submission, &value}, Completion::Run, &completion,
-        iree_allocator_system(), &wait));
+    iree_hal_host_wait_t wait;
+    IREE_ASSERT_OK(iree_hal_host_wait_begin(&context, {1, &submission, &value},
+                                            Completion::Run, &completion,
+                                            iree_allocator_system(), &wait));
     if (expected == IREE_STATUS_ABORTED) {
       iree_hal_semaphore_fail(semaphore,
                               iree_make_status(expected, "native producer"));
     } else {
-      iree_hal_amd_gpu_host_wait_cancel(&wait);
+      iree_hal_host_wait_cancel(&wait);
     }
     completion.done.acquire();
     EXPECT_EQ(iree_status_code(completion.status), expected);

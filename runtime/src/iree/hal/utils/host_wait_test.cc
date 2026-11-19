@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/driver/amd/gpu/queue/host_wait.h"
+#include "iree/hal/utils/host_wait.h"
 
 #include <array>
 #include <atomic>
@@ -21,7 +21,7 @@
 
 namespace {
 
-using Wait = iree_hal_amd_gpu_host_wait_t;
+using Wait = iree_hal_host_wait_t;
 
 struct Completion {
   // Joins the callback's final access to this test-owned result.
@@ -120,8 +120,8 @@ class HostWaitTest : public ::testing::Test {
   iree_status_t Begin(iree_hal_semaphore_list_t waits, Completion& completion,
                       Wait& wait,
                       iree_allocator_t allocator = iree_allocator_system()) {
-    return iree_hal_amd_gpu_host_wait_begin(&context_, waits, Completion::Run,
-                                            &completion, allocator, &wait);
+    return iree_hal_host_wait_begin(&context_, waits, Completion::Run,
+                                    &completion, allocator, &wait);
   }
   void Check(Completion& completion, iree_status_code_t code = IREE_STATUS_OK) {
     completion.done.acquire();
@@ -273,10 +273,10 @@ TEST_F(HostWaitTest, CancellationDoesNotWaitForProducer) {
   Completion completion;
   Wait wait;
   IREE_ASSERT_OK(Begin({1, &semaphore, &value}, completion, wait));
-  iree_hal_amd_gpu_host_wait_cancel(&wait);
+  iree_hal_host_wait_cancel(&wait);
   Check(completion, IREE_STATUS_CANCELLED);
   // The sidecar remains test-owned; cancellation after finalization is benign.
-  iree_hal_amd_gpu_host_wait_cancel(&wait);
+  iree_hal_host_wait_cancel(&wait);
   EXPECT_EQ(completion.calls.load(), 1u);
 }
 
@@ -288,7 +288,7 @@ TEST_F(HostWaitTest, AllocationFailureDoesNotAcceptOrRetain) {
   Allocator allocator;
   allocator.fail_allocations = true;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
-                        iree_hal_amd_gpu_host_wait_begin(
+                        iree_hal_host_wait_begin(
                             &context_, {1, &semaphore, &value}, Completion::Run,
                             &completion, allocator.get(), &wait));
   IREE_ASSERT_OK(iree_hal_semaphore_signal(semaphore, 1, nullptr));
@@ -305,13 +305,13 @@ TEST_F(HostWaitTest, LastReferencesReleaseBeforeTerminalCallback) {
   uint64_t value = 1;
   Completion completion;
   Wait wait;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_host_wait_prepare(
-      &context_, {1, &semaphore, &value}, Completion::Run, &completion,
-      tracker_allocator.get(), &wait));
+  IREE_ASSERT_OK(iree_hal_host_wait_prepare(&context_, {1, &semaphore, &value},
+                                            Completion::Run, &completion,
+                                            tracker_allocator.get(), &wait));
   iree_hal_semaphore_release(semaphore);
   EXPECT_EQ(semaphore_allocator.frees.load(), 0u);
   EXPECT_EQ(tracker_allocator.frees.load(), 0u);
-  iree_hal_amd_gpu_host_wait_register(&wait);
+  iree_hal_host_wait_register(&wait);
   Check(completion);
   EXPECT_EQ(semaphore_allocator.frees.load(), 1u);
   EXPECT_EQ(semaphore_allocator.thread, std::this_thread::get_id());
@@ -325,12 +325,12 @@ TEST_F(HostWaitTest, CancellationBetweenPreparationAndRegistration) {
   uint64_t value = 1;
   Completion completion;
   Wait wait;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_host_wait_prepare(
-      &context_, {1, &semaphore, &value}, Completion::Run, &completion,
-      iree_allocator_system(), &wait));
-  iree_hal_amd_gpu_host_wait_cancel(&wait);
+  IREE_ASSERT_OK(iree_hal_host_wait_prepare(&context_, {1, &semaphore, &value},
+                                            Completion::Run, &completion,
+                                            iree_allocator_system(), &wait));
+  iree_hal_host_wait_cancel(&wait);
   EXPECT_EQ(completion.calls.load(), 0u);
-  iree_hal_amd_gpu_host_wait_register(&wait);
+  iree_hal_host_wait_register(&wait);
   Check(completion, IREE_STATUS_CANCELLED);
   EXPECT_EQ(completion.thread, std::this_thread::get_id());
 }
@@ -352,7 +352,7 @@ TEST_F(HostWaitTest, TerminalCallbackCanFreeCaptureImmediately) {
   for (uint64_t value = 1; value <= 1024; ++value) {
     Completion completion;
     auto* capture = new Capture{{}, semaphore, value, &completion};
-    IREE_ASSERT_OK(iree_hal_amd_gpu_host_wait_begin(
+    IREE_ASSERT_OK(iree_hal_host_wait_begin(
         &context_, {1, &capture->semaphore, &capture->value},
         [](void* user_data, iree_status_t status) {
           auto* capture = static_cast<Capture*>(user_data);
@@ -416,7 +416,7 @@ TEST_F(HostWaitTest, ConcurrentCancellationAndSignalHaveOneTerminalOwner) {
     IREE_CHECK_OK(
         Begin({1, &semaphore, &value}, completion, wait, storage.allocator()));
     start.arrive_and_wait();
-    iree_hal_amd_gpu_host_wait_cancel(&wait);
+    iree_hal_host_wait_cancel(&wait);
     completion.done.acquire();
     const auto code = iree_status_code(completion.status);
     EXPECT_TRUE(code == IREE_STATUS_OK || code == IREE_STATUS_CANCELLED);
@@ -429,7 +429,7 @@ TEST_F(HostWaitTest, ConcurrentCancellationAndSignalHaveOneTerminalOwner) {
 
 struct WaitCapture {
   // Placed cancellation/tracker state may disappear from its terminal callback.
-  iree_hal_amd_gpu_host_wait_entry_t entry;
+  iree_hal_host_wait_entry_t entry;
   // Borrowed dependency retained independently by the fixture.
   iree_hal_semaphore_t* semaphore;
   // Stable operand until the tracker returns capture ownership.
@@ -446,8 +446,8 @@ struct WaitCapture {
 };
 
 TEST_F(HostWaitTest, SetDetachesCancelledEntriesBeforeReleasingCaptures) {
-  iree_hal_amd_gpu_host_wait_set_t set;
-  iree_hal_amd_gpu_host_wait_set_initialize(&context_, &set);
+  iree_hal_host_wait_set_t set;
+  iree_hal_host_wait_set_initialize(&context_, &set);
   std::array<Completion, 3> completions;
   std::array<iree_hal_semaphore_t*, 3> semaphores;
   for (size_t i = 0; i < completions.size(); ++i) {
@@ -456,57 +456,57 @@ TEST_F(HostWaitTest, SetDetachesCancelledEntriesBeforeReleasingCaptures) {
         .semaphore = semaphores[i],
         .completion = &completions[i],
     };
-    IREE_ASSERT_OK(iree_hal_amd_gpu_host_wait_set_begin(
+    IREE_ASSERT_OK(iree_hal_host_wait_set_begin(
         &set, {1, &capture->semaphore, &capture->value}, WaitCapture::Complete,
         capture, iree_allocator_system(), &capture->entry));
   }
   IREE_ASSERT_OK(iree_hal_semaphore_signal(semaphores[1], 1, nullptr));
   Check(completions[1]);
-  iree_hal_amd_gpu_host_wait_set_cancel(&set);
+  iree_hal_host_wait_set_cancel(&set);
   Check(completions[0], IREE_STATUS_CANCELLED);
   Check(completions[2], IREE_STATUS_CANCELLED);
   EXPECT_EQ(set.head, nullptr);
-  iree_hal_amd_gpu_host_wait_set_deinitialize(&set);
+  iree_hal_host_wait_set_deinitialize(&set);
 }
 
 TEST_F(HostWaitTest, CancelledSetCompletesLaterEnrollmentInline) {
-  iree_hal_amd_gpu_host_wait_set_t set;
-  iree_hal_amd_gpu_host_wait_set_initialize(&context_, &set);
-  iree_hal_amd_gpu_host_wait_set_cancel(&set);
+  iree_hal_host_wait_set_t set;
+  iree_hal_host_wait_set_initialize(&context_, &set);
+  iree_hal_host_wait_set_cancel(&set);
   Completion completion;
   auto* capture =
       new WaitCapture{.semaphore = Semaphore(), .completion = &completion};
-  IREE_ASSERT_OK(iree_hal_amd_gpu_host_wait_set_begin(
+  IREE_ASSERT_OK(iree_hal_host_wait_set_begin(
       &set, {1, &capture->semaphore, &capture->value}, WaitCapture::Complete,
       capture, iree_allocator_system(), &capture->entry));
   Check(completion, IREE_STATUS_CANCELLED);
   EXPECT_EQ(completion.thread, std::this_thread::get_id());
-  iree_hal_amd_gpu_host_wait_set_deinitialize(&set);
+  iree_hal_host_wait_set_deinitialize(&set);
 }
 
 TEST_F(HostWaitTest, CancellationCallbackMayReenterSet) {
-  iree_hal_amd_gpu_host_wait_set_t set;
-  iree_hal_amd_gpu_host_wait_set_initialize(&context_, &set);
-  iree_hal_amd_gpu_host_wait_entry_t entry;
+  iree_hal_host_wait_set_t set;
+  iree_hal_host_wait_set_initialize(&context_, &set);
+  iree_hal_host_wait_entry_t entry;
   auto* semaphore = Semaphore();
   uint64_t value = 1;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_host_wait_set_begin(
+  IREE_ASSERT_OK(iree_hal_host_wait_set_begin(
       &set, {1, &semaphore, &value},
       [](void* user_data, iree_status_t status) {
-        auto* set = static_cast<iree_hal_amd_gpu_host_wait_set_t*>(user_data);
+        auto* set = static_cast<iree_hal_host_wait_set_t*>(user_data);
         EXPECT_EQ(iree_status_code(status), IREE_STATUS_CANCELLED);
         iree_status_free(status);
-        iree_hal_amd_gpu_host_wait_set_cancel(set);
+        iree_hal_host_wait_set_cancel(set);
       },
       &set, iree_allocator_system(), &entry));
-  iree_hal_amd_gpu_host_wait_set_cancel(&set);
-  iree_hal_amd_gpu_host_wait_set_deinitialize(&set);
+  iree_hal_host_wait_set_cancel(&set);
+  iree_hal_host_wait_set_deinitialize(&set);
 }
 
 TEST_F(HostWaitTest, ConcurrentEnrollmentCancellationAndSignalReclaimOnce) {
   for (size_t i = 0; i < 256; ++i) {
-    iree_hal_amd_gpu_host_wait_set_t set;
-    iree_hal_amd_gpu_host_wait_set_initialize(&context_, &set);
+    iree_hal_host_wait_set_t set;
+    iree_hal_host_wait_set_initialize(&context_, &set);
     auto* semaphore = Semaphore();
     Completion completion;
     auto* capture =
@@ -514,14 +514,14 @@ TEST_F(HostWaitTest, ConcurrentEnrollmentCancellationAndSignalReclaimOnce) {
     std::barrier<> start(3);
     std::thread registration([&] {
       start.arrive_and_wait();
-      IREE_CHECK_OK(iree_hal_amd_gpu_host_wait_set_begin(
+      IREE_CHECK_OK(iree_hal_host_wait_set_begin(
           &set, {1, &capture->semaphore, &capture->value},
           WaitCapture::Complete, capture, iree_allocator_system(),
           &capture->entry));
     });
     std::thread cancellation([&] {
       start.arrive_and_wait();
-      iree_hal_amd_gpu_host_wait_set_cancel(&set);
+      iree_hal_host_wait_set_cancel(&set);
     });
     start.arrive_and_wait();
     IREE_CHECK_OK(iree_hal_semaphore_signal(semaphore, 1, nullptr));
@@ -532,7 +532,7 @@ TEST_F(HostWaitTest, ConcurrentEnrollmentCancellationAndSignalReclaimOnce) {
     EXPECT_TRUE(code == IREE_STATUS_OK || code == IREE_STATUS_CANCELLED);
     EXPECT_EQ(completion.calls.load(), 1u);
     EXPECT_EQ(set.head, nullptr);
-    iree_hal_amd_gpu_host_wait_set_deinitialize(&set);
+    iree_hal_host_wait_set_deinitialize(&set);
   }
 }
 

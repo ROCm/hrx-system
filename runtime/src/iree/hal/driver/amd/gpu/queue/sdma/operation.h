@@ -10,11 +10,11 @@
 #include "iree/hal/driver/amd/gpu/profile.h"
 #include "iree/hal/driver/amd/gpu/queue/allocation.h"
 #include "iree/hal/driver/amd/gpu/queue/capture_pool.h"
-#include "iree/hal/driver/amd/gpu/queue/host_wait.h"
 #include "iree/hal/driver/amd/gpu/queue/sdma/command_buffer.h"
 #include "iree/hal/driver/amd/gpu/queue/sdma/native_queue.h"
 #include "iree/hal/driver/amd/gpu/queue/semaphore.h"
 #include "iree/hal/driver/amd/gpu/queue/transfer.h"
+#include "iree/hal/utils/host_wait.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,7 +26,7 @@ typedef struct iree_hal_amd_gpu_sdma_queue_t iree_hal_amd_gpu_sdma_queue_t;
 // on the next unresolved edge cannot fail a new allocation after acceptance.
 typedef struct iree_hal_amd_gpu_sdma_pending_t {
   // Cancellation membership joins every callback borrower.
-  iree_hal_amd_gpu_host_wait_entry_t entry;
+  iree_hal_host_wait_entry_t entry;
   // Capture retaining the original dependency and unpublished native suffix.
   struct iree_hal_amd_gpu_sdma_operation_t* operation;
   // Retained completion or submission-availability view used by the tracker.

@@ -12,7 +12,7 @@
 #include "iree/hal/driver/amd/gpu/context.h"
 #include "iree/hal/driver/amd/gpu/profile.h"
 #include "iree/hal/driver/amd/gpu/publication.h"
-#include "iree/hal/driver/amd/gpu/queue/host_wait.h"
+#include "iree/hal/utils/host_wait.h"
 
 #ifdef __cplusplus
 extern "C" {

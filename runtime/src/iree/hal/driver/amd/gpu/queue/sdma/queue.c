@@ -417,7 +417,7 @@ static void iree_hal_amd_gpu_sdma_queue_destroy(iree_hal_queue_t* base) {
   if (queue->release.fn && !queue->release.fn(queue->release.user_data, base)) {
     return;
   }
-  iree_hal_amd_gpu_host_wait_set_deinitialize(&queue->waits);
+  iree_hal_host_wait_set_deinitialize(&queue->waits);
   iree_async_semaphore_wait_context_deinitialize(&queue->wait_context);
   iree_hal_amd_gpu_capture_pool_deinitialize(&queue->captures);
   iree_slim_mutex_deinitialize(&queue->host_mutex);
@@ -513,8 +513,7 @@ iree_status_t iree_hal_amd_gpu_sdma_queue_create(
                             &queue->base);
   iree_slim_mutex_initialize(&queue->host_mutex);
   iree_async_semaphore_wait_context_initialize(&queue->wait_context);
-  iree_hal_amd_gpu_host_wait_set_initialize(&queue->wait_context,
-                                            &queue->waits);
+  iree_hal_host_wait_set_initialize(&queue->wait_context, &queue->waits);
   iree_hal_amd_gpu_capture_pool_initialize(options->capture_block_size,
                                            host_allocator, &queue->captures);
   queue->host_executor = (iree_hal_amd_gpu_host_call_executor_t){
@@ -611,7 +610,7 @@ static void iree_hal_amd_gpu_sdma_queue_notify_failure(iree_hal_queue_t* base) {
   iree_atomic_compare_exchange_strong(
       &queue->failure_code, &expected, IREE_STATUS_ABORTED,
       iree_memory_order_release, iree_memory_order_relaxed);
-  iree_hal_amd_gpu_host_wait_set_cancel(&queue->waits);
+  iree_hal_host_wait_set_cancel(&queue->waits);
   iree_hal_amd_gpu_sdma_native_queue_fail(
       queue->native, amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST));
 }

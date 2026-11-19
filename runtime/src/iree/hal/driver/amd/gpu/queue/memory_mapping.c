@@ -20,7 +20,7 @@ typedef struct iree_hal_amd_gpu_memory_mapping_t {
   // Owned logical transaction, retaining original source and target views.
   iree_hal_memory_mapping_batch_t* batch;
   // Dependency registration; finalization relinquishes it before resuming.
-  iree_hal_amd_gpu_host_wait_t wait;
+  iree_hal_host_wait_t wait;
   // Embedded ready native request and callback/context join.
   iree_hal_amd_gpu_memory_map_t native;
   // Owned native result consumed once by the device publisher.
@@ -193,10 +193,9 @@ iree_status_t iree_hal_amd_gpu_queue_map(
   if (!operation->waits.count) {
     iree_hal_amd_gpu_memory_mapping_ready(operation, iree_ok_status());
   } else {
-    status = iree_hal_amd_gpu_host_wait_begin(
-        &context->waits, operation->waits,
-        iree_hal_amd_gpu_memory_mapping_ready, operation, allocator,
-        &operation->wait);
+    status = iree_hal_host_wait_begin(&context->waits, operation->waits,
+                                      iree_hal_amd_gpu_memory_mapping_ready,
+                                      operation, allocator, &operation->wait);
     if (!iree_status_is_ok(status)) {
       iree_hal_amd_gpu_memory_mapping_complete(operation, status);
     }
