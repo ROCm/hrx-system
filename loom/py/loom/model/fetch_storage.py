@@ -23,12 +23,31 @@ from .fetch_progress import ByteProgress, Progress, ProgressEvent
 from .fetch_safetensors import repack
 from .fetch_source import Document, FetchError, Source, document_source, open_source
 from .fetch_transfer import run_transfer
+from .fetch_xz import unpack_xz
 from .lock import FileIdentity, ModelLock, file_digest, file_key
-from .manifest import ManifestError, parse_json
+from .manifest import ManifestError, operation_fields, parse_json
 
 # Document limits protect the public metadata boundary; payloads stream instead.
 _DOCUMENT_LIMIT = 16 * 1024 * 1024
 _CHUNK_SIZE = 1024 * 1024
+
+_TRANSFORM_OPTIONS = {("xz", 1): (), ("safetensors", 1): ("alignment", "tensors")}
+
+
+def require_supported_transform(transform: dict, path: str) -> None:
+    """Checks acquisition capability without opening a source or cache entry."""
+    kind, version = transform["kind"], transform["version"]
+    options = _TRANSFORM_OPTIONS.get((kind, version))
+    if options is None:
+        raise ManifestError(
+            f"{path}: unsupported acquisition transform {kind!r} version {version}"
+        )
+    unknown = operation_fields(transform).keys() - {"kind", "version", *options}
+    if unknown:
+        raise ManifestError(
+            f"{path}: unsupported options for acquisition transform {kind!r} "
+            f"version {version}: {', '.join(sorted(unknown))}"
+        )
 
 
 def atomic_write(path: Path, content: bytes) -> None:
@@ -252,6 +271,32 @@ class ContentCache:
             )
         return path
 
+    def _source_receipt(self, source: Source, transform: dict | None = None) -> Path:
+        key = hashlib.sha256(file_key(source.transport, transform).encode()).hexdigest()
+        return self.root / "source" / (key + ".json")
+
+    def _read_source_identity(self, receipt, source, transform=None):
+        document = self.read_document(str(receipt), offline=True)
+        recorded = ModelLock.parse(document.text)
+        identity = recorded.files.get(file_key(source.transport, transform))
+        if recorded.scope != "all" or len(recorded.files) != 1 or identity is None:
+            raise FetchError("cached source receipt does not match the source")
+        return replace(identity, origin=source.origin, resolved=source.resolved)
+
+    def _record_source(self, receipt, source, identity):
+        # This observation supports offline editable sources. An unlocked online
+        # fetch still refreshes from the effective transport.
+        resolved = (
+            {"revision": source.transport["revision"]}
+            if source.transport["kind"] == "hf"
+            else None
+        )
+        observed = replace(identity, origin=source.transport, resolved=resolved)
+        atomic_write(
+            receipt,
+            (json.dumps(ModelLock.snapshot({}, [observed])) + "\n").encode(),
+        )
+
     def acquire_transformed(
         self,
         source: Source,
@@ -262,9 +307,27 @@ class ContentCache:
         preserve_sources: bool,
         progress=None,
     ) -> AcquiredFile:
+        require_supported_transform(transform, "source")
         progress = self.progress if progress is None else progress
         if self.cancelled.is_set():
             raise FetchError("model acquisition cancelled")
+        receipt = (
+            self._source_receipt(source, transform)
+            if identity is None and source.transport["kind"] in ("url", "hf")
+            else None
+        )
+        if offline and receipt is not None and receipt.is_file():
+            identity = self._read_source_identity(receipt, source, transform)
+        acquired = self._materialize_transform(
+            source, transform, identity, offline, preserve_sources, progress
+        )
+        if receipt is not None and not offline:
+            self._record_source(receipt, source, acquired.identity)
+        return acquired
+
+    def _materialize_transform(
+        self, source, transform, identity, offline, preserve_sources, progress
+    ):
         key = hashlib.sha256(file_key(source.transport, transform).encode()).hexdigest()
         receipt = self.root / "preserved" / (key + ".json")
         cached = None
@@ -294,6 +357,13 @@ class ContentCache:
                             )
                         return AcquiredFile(cached, identity)
         source = self.prepare_source(source, None, offline=offline)
+        if transform["kind"] == "xz" and source.transport["kind"] == "hf":
+            # Whole-file HF transfers own authentication, cancellation, and the
+            # encoded file in the Hub cache. Decode the returned local file.
+            encoded = self.huggingface.download(
+                source.transport, offline=offline, progress=progress
+            )
+            source = replace(source, transport={"kind": "local", "path": str(encoded)})
         kind = source.transport["kind"]
         if cached is not None and kind in ("local", "inline"):
             return AcquiredFile(cached, identity)
@@ -311,18 +381,29 @@ class ContentCache:
                 if preserve_sources and kind in ("url", "hf")
                 else None
             )
-            result = (
-                self.huggingface.repack(
+            if transform["kind"] == "xz":
+                result = run_transfer(
+                    unpack_xz,
+                    (
+                        source,
+                        destination,
+                        preserve,
+                        identity.size if identity else None,
+                    ),
+                    self.cancelled,
+                    progress=progress if progress else None,
+                )
+            elif kind == "hf":
+                result = self.huggingface.repack(
                     source, transform, destination, preserve, progress=progress
                 )
-                if kind == "hf"
-                else run_transfer(
+            else:
+                result = run_transfer(
                     repack,
                     (source, transform, destination, preserve),
                     self.cancelled,
                     progress=progress if progress else None,
                 )
-            )
             observed = FileIdentity(
                 source.origin,
                 result["size"],
@@ -337,9 +418,7 @@ class ContentCache:
                 identity.size,
                 identity.sha256,
             ):
-                raise ManifestError(
-                    "transformed parameter bytes do not match their lock"
-                )
+                raise ManifestError("transformed file bytes do not match their lock")
             if self.cancelled.is_set():
                 raise FetchError("model acquisition cancelled")
             if preserve is not None:
@@ -379,7 +458,7 @@ class ContentCache:
                 if cached is not None
                 else self._publish(destination, observed, progress=progress)
             )
-            return AcquiredFile(path, observed)
+            return AcquiredFile(path, identity or observed)
 
     def read_document(self, location: str, *, offline: bool) -> Document:
         self.progress.emit("discover")
@@ -477,26 +556,14 @@ class ContentCache:
                 identity.sha256,
             ):
                 raise ManifestError(f"integrity mismatch for local source {path}")
-            return AcquiredFile(path, observed)
+            return AcquiredFile(path, identity or observed)
         receipt = None
         if kind == "url":
-            key = hashlib.sha256(file_key(source.transport).encode()).hexdigest()
-            receipt = self.root / "source" / (key + ".json")
+            receipt = self._source_receipt(source)
             if offline and identity is None:
                 if not receipt.is_file():
                     raise FetchError("--offline source is not cached")
-                document = self.read_document(str(receipt), offline=True)
-                recorded = ModelLock.parse(document.text)
-                identity = recorded.files.get(file_key(source.transport))
-                if (
-                    recorded.scope != "all"
-                    or len(recorded.files) != 1
-                    or identity is None
-                ):
-                    raise FetchError("cached source receipt does not match the source")
-                identity = replace(
-                    identity, origin=source.origin, resolved=source.resolved
-                )
+                identity = self._read_source_identity(receipt, source)
         cached = (
             self.find(identity, progress=progress) if identity is not None else None
         )
@@ -524,16 +591,9 @@ class ContentCache:
                 )
                 observed = FileIdentity(source.origin, size, digest, source.resolved)
                 path = self._publish(temporary, observed, progress=progress)
-                acquired = AcquiredFile(path, observed)
+                acquired = AcquiredFile(path, identity or observed)
             finally:
                 temporary.unlink(missing_ok=True)
         if receipt is not None and not offline:
-            # This cache-local observation supports offline editable sources;
-            # it is not an authored commitment and never suppresses an online
-            # refresh when the caller did not supply a locked byte identity.
-            observed = replace(acquired.identity, origin=source.transport)
-            atomic_write(
-                receipt,
-                (json.dumps(ModelLock.snapshot({}, [observed])) + "\n").encode(),
-            )
+            self._record_source(receipt, source, acquired.identity)
         return acquired

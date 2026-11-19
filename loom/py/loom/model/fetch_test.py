@@ -9,9 +9,12 @@ import errno
 import hashlib
 import http.server
 import json
+import lzma
 import os
 import threading
 from contextlib import ExitStack, contextmanager
+from functools import partial
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -284,6 +287,238 @@ def _remote_plan(base, cache, **kwargs):
     )
 
 
+def test_unfamiliar_transforms_only_require_support_for_acquired_files(
+    tmp_path, capsys
+):
+    card = _card()
+    payloads = {"code.loom": b"program", "weights.data": b"weights", "large.data": b"L"}
+    recipes = (
+        {"kind": "example.codec", "version": 1, "parameters": {"order": [2, 1]}},
+        {"kind": "xz", "version": 2},
+        {"kind": "xz", "version": 1, "window": 16},
+    )
+    lock = _lock(payloads)
+    for i, recipe in enumerate(recipes):
+        path = f"future-{i}.loombc"
+        card["programs"][path] = {
+            "inputs": [{"path": path, "transform": recipe}],
+            "libraries": [],
+        }
+        card["variants"]["v"]["services"]["text"]["programs"].append(path)
+        lock["files"].append(
+            {"origin": path, "transform": recipe, "size": 10, "sha256": "0" * 64}
+        )
+    with _server(card, payloads) as (base, requests, resources):
+        resources["/model.json.lock"] = json.dumps(lock).encode()
+        args = [base + "/model.json", "--cache", str(tmp_path / "cache"), "--no-input"]
+        assert main([*args, "--list", "--json"]) == 0
+        assert "future-2.loombc" in capsys.readouterr().out
+        for i, recipe in enumerate(recipes):
+            path = f"future-{i}.loombc"
+            assert main([*args, "--programs", path, "--preset=check"]) == 1
+            diagnostic = capsys.readouterr().err
+            assert path in diagnostic
+            assert f"{recipe['kind']!r} version {recipe['version']}" in diagnostic
+            if i == 2:
+                assert "window" in diagnostic
+        destination = tmp_path / "author.lock"
+        update = [
+            *args,
+            "--all-variants",
+            "--update-lock",
+            "--lockfile",
+            str(destination),
+        ]
+        assert main([*update, "--lock-scope=all"]) == 1
+        assert not destination.exists()
+        assert not set(requests) & {"/" + name for name in payloads}
+        # An asset-only lock computes no program transforms, even across all variants.
+        assert main([*update, "--lock-scope=assets"]) == 0
+        assert main([*args, "--preset=check", "--output", str(tmp_path / "model")]) == 0
+        assert (tmp_path / "model/code.loom").read_bytes() == payloads["code.loom"]
+        assert not any(request.startswith("/future-") for request in requests)
+
+
+def test_future_transports_do_not_prevent_installing_another_program(tmp_path, capsys):
+    card = _card()
+    card["origins"] = {"store": {"kind": "example.store", "bucket": "stable"}}
+    payloads = {"code.loom": b"code", "weights.data": b"weights"}
+    lock = _lock(payloads)
+    lock["origins"]["store"] = {
+        "requested": card["origins"]["store"],
+        "resolved": {"generation": [1, 7]},
+    }
+    repository = {"kind": "hf", "repository": "org/repo", "revision": "a" * 40}
+    opaque_pin = {"revision": "a" * 40, "tree_ordinal": 17}
+    card["origins"]["repository"] = repository
+    lock["origins"]["repository"] = {"requested": repository, "resolved": opaque_pin}
+    origins = [
+        (
+            "direct",
+            {"kind": "example.blob", "keys": [1, 2]},
+            {"sequence": 2},
+            "example.blob",
+        ),
+        ("aliased", "@store/object", None, "example.store"),
+        (
+            "option",
+            {
+                "kind": "url",
+                "url": "https://example.invalid/file",
+                "signed_chunks": True,
+            },
+            None,
+            "signed_chunks",
+        ),
+        (
+            "resolution",
+            repository | {"path": "file"},
+            opaque_pin,
+            "tree_ordinal",
+        ),
+        ("root-resolution", "@repository/file", None, "tree_ordinal"),
+    ]
+    for name, origin, resolved, _ in origins:
+        path = name + ".loom"
+        card["programs"][name] = {
+            "inputs": [{"path": path, "origin": origin}],
+            "libraries": [],
+        }
+        card["variants"]["v"]["services"]["text"]["programs"].append(name)
+        record = {"origin": origin, "size": 1, "sha256": "b" * 64}
+        if resolved is not None:
+            record["resolved"] = resolved
+        lock["files"].append(record)
+    with _server(card, payloads) as (base, requests, resources):
+        resources["/model.json.lock"] = json.dumps(lock).encode()
+        args = [base + "/model.json", "--cache", str(tmp_path / "cache"), "--no-input"]
+        assert main([*args, "--list", "--json"]) == 0
+        assert "aliased" in capsys.readouterr().out
+        for name, _, _, diagnostic in origins:
+            assert main([*args, "--preset=check", "--programs", name, "--dry-run"]) == 1
+            error = capsys.readouterr().err
+            assert name + ".loom" in error and diagnostic in error
+        assert (
+            main(
+                [
+                    *args,
+                    "--preset=check",
+                    "--programs=aliased",
+                    "--dry-run",
+                    f"--origin=store={tmp_path}",
+                ]
+            )
+            == 1
+        )
+        assert "example.store" in capsys.readouterr().err
+        author_lock = tmp_path / "author.lock"
+        author_lock.write_bytes(resources["/model.json.lock"])
+        for program in ("resolution", "root-resolution"):
+            assert (
+                main(
+                    [
+                        *args,
+                        "--programs",
+                        program,
+                        "--preset=check",
+                        "--update-lock",
+                        "--lock-scope=all",
+                        "--lockfile",
+                        str(author_lock),
+                        "--dry-run",
+                    ]
+                )
+                == 1
+            )
+            error = capsys.readouterr().err
+            assert "tree_ordinal" in error, error
+        assert author_lock.read_bytes() == resources["/model.json.lock"]
+        assert set(requests) <= {"/model.json", "/model.json.lock"}
+        assert (
+            main([*args, "--preset=check", "--output", str(tmp_path / "working")]) == 0
+        )
+        assert (tmp_path / "working/code.loom").read_bytes() == b"code"
+
+
+@pytest.mark.parametrize(("scope", "preserve"), [("all", False), ("assets", True)])
+def test_xz_program_uses_decoded_identity_and_reinstalls_offline(
+    tmp_path, scope, preserve
+):
+    raw = b"bytecode" * 200000
+    encoded = lzma.compress(raw[:11]) + bytes(4) + lzma.compress(raw[11:])
+    transform = {"kind": "xz", "version": 1}
+    card = _card()
+    card["x-publisher"] = {"labels": ["example", 3]}
+    card["variants"]["v"]["x-quality"] = "preview"
+    card["presets"]["check"]["x-display"] = True
+    card["programs"]["p"]["inputs"] = [
+        {
+            "path": "code.loombc",
+            "origin": "code.loombc.xz",
+            "x-source": "example",
+            "transform": transform | {"x-encoder": "author"},
+        }
+    ]
+    cache = ContentCache(tmp_path / "cache")
+    identity = FileIdentity(
+        "code.loombc.xz",
+        len(raw),
+        hashlib.sha256(raw).hexdigest(),
+        transform=transform | {"x-encoder": "lock"},
+        extensions={"x-signer": ["release"]},
+    )
+    weights = b"weights"
+    commitments = [
+        FileIdentity("weights.data", len(weights), hashlib.sha256(weights).hexdigest())
+    ]
+    if scope == "all":
+        commitments.append(identity)
+    with _server(card, {"code.loombc.xz": encoded, "weights.data": weights}) as (
+        base,
+        requests,
+        resources,
+    ):
+        resources["/model.json.lock"] = json.dumps(
+            ModelLock.snapshot({}, commitments, scope=scope) | {"x-build": 17}
+        ).encode()
+        install(
+            _remote_plan(base, cache),
+            cache,
+            tmp_path / "first",
+            preserve_sources=preserve,
+        )
+        assert requests.count("/code.loombc.xz") == 1
+        assert "/code.loombc" not in requests
+    assert cache.blob_path(identity.sha256).read_bytes() == raw
+    encoded_blob = cache.blob_path(hashlib.sha256(encoded).hexdigest())
+    if preserve:
+        assert encoded_blob.read_bytes() == encoded
+    else:
+        assert not encoded_blob.exists()
+    install(
+        _remote_plan(base, cache, offline=True),
+        cache,
+        tmp_path / "second",
+        preserve_sources=preserve,
+    )
+    for directory in (tmp_path / "first", tmp_path / "second"):
+        installed = json.loads((directory / "model.json").read_text())
+        assert installed["x-publisher"] == card["x-publisher"]
+        assert installed["variants"]["v"]["x-quality"] == "preview"
+        assert installed["presets"]["check"]["x-display"] is True
+        provider = installed["programs"]["p"]["inputs"][0]
+        assert provider["x-source"] == "example"
+        assert provider["transform"]["x-encoder"] == "author"
+        lock = json.loads((directory / "model.json.lock").read_text())
+        assert lock["x-build"] == 17
+        if scope == "all":
+            entry = next(file for file in lock["files"] if "transform" in file)
+            assert entry["x-signer"] == ["release"]
+            assert entry["transform"]["x-encoder"] == "lock"
+        assert (directory / "code.loombc").read_bytes() == raw
+        assert not (directory / "code.loombc.xz").exists()
+
+
 @pytest.mark.parametrize("quiet", [False, True])
 def test_cli_progress_preserves_json_stdout_and_quiet_mode(tmp_path, capsys, quiet):
     files = {"code.loom": b"code", "weights.data": b"weights"}
@@ -464,7 +699,12 @@ def test_publication_lock_unions_sources_without_merging_destinations(tmp_path):
         document = cache.read_document(base + "/model.json", offline=False)
         card = ModelCard.parse(document.text)
         lock_path = tmp_path / "publication.json.lock"
-        lock_path.write_text('{"stale":"record"}')
+        old = _lock({"code.loom": b"old", "removed": b"stale"})
+        old["x-release"] = 23
+        next(file for file in old["files"] if file["origin"] == "code.loom")[
+            "x-label"
+        ] = "source"
+        lock_path.write_text(json.dumps(old))
         plan = plan_lock(
             document, card, cache, lock_location=str(lock_path), lock_scope="all"
         )
@@ -489,6 +729,11 @@ def test_publication_lock_unions_sources_without_merging_destinations(tmp_path):
         assert set(requests) == {"/model.json", *("/" + name for name in files)}
         assert len(requests) == 4
         lock = ModelLock.parse(lock_path.read_text())
+        assert len(lock.files) == 3
+        assert lock.extensions == {"x-release": 23}
+        code = next(file for file in lock.files.values() if file.origin == "code.loom")
+        assert code.extensions == {"x-label": "source"}
+        assert code.sha256 == hashlib.sha256(b"code").hexdigest()
         for choice in plan.selections:
             selected = card.select(**choice)
             assert set(lock.cover(selected)) == set(selected.files)
@@ -501,6 +746,87 @@ def test_publication_lock_unions_sources_without_merging_destinations(tmp_path):
         assert "/alternate.data" not in requests
         assert (tmp_path / "installed/weights.data").read_bytes() == b"weights"
         assert not (tmp_path / "installed/renamed.loom").exists()
+
+
+@pytest.mark.parametrize("all_variants", [False, True])
+def test_author_update_leaves_a_newer_lock_intact_if_it_arrives_after_planning(
+    tmp_path, all_variants
+):
+    card = ModelCard(_card())
+    files = {"code.loom": b"code", "weights.data": b"one", "large.data": b"two"}
+    with _server(card.document, files) as (base, requests, _):
+        cache = ContentCache(tmp_path / "cache")
+        document = cache.read_document(base + "/model.json", offline=False)
+        path = tmp_path / "published.lock"
+        options = {"lock_location": str(path), "lock_scope": "all"}
+        if all_variants:
+            plan = plan_lock(document, card, cache, **options)
+            publish = partial(update_lock, plan, cache)
+        else:
+            plan = plan_fetch(
+                document, card.select(), cache, update_lock=True, **options
+            )
+            publish = partial(install, plan, cache, tmp_path / "installed")
+        newer = '{"schema_version":23,"future":{"entries":[]}}'
+        path.write_text(newer)
+        with pytest.raises(ManifestError, match="unsupported lock version"):
+            publish()
+        assert path.read_text() == newer
+        assert not (tmp_path / "installed/model.json").exists()
+        assert requests == ["/model.json"]
+
+
+def test_refresh_carries_file_and_root_annotations_to_relocated_installed_lock(
+    tmp_path,
+):
+    doc = _card()
+    doc["origins"] = {"assets": {"kind": "local", "path": "."}}
+    files = doc["variants"]["v"]["services"]["text"]["parameters"]["scope"]
+    files["origin"] = "@assets/"
+    origin = {"kind": "local", "path": "code.loom"}
+    doc["programs"]["p"]["inputs"] = [{"path": "code.loom", "origin": origin}]
+    card = ModelCard(doc)
+    document = Document(str(tmp_path / "model.json"), json.dumps(doc))
+    old_digest = hashlib.sha256(b"old").hexdigest()
+    old = ModelLock.snapshot(
+        {
+            "assets": {
+                "requested": doc["origins"]["assets"] | {"x-store": "local"},
+                "x-owner": "alice",
+            }
+        },
+        [
+            FileIdentity(
+                origin | {"x-input": "authored"},
+                3,
+                old_digest,
+                extensions={"x-source": "test"},
+            ),
+            FileIdentity("@assets/weights.data", 3, old_digest),
+        ],
+    )
+    author_lock = tmp_path / "model.json.lock"
+    author_lock.write_text(json.dumps(old))
+    for name in ("code.loom", "weights.data"):
+        (tmp_path / name).write_bytes(b"new")
+    cache = ContentCache(tmp_path / "cache")
+    output = tmp_path / "model"
+    plan = plan_fetch(
+        document, card.select(), cache, update_lock=True, lock_scope="all"
+    )
+    install(plan, cache, output)
+    for path in (author_lock, output / "model.json.lock"):
+        lock = ModelLock.parse(path.read_text())
+        assert lock.origins["assets"]["x-owner"] == "alice"
+        assert lock.origins["assets"]["requested"]["x-store"] == "local"
+        code = next(
+            file for file in lock.files.values() if isinstance(file.origin, dict)
+        )
+        assert code.origin["x-input"] == "authored"
+        assert code.extensions["x-source"] == "test"
+        assert code.sha256 == hashlib.sha256(b"new").hexdigest()
+        assert Path(code.origin["path"]).is_absolute() == (path != author_lock)
+    install(plan_fetch(document, card.select(), cache), cache, output)
 
 
 def test_publication_lock_failure_preserves_the_previous_snapshot(tmp_path):
@@ -526,14 +852,15 @@ def test_publication_lock_cancellation_never_changes_previous_bytes(tmp_path):
         cache = ContentCache(tmp_path / "cache")
         document = cache.read_document(base + "/model.json", offline=False)
         path = tmp_path / "model.json.lock"
-        path.write_text("previous bytes")
+        previous = json.dumps(_lock(files))
+        path.write_text(previous)
         plan = plan_lock(
             document, ModelCard.parse(document.text), cache, lock_location=str(path)
         )
         cache.cancel()
         with pytest.raises(FetchError, match="cancelled"):
             update_lock(plan, cache)
-        assert path.read_text() == "previous bytes"
+        assert path.read_text() == previous
         assert requests == ["/model.json"]
 
 

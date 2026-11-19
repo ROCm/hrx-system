@@ -235,9 +235,42 @@ application owns communication and placement between separately loaded models.
 Admission records the reference without opening the card. Preparation resolves
 it on a worker before constructing the native model. The server reads local
 files and does not fetch origins or inspect integrity locks. Acquisition and
-materialization happen before registration. A parameter descriptor may include
-an acquisition `transform`; `loom-fetch` produces the declared local file, and
-the server reads its `path` and `format` without interpreting that transform.
+materialization happen before registration. A file descriptor can include an
+acquisition `transform`. For example, a publisher can point a bytecode provider
+at a `.loombc.xz` download with `"transform": {"kind": "xz", "version": 1}`.
+`loom-fetch` installs the decoded `.loombc` at the declared `path`. The server
+reads that local file directly.
+
+An acquisition transform has a `kind`, a positive integer `version`, and
+options defined by that version. Catalogs, file listings, and locks can carry
+instructions for newer installers. `loom-fetch` checks the transforms needed
+by the selected files before transferring payloads. A different preset can
+therefore use a newer transform in the same publication. A native server
+opening an installed file reads its local path and format.
+
+### Extending a publication
+
+A publisher can add optional metadata to a model card, catalog, or lock by
+giving the field an `x-` prefix. For example, `"x-studio-label": "preview"`
+on a model can give a registry a display label. Loom carries these fields on
+retained records and ignores them during acquisition and execution. Changing
+the label leaves the file's lock identity and content cache entry intact.
+
+Fields that change how a file is acquired or a model runs belong to the
+corresponding operation or service contract. An installer can discover a
+model with a newer acquisition operation and will name the unsupported file
+if the user selects it. A new document major version requires a reader that
+understands it. Within a supported version, misspelled structural fields
+still produce an error.
+
+SDKs released before this convention can reject a whole card when they see
+an unfamiliar field or transform. Publishers supporting those clients can
+keep their original card available alongside the extended publication.
+
+The same rule lets a publication reference a new download transport with a
+typed `origin`. A fetcher can list its models or install a preset that uses
+ordinary files. Selecting a file that needs the new transport reports the
+file path and origin kind before payload transfer, even with a local mirror.
 
 ## Deployment fields
 

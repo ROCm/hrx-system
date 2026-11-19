@@ -173,6 +173,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="loom-fetch",
         description="Acquire a portable Loom model's selected files. "
+        "XZ-compressed programs declared by the card are unpacked during installation. "
         "Without a card or model ID, an interactive terminal opens the model picker.",
     )
     parser.add_argument(
@@ -278,8 +279,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--preserve-sources",
         action="store_true",
-        help="retain acquired transform input ranges; "
-        "existing local/HF cache files remain shared",
+        help="keep downloaded XZ files or selected safetensors source ranges "
+        "for reuse, sharing existing local and Hugging Face cache files",
     )
     parser.add_argument(
         "--no-verify-parameters",

@@ -79,6 +79,27 @@ def test_snapshot_deduplicates_and_does_not_retain_other_variants():
     assert len(parsed.files) == 3
 
 
+@pytest.mark.parametrize("version", [1, 2])
+def test_lock_keeps_opaque_recipe_payloads_distinct(version):
+    lock = _lock()
+    if version == 1:
+        lock["schema_version"] = 1
+        lock.pop("scope")
+    records = [
+        {
+            "origin": "blob",
+            "size": 1,
+            "sha256": str(i) * 64,
+            "transform": {"kind": "vendor.codec", "version": 2, "order": order},
+        }
+        for i, order in enumerate(([0, 1], [1, 0]))
+    ]
+    lock["files"].extend(records)
+    parsed = ModelLock(lock)
+    snapshot = ModelLock.snapshot(parsed.origins, list(parsed.files.values()))
+    assert [item for item in snapshot["files"] if item["origin"] == "blob"] == records
+
+
 def test_changed_authored_origin_is_not_a_transport_override():
     card = _card()
     card["origins"]["weights"]["repository"] = "different/model"

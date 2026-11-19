@@ -8,6 +8,7 @@ import copy
 import hashlib
 import http.server
 import json
+import lzma
 import os
 import re
 import struct
@@ -62,6 +63,29 @@ def _cache(root, hub, wait=None):
             endpoint=hub.endpoint, cache_dir=hub.cache_dir, wait_for_access=wait
         ),
     )
+
+
+def test_xz_bytecode_uses_hub_transfer_and_decoded_cache(tmp_path):
+    raw = b"compiled module" * 100
+    encoded = lzma.compress(raw)
+    transform = {"kind": "xz", "version": 1}
+    with running_hub(tmp_path, {"model.loombc.xz": encoded}) as hub:
+        hub.approved = True
+        hub.credentials.write_text("fixture-first")
+        source = Source("@program/model.loombc.xz", hub.source("model.loombc.xz"))
+        cache = _cache(tmp_path, hub)
+        result = cache.acquire_transformed(
+            source, transform, None, offline=False, preserve_sources=False
+        )
+        assert result.path.read_bytes() == raw
+        assert result.identity.sha256 == hashlib.sha256(raw).hexdigest()
+        assert cache.huggingface.cached_file(source.transport).read_bytes() == encoded
+        requests = list(hub.requests)
+        again = cache.acquire_transformed(
+            source, transform, None, offline=True, preserve_sources=False
+        )
+        assert again == result
+        assert hub.requests == requests
 
 
 def test_range_redirect_strips_credentials_and_never_persists_signed_url(tmp_path):
@@ -176,7 +200,7 @@ def test_streaming_transform_reuses_hub_auth_without_downloading_parent(tmp_path
         hub.files["weights.data"] = content[:-4] + struct.pack("<i", 3)
         fresh = ContentCache(tmp_path / "fresh", huggingface=cache.huggingface)
         plan = plan_fetch(document, selection, fresh)
-        with pytest.raises(ManifestError, match="transformed parameter"):
+        with pytest.raises(ManifestError, match="transformed file bytes"):
             install(plan, fresh, tmp_path / "rejected")
         assert not (tmp_path / "rejected/model.json").exists()
         # The developer exception still resolves the publisher's immutable

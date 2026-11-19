@@ -327,6 +327,7 @@ loom_py_test(
         "//loom/src/loom/serve/fixture/text:fetch_model_mixed",
         "//loom/src/loom/serve/fixture/text:fetch_model_source",
         "//loom/src/loom/serve/fixture/text:native.card.json",
+        "//loom/src/loom/serve/fixture/text:native.card.json.lock",
         "//loom/src/loom/serve/fixture/text:native_source_files",
     ],
     imports = ["."],
@@ -339,8 +340,8 @@ loom_py_test(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
-        "//loom/py/loom/model:lock",
         "//loom/py/loom/model:manifest",
+        "//loom/py/loom/model:release",
         "//loom/src/loom/serve/testing/loom_serve_testing:http",
     ],
 )
@@ -407,6 +408,7 @@ loom_py_test(
         "//loom/src/loom/serve/fixture/text:image_fetch_archive",
         "//loom/src/loom/serve/fixture/text:image_fetch_mixed",
         "//loom/src/loom/serve/fixture/text:image_fetch_source",
+        "//loom/src/loom/serve/fixture/text:native.card.json.lock",
         "//loom/src/loom/serve/fixture/text:native_source_files",
     ],
     imports = ["."],
@@ -420,8 +422,8 @@ loom_py_test(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
-        "//loom/py/loom/model:lock",
         "//loom/py/loom/model:manifest",
+        "//loom/py/loom/model:release",
         "//loom/src/loom/serve/testing/loom_serve_testing:http",
     ],
 )

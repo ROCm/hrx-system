@@ -25,6 +25,32 @@ escaping destination paths are errors. The Moonshine metadata example declares
 inputs and service geometry; execution evidence belongs to the model
 implementation and its tests.
 
+Model cards, catalogs, and locks reserve member names beginning with `x-`
+for optional publisher metadata on schema-defined records. Their values may
+be any plain JSON. For example, `"x-example-labels": ["preview"]` on a model
+can appear in discovery UIs. Selection and publication retain annotations on
+the records they carry. Regenerating a lock or catalog retains annotations on
+matching records and drops records removed from the publication. Annotations
+on a file's origin or transform do not change its logical identity or digest.
+
+Named maps (such as program names and JIT configuration), service-specific
+options, and the contents of annotations keep their own key spaces. Required
+behavior belongs to the owning service contract, acquisition operation, or
+document version. A reader rejects a document version it cannot interpret.
+
+Discovery and documentation can also carry a typed acquisition origin with
+an unfamiliar `kind`, including its opaque lock resolution. When fetching
+that origin, the installer must understand its transport, options, and
+resolution. This applies to direct descriptors and named roots, including
+roots with a caller-supplied mirror. Known repository revisions remain pinned
+to immutable commits. A local or HTTP origin cannot claim a repository
+revision. Source locator strings keep their existing syntax.
+
+A lock update reads the current publication under its directory lock before
+transferring payloads. An unsupported lock version or an unfamiliar resolution
+option on a retained repository pin leaves the publication intact. An explicit
+new `--lockfile` can be used to generate a separate lock from the current card.
+
 Provider-set names have no encoding semantics. A set named `source` may include
 bytecode libraries. `inputs` and `libraries` are arrays of path strings or
 objects with `path`, optional `format`, importer `options`, and auxiliary `data`.
@@ -177,11 +203,17 @@ the built card with `--update-lock`, then serve the installed `model.json`
 directly. Public releases supply the corresponding lock. Compiler source inputs
 are not needed to run a normalized package.
 
-The optional `lockfile` attribute declares the authored acquisition lock as a
-test dependency. The original card and lock are carried in runfiles, alongside
-the built package, so edits to either invalidate dependent tests. The lock does
-not enter the linker action or the `model_files` publication output group: a
-normalized publication needs a lock describing its own output bytes.
+To stage a directory for distribution, build the `loom_model` target with
+`--output_groups=model_release`. The resulting `<target>.release/` contains
+the selected card, one `.xz` download per bytecode provider, the other program
+files, and a lock generated from the installed bytes. The rule takes the
+identities of external runtime assets from the authored `lockfile`. Those
+assets stay at their pinned origins. See [Compressed program downloads](#compressed-program-downloads).
+
+The original card and optional `lockfile` are also carried in test runfiles,
+alongside the built package, so edits to either invalidate dependent tests.
+The linker action and the `model_files` output group use the built providers
+independently of the acquisition lock.
 
 Model regression tests use current built providers and independently provisioned
 parameters and tokenizers. The test-only
@@ -437,8 +469,8 @@ their own lock when their bytes are published.
 Locks use a separate [versioned editor schema](model-lock.v2.schema.json).
 `origins` records requested roots and resolved repository commits. Each `files`
 record contains its logical `origin`, final whole-file `size`, and `sha256`.
-Transformed parameter records also contain the normalized `transform`; the hash
-identifies the resulting archive, without requiring a read of unused source bytes.
+Transformed records include the normalized `transform`. Their size and hash
+identify the installed bytes.
 A file's destination name, parameter scope, and JIT configuration are independent
 of that identity. `--origin=checkpoint=/local/mirror` replaces transport while retaining
 the original lock identity; it never falls back to the original host. Unknown
@@ -546,6 +578,29 @@ card separately; native serving performs no network access or lock processing.
 The fetch-to-serve fixture checks source, bytecode, mixed, and offline packages
 against the same weighted response, and rejects substituted code before
 publication.
+
+## Compressed program downloads
+
+A publisher can serve independently compressed bytecode. The provider's
+`path` and `format` describe the file the server opens. Its `origin` names the
+XZ download:
+
+```json
+{
+  "path": "program/attention.loombc",
+  "origin": "program/attention.loombc.xz",
+  "transform": {"kind": "xz", "version": 1}
+}
+```
+
+`loom-fetch` decodes during installation using Python's standard `lzma` module.
+A complete lock (`--lock-scope=all`) verifies the decoded size and SHA-256,
+so raw and compressed publications can share the same verified cache entry.
+An offline installation reuses that entry. Ordinary server startup reads
+`attention.loombc` directly. Use `--preserve-sources` when the compressed
+download itself should also be kept. XZ files can contain concatenated streams
+and standard stream padding. The decoder accepts all standard XZ presets
+within a 128 MiB decoder-memory limit per worker.
 
 ## Streaming parameter materialization
 

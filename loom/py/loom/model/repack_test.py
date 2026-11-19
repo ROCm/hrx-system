@@ -377,13 +377,13 @@ def test_output_lock_distinguishes_operations_and_does_not_hash_parent(tmp_path)
     broken = FileIdentity(
         "checkpoint", result.identity.size, "0" * 64, transform=transform()
     )
-    with pytest.raises(ManifestError, match="transformed parameter"):
+    with pytest.raises(ManifestError, match="transformed file bytes"):
         cache.acquire_transformed(
             source, transform(), broken, offline=True, preserve_sources=False
         )
 
 
-def test_transform_requires_explicit_typed_parameter_ownership():
+def test_safetensors_transform_requires_explicit_typed_parameter_ownership():
     document = {
         "schema_version": 1,
         "model": {"id": "test/test", "name": "test"},
@@ -418,5 +418,7 @@ def test_transform_requires_explicit_typed_parameter_ownership():
     document["programs"]["p"]["inputs"] = document["variants"]["v"]["services"]["s"][
         "parameters"
     ]["model"]["files"]
-    with pytest.raises(ManifestError, match="unknown fields"):
+    with pytest.raises(
+        ManifestError, match="safetensors transform requires a parameter"
+    ):
         ModelCard(document)

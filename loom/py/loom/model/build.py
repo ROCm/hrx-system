@@ -19,6 +19,7 @@ import subprocess
 from pathlib import Path
 
 from loom.model import ManifestError, ModelCard
+from loom.model.manifest import project_fields
 
 
 def _provider_declaration(value):
@@ -123,7 +124,7 @@ def build(plan: dict, linker: str | None = None) -> None:
             return record | {"origin": selection.files[record["path"]].origin}
         if isinstance(value, str):
             return value
-        return {key: value[key] for key in ("path", "format") if key in value}
+        return project_fields(value, ("path", "format"))
 
     def output_data(provider):
         return [
@@ -138,11 +139,7 @@ def build(plan: dict, linker: str | None = None) -> None:
             provider = {"path": value} if isinstance(value, str) else value
             name = provider["path"]
             if encoding == "preserve":
-                result = {
-                    key: provider[key]
-                    for key in ("path", "format", "options")
-                    if key in provider
-                }
+                result = project_fields(provider, ("path", "format", "options"))
                 if auxiliary := output_data(provider):
                     result["data"] = auxiliary
                 normalized.append(result)
@@ -170,6 +167,7 @@ def build(plan: dict, linker: str | None = None) -> None:
             )
             subprocess.run(arguments, check=True)
             result = {
+                **project_fields(provider),
                 "path": name,
                 "format": "loombc" if plan["encoding"] == "bc" else "loom",
             }

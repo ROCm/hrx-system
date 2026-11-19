@@ -17,7 +17,7 @@ import threading
 from pathlib import Path
 
 from loom.model import ModelCard
-from loom.model.lock import FileIdentity, ModelLock, file_digest
+from loom.model.release import stage_release
 from model_card_test import check_model, complete
 
 
@@ -25,69 +25,91 @@ def main():
     fetch, server_tool, fixture_card, *deployments = (
         Path(value).absolute() for value in sys.argv[1:]
     )
-    runtime_files = {
-        "bias.data": fixture_card.parent / "bias.data",
-        "metadata.safetensors": fixture_card.parent / "metadata.safetensors",
-        "tokenizer.json": fixture_card.parent / "tokenizer.json",
-    }
+    builds = dict(zip(("source", "archive", "mixed"), deployments, strict=True))
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
+        authored = ModelCard.parse(fixture_card.read_text()).document
+        lock = root / "asset.lock"
+        asset_lock = json.loads(
+            (fixture_card.parent / "native.card.json.lock").read_text()
+        )
+        lock.write_text(json.dumps(asset_lock | {"x-publication": "example"}))
         publication = root / "publication"
         publication.mkdir()
-        for index, deployment in enumerate(deployments):
-            directory = publication / str(index)
-            directory.mkdir()
+        for representation, deployment in builds.items():
+            directory = publication / representation
             card = deployment.parent / "model.json"
-            selected = ModelCard.parse(card.read_text()).select("check")
-            identities = []
-            for path, file in selected.files.items():
-                if path in runtime_files:
-                    # Runtime assets are deliberately absent from the build package.
-                    assert not (card.parent / path).exists(), path
-                    source = runtime_files[path]
-                else:
-                    source = card.parent / path
-                destination = directory / path
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(source, destination)
-                size, digest = file_digest(source)
-                identities.append(FileIdentity(file.origin, size, digest))
-            shutil.copyfile(card, directory / "model.json")
-            (directory / "model.json.lock").write_text(
-                json.dumps(ModelLock.snapshot({}, identities))
-            )
+            stage_release(card, directory, asset_lock=lock)
+            # The same separately published runtime assets serve every encoding.
+            for name in ("bias.data", "metadata.safetensors", "tokenizer.json"):
+                assert not (card.parent / name).exists(), name
+                shutil.copyfile(fixture_card.parent / name, directory / name)
+            selected = ModelCard.parse((directory / "model.json").read_text()).select()
+            compressed = [
+                file
+                for file in selected.files.values()
+                if file.transform and file.transform["kind"] == "xz"
+            ]
+            if representation != "source":
+                assert compressed, deployment
+            for file in compressed:
+                assert (directory / file.origin).is_file()
+                assert not (directory / file.path).exists()
 
         handler = functools.partial(
             http.server.SimpleHTTPRequestHandler, directory=str(publication)
         )
-        installations = []
+        installations = {}
         with http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler) as server:
             thread = threading.Thread(target=server.serve_forever)
             thread.start()
             try:
-                for index, deployment in enumerate(deployments):
-                    output = root / f"installed-{index}"
+                base = f"http://127.0.0.1:{server.server_port}"
+                for representation in builds:
+                    output = root / f"installed-{representation}"
                     subprocess.run(
                         [
                             str(fetch),
-                            f"http://127.0.0.1:{server.server_port}/{index}/model.json",
+                            f"{base}/{representation}/model.json",
                             "--preset=check",
                             "--output=" + str(output),
                             "--cache=" + str(root / "cache"),
                         ],
                         check=True,
                     )
-                    installations.append(output / "model.json")
+                    installations[representation] = output / "model.json"
             finally:
                 server.shutdown()
                 thread.join()
+        offline = root / "offline"
+        subprocess.run(
+            [
+                str(fetch),
+                f"{base}/archive/model.json",
+                "--offline",
+                "--output=" + str(offline),
+                "--cache=" + str(root / "cache"),
+            ],
+            check=True,
+        )
+        installations["archive"] = offline / "model.json"
         # Acquired files are sufficient after the publisher is gone, and all
         # representations reuse identical parameter bytes in the fetch cache.
-        assert (installations[0].parent / "bias.data").samefile(
-            installations[1].parent / "bias.data"
+        assert (installations["source"].parent / "bias.data").samefile(
+            installations["archive"].parent / "bias.data"
         )
-        for deployment in installations:
+        for representation, deployment in installations.items():
             selected = ModelCard.parse(deployment.read_text()).select()
+            assert selected.document.get("x-fixture") == authored.get("x-fixture")
+            installed_lock = json.loads(
+                deployment.with_name("model.json.lock").read_text()
+            )
+            assert installed_lock["x-publication"] == "example"
+            for file in selected.files.values():
+                if file.roles & {"program", "auxiliary"}:
+                    assert (deployment.parent / file.path).read_bytes() == (
+                        builds[representation].parent / file.path
+                    ).read_bytes(), file.path
             check_model(
                 server_tool,
                 deployment,

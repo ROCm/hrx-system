@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Loom model lock, version 1",
-  "description": "Complete output commitments, independent of destinations and model preset. For a transformed parameter file, size and SHA-256 identify the resulting archive, not the encoded parent source.",
+  "description": "Complete output commitments, independent of destinations and model preset. For a transformed file, size and SHA-256 identify its installed bytes.",
   "type": "object",
   "required": ["schema_version", "origins", "files"],
   "properties": {
@@ -15,11 +15,14 @@
         "required": ["requested"],
         "properties": {
           "requested": {"$ref": "model-card.v1.schema.json#/$defs/originRoot"},
-          "resolved": {"$ref": "#/$defs/resolved"}
+          "resolved": {"type": "object"}
         },
         "if": {"properties": {"requested": {"properties": {"kind": {"const": "hf"}}}}},
-        "then": {"required": ["resolved"]},
-        "else": {"not": {"required": ["resolved"]}},
+        "then": {"required": ["resolved"], "properties": {"resolved": {"$ref": "#/$defs/resolved"}}},
+        "else": {
+          "dependentSchemas": {"resolved": {"properties": {"requested": {"$ref": "model-card.v1.schema.json#/$defs/otherOrigin"}}}}
+        },
+        "patternProperties": {"^x-": {}},
         "additionalProperties": false
       }
     },
@@ -32,24 +35,27 @@
           "origin": {"$ref": "model-card.v1.schema.json#/$defs/fileOrigin"},
           "size": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615},
           "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-          "resolved": {"$ref": "#/$defs/resolved"},
+          "resolved": {"type": "object"},
           "transform": {"$ref": "model-card.v1.schema.json#/$defs/transform"}
         },
         "if": {"properties": {"origin": {"type": "object", "required": ["kind"], "properties": {"kind": {"const": "hf"}}}}},
-        "then": {"required": ["resolved"]},
-        "else": {"not": {"required": ["resolved"]}},
+        "then": {"required": ["resolved"], "properties": {"resolved": {"$ref": "#/$defs/resolved"}}},
+        "else": {
+          "dependentSchemas": {"resolved": {"properties": {"origin": {"$ref": "model-card.v1.schema.json#/$defs/otherOrigin"}}}}
+        },
+        "patternProperties": {"^x-": {}},
         "additionalProperties": false
       },
       "description": "One record per logical origin and optional transform. Aliased roots carry their repository resolution once. Updates replace the exact requested output set."
     }
   },
+  "patternProperties": {"^x-": {}},
   "additionalProperties": false,
   "$defs": {
     "resolved": {
       "type": "object",
       "required": ["revision"],
-      "properties": {"revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"}},
-      "additionalProperties": false
+      "properties": {"revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"}}
     }
   }
 }

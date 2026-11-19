@@ -7,6 +7,7 @@
 import base64
 import hashlib
 import http.server
+import lzma
 import os
 import subprocess
 import sys
@@ -59,6 +60,36 @@ def test_local_file_is_not_copied_into_another_cache(tmp_path):
     )
     assert acquired.path == source
     assert not cache.root.exists()
+
+
+@pytest.mark.parametrize(
+    "failure", ["truncated", "checksum", "padding", "overrun", "digest"]
+)
+def test_invalid_xz_never_publishes_decoded_bytes(tmp_path, failure):
+    raw = b"module" * 1000
+    frame = lzma.compress(raw)
+    length = len(raw)
+    digest = hashlib.sha256(raw).hexdigest()
+    if failure == "truncated":
+        frame = frame[:-1]
+    elif failure == "checksum":
+        frame = frame[:-9] + bytes([frame[-9] ^ 1]) + frame[-8:]
+    elif failure == "padding":
+        frame += b"\0"
+    elif failure == "overrun":
+        length -= 1
+    else:
+        digest = "0" * 64
+    source = _source(frame)
+    transform = {"kind": "xz", "version": 1}
+    identity = FileIdentity(source.origin, length, digest, transform=transform)
+    cache = ContentCache(tmp_path / "cache")
+    with pytest.raises((FetchError, ManifestError), match=r"XZ|lock"):
+        cache.acquire_transformed(
+            source, transform, identity, offline=True, preserve_sources=False
+        )
+    assert not (cache.root / "blob").exists()
+    assert not any((cache.root / "temporary").iterdir())
 
 
 @contextmanager

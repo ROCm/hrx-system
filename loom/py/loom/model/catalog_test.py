@@ -12,6 +12,7 @@ import pytest
 
 from loom.model import ManifestError, ModelCard
 from loom.model.catalog import ModelCatalog, generate
+from loom.model.catalog import main as generate_catalog
 from loom.model.fetch_publication import load_publication
 from loom.model.fetch_source import Document, FetchError, SourceNotFound
 from loom.model.fetch_storage import ContentCache
@@ -84,6 +85,37 @@ def test_catalog_owns_its_input_and_exposed_document():
         catalog.card_path("moonshine-ai/moonshine-streaming-tiny")
         == "model/moonshine/model.json"
     )
+
+
+def test_regenerating_catalog_retains_annotations_on_current_entries(tmp_path):
+    card = _card().document
+    card["model"]["x-label"] = ["speech"]
+    card["services"]["transcription"]["x-icon"] = "microphone"
+    identity = card["model"]["id"]
+    previous = _catalog()
+    previous["x-index"] = {"language": "en"}
+    entry = previous["models"][identity]
+    entry["x-rank"] = 1
+    entry["services"]["transcription"]["x-display"] = True
+    previous["models"]["removed"] = entry
+    index = tmp_path / "catalog.json"
+    index.write_text(json.dumps(previous))
+    path = tmp_path / "model.json"
+    path.write_text(json.dumps(card))
+    assert (
+        generate_catalog(["--card", f"model.json={path}", "--output", str(index)]) == 0
+    )
+    result = ModelCatalog.parse(index.read_text()).document
+    assert result["x-index"] == {"language": "en"}
+    assert set(result["models"]) == {identity}
+    entry = result["models"][identity]
+    assert entry["x-label"] == ["speech"]
+    assert entry["x-rank"] == 1
+    assert entry["services"]["transcription"] == {
+        "kind": "recognition",
+        "x-icon": "microphone",
+        "x-display": True,
+    }
 
 
 @pytest.mark.parametrize(

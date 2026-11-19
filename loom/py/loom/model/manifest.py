@@ -27,11 +27,39 @@ def _fail(path: str, message: str) -> None:
     raise ManifestError(f"{path}: {message}")
 
 
-def _object(value: Any, path: str, required=(), optional=()) -> dict:
+def project_fields(record: dict, fields=()) -> dict:
+    """Projects a typed portable record, forwarding its optional annotations."""
+    return {
+        key: value
+        for key, value in record.items()
+        if key in fields or key.startswith("x-")
+    }
+
+
+def operation_fields(value):
+    """Removes top-level annotations from a typed operation's semantic identity."""
+    if isinstance(value, dict):
+        return {key: item for key, item in value.items() if not key.startswith("x-")}
+    return value
+
+
+def file_key(origin: str | dict, transform: dict | None = None) -> str:
+    """Logical output identity, independent of placement, mirrors, and annotations."""
+    value = operation_fields(origin)
+    if transform is not None:
+        value = {"origin": value, "transform": operation_fields(transform)}
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+def _object(
+    value: Any, path: str, required=(), optional=(), *, extensions=True
+) -> dict:
     if not isinstance(value, dict):
         _fail(path, "expected an object")
     missing = set(required) - value.keys()
     unknown = value.keys() - set(required) - set(optional)
+    if extensions:
+        unknown = {key for key in unknown if not key.startswith("x-")}
     if missing:
         _fail(path, f"missing fields: {', '.join(sorted(missing))}")
     if unknown:
@@ -159,34 +187,26 @@ def _url(value: Any, path: str) -> None:
 
 def _origin_object(value: Any, path: str, *, root: bool) -> dict:
     _mapping(value, path)
-    kind = value.get("kind")
-    fields = {
-        "hf": (("kind", "repository"), ("revision",) if root else ("revision", "path")),
-        "url": (("kind", "url"), ()),
-        "local": (("kind", "path"), ()),
-    }
-    if not root:
-        fields["inline"] = (("kind", "base64"), ())
-    if not isinstance(kind, str) or kind not in fields:
-        _fail(path + ".kind", f"unsupported origin {kind!r}")
-    _object(value, path, *fields[kind])
+    kind = _string(value.get("kind"), path + ".kind")
     if kind == "hf":
-        _path(value["repository"], path + ".repository")
+        _path(value.get("repository"), path + ".repository")
         if "revision" in value:
             _string(value["revision"], path + ".revision")
         if not root:
             _path(value.get("path"), path + ".path")
     elif kind == "url":
-        _url(value["url"], path + ".url")
+        _url(value.get("url"), path + ".url")
         if root and urlsplit(value["url"]).query:
             _fail(path + ".url", "directory origins cannot contain a query")
     elif kind == "local":
         # Acquisition knows if host-local coordinates came from a local caller
         # or an untrusted remote document; parsing alone cannot authorize them.
-        _string(value["path"], path + ".path")
-    else:
+        _string(value.get("path"), path + ".path")
+    elif kind == "inline":
+        if root:
+            _fail(path + ".kind", "inline content cannot be a directory origin")
         try:
-            base64.b64decode(value["base64"], validate=True)
+            base64.b64decode(value.get("base64"), validate=True)
         except (TypeError, ValueError):
             _fail(path + ".base64", "invalid base64 content")
     return value
@@ -232,13 +252,14 @@ def _origin(value: Any, roots: dict, path: str, *, group: bool = False) -> None:
 
 
 def _transform(value: Any, path: str) -> dict:
-    _object(value, path, ("kind", "version"), ("alignment", "tensors"))
-    if (
-        value["kind"] != "safetensors"
-        or type(value["version"]) is not int
-        or value["version"] != 1
-    ):
-        _fail(path, "supported transform: safetensors version 1")
+    """Retains a versioned acquisition recipe, including opaque payload fields."""
+    _mapping(value, path)
+    kind = _string(value.get("kind"), path + ".kind")
+    version = value.get("version")
+    if type(version) is not int or version < 1:
+        _fail(path + ".version", "expected a positive integer")
+    if (kind, version) != ("safetensors", 1):
+        return value
     alignment = value.get("alignment", 8)
     if (
         type(alignment) is not int
@@ -246,7 +267,7 @@ def _transform(value: Any, path: str) -> dict:
         or alignment & (alignment - 1)
     ):
         _fail(path + ".alignment", "expected a power of two from 8 through 1048576")
-    result = {"kind": "safetensors", "version": 1, "alignment": alignment}
+    result = {**value, "alignment": alignment}
     if "tensors" in value:
         tensors = value["tensors"]
         if (
@@ -273,11 +294,9 @@ def _file(
         record,
         path,
         ("path",),
-        ("origin", "format", "options", "data")
+        ("origin", "format", "options", "data", "transform")
         if provider
-        else ("origin", "format", "transform")
-        if parameter
-        else ("origin", "format"),
+        else ("origin", "format", "transform"),
     )
     _path(record["path"], path + ".path")
     if "format" in record:
@@ -286,10 +305,14 @@ def _file(
         _origin(record["origin"], roots, path + ".origin")
     if "transform" in record:
         record["transform"] = _transform(record["transform"], path + ".transform")
-        if record.get("format") != "safetensors":
+        recipe = record["transform"]
+        if (recipe["kind"], recipe["version"]) == ("safetensors", 1) and (
+            not parameter or record.get("format") != "safetensors"
+        ):
             _fail(
                 path + ".format",
-                "safetensors transform requires explicit format 'safetensors'",
+                "safetensors transform requires a parameter "
+                "with explicit format 'safetensors'",
             )
     if provider:
         _strings(record.get("options", []), path + ".options")
@@ -731,14 +754,12 @@ class ModelCard:
             )
             if name in files:
                 previous = files[name]
-                if (
-                    previous.origin != candidate.origin
-                    or previous.transform != candidate.transform
-                    or (
-                        previous.format
-                        and candidate.format
-                        and previous.format != candidate.format
-                    )
+                if file_key(previous.origin, previous.transform) != file_key(
+                    candidate.origin, candidate.transform
+                ) or (
+                    previous.format
+                    and candidate.format
+                    and previous.format != candidate.format
                 ):
                     _fail("files." + name, "conflicting selected file declarations")
                 candidate = replace(
@@ -768,25 +789,20 @@ class ModelCard:
                     "files." + path,
                     "destination collides with another file's directory",
                 )
-        projected = {
-            key: copy.deepcopy(doc[key])
-            for key in ("$schema", "schema_version", "model", "origins")
-            if key in doc
-        }
+        projected = copy.deepcopy(
+            project_fields(doc, ("$schema", "schema_version", "model", "origins"))
+        )
         projected["programs"] = {programs: copy.deepcopy(program)}
         projected["services"] = {service: copy.deepcopy(service_definition)}
         projected_variant_service = copy.deepcopy(variant_service)
         projected_variant_service["programs"] = [programs]
-        projected_scope = {"services": {service: projected_variant_service}}
+        projected_scope = copy.deepcopy(project_fields(variant_scope, ("description",)))
+        projected_scope["services"] = {service: projected_variant_service}
         if partition is not None:
-            if "description" in variant_scope:
-                projected_scope["description"] = variant_scope["description"]
-            projected_scope = {"partitions": {partition: projected_scope}}
+            projected_scope = copy.deepcopy(
+                project_fields(doc["variants"][variant], ("description",))
+            ) | {"partitions": {partition: projected_scope}}
         projected["variants"] = {variant: projected_scope}
-        if "description" in doc["variants"][variant]:
-            projected["variants"][variant]["description"] = doc["variants"][variant][
-                "description"
-            ]
         settings = copy.deepcopy(settings)
         if any(
             settings.get(key, value) != value

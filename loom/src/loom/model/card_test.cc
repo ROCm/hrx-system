@@ -22,6 +22,8 @@ constexpr char kCard[] = R"json({
       "directory": "program",
       "inputs": ["program/prepare.loom", "program/control.loombc"],
       "libraries": [{"path": "program/library.data", "format": "loombc",
+                     "origin": "program/library.loombc.xz",
+                     "transform": {"kind": "xz", "version": 1},
                      "data": ["program/weights.loom"]}],
       "config": {"width": 4, "quantized": false}
     },
@@ -298,6 +300,25 @@ TEST_F(CardTest, UnknownRevisionFailsBeforeInterpretingNewFields) {
       Parse(Replace("\"schema_version\": 1",
                     "\"schema_version\": 2, \"future_field\": {}")));
   EXPECT_EQ(card_, nullptr);
+}
+
+TEST_F(CardTest, InstalledProvidersIgnoreAcquisitionInstructions) {
+  IREE_ASSERT_OK(Parse(
+      Replace(R"({"kind": "xz", "version": 1})",
+              R"({"kind": "vendor.unpack", "version": 6, "layout": [2, 1]})")));
+  EXPECT_EQ(String(loom_model_card_selection(card_)->selector.programs),
+            "mixed");
+}
+
+TEST_F(CardTest, OptionalRecordAnnotationsDoNotChangeSelection) {
+  IREE_ASSERT_OK(Parse(
+      Replace(R"("directory": "program")",
+              R"("x-publisher": {"ranks":[1,2]}, "directory": "program")")));
+  EXPECT_EQ(String(loom_model_card_selection(card_)->selector.programs),
+            "mixed");
+  IREE_ASSERT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      Parse(Replace(R"("directory": "program")", R"("direcotry": "program")")));
 }
 
 TEST_F(CardTest, CanonicalOptionsBelongToTheSelectedService) {

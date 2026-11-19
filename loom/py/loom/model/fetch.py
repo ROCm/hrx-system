@@ -36,8 +36,16 @@ from .fetch_storage import (
     ContentCache,
     atomic_write,
     installation_lock,
+    require_supported_transform,
 )
-from .lock import FileIdentity, ModelLock, file_digest, file_key, lock_files
+from .lock import (
+    FileIdentity,
+    ModelLock,
+    file_digest,
+    file_key,
+    lock_files,
+    require_supported_revision,
+)
 from .manifest import ManifestError, ModelCard, Selection, parse_json
 
 _RESERVED_PATHS = frozenset(
@@ -65,6 +73,8 @@ class FetchPlan:
     lock_scope: str
     # Explicit author's lock update destination; absent for ordinary acquisition.
     update_path: Path | None
+    # Source annotations carried by retained records when producing a lock.
+    previous_lock: ModelLock | None
     # Acquisition provenance for catalog or developer verification selections.
     provenance: dict | None = None
     # Parameter-only paths whose publisher byte expectations are explicitly skipped.
@@ -133,9 +143,11 @@ def plan_fetch(
             "--no-verify-parameters requires ordinary locked acquisition; "
             "it cannot be combined with --no-lock or --update-lock"
         )
-    for path in selection.files:
+    for path, file in selection.files.items():
         if PurePosixPath(path).parts[0] in _RESERVED_PATHS:
             raise ManifestError(f"reserved installation path {path!r}")
+        if file.transform is not None:
+            require_supported_transform(file.transform, path)
     location = (
         document_location(lock_location)
         if lock_location
@@ -166,8 +178,31 @@ def plan_fetch(
             root, offline=offline
         ),
     )
+    previous = lock
+    update_path = None
+    if update_lock:
+        if "://" in location:
+            if lock_location:
+                raise ManifestError(
+                    "--update-lock requires a local --lockfile destination"
+                )
+        else:
+            update_path = Path(location)
+            _check_lock_sources(
+                update_path,
+                document,
+                {},
+                local_inputs=(
+                    local
+                    for file in selection.files.values()
+                    if (local := resolver.local_file(file.origin)) is not None
+                ),
+            )
+            previous = _read_update_lock(
+                update_path, resolver.roots, _selected_lock_inputs(selection, scope)
+            )
     sources = {
-        path: resolver.resolve(file.origin, identities.get(path))
+        path: resolver.resolve(file.origin, identities.get(path), destination=path)
         for path, file in selection.files.items()
     }
     protected = {
@@ -197,16 +232,8 @@ def plan_fetch(
             if file.transform is not None
         },
     )
-    update_path = None
-    if update_lock:
-        if "://" in location:
-            if lock_location:
-                raise ManifestError(
-                    "--update-lock requires a local --lockfile destination"
-                )
-        else:
-            update_path = Path(location)
-            _check_lock_sources(update_path, document, sources)
+    if update_path:
+        _check_lock_sources(update_path, document, sources)
     return FetchPlan(
         document,
         selection,
@@ -217,6 +244,7 @@ def plan_fetch(
         "none" if no_lock else "update" if update_lock else "verify",
         scope,
         update_path,
+        previous,
         {
             "schema_version": 1,
             "card": {
@@ -256,6 +284,16 @@ class LockPlan:
     path: Path
     # Network prohibition retained across planning and acquisition.
     offline: bool
+
+    def read_previous_lock(self) -> ModelLock | None:
+        return _read_update_lock(
+            self.path,
+            {name: root["requested"] for name, root in self.origins.items()},
+            (
+                (self.paths[key], source.origin, self.transforms.get(key))
+                for key, source in self.sources.items()
+            ),
+        )
 
     def summary(self) -> dict:
         return {
@@ -310,7 +348,7 @@ def plan_lock(
             root, offline=offline
         ),
     )
-    sources = {}
+    files = {}
     paths = {}
     transforms = {}
     local_inputs = set()
@@ -324,15 +362,26 @@ def plan_lock(
                 local_inputs.add(local)
         for name, file in lock_files(selected, lock_scope).items():
             key = file_key(file.origin, file.transform)
-            if key not in sources:
-                sources[key] = resolver.resolve(file.origin, None)
+            if key not in files:
+                files[key] = file
                 paths[key] = name
                 if file.transform is not None:
+                    require_supported_transform(file.transform, name)
                     transforms[key] = file.transform
+    _check_lock_sources(path, document, {}, local_inputs=local_inputs)
+    _read_update_lock(
+        path,
+        resolver.roots,
+        ((paths[key], file.origin, file.transform) for key, file in files.items()),
+    )
+    sources = {
+        key: resolver.resolve(file.origin, None, destination=paths[key])
+        for key, file in files.items()
+    }
     sources = _prepare_sources(
         sources, {}, cache, offline=offline, transforms=transforms
     )
-    _check_lock_sources(path, document, sources, local_inputs=local_inputs)
+    _check_lock_sources(path, document, sources)
     return LockPlan(
         authored["model"]["id"],
         selections,
@@ -366,6 +415,34 @@ def _prepare_sources(
             if not path.is_file():
                 raise FetchError(f"local source is missing or not a file: {path}")
     return sources
+
+
+def _selected_lock_inputs(selection: Selection, scope: str):
+    return (
+        (name, file.origin, file.transform)
+        for name, file in lock_files(selection, scope).items()
+    )
+
+
+def _read_update_lock(
+    path: Path, origins: dict, files: Iterable[tuple[str, str | dict, dict | None]]
+) -> ModelLock | None:
+    """Reads the current lock and checks retained pins before an update."""
+    previous = ModelLock.read_if_present(path)
+    if previous is None:
+        return None
+    for name, origin, transform in files:
+        if isinstance(origin, str) and origin.startswith("@"):
+            alias = origin[1:].split("/", 1)[0]
+            requested = origins[alias]
+            if requested["kind"] == "hf" and (
+                old := previous.matching_root(alias, requested)
+            ):
+                require_supported_revision(old["resolved"], name)
+        elif isinstance(origin, dict) and origin["kind"] == "hf":
+            if old_file := previous.files.get(file_key(origin, transform)):
+                require_supported_revision(old_file.resolved, name)
+    return previous
 
 
 def _check_lock_sources(
@@ -463,6 +540,7 @@ def update_lock(
 ) -> Path:
     """Atomically replaces one scoped lock after all required source reads succeed."""
     with installation_lock(plan.path.parent):
+        previous = plan.read_previous_lock()
         acquired = _acquire_sources(
             plan.sources,
             {},
@@ -476,6 +554,7 @@ def update_lock(
             plan.origins,
             [item.identity for item in acquired.values()],
             scope=plan.scope,
+            previous=previous,
         )
         if cache.cancelled.is_set():
             raise FetchError("model acquisition cancelled")
@@ -491,6 +570,8 @@ def _installation_card(plan: FetchPlan) -> tuple[dict, dict[str, str | dict], di
     roots = {}
     for name, record in plan.origins.items():
         root = copy.deepcopy(record)
+        if plan.previous_lock:
+            root = plan.previous_lock.project_root(name, root)
         if root["requested"]["kind"] == "local":
             path = Path(root["requested"]["path"])
             if not path.is_absolute():
@@ -619,7 +700,7 @@ def _check_installation_lock(path: Path, document: dict) -> None:
         return
     actual = ModelLock.parse(path.read_text(encoding="utf-8"))
     canonical = ModelLock.snapshot(
-        actual.origins, list(actual.files.values()), scope=actual.scope
+        actual.origins, list(actual.files.values()), scope=actual.scope, previous=actual
     )
     if canonical != document:
         raise FetchError(
@@ -667,7 +748,13 @@ def _check_outputs(
             size, digest = file_digest(
                 destination, cancelled=cancelled, progress=counter
             )
-            identity = FileIdentity(source.origin, size, digest, source.resolved)
+            identity = FileIdentity(
+                source.origin,
+                size,
+                digest,
+                source.resolved,
+                plan.selection.files[name].transform,
+            )
         else:
             identity.verify(destination, cancelled=cancelled, progress=counter)
         present[name] = AcquiredFile(destination, identity)
@@ -679,6 +766,21 @@ def check_output(plan: FetchPlan, output: Path) -> None:
     card, relocated, roots = _installation_card(plan)
     _check_outputs(plan, output.absolute(), card)
     _check_lock_output(plan, output.absolute(), relocated, roots)
+
+
+def _installed_lock(
+    plan: FetchPlan, roots: dict, relocated: dict, identities: dict[str, FileIdentity]
+) -> dict:
+    return ModelLock.snapshot(
+        roots,
+        list(identities.values()),
+        scope=plan.lock_scope,
+        previous=plan.previous_lock,
+        relocated={
+            file_key(identity.origin, identity.transform): relocated[name]
+            for name, identity in identities.items()
+        },
+    )
 
 
 def _check_lock_output(plan: FetchPlan, directory: Path, relocated: dict, roots: dict):
@@ -695,14 +797,7 @@ def _check_lock_output(plan: FetchPlan, directory: Path, relocated: dict, roots:
             "an installation lock already exists; choose another output "
             "for --update-lock"
         )
-    expected = ModelLock.snapshot(
-        roots,
-        [
-            replace(identity, origin=relocated[name])
-            for name, identity in plan.identities.items()
-        ],
-        scope=plan.lock_scope,
-    )
+    expected = _installed_lock(plan, roots, relocated, plan.identities)
     _check_installation_lock(path, expected)
 
 
@@ -804,14 +899,25 @@ def install(
         )
     }
     directory = output.absolute()
-    card, relocated, roots = _installation_card(plan)
     if plan.update_path is not None:
         for name in (*plan.sources, *_RESERVED_PATHS):
             if plan.update_path == directory / name:
                 raise ManifestError(
                     "lock update destination overlaps installation content"
                 )
-    with installation_lock(directory):
+    with ExitStack() as locks:
+        locks.enter_context(installation_lock(directory))
+        if plan.update_path is not None:
+            parent = plan.update_path.parent
+            if parent.resolve() != directory.resolve():
+                locks.enter_context(installation_lock(parent))
+            previous = _read_update_lock(
+                plan.update_path,
+                plan.selection.document.get("origins", {}),
+                _selected_lock_inputs(plan.selection, plan.lock_scope),
+            )
+            plan = replace(plan, previous_lock=previous)
+        card, relocated, roots = _installation_card(plan)
         present = _check_outputs(
             plan, directory, card, cancelled=cache.cancelled, progress=cache.progress
         )
@@ -860,22 +966,15 @@ def install(
                 )
             },
         )
-        identities = [
-            replace(
-                acquired[
-                    file_key(source.origin, plan.selection.files[name].transform)
-                ].identity,
-                origin=relocated[name],
+        installation_lock_document = None
+        if plan.lock_mode != "none":
+            identities = {
+                name: acquired[file_key(file.origin, file.transform)].identity
+                for name, file in required.items()
+            }
+            installation_lock_document = _installed_lock(
+                plan, roots, relocated, identities
             )
-            for name, source in plan.sources.items()
-            if name in required
-        ]
-        installation_lock_document = (
-            ModelLock.snapshot(roots, identities, scope=plan.lock_scope)
-            if plan.lock_mode != "none"
-            else None
-        )
-        if installation_lock_document is not None:
             _check_installation_lock(
                 directory / "model.json.lock", installation_lock_document
             )
@@ -945,11 +1044,9 @@ def install(
             if plan.update_path is not None:
                 document = ModelLock.snapshot(
                     plan.origins,
-                    [
-                        acquired[file_key(file.origin, file.transform)].identity
-                        for file in required.values()
-                    ],
+                    list(identities.values()),
                     scope=plan.lock_scope,
+                    previous=plan.previous_lock,
                 )
                 atomic_write(
                     plan.update_path,

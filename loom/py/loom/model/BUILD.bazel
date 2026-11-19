@@ -64,6 +64,22 @@ iree_py_binary(
 )
 
 iree_py_library(
+    name = "release",
+    srcs = ["release.py"],
+    deps = [
+        ":lock",
+        ":manifest",
+    ],
+)
+
+iree_py_binary(
+    name = "release_stage",
+    srcs = ["release.py"],
+    main = "release.py",
+    deps = [":release"],
+)
+
+iree_py_library(
     name = "fetch_reference",
     srcs = ["fetch_reference.py"],
     deps = [
@@ -249,6 +265,15 @@ iree_py_test(
 )
 
 iree_py_library(
+    name = "fetch_xz",
+    srcs = ["fetch_xz.py"],
+    deps = [
+        ":fetch_progress",
+        ":fetch_source",
+    ],
+)
+
+iree_py_library(
     name = "fetch_storage",
     srcs = ["fetch_storage.py"],
     deps = [
@@ -258,6 +283,7 @@ iree_py_library(
         ":fetch_safetensors",
         ":fetch_source",
         ":fetch_transfer",
+        ":fetch_xz",
         ":lock",
         ":manifest",
     ],
