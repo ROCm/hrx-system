@@ -1818,8 +1818,15 @@ class Translator final : private Initialization::Evaluation,
         references_.emplace(variable, std::move(target));
         return;
       }
+      // A conditional may produce its address inside either arm. Other
+      // initializers already give us the caller's evaluated lvalue, including
+      // an ordinal selecting between an automatic object and external memory.
+      const bool stored_conditional =
+          cxx::ast_cast<cxx::ConditionalExpressionAST>(
+              unwrap_object_identity(unit_, referent_expression)) &&
+          control_->reference_requires_storage(variable);
       auto target =
-          control_->reference_requires_storage(variable)
+          stored_conditional
               ? Lvalue{ObjectLvalue{
                     referent,
                     storage_.project(
@@ -2487,17 +2494,7 @@ class Translator final : private Initialization::Evaluation,
       }
       if (auto found = references_.find(id->symbol);
           found != references_.end()) {
-        const auto* object =
-            std::get_if<ObjectLvalue>(&found->second.projection);
-        auto* projection =
-            object ? std::get_if<StorageProjection>(&object->location)
-                   : nullptr;
-        if (!projection) {
-          fail(ast,
-               "reference identity escaped an automatic value without "
-               "addressable storage");
-        }
-        return *projection;
+        return reference_address(found->second, ast);
       }
       if (auto found = locals_.find(id->symbol); found != locals_.end()) {
         return storage_.project(found->second.pointer, id->type, id);

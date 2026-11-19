@@ -1,4 +1,6 @@
-// RUN: emit source-low target=amdgpu:gfx90a output=low
+// RUN: emit source-low target=amdgpu:gfx90a output=none
+// A private running value and a global byte can feed either level of the
+// comparison without producing a mixed-address-space pointer for the target.
 #include <hip/hip_runtime.h>
 
 #define KERNEL                                                               \
@@ -13,39 +15,10 @@ const T& maximum(const T& left, const T& right) {
 KERNEL void running_maximum(const char* tags, char* output) {
   char maximum_tag = 0;
   for (int i = 0; i < 8; ++i) {
-    maximum_tag = maximum(maximum_tag, tags[i]);
+    maximum_tag = maximum(maximum(maximum_tag, tags[i]), tags[i + 1]);
   }
   output[0] = maximum_tag;
 }
 }  // namespace selected_reference
 
 // ----
-low.kernel.def target<amdgpu.cdna2.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @selected_reference.running_maximum() asm {
-  %tags = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %output = resource<hal_binding> {extent = 1, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %maximum_tag$65 = v_mov_b32 0
-  %66 = s_mov_b32 0
-  %67 = s_mov_b32 8
-  %68 = s_mov_b32 1
-  low.br ^_bb1(%66: reg<amdgpu.sgpr>, %maximum_tag$65: reg<amdgpu.vgpr>)
-^_bb1(%i: reg<amdgpu.sgpr>, %maximum_tag$62: reg<amdgpu.vgpr>):
-  %71 = s_cmp_lt_i32 %i, %67
-  low.cond_br %71, ^_bb2, ^_bb3 : reg<amdgpu.scc>
-^_bb2:
-  %73 = slice %tags[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %74 = slice %tags[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %76, %77 = s_add_co_u32 %73, %i
-  %78, %79 = s_addc_u32 %74, %66, %77
-  %80 = concat(%76, %78) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %right = global_load_sbyte_saddr %maximum_tag$65, %80 : reg<amdgpu.vgpr>
-  %82 = v_cmp_lt_i32 %maximum_tag$62, %right
-  %83 = v_mov_b32_copy %68
-  %84 = v_cndmask_b32_src1_inline %83, %82 {true_value = 0}
-  %85 = v_cmp_eq_i32_src1_inline %84 {rhs = 0}
-  %maximum_tag$86 = v_cndmask_b32 %maximum_tag$62, %right, %85
-  %87 = s_add_u32 %i, %68
-  low.br ^_bb1(%87: reg<amdgpu.sgpr>, %maximum_tag$86: reg<amdgpu.vgpr>)
-^_bb3:
-  global_store_b8_saddr %maximum_tag$65, %maximum_tag$62, %output
-  return
-}

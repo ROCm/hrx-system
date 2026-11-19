@@ -4,7 +4,7 @@
 using Values = loom::type::view<loom::type::shape<4>, unsigned>;
 
 void retain(Values values) {
-  // ERROR@+1: LOWERING/059 "view elements have no source address or reference identity"
+  // ERROR@+1: LOWERING/059 "view element references are immediate and cannot escape their read or write"
   auto& element = values[0];
   (void)element;
 }

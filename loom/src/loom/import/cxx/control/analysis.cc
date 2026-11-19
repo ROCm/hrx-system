@@ -147,6 +147,9 @@ struct ControlFlow::ProjectedReferenceReturnFacts {
   std::vector<bool> parameter_has_origin;
   // Parameters with a candidate smaller than their storage ABI carrier.
   std::unordered_set<cxx::Symbol*> partial_parameter_origins;
+  // All discovered origins are complete caller arguments. Survives disposal
+  // of the per-parameter origin index after the call graph converges.
+  bool only_whole_parameters = true;
   // Whether a result candidate is smaller than the storage receiver.
   bool has_partial_receiver_origin = false;
   // Whether every origin must use durable pointer transport.
@@ -423,6 +426,11 @@ std::optional<size_t> ControlFlow::reference_return_parameter() const {
              : std::nullopt;
 }
 
+bool ControlFlow::selects_whole_parameters() const {
+  const auto* facts = projected_reference_return_facts_.get();
+  return facts && facts->only_whole_parameters && !facts->requires_storage;
+}
+
 std::span<const ReferenceResultOrigin>
 ControlFlow::projected_reference_return_origins(bool value_receiver) const {
   if (reference_return_ != ReferenceReturn::Projected ||
@@ -693,6 +701,7 @@ std::pair<size_t, bool> ControlFlow::retain_projected_reference_origin(
       promote_projected_reference_storage(facts);
     }
     if (retained.owner_ordinal == ReferenceResultOrigin::kReceiver) {
+      facts.only_whole_parameters = false;
       const bool partial = retained.projection.component_offset != 0 ||
                            retained.projection.partition != receiver_partition_;
       facts.has_partial_receiver_origin |= partial;
@@ -712,6 +721,7 @@ std::pair<size_t, bool> ControlFlow::retain_projected_reference_origin(
           retained.projection.partition !=
               &types_.partition(type, function_->declaration());
       if (partial) {
+        facts.only_whole_parameters = false;
         facts.partial_parameter_origins.insert(parameter);
       }
       if (facts.requires_storage) {
@@ -4364,13 +4374,14 @@ CallPropagation ControlFlow::propagate_call(
     caller_changed = record_memory_write() || caller_changed;
   }
   // Value transport snapshots a reference at the call boundary. A write can
-  // change it through another alias; a returned reference can expose a stored
-  // subobject whose identity must survive the call. Other identity and volatile
-  // demands still select storage independently below.
+  // change it through another alias. Untracked return origins also need their
+  // address. A whole-parameter selector returns an ordinal to the caller,
+  // which already holds the original lvalues.
   const bool observes_reference_storage =
       callee.writes_memory_ || !callee.written_indirect_parameters_.empty() ||
       stored_receiver_write ||
-      callee.reference_return_ != ReferenceReturn::None;
+      (callee.reference_return_ != ReferenceReturn::None &&
+       !callee.selects_whole_parameters());
   if (object_identity_ && callee.object_identity_ &&
       (object_requires_storage(call.source) ||
        callee.result_requires_storage())) {

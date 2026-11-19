@@ -435,31 +435,31 @@ float projected_pointer(float* input) { return read(Owner{input}[0]); }
 
 // ----
 func.def public @forwarded_pointer(%choose: i1, %first: buffer, %first_byte_offset: index, %second: buffer, %second_byte_offset: index) -> (f32) {
-  %68 = index.constant 4 : index
-  %10 = index.add %first_byte_offset, %68 : index
-  %67 = index.constant 8 : index
-  %15 = index.add %second_byte_offset, %67 : index
-  %16 = func.call pure @select(%choose, %first, %10, %second, %15) : (i1, buffer, index, buffer, index) -> (i32)
+  %64 = index.constant 4 : index
+  %10 = index.add %first_byte_offset, %64 : index
+  %63 = index.constant 8 : index
+  %15 = index.add %second_byte_offset, %63 : index
+  %16 = func.call pure @select(%choose) : (i1) -> (i32)
   %17 = scalar.constant 0 : i32
   %18 = scalar.cmpi eq, %16, %17 : i32
-  %69 = scf.select %18, %first, %second : buffer
-  %70 = scf.select %18, %10, %15 : index
-  %21 = buffer.view %69[%70] : buffer -> view<1xf32>
+  %65 = scf.select %18, %first, %second : buffer
+  %66 = scf.select %18, %10, %15 : index
+  %21 = buffer.view %65[%66] : buffer -> view<1xf32>
   %22 = view.load<root_in_bounds|type_disjoint> %21[0] : view<1xf32> -> f32
   func.return %22 : f32
 }
 
 func.def public @nested_pointer(%choose: i1, %first: buffer, %first_byte_offset: index, %second: buffer, %second_byte_offset: index) -> (f32) {
-  %72 = index.constant 4 : index
-  %33 = index.add %first_byte_offset, %72 : index
-  %71 = index.constant 8 : index
-  %38 = index.add %second_byte_offset, %71 : index
-  %39 = func.call pure @select(%choose, %first, %33, %second, %38) : (i1, buffer, index, buffer, index) -> (i32)
+  %68 = index.constant 4 : index
+  %33 = index.add %first_byte_offset, %68 : index
+  %67 = index.constant 8 : index
+  %38 = index.add %second_byte_offset, %67 : index
+  %39 = func.call pure @select(%choose) : (i1) -> (i32)
   %40 = scalar.constant 0 : i32
   %41 = scalar.cmpi eq, %39, %40 : i32
-  %73 = scf.select %41, %first, %second : buffer
-  %74 = scf.select %41, %33, %38 : index
-  %44 = func.call readonly @read(%73, %74) : (buffer, index) -> (f32)
+  %69 = scf.select %41, %first, %second : buffer
+  %70 = scf.select %41, %33, %38 : index
+  %44 = func.call readonly @read(%69, %70) : (buffer, index) -> (f32)
   func.return %44 : f32
 }
 
@@ -468,19 +468,19 @@ func.def public @projected_pointer(%input: buffer, %input_byte_offset: index) ->
   func.return %49 : f32
 }
 
-func.def @select(%choose: i1, %first: buffer, %first_byte_offset: index, %second: buffer, %second_byte_offset: index) -> (i32) {
-  %56 = scalar.constant 0 : i32
-  %57 = scalar.constant 1 : i32
-  %75 = scf.select %choose, %56, %57 : i32
-  func.return %75 : i32
+func.def @select(%choose: i1) -> (i32) {
+  %52 = scalar.constant 0 : i32
+  %53 = scalar.constant 1 : i32
+  %71 = scf.select %choose, %52, %53 : i32
+  func.return %71 : i32
 }
 
 func.def @read(%pointer: buffer, %pointer_byte_offset: index) -> (f32) {
-  %62 = buffer.view %pointer[%pointer_byte_offset] : buffer -> view<1xf32>
-  %63 = view.load<root_in_bounds|type_disjoint> %62[0] : view<1xf32> -> f32
-  func.return %63 : f32
+  %58 = buffer.view %pointer[%pointer_byte_offset] : buffer -> view<1xf32>
+  %59 = view.load<root_in_bounds|type_disjoint> %58[0] : view<1xf32> -> f32
+  func.return %59 : f32
 }
 
-func.def @Owner__operator_subscript_value(%this_pointer: buffer, %this_pointer_byte_offset: index, %66: i32) {
+func.def @Owner__operator_subscript_value(%this_pointer: buffer, %this_pointer_byte_offset: index, %62: i32) {
   func.return
 }

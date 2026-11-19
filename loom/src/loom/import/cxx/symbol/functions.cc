@@ -623,15 +623,19 @@ void Functions::analyze(Types& types) {
     }
     propagate_calls();
   }
+  auto needs_complete_reference_inputs = [&](cxx::FunctionSymbol* function,
+                                             const ControlFlow& analysis) {
+    auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
+    return (unit_.typeTraits().is_reference(signature->returnType()) ||
+            !analysis.projected_reference_return_origins(true).empty()) &&
+           !analysis.selects_whole_parameters();
+  };
   for (const auto& [canonical, analysis] : analyzed_functions) {
     auto* function = definition(canonical);
-    auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
-    const bool whole =
-        exported_.contains(function) ||
-        function_contracts_.has_predicates(function) ||
-        template_definitions_.lookup(function) ||
-        unit_.typeTraits().is_reference(signature->returnType()) ||
-        !analysis->projected_reference_return_origins(true).empty();
+    const bool whole = exported_.contains(function) ||
+                       function_contracts_.has_predicates(function) ||
+                       template_definitions_.lookup(function) ||
+                       needs_complete_reference_inputs(function, *analysis);
     const bool receiver_storage = receiver_requires_storage(function);
     analysis->configure_receiver(
         receiver_storage ? Construction::ParameterMode::Storage
@@ -690,9 +694,7 @@ void Functions::analyze(Types& types) {
                                  function_contracts_.has_predicates(function) ||
                                  template_definitions_.lookup(function);
     const bool whole =
-        fixed_signature ||
-        unit_.typeTraits().is_reference(signature->returnType()) ||
-        !analysis->projected_reference_return_origins(true).empty();
+        fixed_signature || needs_complete_reference_inputs(function, *analysis);
     for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
       auto* parameter = parameters[ordinal];
       if (unit_.typeTraits().is_class(parameter->type()) &&
