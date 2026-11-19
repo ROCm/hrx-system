@@ -889,16 +889,6 @@ static uint32_t loom_serve_text_reserve_recurrent(
   return slot;
 }
 
-// Reverses tentative acquisition order, preserving the free-ID stack on a
-// denied request as well as the selected owners and their logical maps.
-static void loom_serve_text_release_reverse(loom_runtime_block_pool_t* pool,
-                                            uint32_t count,
-                                            const uint32_t* blocks) {
-  while (count) {
-    loom_runtime_block_pool_release(pool, 1, &blocks[--count]);
-  }
-}
-
 iree_status_t loom_serve_text_state_row_prepare_reserve(
     loom_serve_text_state_row_t* row, loom_serve_text_reserve_mode_t mode,
     loom_serve_text_state_checkpoint_t* checkpoint, iree_host_size_t extent,
@@ -1351,7 +1341,7 @@ void loom_serve_text_state_reservation_free(
       loom_runtime_block_pool_release(&state->recurrent.pool, 1,
                                       &reservation->reader);
     }
-    loom_serve_text_release_reverse(&state->cache.pool,
+    loom_runtime_block_pool_release(&state->cache.pool,
                                     owned_count - owned_prefix,
                                     reservation->blocks + owned_prefix);
     if (reservation->tail != UINT32_MAX) {
@@ -1359,14 +1349,21 @@ void loom_serve_text_state_reservation_free(
                                       &reservation->blocks[owned_prefix - 1]);
       reservation->blocks[owned_prefix - 1] = reservation->tail;
     }
-    loom_serve_text_release_reverse(&state->cache.pool, owned_prefix,
+    loom_runtime_block_pool_release(&state->cache.pool, owned_prefix,
                                     reservation->blocks);
     if (iree_any_bit_set(reservation->flags,
                          LOOM_SERVE_TEXT_RESERVATION_COLD)) {
       loom_runtime_block_pool_release(&state->recurrent.pool, 1,
                                       &reservation->restored.recurrent_slot);
-      loom_serve_text_release_reverse(&state->cache.pool, reservation->prefix,
+      loom_runtime_block_pool_release(&state->cache.pool, reservation->prefix,
                                       reservation->restored.blocks);
+    }
+    // The plan returned logical IDs. Only a model with existing or incoming
+    // backing can owe physical releases, including for partially backed IDs.
+    if (state->memory.index && !state->memory.statistics.committed_bytes &&
+        !state->memory.statistics.pending_bytes) {
+      loom_runtime_block_pool_acknowledge_releases(&state->cache.pool);
+      loom_runtime_block_pool_acknowledge_releases(&state->recurrent.pool);
     }
   }
   iree_allocator_free(state->host_allocator, reservation->requirements);

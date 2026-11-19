@@ -545,9 +545,46 @@ void loom_runtime_memory_pool_set_reclaimer(
 iree_status_t loom_runtime_memory_pool_prepare(
     loom_runtime_memory_pool_t* pool, loom_runtime_memory_demand_t additional,
     loom_runtime_memory_admission_t* out_admission) {
+  return loom_runtime_memory_pool_prepare_working_set(
+      pool, additional, (loom_runtime_memory_headroom_t){0}, out_admission);
+}
+
+static loom_runtime_memory_demand_t loom_runtime_memory_working_demand(
+    const loom_runtime_memory_pool_t* pool, loom_runtime_memory_demand_t demand,
+    loom_runtime_memory_headroom_t headroom) {
+  if (headroom.source) {
+    const uint64_t backed = headroom.source->committed_bytes +
+                            headroom.source->pending_bytes -
+                            headroom.source->releasing_bytes;
+    if (backed < headroom.minimum_bytes) {
+      const uint64_t missing = headroom.minimum_bytes - backed;
+      demand.packed_bytes += missing;
+      demand.packed_count +=
+          1 + (missing - 1) / pool->packed_request.allocation_size;
+    }
+  }
+  return demand;
+}
+
+bool loom_runtime_memory_pool_has_headroom(
+    const loom_runtime_memory_pool_t* pool,
+    loom_runtime_memory_headroom_t headroom) {
+  const loom_runtime_memory_demand_t demand =
+      loom_runtime_memory_working_demand(
+          pool, (loom_runtime_memory_demand_t){0}, headroom);
+  return !demand.packed_count || loom_runtime_memory_pool_projected_bytes(
+                                     pool, demand) <= pool->limit_bytes;
+}
+
+iree_status_t loom_runtime_memory_pool_prepare_working_set(
+    loom_runtime_memory_pool_t* pool, loom_runtime_memory_demand_t immediate,
+    loom_runtime_memory_headroom_t headroom,
+    loom_runtime_memory_admission_t* out_admission) {
   *out_admission = LOOM_RUNTIME_MEMORY_ADMISSION_CAPACITY;
   loom_runtime_memory_pool_collect(pool);
   IREE_RETURN_IF_ERROR(iree_status_clone(pool->failure));
+  loom_runtime_memory_demand_t additional =
+      loom_runtime_memory_working_demand(pool, immediate, headroom);
   const uint64_t additional_bytes =
       loom_runtime_memory_demand_total(additional);
   if (!additional_bytes) {
@@ -581,6 +618,9 @@ iree_status_t loom_runtime_memory_pool_prepare(
     }
     loom_runtime_memory_pool_collect(pool);
     IREE_RETURN_IF_ERROR(iree_status_clone(pool->failure));
+    // Returned workspace pages can serve the immediate cohort or its later
+    // workspace, once. Reprice both against the same post-reclaim inventory.
+    additional = loom_runtime_memory_working_demand(pool, immediate, headroom);
   }
   // Another class's idle bytes cannot satisfy this demand. Return them without
   // joining unrelated acquisitions; their native disposal must finish before
@@ -1749,7 +1789,8 @@ iree_status_t loom_runtime_memory_pool_cancel_commit(
 
 iree_status_t loom_runtime_memory_pool_commit_prepared_async(
     loom_runtime_memory_pool_t* pool, loom_runtime_memory_commit_t* commit,
-    loom_runtime_memory_demand_t immediate, iree_hal_semaphore_t* readiness,
+    loom_runtime_memory_demand_t immediate,
+    loom_runtime_memory_headroom_t headroom, iree_hal_semaphore_t* readiness,
     uint64_t value, loom_runtime_memory_admission_t* out_admission,
     loom_runtime_memory_operation_t** out_operation) {
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -1760,8 +1801,8 @@ iree_status_t loom_runtime_memory_pool_commit_prepared_async(
   loom_runtime_memory_demand_add(&demand, immediate);
   loom_runtime_memory_admission_t admission =
       LOOM_RUNTIME_MEMORY_ADMISSION_CAPACITY;
-  iree_status_t status =
-      loom_runtime_memory_pool_prepare(pool, demand, &admission);
+  iree_status_t status = loom_runtime_memory_pool_prepare_working_set(
+      pool, demand, headroom, &admission);
   const bool admitted = admission == LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE;
   loom_runtime_memory_operation_t* operation = NULL;
   if (iree_status_is_ok(status) && admitted && commit->mapping_count) {
@@ -1805,8 +1846,9 @@ iree_status_t loom_runtime_memory_pool_commit_async(
     return iree_ok_status();
   }
   return loom_runtime_memory_pool_commit_prepared_async(
-      pool, &commit, (loom_runtime_memory_demand_t){0}, readiness, value,
-      out_admission, out_operation);
+      pool, &commit, (loom_runtime_memory_demand_t){0},
+      (loom_runtime_memory_headroom_t){0}, readiness, value, out_admission,
+      out_operation);
 }
 
 iree_status_t loom_runtime_memory_pool_trim_async(

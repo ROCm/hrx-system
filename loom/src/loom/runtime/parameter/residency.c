@@ -770,11 +770,11 @@ static iree_status_t loom_runtime_residency_reclaim(void* user_data,
   return iree_ok_status();
 }
 
-static uint64_t loom_runtime_residency_workspace_footprint(
+static loom_runtime_memory_headroom_t loom_runtime_residency_workspace_headroom(
     const loom_runtime_residency_cache_t* cache, uint64_t byte_length) {
   return cache->workspace
-             ? loom_runtime_workspace_round_size(cache->workspace, byte_length)
-             : byte_length;
+             ? loom_runtime_workspace_headroom(cache->workspace, byte_length)
+             : (loom_runtime_memory_headroom_t){.minimum_bytes = byte_length};
 }
 
 static uint64_t loom_runtime_residency_activation_workspace(
@@ -914,8 +914,9 @@ iree_status_t loom_runtime_residency_allocate(
         remaining -= required;
       }
     }
-    if (loom_runtime_residency_workspace_footprint(
-            cache, staging_capacity - remaining) > staging_capacity) {
+    if (loom_runtime_residency_workspace_headroom(cache,
+                                                  staging_capacity - remaining)
+            .minimum_bytes > staging_capacity) {
       return iree_make_status(
           IREE_STATUS_RESOURCE_EXHAUSTED,
           "model activation staging slabs exceed the serving memory limit");
@@ -1030,9 +1031,10 @@ uint64_t loom_runtime_residency_activation_footprint(
     const loom_runtime_residency_group_t* group = residency->entries[i].group;
     bytes += loom_runtime_residency_group_statistics(group).reserved_bytes;
   }
-  return bytes + loom_runtime_residency_workspace_footprint(
+  return bytes + loom_runtime_residency_workspace_headroom(
                      residency->cache,
-                     loom_runtime_residency_activation_workspace(residency));
+                     loom_runtime_residency_activation_workspace(residency))
+                     .minimum_bytes;
 }
 
 iree_status_t loom_runtime_residency_check_working_set(
@@ -1061,9 +1063,9 @@ iree_status_t loom_runtime_residency_check_working_set(
     }
     remaining -= extents[i];
   }
-  if (loom_runtime_residency_workspace_footprint(
-          residency->cache, workspace_capacity - remaining) >
-      workspace_capacity) {
+  if (loom_runtime_residency_workspace_headroom(residency->cache,
+                                                workspace_capacity - remaining)
+          .minimum_bytes > workspace_capacity) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         "model invocation workspace slabs exceed the serving memory limit of "
@@ -1175,8 +1177,8 @@ static bool loom_runtime_residency_can_wait_for_consumers(
                                           residency->private_bytes,
                                           residency->output_bytes) +
       residency->output_bytes;
-  if (loom_runtime_residency_workspace_footprint(cache, workspace_bytes) >
-      capacity) {
+  if (loom_runtime_residency_workspace_headroom(cache, workspace_bytes)
+          .minimum_bytes > capacity) {
     return false;
   }
   if (loom_runtime_residency_cache_is_pending(cache)) {
@@ -1191,15 +1193,23 @@ static bool loom_runtime_residency_can_wait_for_consumers(
   return false;
 }
 
+typedef struct loom_runtime_residency_budget_t {
+  // Mutable ownership retained across this request and its peers.
+  uint64_t resident_bytes;
+  // Capacity left for mutable state after protecting parameters and workspace.
+  uint64_t state_capacity;
+  // Aggregate command peak, including workspace already backed by the pool.
+  loom_runtime_memory_headroom_t workspace;
+} loom_runtime_residency_budget_t;
+
 // Forecast against service-owned requirements and live reservation accounting.
 // Unpinned weight groups are reclaimable; shared pinned groups count once.
 // Native allocator availability and idle slab caches are not scheduling inputs.
 static bool loom_runtime_residency_state_budget(
     const loom_runtime_residency_t* residency, uint64_t private_bytes,
-    uint64_t* out_resident_bytes, uint64_t* out_capacity) {
+    loom_runtime_residency_budget_t* out_budget) {
   loom_runtime_residency_cache_t* cache = residency->cache;
-  *out_resident_bytes = 0;
-  *out_capacity = UINT64_MAX;
+  *out_budget = (loom_runtime_residency_budget_t){.state_capacity = UINT64_MAX};
   if (!cache->pool) {
     return true;
   }
@@ -1213,7 +1223,7 @@ static bool loom_runtime_residency_state_budget(
   // the same serialized owner snapshot, including pending range commitments.
   // Workspace backing already fulfills the private/output bounds below; it
   // must not be charged a second time as model-owned mutable state.
-  *out_resident_bytes =
+  out_budget->resident_bytes =
       loom_runtime_residency_mutable_bytes(cache, parameter_bytes);
   const uint64_t workspace_capacity = remaining;
   iree_slim_mutex_lock(&cache->observer_mutex);
@@ -1243,25 +1253,32 @@ static bool loom_runtime_residency_state_budget(
   remaining -= output;
   // Logical peers can pack into the same slab; round their aggregate once.
   // Even a small cold request needs a complete slab before its queue can run.
-  const uint64_t workspace_bytes = loom_runtime_residency_workspace_footprint(
+  out_budget->workspace = loom_runtime_residency_workspace_headroom(
       cache, workspace_capacity - remaining);
+  const uint64_t workspace_bytes = out_budget->workspace.minimum_bytes;
   if (workspace_bytes > workspace_capacity) {
     return false;
   }
-  *out_capacity = workspace_capacity - workspace_bytes;
+  out_budget->state_capacity = workspace_capacity - workspace_bytes;
   return true;
 }
 
 static bool loom_runtime_residency_fits(
     const loom_runtime_residency_t* residency, uint64_t additional_state,
-    uint64_t private_bytes) {
-  uint64_t resident_bytes = 0, capacity = 0;
-  if (!loom_runtime_residency_state_budget(residency, private_bytes,
-                                           &resident_bytes, &capacity) ||
-      additional_state > capacity) {
-    return false;
-  }
-  return resident_bytes <= capacity - additional_state;
+    uint64_t private_bytes, loom_runtime_residency_budget_t* out_budget) {
+  return loom_runtime_residency_state_budget(residency, private_bytes,
+                                             out_budget) &&
+         additional_state <= out_budget->state_capacity &&
+         out_budget->resident_bytes <=
+             out_budget->state_capacity - additional_state;
+}
+
+static bool loom_runtime_residency_private_peak_fits(
+    const loom_runtime_residency_t* residency, uint64_t private_bytes) {
+  loom_runtime_residency_budget_t budget;
+  return loom_runtime_residency_fits(residency, 0, private_bytes, &budget) &&
+         loom_runtime_memory_pool_has_headroom(residency->cache->pool,
+                                               budget.workspace);
 }
 
 iree_status_t loom_runtime_residency_check_private_peak(
@@ -1276,12 +1293,12 @@ iree_status_t loom_runtime_residency_check_private_peak(
   IREE_RETURN_IF_ERROR(loom_runtime_residency_check_working_set(
       residency, IREE_ARRAYSIZE(extents), extents));
   if (residency->pin_count && private_bytes > residency->private_bytes &&
-      !loom_runtime_residency_fits(residency, 0, private_bytes)) {
+      !loom_runtime_residency_private_peak_fits(residency, private_bytes)) {
     // Completed failures may still be charged. Refresh only under pressure;
     // replacing workspace never requests logical history eviction.
     IREE_RETURN_IF_ERROR(
         loom_runtime_memory_pool_query_status(residency->cache->pool));
-    if (!loom_runtime_residency_fits(residency, 0, private_bytes)) {
+    if (!loom_runtime_residency_private_peak_fits(residency, private_bytes)) {
       return iree_make_status(
           IREE_STATUS_RESOURCE_EXHAUSTED,
           "replacement command workspace exceeds available serving capacity");
@@ -1314,17 +1331,22 @@ typedef struct loom_runtime_residency_state_t {
   loom_runtime_memory_operation_t** operation;
 } loom_runtime_residency_state_t;
 
-static iree_status_t loom_runtime_residency_commit_state(
+static iree_status_t loom_runtime_residency_prepare_backing(
     loom_runtime_residency_t* residency, loom_runtime_residency_state_t* state,
     loom_runtime_memory_demand_t immediate,
+    loom_runtime_memory_headroom_t headroom,
     loom_runtime_memory_admission_t* out_admission) {
   *out_admission = LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE;
   if (!residency->cache->pool) {
     return iree_ok_status();
   }
+  if (!state) {
+    return loom_runtime_memory_pool_prepare_working_set(
+        residency->cache->pool, immediate, headroom, out_admission);
+  }
   return loom_runtime_memory_pool_commit_prepared_async(
-      residency->cache->pool, &state->prepared, immediate, state->readiness,
-      state->value, out_admission, state->operation);
+      residency->cache->pool, &state->prepared, immediate, headroom,
+      state->readiness, state->value, out_admission, state->operation);
 }
 
 // A cold necessary bound, not a reservation or a claim that compaction will
@@ -1334,18 +1356,19 @@ static iree_status_t loom_runtime_residency_request_history(
     loom_runtime_residency_t* residency,
     const loom_runtime_residency_state_t* state, uint64_t additional_state,
     loom_runtime_residency_admission_t* out_admission) {
-  uint64_t resident_bytes = 0, capacity = 0;
+  loom_runtime_residency_budget_t budget;
   if (!loom_runtime_residency_state_budget(residency, residency->private_bytes,
-                                           &resident_bytes, &capacity)) {
+                                           &budget)) {
     return iree_ok_status();
   }
   const loom_runtime_residency_forecast_t* request =
       state ? state->forecast : NULL;
   uint64_t minimum_bytes = 0;
   IREE_RETURN_IF_ERROR(loom_runtime_residency_project_state(
-      residency->cache, residency, request, resident_bytes, &minimum_bytes));
-  if (minimum_bytes > capacity ||
-      (!request && additional_state > capacity - minimum_bytes)) {
+      residency->cache, residency, request, budget.resident_bytes,
+      &minimum_bytes));
+  if (minimum_bytes > budget.state_capacity ||
+      (!request && additional_state > budget.state_capacity - minimum_bytes)) {
     return iree_ok_status();
   }
   // Parameter pins protect weights, not every history of that model. Each
@@ -1377,8 +1400,9 @@ static iree_status_t loom_runtime_residency_acquire_parameters(
   }
   const uint64_t additional_state =
       state ? loom_runtime_memory_demand_total(state->prepared.demand) : 0;
+  loom_runtime_residency_budget_t budget;
   if (!loom_runtime_residency_fits(residency, additional_state,
-                                   residency->private_bytes)) {
+                                   residency->private_bytes, &budget)) {
     // A readiness query can publish failed or retired backing. Recalculate
     // before discarding history, keeping successful admission query-free.
     loom_runtime_residency_cache_t* cache = residency->cache;
@@ -1387,7 +1411,7 @@ static iree_status_t loom_runtime_residency_acquire_parameters(
         loom_runtime_residency_can_wait_for_consumers(residency);
     IREE_RETURN_IF_ERROR(loom_runtime_memory_pool_query_status(cache->pool));
     if (!loom_runtime_residency_fits(residency, additional_state,
-                                     residency->private_bytes)) {
+                                     residency->private_bytes, &budget)) {
       if (reclaiming) {
         // Keep this pending observation even if its wake has already arrived.
         *out_admission = LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED;
@@ -1404,17 +1428,21 @@ static iree_status_t loom_runtime_residency_acquire_parameters(
   }
   // Nested execution shares parameter protection. A new row still admits its
   // complete state growth before borrowing another pin.
+  const bool check_backing =
+      state || !loom_runtime_memory_pool_has_headroom(residency->cache->pool,
+                                                      budget.workspace);
   if (residency->pin_count && residency->active) {
-    if (state) {
+    if (check_backing) {
       const bool consumers =
           loom_runtime_residency_can_wait_for_consumers(residency);
       loom_runtime_memory_admission_t admission;
-      IREE_RETURN_IF_ERROR(loom_runtime_residency_commit_state(
-          residency, state, (loom_runtime_memory_demand_t){0}, &admission));
+      IREE_RETURN_IF_ERROR(loom_runtime_residency_prepare_backing(
+          residency, state, (loom_runtime_memory_demand_t){0}, budget.workspace,
+          &admission));
       if (admission != LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE) {
         if (admission == LOOM_RUNTIME_MEMORY_ADMISSION_DEFERRED) {
           *out_admission = LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED;
-        } else if (state->forecast) {
+        } else if (state && state->forecast) {
           // Physical admission sees this attempt's exact placement. A source
           // projection may prove that releasing logical IDs can make a retry
           // fit without releasing any physical slab.
@@ -1442,7 +1470,7 @@ static iree_status_t loom_runtime_residency_acquire_parameters(
   }
   residency->active = false;
   const bool consumers =
-      (!active || state) && residency->cache->pool &&
+      (!active || check_backing) && residency->cache->pool &&
       loom_runtime_residency_can_wait_for_consumers(residency);
   if (residency->output_bytes && residency->cache->pool) {
     loom_runtime_residency_output_t* output = NULL;
@@ -1460,7 +1488,7 @@ static iree_status_t loom_runtime_residency_acquire_parameters(
   for (iree_host_size_t i = 0; i < residency->group_count; ++i) {
     ++residency->entries[i].group->pin_count;
   }
-  if ((!active || state) && residency->cache->pool) {
+  if ((!active || check_backing) && residency->cache->pool) {
     loom_runtime_memory_demand_t demand = {0};
     for (iree_host_size_t i = 0; i < residency->group_count; ++i) {
       const loom_runtime_residency_group_t* group = residency->entries[i].group;
@@ -1472,11 +1500,8 @@ static iree_status_t loom_runtime_residency_acquire_parameters(
       }
     }
     loom_runtime_memory_admission_t admission;
-    iree_status_t status =
-        state ? loom_runtime_residency_commit_state(residency, state, demand,
-                                                    &admission)
-              : loom_runtime_memory_pool_prepare(residency->cache->pool, demand,
-                                                 &admission);
+    iree_status_t status = loom_runtime_residency_prepare_backing(
+        residency, state, demand, budget.workspace, &admission);
     if (!iree_status_is_ok(status) ||
         admission != LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE) {
       // No parameter activation was accepted. Undo this attempt's pin even

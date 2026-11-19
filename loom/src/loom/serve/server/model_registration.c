@@ -916,8 +916,8 @@ static iree_status_t loom_serve_text_registration_create(
   loom_runtime_memory_pool_t* memory_pool = loom_runtime_pool_memory(pool);
   const uint64_t cache_limit_bytes =
       memory_pool ? loom_runtime_memory_pool_limit(memory_pool) : 0;
-  const iree_host_size_t shape_count =
-      loom_serve_text_default_shapes(text->prefill_capacity, NULL);
+  const iree_host_size_t shape_count = loom_serve_text_default_shapes(
+      text->prefill_capacity, text->max_sessions, NULL);
   iree_host_size_t total = 0, shapes_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(loom_serve_text_registration_t), &total,
@@ -935,7 +935,8 @@ static iree_status_t loom_serve_text_registration_create(
   registration->stream = stream;
   registration->shapes =
       (loom_serve_packing_shape_t*)((uint8_t*)registration + shapes_offset);
-  loom_serve_text_default_shapes(text->prefill_capacity, registration->shapes);
+  loom_serve_text_default_shapes(text->prefill_capacity, text->max_sessions,
+                                 registration->shapes);
   const loom_serve_text_options_t model_options = {
       .mode = configuration->kind == LOOM_SERVICE_KIND_SEQUENCE
                   ? LOOM_SERVE_TEXT_MODE_ENCODE

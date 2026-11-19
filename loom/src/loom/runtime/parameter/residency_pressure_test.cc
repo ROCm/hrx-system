@@ -619,5 +619,116 @@ TEST_P(ResidencyPressureTest, WorkspaceGrowthCollectsFailureBeforeDenial) {
 INSTANTIATE_TEST_SUITE_P(Pressure, ResidencyPressureTest,
                          ::testing::Values(true));
 
+class PackedResidencyPressureTest : public ResidencyPressureTest {
+ protected:
+  uint64_t SlabSize() const override { return 2 * 1024 * 1024; }
+
+  void SetUpPool() override { AllocatePool(SlabSize() + SlabSize() / 2); }
+};
+
+TEST_P(PackedResidencyPressureTest, StateAndWorkspaceMustFitTheSameParents) {
+  const auto geometry = loom_runtime_pool_state_geometry(storage_owner_);
+  const uint64_t parent = geometry.backing_size;
+  const uint64_t page = geometry.minimum_size;
+  ASSERT_LE(parent + page, loom_runtime_memory_pool_limit(pool_));
+  ASSERT_GT(2 * parent, loom_runtime_memory_pool_limit(pool_));
+  IREE_ASSERT_OK(Register(0, 0, 0));
+  IREE_ASSERT_OK(
+      loom_runtime_residency_prepare_working_set(residencies_[0], page, 0));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool_, geometry, parent, 256, &state_statistics_, &state_));
+
+  // Either request fits alone. Their logical payload fits together, but the
+  // last workspace page would require a second native parent.
+  loom_runtime_memory_range_t range = {state_, 0, parent};
+  loom_runtime_residency_admission_t admission;
+  loom_runtime_memory_operation_t* operation = nullptr;
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit_state(
+      residencies_[0], 1, &range, nullptr, nullptr, 0, &admission, &operation));
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+  EXPECT_EQ(operation, nullptr);
+  EXPECT_EQ(loom_runtime_residency_snapshot(residencies_[0]).pin_count, 0u);
+  EXPECT_EQ(loom_runtime_memory_pool_retained_bytes(pool_), 0u);
+  loom_runtime_residency_cancel_admission(residencies_[0]);
+
+  // Return one page to the accepted working set. State and real command
+  // scratch can then occupy opposite ends of the same physical parent.
+  range.length -= page;
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit_state(
+      residencies_[0], 1, &range, nullptr, nullptr, 0, &admission, &operation));
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+  loom_runtime_memory_operation_await(operation);
+  IREE_EXPECT_OK(loom_runtime_memory_operation_query_status(operation));
+  loom_runtime_memory_operation_free(operation);
+  loom_runtime_residency_cancel_admission(residencies_[0]);
+  const auto request = iree_hal_make_pool_reservation_request(page, 256);
+  IREE_ASSERT_OK(
+      loom_runtime_execution_alloca(execution_, 1, &request, &workspace_));
+  ASSERT_NO_FATAL_FAILURE(Fill(workspace_));
+  ASSERT_NO_FATAL_FAILURE(Check(workspace_));
+  EXPECT_EQ(loom_runtime_memory_pool_retained_bytes(pool_), parent);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_runtime_residency_check_private_peak(residencies_[0], 2 * page));
+  // The realized workspace already fulfills its protected page on reentry.
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[0], &admission));
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+  loom_runtime_residency_cancel_admission(residencies_[0]);
+  loom_runtime_residency_release(residencies_[0]);
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(
+      loom_runtime_execution_dealloca(execution_, workspace_, &completion));
+  loom_runtime_residency_release(residencies_[0]);
+}
+
+TEST_P(PackedResidencyPressureTest, ReturningWorkspaceCannotFundTwoConsumers) {
+  const auto geometry = loom_runtime_pool_state_geometry(storage_owner_);
+  const uint64_t page = geometry.minimum_size;
+  IREE_ASSERT_OK(Register(0, 0, 0));
+  IREE_ASSERT_OK(
+      loom_runtime_residency_prepare_working_set(residencies_[0], page, 0));
+  const auto request = iree_hal_make_pool_reservation_request(page, 256);
+  IREE_ASSERT_OK(
+      loom_runtime_execution_alloca(execution_, 1, &request, &workspace_));
+  ASSERT_NO_FATAL_FAILURE(Fill(workspace_));
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(
+      loom_runtime_execution_dealloca(execution_, workspace_, &completion));
+  iree_hal_buffer_release(workspace_);
+  workspace_ = nullptr;
+  IREE_ASSERT_OK(loom_runtime_execution_drain(execution_));
+  IREE_ASSERT_OK(loom_runtime_test_workspace_await_idle(
+      loom_runtime_pool_workspace(storage_owner_)));
+  ASSERT_EQ(
+      loom_runtime_pool_statistics(storage_owner_).workspace.bytes_committed,
+      page);
+
+  // Pressure may return that cached page to state. The next command would
+  // then need a replacement, and there is only room for one physical parent.
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool_, geometry, geometry.backing_size, 256, &state_statistics_,
+      &state_));
+  const loom_runtime_memory_range_t range = {state_, 0, geometry.backing_size};
+  loom_runtime_residency_admission_t admission;
+  loom_runtime_memory_operation_t* operation = nullptr;
+  do {
+    IREE_ASSERT_OK(loom_runtime_residency_try_admit_state(
+        residencies_[0], 1, &range, nullptr, nullptr, 0, &admission,
+        &operation));
+    if (admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED) {
+      IREE_ASSERT_OK(loom_runtime_test_pool_trim_and_drain(
+          storage_owner_, loom_runtime_memory_pool_limit(pool_)));
+    }
+  } while (admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+  EXPECT_EQ(operation, nullptr);
+  EXPECT_EQ(state_statistics_.pending_bytes, 0u);
+  EXPECT_EQ(state_statistics_.committed_bytes, 0u);
+  loom_runtime_residency_cancel_admission(residencies_[0]);
+}
+
+INSTANTIATE_TEST_SUITE_P(Pressure, PackedResidencyPressureTest,
+                         ::testing::Values(true));
+
 }  // namespace
 }  // namespace loom_runtime::testing

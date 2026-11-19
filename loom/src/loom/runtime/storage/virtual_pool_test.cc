@@ -41,10 +41,14 @@ TEST_F(DeviceMemoryTest, StorageAndWorkspaceSharePackedPhysicalParents) {
   const auto geometry = loom_runtime_pool_state_geometry(storage_owner);
   const uint64_t page = geometry.minimum_size;
   auto* shared_workspace = loom_runtime_pool_workspace(storage_owner);
-  EXPECT_EQ(loom_runtime_workspace_round_size(shared_workspace, 0), 0u);
-  EXPECT_EQ(loom_runtime_workspace_round_size(shared_workspace, 256), page);
-  EXPECT_EQ(loom_runtime_workspace_round_size(shared_workspace, page + 1),
-            2 * page);
+  EXPECT_EQ(loom_runtime_workspace_headroom(shared_workspace, 0).minimum_bytes,
+            0u);
+  EXPECT_EQ(
+      loom_runtime_workspace_headroom(shared_workspace, 256).minimum_bytes,
+      page);
+  EXPECT_EQ(
+      loom_runtime_workspace_headroom(shared_workspace, page + 1).minimum_bytes,
+      2 * page);
   const auto storage_request = iree_hal_make_pool_reservation_request(256, 256);
   iree_hal_buffer_t* storage = nullptr;
   IREE_ASSERT_OK(loom_runtime_execution_alloca_from_pool(

@@ -722,6 +722,17 @@ loom_runtime_storage_usage_t loom_runtime_virtual_pool_source_memory_usage(
   };
 }
 
+loom_runtime_memory_headroom_t loom_runtime_virtual_pool_source_headroom(
+    const iree_hal_pool_t* base_pool, uint64_t byte_length) {
+  const loom_runtime_virtual_pool_source_t* source =
+      (const loom_runtime_virtual_pool_source_t*)base_pool;
+  return (loom_runtime_memory_headroom_t){
+      .source = &source->memory,
+      .minimum_bytes =
+          loom_runtime_virtual_pool_round_size(source->owner, byte_length),
+  };
+}
+
 uint64_t loom_runtime_virtual_pool_source_protected_bytes(
     const iree_hal_pool_t* base_pool) {
   const loom_runtime_virtual_pool_source_t* source =

@@ -942,7 +942,7 @@ TEST_F(MemoryTest, WeightTailAndStateMappingsShareOnePhysicalParent) {
   deferred_backing->defer = true;
   loom_runtime_memory_operation_t* operation = nullptr;
   IREE_ASSERT_OK(loom_runtime_memory_pool_commit_prepared_async(
-      pool, &prepared, {}, nullptr, 0, &commit_admission, &operation));
+      pool, &prepared, {}, {}, nullptr, 0, &commit_admission, &operation));
   EXPECT_EQ(prepared.ranges, nullptr);
   ASSERT_EQ(commit_admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
   deferred_backing->WaitForAcquisition();

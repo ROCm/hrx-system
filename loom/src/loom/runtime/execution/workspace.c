@@ -590,11 +590,12 @@ uint64_t loom_runtime_workspace_protected_bytes(
              : 0;
 }
 
-uint64_t loom_runtime_workspace_round_size(
+loom_runtime_memory_headroom_t loom_runtime_workspace_headroom(
     const loom_runtime_workspace_t* workspace, uint64_t byte_length) {
-  return workspace->virtual_pool ? loom_runtime_virtual_pool_round_size(
-                                       workspace->virtual_pool, byte_length)
-                                 : byte_length;
+  return workspace->virtual_pool
+             ? loom_runtime_virtual_pool_source_headroom(
+                   workspace->backing_pool, byte_length)
+             : (loom_runtime_memory_headroom_t){.minimum_bytes = byte_length};
 }
 
 iree_status_t loom_runtime_workspace_advance(
