@@ -286,6 +286,161 @@ CONTIGUOUS_STORAGE(Device);
 #undef CONTIGUOUS_STORAGE
 #undef CONTIGUOUS_CASE
 
+// One public operation retains the full rectangle or volume. Captured variants
+// measure replay only; graph construction, allocation, and byte verification
+// remain outside both the submit-only and completed-transfer intervals.
+template <bool complete, bool fill, bool graph>
+void GeometryTransfer(benchmark::State& state) {
+  auto& runtime = Runtime();
+  const auto copy = runtime.Resolve<decltype(&hipMemcpy)>("hipMemcpy");
+  const auto copy_2d =
+      runtime.Resolve<decltype(&hipMemcpy2DAsync)>("hipMemcpy2DAsync");
+  const auto copy_3d =
+      runtime.Resolve<decltype(&hipMemcpy3DAsync)>("hipMemcpy3DAsync");
+  const auto fill_2d =
+      runtime.Resolve<decltype(&hipMemset2DAsync)>("hipMemset2DAsync");
+  const auto fill_3d =
+      runtime.Resolve<decltype(&hipMemset3DAsync)>("hipMemset3DAsync");
+  const auto allocate = runtime.Resolve<decltype(&hipMalloc)>("hipMalloc");
+  const auto release = runtime.Resolve<decltype(&hipFree)>("hipFree");
+  const size_t width = state.range(0);
+  const size_t height = state.range(1);
+  const size_t depth = state.range(2);
+  const int64_t operation_count = state.range(3);
+  const size_t source_pitch = width + 64;
+  const size_t target_pitch = width + 128;
+  const size_t rows_per_slice = height + 1;
+  const size_t source_slice = source_pitch * rows_per_slice;
+  const size_t target_slice = target_pitch * rows_per_slice;
+  constexpr size_t kSourceOffset = 7;
+  constexpr size_t kTargetOffset = 11;
+  std::vector<uint8_t> source(kSourceOffset + source_slice * depth + 16);
+  std::vector<uint8_t> target(kTargetOffset + target_slice * depth + 16,
+                              kPadding);
+  for (size_t i = 0; i < source.size(); ++i) {
+    source[i] = static_cast<uint8_t>(i * 13 + i / 32);
+  }
+  void* source_device = nullptr;
+  void* target_device = nullptr;
+  Check(allocate(&source_device, source.size()));
+  Check(allocate(&target_device, target.size()));
+  Check(
+      copy(source_device, source.data(), source.size(), hipMemcpyHostToDevice));
+  Check(
+      copy(target_device, target.data(), target.size(), hipMemcpyHostToDevice));
+  const hipPitchedPtr source_pointer = {
+      static_cast<uint8_t*>(source_device) + kSourceOffset, source_pitch, width,
+      rows_per_slice};
+  const hipPitchedPtr target_pointer = {
+      static_cast<uint8_t*>(target_device) + kTargetOffset, target_pitch, width,
+      rows_per_slice};
+  const hipMemcpy3DParms parameters = {
+      .srcPtr = source_pointer,
+      .dstPtr = target_pointer,
+      .extent = {width, height, depth},
+      .kind = hipMemcpyDeviceToDevice,
+  };
+  const auto issue = [&] {
+    for (int64_t i = 0; i < operation_count; ++i) {
+      if constexpr (fill) {
+        if (depth == 1) {
+          Check(fill_2d(target_pointer.ptr, target_pitch, kPayload, width,
+                        height, runtime.stream()));
+        } else {
+          Check(fill_3d(target_pointer, kPayload, {width, height, depth},
+                        runtime.stream()));
+        }
+      } else if (depth == 1) {
+        Check(copy_2d(target_pointer.ptr, target_pitch, source_pointer.ptr,
+                      source_pitch, width, height, hipMemcpyDeviceToDevice,
+                      runtime.stream()));
+      } else {
+        Check(copy_3d(&parameters, runtime.stream()));
+      }
+    }
+  };
+  hipGraph_t graph_handle = nullptr;
+  hipGraphExec_t executable = nullptr;
+  decltype(&hipGraphLaunch) launch = nullptr;
+  if constexpr (graph) {
+    launch = runtime.Resolve<decltype(&hipGraphLaunch)>("hipGraphLaunch");
+    Check(runtime.Resolve<decltype(&hipStreamBeginCapture)>(
+        "hipStreamBeginCapture")(runtime.stream(), hipStreamCaptureModeGlobal));
+    issue();
+    Check(runtime.Resolve<decltype(&hipStreamEndCapture)>(
+        "hipStreamEndCapture")(runtime.stream(), &graph_handle));
+    Check(runtime.Resolve<decltype(&hipGraphInstantiateWithFlags)>(
+        "hipGraphInstantiateWithFlags")(&executable, graph_handle, 0));
+  }
+  const auto enqueue = [&] {
+    if constexpr (graph) {
+      Check(launch(executable, runtime.stream()));
+    } else {
+      issue();
+    }
+  };
+  enqueue();
+  runtime.Wait();
+  for (auto _ : state) {
+    enqueue();
+    if constexpr (!complete) {
+      state.PauseTiming();
+    }
+    runtime.Wait();
+    if constexpr (!complete) {
+      state.ResumeTiming();
+    }
+  }
+  Check(
+      copy(target.data(), target_device, target.size(), hipMemcpyDeviceToHost));
+  std::vector<uint8_t> expected(target.size(), kPadding);
+  for (size_t slice = 0; slice < depth; ++slice) {
+    for (size_t row = 0; row < height; ++row) {
+      for (size_t column = 0; column < width; ++column) {
+        expected[kTargetOffset + slice * target_slice + row * target_pitch +
+                 column] = fill ? kPayload
+                                : source[kSourceOffset + slice * source_slice +
+                                         row * source_pitch + column];
+      }
+    }
+  }
+  Require(target == expected,
+          "rectangular transfer changed payload or padding");
+  if constexpr (graph) {
+    Check(runtime.Resolve<decltype(&hipGraphExecDestroy)>(
+        "hipGraphExecDestroy")(executable));
+    Check(runtime.Resolve<decltype(&hipGraphDestroy)>("hipGraphDestroy")(
+        graph_handle));
+  }
+  Check(release(target_device));
+  Check(release(source_device));
+  state.SetLabel(runtime.label());
+  state.SetItemsProcessed(state.iterations() * operation_count);
+  state.SetBytesProcessed(state.iterations() * operation_count * width *
+                          height * depth);
+}
+
+#define GEOMETRY_CASE(name, complete, fill, graph, timing)      \
+  BENCHMARK_TEMPLATE(GeometryTransfer, complete, fill, graph)   \
+      ->Name("HIP/Geometry/" #name "/" #timing)                 \
+      ->ArgNames({"row_bytes", "rows", "slices", "operations"}) \
+      ->Args({64, 1, 1, 1})                                     \
+      ->Args({64, 32, 1, 1})                                    \
+      ->Args({4096, 128, 1, 1})                                 \
+      ->Args({257, 17, 3, 1})                                   \
+      ->Args({64, 1, 1, 32})                                    \
+      ->Args({64, 32, 1, 32})                                   \
+      ->UseRealTime()
+#define GEOMETRY_VARIANT(name, fill, graph)        \
+  GEOMETRY_CASE(name, false, fill, graph, Submit); \
+  GEOMETRY_CASE(name, true, fill, graph, Complete)
+GEOMETRY_VARIANT(Copy, false, false);
+GEOMETRY_VARIANT(Fill, true, false);
+GEOMETRY_VARIANT(GraphCopy, false, true);
+GEOMETRY_VARIANT(GraphFill, true, true);
+#undef GEOMETRY_VARIANT
+#undef GEOMETRY_CASE
+
 void Download(benchmark::State& state, uint32_t flags,
               size_t row_width = 4096) {
   auto& runtime = Runtime();
