@@ -30,30 +30,37 @@
 
 namespace iree::hal::amd::xdna::cts {
 
-class XdnaNativeTest : public ::testing::Test {
- protected:
+// Owns one independently scheduled native context and its HAL resources.
+class XdnaNativeSession {
+ public:
+  XdnaNativeSession() = default;
+  XdnaNativeSession(const XdnaNativeSession&) = delete;
+  XdnaNativeSession& operator=(const XdnaNativeSession&) = delete;
+
   enum class BinaryOperation {
     kAdd,
     kMultiply,
   };
 
-  void SetUp() override {
+  void Open(const std::string& device_path = {}) {
     IREE_ASSERT_OK(
         iree_hal_driver_registry_allocate(iree_allocator_system(), &registry_));
     IREE_ASSERT_OK(iree_hal_amd_driver_module_register(registry_));
     IREE_ASSERT_OK(iree_hal_driver_registry_acquire_driver(
         registry_, IREE_SV("xdna"), &driver_));
-    iree_host_size_t count = 0;
-    iree_hal_device_info_t* infos = nullptr;
-    IREE_ASSERT_OK(iree_hal_driver_query_available_devices(
-        driver_, IREE_SV("xdna"), iree_allocator_system(), &count, &infos));
-    std::string device_path;
-    if (count) {
-      device_path.assign(infos[0].path.data, infos[0].path.size);
-    }
-    iree_allocator_free(iree_allocator_system(), infos);
-    if (!count) {
-      GTEST_SKIP() << "No native XDNA endpoint";
+    endpoint_path_ = device_path;
+    if (endpoint_path_.empty()) {
+      iree_host_size_t count = 0;
+      iree_hal_device_info_t* infos = nullptr;
+      IREE_ASSERT_OK(iree_hal_driver_query_available_devices(
+          driver_, IREE_SV("xdna"), iree_allocator_system(), &count, &infos));
+      if (count) {
+        endpoint_path_.assign(infos[0].path.data, infos[0].path.size);
+      }
+      iree_allocator_free(iree_allocator_system(), infos);
+      if (!count) {
+        GTEST_SKIP() << "No native XDNA endpoint";
+      }
     }
     IREE_ASSERT_OK(iree_async_proactor_pool_create(
         1, nullptr, iree_async_proactor_pool_options_default(),
@@ -62,8 +69,9 @@ class XdnaNativeTest : public ::testing::Test {
     params.proactor_pool = pool_;
     params.event_sink = iree_hal_device_event_sink_stderr();
     IREE_ASSERT_OK(iree_hal_driver_create_device_by_path(
-        driver_, IREE_SV("xdna"), iree_make_cstring_view(device_path.c_str()),
-        0, nullptr, &params, iree_allocator_system(), &device_));
+        driver_, IREE_SV("xdna"),
+        iree_make_cstring_view(endpoint_path_.c_str()), 0, nullptr, &params,
+        iree_allocator_system(), &device_));
     // Native memory and execution retain the fabric without either discovery
     // owner. Every workload below runs after these releases.
     iree_hal_driver_release(driver_);
@@ -81,7 +89,7 @@ class XdnaNativeTest : public ::testing::Test {
     target_ = &targets->targets[0];
   }
 
-  void TearDown() override {
+  void Close() {
     for (auto* semaphore : semaphores_) {
       iree_hal_semaphore_release(semaphore);
     }
@@ -283,6 +291,35 @@ class XdnaNativeTest : public ::testing::Test {
     }
   }
 
+  // Runs a checked direct program on this context, including output guards.
+  void Square(uint32_t first_word) {
+    std::array<uint32_t, 16> data;
+    for (size_t i = 0; i < data.size(); ++i) {
+      data[i] = first_word + static_cast<uint32_t>(i);
+    }
+    iree_hal_buffer_t *source = nullptr, *destination = nullptr;
+    ASSERT_NO_FATAL_FAILURE(MakeBuffer(&source));
+    ASSERT_NO_FATAL_FAILURE(MakeBuffer(&destination));
+    IREE_ASSERT_OK(iree_hal_buffer_map_write(source, 0, data.data(), kBytes));
+    auto input = iree_hal_make_buffer_ref(source, 0, kBytes);
+    const iree_hal_buffer_ref_t bindings[] = {
+        input, input, iree_hal_make_buffer_ref(destination, 0, kBytes)};
+    iree_hal_semaphore_t* done = nullptr;
+    ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&done));
+    uint64_t value = 1;
+    IREE_ASSERT_OK(iree_hal_queue_dispatch(
+        queue_, {}, {1, &done, &value}, executable_, function_,
+        iree_hal_make_static_dispatch_config(1, 1, 1), {},
+        {IREE_ARRAYSIZE(bindings), bindings}, nullptr,
+        IREE_HAL_DISPATCH_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(done, value, iree_infinite_timeout(),
+                                           IREE_ASYNC_WAIT_FLAG_NONE));
+    ASSERT_NO_FATAL_FAILURE(CheckOutput(destination, data, data));
+  }
+
+ protected:
+  // Selected endpoint path for opening another context on the same NPU.
+  std::string endpoint_path_;
   // Canonical compiler fixture binding extent.
   static constexpr size_t kBytes = 16 * sizeof(uint32_t);
   // Driver owning the native discovery instance.
@@ -321,6 +358,12 @@ class XdnaNativeTest : public ::testing::Test {
   iree_async_proactor_pool_t* file_pool_ = nullptr;
   // Test-owned semaphores, released before device teardown.
   std::vector<iree_hal_semaphore_t*> semaphores_;
+};
+
+class XdnaNativeTest : public ::testing::Test, protected XdnaNativeSession {
+ protected:
+  void SetUp() override { Open(); }
+  void TearDown() override { Close(); }
 };
 
 }  // namespace iree::hal::amd::xdna::cts

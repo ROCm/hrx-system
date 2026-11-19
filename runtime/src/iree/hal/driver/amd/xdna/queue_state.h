@@ -111,6 +111,9 @@ struct iree_hal_amd_xdna_queue_t {
   iree_atomic_intptr_t publisher_operation;
   // Nonzero while one caller or the native service owns publication order.
   iree_atomic_int32_t publisher_claim;
+  // The last accepted command configured the array directly. Only the current
+  // publisher reads or writes this bit, including for caller-side dispatch.
+  bool needs_pdi_entry;
   // Nonzero while the persistent observer permits new native admission.
   iree_atomic_int32_t native_admission_open;
   // Nonzero while a BUSY publication waits for checked native progress.
