@@ -37,7 +37,8 @@ typedef struct iree_hal_amd_gpu_pm4_kmq_storage_t {
   uint64_t address;
   // Optional native progress word borrowed until the observer joins.
   const iree_atomic_int64_t* progress;
-  // Opaque native points indexed by the enclosing queue's publication slots.
+  // Native points indexed by publication slot. Zero denotes a logical
+  // operation with no command or device-written retirement record.
   uint64_t* points;
   // Power-of-two point-array capacity minus one.
   uint32_t capacity_mask;

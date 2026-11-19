@@ -273,6 +273,11 @@ iree_hal_amd_gpu_signal_t* iree_hal_amd_gpu_signal_pool_try_acquire_alias(
   iree_hal_amd_gpu_signal_t* signal =
       iree_hal_amd_gpu_signal_pool_try_acquire_slot(pool);
   if (signal) {
+    // Retain the physical cell directly, including when the input is an alias.
+    // Each logical producer's status and frontier belong to its own slot.
+    if (completion->completion) {
+      completion = completion->completion;
+    }
     signal->completion = completion;
     iree_hal_amd_gpu_signal_retain(completion);
     signal->device_address = completion->device_address;
@@ -281,14 +286,29 @@ iree_hal_amd_gpu_signal_t* iree_hal_amd_gpu_signal_pool_try_acquire_alias(
   return signal;
 }
 
+static uint64_t* iree_hal_amd_gpu_signal_frontier_row(
+    const iree_hal_amd_gpu_signal_t* signal,
+    const iree_hal_amd_gpu_signal_frontiers_t* frontiers) {
+  return (uint64_t*)(frontiers + 1) +
+         (signal - signal->block->signals) * frontiers->queue_count;
+}
+
 void iree_hal_amd_gpu_signal_publish_frontier(iree_hal_amd_gpu_signal_t* signal,
                                               const uint64_t* frontier) {
   const iree_hal_amd_gpu_signal_block_t* block = signal->block;
   const iree_hal_amd_gpu_signal_frontiers_t* frontiers =
       iree_hal_amd_gpu_signal_block_frontiers(block);
-  uint64_t* target = (uint64_t*)(frontiers + 1) +
-                     (signal - block->signals) * frontiers->queue_count;
+  uint64_t* target = iree_hal_amd_gpu_signal_frontier_row(signal, frontiers);
   memcpy(target, frontier, frontiers->queue_count * sizeof(*target));
+}
+
+uint64_t iree_hal_amd_gpu_signal_frontier_epoch(
+    const iree_hal_amd_gpu_signal_t* signal, uint32_t queue_ordinal) {
+  const iree_hal_amd_gpu_signal_block_t* block = signal->block;
+  const iree_hal_amd_gpu_signal_frontiers_t* frontiers =
+      iree_hal_amd_gpu_signal_block_frontiers(block);
+  const uint64_t* row = iree_hal_amd_gpu_signal_frontier_row(signal, frontiers);
+  return queue_ordinal < frontiers->queue_count ? row[queue_ordinal] : 0;
 }
 
 void iree_hal_amd_gpu_signal_join_frontier(
@@ -297,8 +317,8 @@ void iree_hal_amd_gpu_signal_join_frontier(
   const iree_hal_amd_gpu_signal_block_t* block = signal->block;
   const iree_hal_amd_gpu_signal_frontiers_t* frontiers =
       iree_hal_amd_gpu_signal_block_frontiers(block);
-  const uint64_t* source = (const uint64_t*)(frontiers + 1) +
-                           (signal - block->signals) * frontiers->queue_count;
+  const uint64_t* source =
+      iree_hal_amd_gpu_signal_frontier_row(signal, frontiers);
   const uint32_t count = iree_min(queue_count, frontiers->queue_count);
   for (uint32_t i = 0; i < count; ++i) {
     frontier[i] = iree_max(frontier[i], source[i]);

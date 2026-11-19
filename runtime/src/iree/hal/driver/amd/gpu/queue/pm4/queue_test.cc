@@ -15,7 +15,9 @@
 #include "iree/async/event.h"
 #include "iree/hal/cts/util/profile_test_util.h"
 #include "iree/hal/cts/util/test_base.h"
+#include "iree/hal/driver/amd/fabric/allocation_queue.h"
 #include "iree/hal/driver/amd/fabric/memory_backend_test_base.h"
+#include "iree/hal/driver/amd/gpu/queue/allocation.h"
 #include "iree/hal/driver/amd/gpu/queue/byte_storage_pool.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/state.h"
 #include "iree/hal/driver/amd/gpu/queue/semaphore.h"
@@ -279,6 +281,8 @@ class KernelQueueTest : public MemoryBackendTest {
         .host_access = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
     };
 
+    iree_hal_amd_gpu_allocation_context_initialize(
+        devices_[0], &publication_, 2, allocator_, &allocations_);
     transfer_memory_ = memory_;
     programs_.inputs.options = memory_;
     for (uint32_t i = 0; i < queues_.size(); ++i) {
@@ -295,6 +299,7 @@ class KernelQueueTest : public MemoryBackendTest {
           .transfer_memory = &transfer_memory_,
           .programs = &programs_,
           .publication = &publication_,
+          .allocations = &allocations_,
           .barriers = barrier_profile_,
           .retirement_capacity = 4,
           .argument_capacity = 4096,
@@ -340,6 +345,7 @@ class KernelQueueTest : public MemoryBackendTest {
     }
     IREE_EXPECT_OK(iree_hal_amd_gpu_profile_end(profile_));
     transfer_pool_.reset();
+    iree_hal_amd_gpu_allocation_context_deinitialize(&allocations_);
     iree_hal_amd_gpu_context_deinitialize_memory(&context_);
     iree_async_event_native_deinitialize(&context_.kernel_event);
     iree_hal_amd_fabric_release(fabric_);
@@ -549,9 +555,197 @@ class KernelQueueTest : public MemoryBackendTest {
   std::array<iree_hal_amd_gpu_signal_cache_t, 2> signals_ = {};
   // Public queues under test, borrowing the fixture's device families.
   std::array<Ref<iree_hal_queue_t>, 2> queues_;
+  // Device-shared pool transactions retained through both queue lifetimes.
+  iree_hal_amd_gpu_allocation_context_t allocations_ = {};
   // Public transfer allocation owner, retained through every captured buffer.
   Ref<iree_hal_pool_t> transfer_pool_;
 };
+
+class KernelAllocationTest : public KernelQueueTest {
+ protected:
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(KernelQueueTest::SetUp());
+    for (uint32_t i = 0; i < queues_.size(); ++i) {
+      const auto axis = iree_async_axis_make_queue(1, 0, 0, i, 1);
+      IREE_ASSERT_OK(
+          iree_async_frontier_tracker_register_axis(tracker_, axis, nullptr));
+      iree_hal_amd_gpu_pm4_queue_assign_frontier(queues_[i], tracker_, axis);
+    }
+    IREE_ASSERT_OK(
+        CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER,
+                   UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+                   transfer_pool_.out()));
+  }
+
+  void Allocate(iree_hal_semaphore_list_t signals, iree_hal_buffer_t** buffer) {
+    const auto request = iree_hal_make_pool_reservation_request(64, 64);
+    IREE_ASSERT_OK(iree_hal_queue_alloca(queues_[0], {}, signals,
+                                         transfer_pool_, 1, &request, buffer));
+    // Cold backing completes on the native allocator. Drive its actual callback
+    // and the queue publisher independently of executing any GPU command.
+    Publish(0);
+    iree_hal_amd_fabric_allocation_queue_drain(allocation_queue_);
+    const auto source =
+        iree_hal_amd_gpu_allocation_context_publication_source(&allocations_);
+    while (source.publish(source.user_data)) {
+    }
+    Publish(0);
+  }
+};
+
+TEST_F(KernelAllocationTest, WorkspaceUsesThePrecedingNativeCompletion) {
+  auto work = Semaphore(), complete = Semaphore();
+  auto* timeline = work.get();
+  auto* done = complete.get();
+  uint64_t one = 1, two = 2, three = 3;
+  Ref<iree_hal_buffer_t> scratch;
+  ASSERT_NO_FATAL_FAILURE(Allocate({1, &timeline, &one}, scratch.out()));
+  EXPECT_TRUE(native_queues_[0].commands.empty());
+  uint64_t value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(work, &value));
+  EXPECT_EQ(value, 0u);
+
+  auto result = Buffer(64);
+  const uint32_t pattern = 0x5A5A5A5A;
+  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {1, &timeline, &one},
+                                     {1, &timeline, &two}, scratch, 0, 64,
+                                     &pattern, sizeof(pattern), nullptr, 0));
+  auto* root = scratch.get();
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(queues_[0], {1, &timeline, &two},
+                                         {1, &timeline, &three}, 1, &root));
+  Publish(0);
+  // The other queue must admit its native waiter before the first queue runs.
+  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[1], {1, &timeline, &three},
+                                     {1, &done, &one}, result, 0, 64, &pattern,
+                                     sizeof(pattern), nullptr, 0));
+  Publish(1);
+  EXPECT_EQ(native_queues_[0].commands.size(), 1u);
+  EXPECT_EQ(native_queues_[1].commands.size(), 1u);
+  ASSERT_NO_FATAL_FAILURE(Execute(0));
+  ASSERT_NO_FATAL_FAILURE(Execute(1));
+  Poll(1);
+  IREE_ASSERT_OK(iree_hal_semaphore_query(complete, &value));
+  EXPECT_EQ(value, 0u);
+  Poll(0);
+  Poll(1);
+  IREE_ASSERT_OK(iree_hal_semaphore_query(work, &value));
+  EXPECT_EQ(value, three);
+  IREE_ASSERT_OK(iree_hal_semaphore_query(complete, &value));
+  EXPECT_EQ(value, one);
+  EXPECT_EQ(Read(result, 64), std::vector<uint8_t>(64, 0x5A));
+}
+
+TEST_F(KernelAllocationTest, IndependentQueuesNeedANativeJoin) {
+  auto local = Semaphore(), remote = Semaphore();
+  auto* local_handle = local.get();
+  auto* remote_handle = remote.get();
+  uint64_t one = 1, two = 2, three = 3;
+  Ref<iree_hal_buffer_t> scratch;
+  ASSERT_NO_FATAL_FAILURE(Allocate({1, &local_handle, &one}, scratch.out()));
+  Poll(0);
+  IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[0], {},
+                                        {1, &local_handle, &two}, nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[1], {},
+                                        {1, &remote_handle, &one}, nullptr, 0));
+  Publish(0);
+  Publish(1);
+  iree_hal_semaphore_t* dependencies[] = {local_handle, remote_handle};
+  uint64_t values[] = {two, one};
+  auto* root = scratch.get();
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(queues_[0], {2, dependencies, values},
+                                         {1, &local_handle, &three}, 1, &root));
+  Publish(0);
+  EXPECT_EQ(native_queues_[0].commands.size(), 2u);
+  EXPECT_EQ(native_queues_[1].commands.size(), 1u);
+  ASSERT_NO_FATAL_FAILURE(Execute(1));
+  ASSERT_NO_FATAL_FAILURE(Execute(0));
+  Poll(0);
+  uint64_t value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(local, &value));
+  EXPECT_EQ(value, two);
+  Poll(1);
+  Poll(0);
+  IREE_ASSERT_OK(iree_hal_semaphore_query(local, &value));
+  EXPECT_EQ(value, three);
+}
+
+TEST_F(KernelAllocationTest, PrivateReleaseRetiresWithoutADeviceMarker) {
+  auto allocated = Semaphore();
+  auto* ready = allocated.get();
+  uint64_t one = 1;
+  Ref<iree_hal_buffer_t> scratch;
+  ASSERT_NO_FATAL_FAILURE(Allocate({1, &ready, &one}, scratch.out()));
+  Poll(0);
+  auto* root = scratch.get();
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(queues_[0], {}, {}, 1, &root));
+  Publish(0);
+  EXPECT_TRUE(native_queues_[0].commands.empty());
+  EXPECT_FALSE(iree_hal_amd_gpu_pm4_queue_is_idle(queues_[0]));
+  Poll(0);
+  EXPECT_TRUE(iree_hal_amd_gpu_pm4_queue_is_idle(queues_[0]));
+}
+
+TEST_F(KernelAllocationTest, OlderLocalWaitCannotStandInForTheQueueTail) {
+  auto work = Semaphore();
+  auto* timeline = work.get();
+  uint64_t one = 1, early = 2, tail = 3, released = 4;
+  Ref<iree_hal_buffer_t> scratch;
+  ASSERT_NO_FATAL_FAILURE(Allocate({1, &timeline, &one}, scratch.out()));
+  Poll(0);
+  IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[0], {}, {1, &timeline, &early},
+                                        nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[0], {}, {1, &timeline, &tail},
+                                        nullptr, 0));
+  auto* root = scratch.get();
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(queues_[0], {1, &timeline, &early},
+                                         {1, &timeline, &released}, 1, &root));
+  Publish(0);
+  EXPECT_EQ(native_queues_[0].commands.size(), 3u);
+  ASSERT_NO_FATAL_FAILURE(Execute(0, 1));
+  Poll(0);
+  uint64_t value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(work, &value));
+  EXPECT_EQ(value, early);
+  ASSERT_NO_FATAL_FAILURE(Execute(0));
+  Poll(0);
+  IREE_ASSERT_OK(iree_hal_semaphore_query(work, &value));
+  EXPECT_EQ(value, released);
+}
+
+TEST_F(KernelAllocationTest, FailedReleasePreservesItsProducersOutcome) {
+  auto allocated = Semaphore(), producer = Semaphore(), released = Semaphore(),
+       consumer = Semaphore();
+  auto* ready = allocated.get();
+  auto* before = producer.get();
+  auto* after = released.get();
+  auto* done = consumer.get();
+  uint64_t one = 1;
+  Ref<iree_hal_buffer_t> scratch;
+  ASSERT_NO_FATAL_FAILURE(Allocate({1, &ready, &one}, scratch.out()));
+  Poll(0);
+  IREE_ASSERT_OK(
+      iree_hal_queue_barrier(queues_[0], {}, {1, &before, &one}, nullptr, 0));
+  auto* root = scratch.get();
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(queues_[0], {1, &before, &one},
+                                         {1, &after, &one}, 1, &root));
+  Publish(0);
+  IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[1], {1, &after, &one},
+                                        {1, &done, &one}, nullptr, 0));
+  Publish(1);
+  EXPECT_EQ(native_queues_[0].commands.size(), 1u);
+  EXPECT_EQ(native_queues_[1].commands.size(), 1u);
+  iree_hal_semaphore_fail(released,
+                          iree_status_from_code(IREE_STATUS_CANCELLED));
+  ASSERT_NO_FATAL_FAILURE(Execute(0));
+  ASSERT_NO_FATAL_FAILURE(Execute(1));
+  Poll(0);
+  Poll(1);
+  uint64_t value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(producer, &value));
+  EXPECT_EQ(value, one);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                        iree_hal_semaphore_query(consumer, &value));
+}
 
 TEST_F(KernelQueueTest, PayloadGrowthPreservesLaunchArgumentCapacity) {
   auto buffer = Buffer(40000);
