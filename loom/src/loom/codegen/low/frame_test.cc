@@ -6,6 +6,8 @@
 
 #include "loom/codegen/low/frame.h"
 
+#include <vector>
+
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -141,6 +143,96 @@ low.func.def target<test.low.core> @structural_model() -> (reg<test.i32 x4>) asm
   loom_target_facts_t target_facts_ = {};
   iree_arena_allocator_t arena_ = {};
 };
+
+TEST_F(LowEmissionFrameTest, SourceOrderAvoidsMaterializingALocalSpill) {
+  // Resource-stall scheduling measures source pressure against the target's
+  // residency model. Only the integer class has a tier transition here.
+  static const loom_target_residency_cliff_t cliff = {
+      TEST_LOW_CORE_REG_CLASS_ID_TEST_I32, 32, 2, 1};
+  static const auto ranges = [] {
+    std::vector<loom_target_residency_cliff_range_t> rows(
+        loom_test_low_core_descriptor_set()->reg_class_count);
+    rows[TEST_LOW_CORE_REG_CLASS_ID_TEST_I32].count = 1;
+    return rows;
+  }();
+  static const auto names = [] {
+    const auto* descriptors = loom_test_low_core_descriptor_set();
+    std::vector<iree_string_view_t> names;
+    for (uint32_t i = 0; i < descriptors->reg_class_count; ++i) {
+      names.push_back(loom_low_descriptor_set_string(
+          descriptors, descriptors->reg_classes[i].name_string_ref));
+    }
+    return names;
+  }();
+  static const loom_target_residency_model_t model = {
+      .best_tier = 2,
+      .direct_resources = {names.data(), &cliff, 1, ranges.data(),
+                           static_cast<uint16_t>(ranges.size())},
+  };
+  for (uint32_t limit : {4u, 5u, 6u}) {
+    SCOPED_TRACE(limit);
+    uint64_t builds[2] = {};
+    uint64_t stores[2] = {};
+    uint64_t reloads[2] = {};
+    for (int trial = 0; trial < 2; ++trial) {
+      ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @scale_lane(%address: reg<test.ptr>, %input: reg<test.i32>) -> (reg<test.i32>) asm {
+  %words = test.load.v4i32 %address
+  %lane = slice %words[2] : reg<test.i32 x4> -> reg<test.i32>
+  %left_scale = test.mul.i32 %input, %input
+  %left = test.mul.i32 %lane, %left_scale
+  %right_scale = test.mul.i32 %input, %input
+  %factor = test.const.issued.i32 5
+  %right = test.mul.i32 %right_scale, %factor
+  %result = test.resource.serial.i32 %left, %right
+  return %result
+}
+)");
+      loom_low_allocation_budget_t budget = {IREE_SV("test.i32"), limit};
+      loom_low_planning_statistics_t statistics = {};
+      loom_low_emission_frame_options_t options = {
+          .descriptor_registry = &registry_.registry,
+          .function_target_facts = &target_facts_,
+          .residency_query =
+              [](const loom_low_resolved_target_t*,
+                 const loom_low_storage_layout_space_sizes_t*) {
+                return loom_target_residency_view(&model, model.best_tier);
+              },
+          .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
+          .allocation_budgets = &budget,
+          .allocation_budget_count = 1,
+          .statistics = &statistics,
+      };
+      const loom_low_emission_frame_spill_free_options_t repair = {
+          .flags = trial ? LOOM_LOW_SPILL_REPAIR_FLAG_TRY_SOURCE_ORDER : 0u,
+      };
+      loom_low_emission_frame_t frame = {};
+      bool accepted = false;
+      IREE_ASSERT_OK(loom_low_emission_frame_build_spill_free(
+          module.get(), loom_block_op(loom_module_block(module.get()), 0),
+          &options, &repair, &arena_, &frame, &accepted));
+      ASSERT_TRUE(accepted);
+      builds[trial] = statistics.frame_build_count;
+      stores[trial] = frame.materialized_spill_store_count;
+      reloads[trial] = frame.materialized_reload_count;
+    }
+    if (limit == 5) {
+      // Five registers fit when the loaded lane is consumed before the
+      // independent right-hand product is computed.
+      EXPECT_GT(stores[0], 0u);
+      EXPECT_EQ(builds[1], 2u);
+      EXPECT_EQ(stores[1], 0u);
+      EXPECT_EQ(reloads[1], 0u);
+    } else {
+      // Four registers require spilling in source order. Six already fit the
+      // normal schedule. Neither case pays for an alternate allocation.
+      EXPECT_EQ(stores[0] != 0, limit == 4);
+      EXPECT_EQ(builds[1], builds[0]);
+      EXPECT_EQ(stores[1], stores[0]);
+      EXPECT_EQ(reloads[1], reloads[0]);
+    }
+  }
+}
 
 TEST_F(LowEmissionFrameTest, RejectsTargetlessFunctionBeforeScheduling) {
   ModulePtr module = ParseModule();

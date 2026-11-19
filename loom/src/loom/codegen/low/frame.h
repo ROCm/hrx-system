@@ -216,8 +216,17 @@ typedef iree_status_t (*loom_low_emission_frame_validate_fn_t)(
     void* user_data, const loom_low_emission_frame_t* frame,
     iree_arena_allocator_t* arena, bool* out_accepted);
 
+enum loom_low_spill_repair_flag_bits_e {
+  // Try source order in blocks with a reordered local spill whose source
+  // register pressure fit the target. Keep only a spill-free physical result.
+  LOOM_LOW_SPILL_REPAIR_FLAG_TRY_SOURCE_ORDER = 1u << 0,
+};
+typedef uint32_t loom_low_spill_repair_flags_t;
+
 // Options controlling final spill-free emission frame construction.
 typedef struct loom_low_emission_frame_spill_free_options_t {
+  // Repair choices enabled by the native emitter.
+  loom_low_spill_repair_flags_t flags;
   // Materialization contract used when final allocation exposes new spills.
   loom_low_allocation_materialization_options_t materialization_options;
   // Target-owned lowering callback for authored or generic spill traffic.
