@@ -161,6 +161,8 @@ struct HipRuntimeApi {
   HipMemcpyAtoDFn memcpy_atod = nullptr;
   // Performs a synchronous legacy array-to-array copy.
   HipMemcpyAtoAFn memcpy_atoa = nullptr;
+  // Copies one pitched rectangle without expanding rows in the frontend.
+  decltype(&hipMemcpy2DAsync) memcpy_2d_async = nullptr;
   // Performs generic asynchronous 3D memory copies.
   HipMemcpy3DAsyncFn memcpy_3d_async = nullptr;
   // Copies pitched array contents asynchronously on an SPT stream.
@@ -231,6 +233,7 @@ class HipArrayCopySptApiTest : public testing::Test {
     HRX_RESOLVE_HIP_FIELD(memcpy_dtoa, "hipMemcpyDtoA");
     HRX_RESOLVE_HIP_FIELD(memcpy_atod, "hipMemcpyAtoD");
     HRX_RESOLVE_HIP_FIELD(memcpy_atoa, "hipMemcpyAtoA");
+    HRX_RESOLVE_HIP_FIELD(memcpy_2d_async, "hipMemcpy2DAsync");
     HRX_RESOLVE_HIP_FIELD(memcpy_3d_async, "hipMemcpy3DAsync");
     HRX_RESOLVE_HIP_FIELD(memcpy_2d_from_array_async_spt,
                           "hipMemcpy2DFromArrayAsync_spt");
@@ -998,6 +1001,106 @@ TEST_F(HipArrayCopySptApiTest, PitchedVolumePreservesIndependentOrigins) {
   EXPECT_EQ(0, std::memcmp(destination, expected.data(), expected.size()));
 }
 
+TEST_F(HipArrayCopySptApiTest,
+       PitchedCopyRejectsWindowOverrunBeforeAcceptance) {
+  ASSERT_EQ(hipSuccess, api_.malloc(&device_pointer_, 16));
+  ASSERT_EQ(hipSuccess, api_.stream_create(&stream_));
+  const std::array<uint8_t, 16> source = {
+      1, 2, 3, 4, 21, 22, 23, 24, 41, 42, 43, 44, 61, 62, 63, 64,
+  };
+  ASSERT_EQ(hipSuccess, api_.memcpy(device_pointer_, source.data(),
+                                    source.size(), hipMemcpyHostToDevice));
+  std::array<uint8_t, 24> replacement = {};
+  EXPECT_EQ(hipErrorInvalidValue,
+            api_.memcpy_2d_async(device_pointer_, 8, replacement.data(), 8, 4,
+                                 3, hipMemcpyHostToDevice, stream_));
+  ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
+  std::array<uint8_t, 16> observed = {};
+  ASSERT_EQ(hipSuccess, api_.memcpy(observed.data(), device_pointer_,
+                                    observed.size(), hipMemcpyDeviceToHost));
+  EXPECT_EQ(observed, source);
+}
+
+TEST_F(HipArrayCopySptApiTest, RectanglesAndVolumesShareOneOrderedCopyPath) {
+  constexpr size_t kSpan = 2 * 1024 * 1024;
+  AllocateHost(2 * kSpan);
+  ASSERT_FALSE(HasFatalFailure());
+  ASSERT_EQ(hipSuccess, api_.malloc(&device_pointer_, 2 * kSpan));
+  ASSERT_EQ(hipSuccess, api_.stream_create(&stream_));
+  std::vector<uint8_t> pageable(2 * kSpan, 0xCD);
+  std::vector<uint8_t> initial(2 * kSpan, 0xCD);
+  std::vector<uint8_t> expected(kSpan, 0xCD);
+  auto* device_a = static_cast<uint8_t*>(device_pointer_);
+  auto* device_b = device_a + kSpan;
+  for (bool registered : {false, true}) {
+    auto* source =
+        registered ? static_cast<uint8_t*>(host_pointer_) : pageable.data();
+    auto* destination = source + kSpan;
+    for (size_t width : {size_t{31}, size_t{257}, size_t{4096}}) {
+      const size_t height = width == 31 ? 1 : (width == 257 ? 17 : 129);
+      for (size_t depth : {size_t{1}, size_t{2}}) {
+        SCOPED_TRACE(registered);
+        SCOPED_TRACE(width);
+        SCOPED_TRACE(depth);
+        const size_t source_pitch = width + 7;
+        const size_t device_a_pitch = width + 11;
+        const size_t device_b_pitch = width + 19;
+        const size_t target_pitch = width + 23;
+        const size_t slice_rows = height + 1;
+        std::memset(source, 0xCD, 2 * kSpan);
+        std::fill(expected.begin(), expected.end(), 0xCD);
+        for (size_t z = 0; z < depth; ++z) {
+          for (size_t y = 0; y < height; ++y) {
+            for (size_t x = 0; x < width; ++x) {
+              const uint8_t value = (x * 37 + y * 13 + z * 71) % 251;
+              const size_t row = z * slice_rows + y + 1;
+              source[row * source_pitch + 1 + x] = value;
+              expected[row * target_pitch + 1 + x] = value;
+            }
+          }
+        }
+        ASSERT_EQ(hipSuccess,
+                  api_.memcpy(device_a, initial.data(), initial.size(),
+                              hipMemcpyHostToDevice));
+        const auto copy = [&](void* target, size_t target_row,
+                              const void* input, size_t source_row,
+                              hipMemcpyKind kind) {
+          if (depth == 1) {
+            return api_.memcpy_2d_async(
+                static_cast<uint8_t*>(target) + target_row + 1, target_row,
+                static_cast<const uint8_t*>(input) + source_row + 1, source_row,
+                width, height, kind, stream_);
+          }
+          const hipMemcpy3DParms params = {
+              .srcPos = {1, 1, 0},
+              .srcPtr = {const_cast<void*>(input), source_row, source_row,
+                         slice_rows},
+              .dstPos = {1, 1, 0},
+              .dstPtr = {target, target_row, target_row, slice_rows},
+              .extent = {width, height, depth},
+              .kind = kind,
+          };
+          return api_.memcpy_3d_async(&params, stream_);
+        };
+        // Always join accepted work before assertions can end local host-byte
+        // lifetimes. Consecutive operations rely only on their stream order.
+        const hipError_t upload = copy(device_a, device_a_pitch, source,
+                                       source_pitch, hipMemcpyHostToDevice);
+        const hipError_t move = copy(device_b, device_b_pitch, device_a,
+                                     device_a_pitch, hipMemcpyDeviceToDevice);
+        const hipError_t download = copy(destination, target_pitch, device_b,
+                                         device_b_pitch, hipMemcpyDeviceToHost);
+        const hipError_t completion = api_.stream_synchronize(stream_);
+        ASSERT_EQ(hipSuccess, upload);
+        ASSERT_EQ(hipSuccess, move);
+        ASSERT_EQ(hipSuccess, download);
+        ASSERT_EQ(hipSuccess, completion);
+        EXPECT_EQ(0, std::memcmp(destination, expected.data(), kSpan));
+      }
+    }
+  }
+}
+
 TEST_F(HipArrayCopySptApiTest, PageableCopiesWaitOnlyForTheirSelectedStream) {
   constexpr size_t kWidth = 8;
   constexpr size_t kHeight = 3;
@@ -1141,6 +1244,36 @@ TEST_F(HipArrayCopySptApiTest, SynchronousCopyRejectsCaptureBeforeMutation) {
             api_.stream_end_capture(stream_, &graph));
   EXPECT_EQ(nullptr, graph);
   expect_original_contents();
+}
+
+TEST_F(HipArrayCopySptApiTest, PackedCopyRejectsKnownAllocationOverrun) {
+  AllocateArray(8, 2);
+  std::array<uint8_t, 16> original;
+  original.fill(0xA5);
+  ASSERT_EQ(hipSuccess,
+            api_.memcpy_to_array(array_, 0, 0, original.data(), original.size(),
+                                 hipMemcpyHostToDevice));
+  ASSERT_EQ(hipSuccess, api_.malloc(&device_pointer_, original.size()));
+  ASSERT_EQ(hipSuccess, api_.memcpy(device_pointer_, original.data(),
+                                    original.size(), hipMemcpyHostToDevice));
+  // A known allocation with an invalid window must not be reclassified as a
+  // pageable host pointer when inference cannot produce a valid endpoint.
+  EXPECT_EQ(hipErrorInvalidValue,
+            api_.memcpy_to_array(array_, 0, 0,
+                                 static_cast<uint8_t*>(device_pointer_) + 8,
+                                 original.size(), hipMemcpyDefault));
+  EXPECT_EQ(hipErrorInvalidValue,
+            api_.memcpy_from_array_spt(
+                static_cast<uint8_t*>(device_pointer_) + 8, array_, 0, 0,
+                original.size(), hipMemcpyDefault));
+  std::array<uint8_t, 16> actual = {};
+  ASSERT_EQ(hipSuccess,
+            api_.memcpy_from_array_spt(actual.data(), array_, 0, 0,
+                                       actual.size(), hipMemcpyDeviceToHost));
+  EXPECT_EQ(actual, original);
+  ASSERT_EQ(hipSuccess, api_.memcpy(actual.data(), device_pointer_,
+                                    actual.size(), hipMemcpyDeviceToHost));
+  EXPECT_EQ(actual, original);
 }
 
 TEST_F(HipArrayCopySptApiTest, CopiesPackedRowsAtRepresentativeHeights) {

@@ -1,6 +1,8 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#include <array>
+
 #include "hrx_internal.h"
 #include "hrx_runtime_cxx.h"
 #include "iree/testing/gtest.h"
@@ -53,6 +55,12 @@ TEST_F(GraphBufferTest, RecordsAndInstantiatesHandleBasedCopyAndFill) {
   const hrx_graph_copy_buffer_node_attrs_t copy_attrs = {
       .src = {source_, 4, 16},
       .dst = {destination_, 8, 16},
+      .region =
+          {
+              .row_length = 16,
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   hrx_graph_node_t copy_node = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_copy_buffer_node(
@@ -62,6 +70,12 @@ TEST_F(GraphBufferTest, RecordsAndInstantiatesHandleBasedCopyAndFill) {
       .dst = {destination_, 24, 8},
       .pattern = 0xA5A5A5A5u,
       .pattern_size = 4,
+      .region =
+          {
+              .row_length = 8,
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   hrx_graph_node_t fill_node = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_fill_buffer_node(
@@ -114,6 +128,12 @@ TEST_F(GraphBufferTest, RetainedGraphDoesNotExtendExplicitAllocationEpoch) {
       .dst = {buffer, 0, 64},
       .pattern = 0xA5u,
       .pattern_size = 1,
+      .region =
+          {
+              .row_length = 64,
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   IREE_ASSERT_OK(hrx_status_to_iree(
       hrx_graph_add_fill_buffer_node(graph, nullptr, 0, &fill, nullptr)));
@@ -127,8 +147,8 @@ TEST_F(GraphBufferTest, RetainedGraphDoesNotExtendExplicitAllocationEpoch) {
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
 
   uint8_t contents[64] = {};
-  IREE_ASSERT_OK(hrx_status_to_iree(
-      hrx_synchronous_d2h(queue, buffer, 0, contents, sizeof(contents))));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h_linear(
+      queue, buffer, 0, contents, sizeof(contents))));
   for (uint8_t byte : contents) {
     EXPECT_EQ(byte, 0xA5u);
   }
@@ -167,6 +187,12 @@ TEST_F(GraphBufferTest, DependentFillThenCopyProducesExpectedContents) {
       .dst = {source_, 0, 64},
       .pattern = 0xA5u,
       .pattern_size = 1,
+      .region =
+          {
+              .row_length = 64,
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   hrx_graph_node_t fill_node = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_fill_buffer_node(
@@ -175,6 +201,12 @@ TEST_F(GraphBufferTest, DependentFillThenCopyProducesExpectedContents) {
   const hrx_graph_copy_buffer_node_attrs_t copy_attrs = {
       .src = {source_, 0, 64},
       .dst = {destination_, 0, 64},
+      .region =
+          {
+              .row_length = 64,
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   hrx_graph_node_t copy_node = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_copy_buffer_node(
@@ -189,8 +221,8 @@ TEST_F(GraphBufferTest, DependentFillThenCopyProducesExpectedContents) {
 
   uint8_t contents[64] = {};
   IREE_ASSERT_OK(hrx_status_to_iree(
-      hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), destination_, 0,
-                          contents, sizeof(contents))));
+      hrx_synchronous_d2h_linear(hrx_device_get_queue(device_, 0, 0),
+                                 destination_, 0, contents, sizeof(contents))));
   for (uint8_t value : contents) {
     EXPECT_EQ(value, 0xA5u);
   }
@@ -201,7 +233,7 @@ TEST_F(GraphBufferTest, DependentFillThenCopyProducesExpectedContents) {
 
 TEST_F(GraphBufferTest, LaunchFlushesPendingStreamWorkBeforeGraphCommands) {
   const uint8_t pattern = 0x5Au;
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer(
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer_linear(
       stream_, source_, 0, 64, &pattern, sizeof(pattern))));
 
   hrx_graph_t graph = nullptr;
@@ -209,6 +241,12 @@ TEST_F(GraphBufferTest, LaunchFlushesPendingStreamWorkBeforeGraphCommands) {
   const hrx_graph_copy_buffer_node_attrs_t copy_attrs = {
       .src = {source_, 0, 64},
       .dst = {destination_, 0, 64},
+      .region =
+          {
+              .row_length = 64,
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   IREE_ASSERT_OK(hrx_status_to_iree(
       hrx_graph_add_copy_buffer_node(graph, nullptr, 0, &copy_attrs, nullptr)));
@@ -222,8 +260,8 @@ TEST_F(GraphBufferTest, LaunchFlushesPendingStreamWorkBeforeGraphCommands) {
 
   uint8_t contents[64] = {};
   IREE_ASSERT_OK(hrx_status_to_iree(
-      hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), destination_, 0,
-                          contents, sizeof(contents))));
+      hrx_synchronous_d2h_linear(hrx_device_get_queue(device_, 0, 0),
+                                 destination_, 0, contents, sizeof(contents))));
   for (uint8_t value : contents) {
     EXPECT_EQ(value, pattern);
   }
@@ -240,6 +278,12 @@ TEST_F(GraphBufferTest, AddedDependencyOrdersFillBeforeCopy) {
       .dst = {source_, 0, 64},
       .pattern = 0x3Cu,
       .pattern_size = 1,
+      .region =
+          {
+              .row_length = 64,
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   hrx_graph_node_t fill_node = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_fill_buffer_node(
@@ -248,6 +292,12 @@ TEST_F(GraphBufferTest, AddedDependencyOrdersFillBeforeCopy) {
   const hrx_graph_copy_buffer_node_attrs_t copy_attrs = {
       .src = {source_, 0, 64},
       .dst = {destination_, 0, 64},
+      .region =
+          {
+              .row_length = 64,
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   hrx_graph_node_t copy_node = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_copy_buffer_node(
@@ -264,14 +314,149 @@ TEST_F(GraphBufferTest, AddedDependencyOrdersFillBeforeCopy) {
 
   uint8_t contents[64] = {};
   IREE_ASSERT_OK(hrx_status_to_iree(
-      hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), destination_, 0,
-                          contents, sizeof(contents))));
+      hrx_synchronous_d2h_linear(hrx_device_get_queue(device_, 0, 0),
+                                 destination_, 0, contents, sizeof(contents))));
   for (uint8_t value : contents) {
     EXPECT_EQ(value, 0x3Cu);
   }
 
   hrx_graph_exec_release(executable);
   hrx_graph_release(graph);
+}
+
+TEST_F(GraphBufferTest, RectangularGraphCapturesGeometryAndPreservesPadding) {
+  for (size_t pattern_size : {1u, 2u, 4u}) {
+    SCOPED_TRACE(pattern_size);
+    hrx::runtime::hrx_ptr<hrx_graph_t, hrx_graph_retain, hrx_graph_release>
+        graph;
+    IREE_ASSERT_OK(
+        hrx_status_to_iree(hrx_graph_create(device_, 0, graph.for_output())));
+    hrx_graph_fill_buffer_node_attrs_t fill = {
+        .dst = {source_, 4, 48},
+        .pattern = 0x7635AB12u,
+        .pattern_size = pattern_size,
+        .region =
+            {
+                .row_length = 4,
+                .row_count = 2,
+                .slice_count = 2,
+                .target_strides = {12, 28},
+            },
+    };
+    hrx_graph_node_t previous = nullptr;
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_graph_add_fill_buffer_node(graph, nullptr, 0, &fill, &previous)));
+    hrx_graph_copy_buffer_node_attrs_t copy = {
+        .src = {source_, 4, 52},
+        .dst = {destination_, 0, 64},
+        .region =
+            {
+                .row_length = 8,
+                .row_count = 2,
+                .slice_count = 2,
+                .source_strides = {12, 28},
+                .target_strides = {16, 32},
+            },
+    };
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_graph_add_copy_buffer_node(graph, &previous, 1, &copy, nullptr)));
+    fill.region = {};
+    copy.region = {};
+    hrx::runtime::hrx_ptr<hrx_graph_exec_t, hrx_graph_exec_retain,
+                          hrx_graph_exec_release>
+        executable;
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_instantiate(
+        graph, hrx_stream_get_queue(stream_), 0, executable.for_output())));
+    std::array<uint8_t, 64> source;
+    std::array<uint8_t, 64> observed;
+    std::array<uint8_t, 64> expected;
+    const auto* pattern = reinterpret_cast<const uint8_t*>(&fill.pattern);
+    for (uint32_t iteration = 0; iteration < 2; ++iteration) {
+      for (size_t i = 0; i < source.size(); ++i) {
+        source[i] = static_cast<uint8_t>(i * 7 + iteration * 31);
+      }
+      expected.fill(0xCD);
+      IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_update_buffer_linear(
+          stream_, source.data(), source.size(), source_, 0)));
+      IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_update_buffer_linear(
+          stream_, expected.data(), expected.size(), destination_, 0)));
+      IREE_ASSERT_OK(
+          hrx_status_to_iree(hrx_graph_exec_launch(executable, stream_)));
+      IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+      IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h_linear(
+          hrx_stream_get_queue(stream_), destination_, 0, observed.data(),
+          observed.size())));
+      for (size_t z = 0; z < 2; ++z) {
+        for (size_t y = 0; y < 2; ++y) {
+          for (size_t x = 0; x < 8; ++x) {
+            expected[z * 32 + y * 16 + x] =
+                x < 4 ? pattern[x % pattern_size]
+                      : source[4 + z * 28 + y * 12 + x];
+          }
+        }
+      }
+      EXPECT_EQ(observed, expected);
+    }
+  }
+}
+
+TEST_F(GraphBufferTest, EmptyGeometryPreservesDependencyEdges) {
+  hrx::runtime::hrx_ptr<hrx_graph_t, hrx_graph_retain, hrx_graph_release> graph;
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_graph_create(device_, 0, graph.for_output())));
+  const hrx_graph_fill_buffer_node_attrs_t fill = {
+      .dst = {source_, 0, 64},
+      .pattern = 0x4Bu,
+      .pattern_size = 1,
+      .region =
+          {
+              .row_length = 64,
+              .row_count = 1,
+              .slice_count = 1,
+          },
+  };
+  hrx_graph_node_t previous = nullptr;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_add_fill_buffer_node(graph, nullptr, 0, &fill, &previous)));
+  hrx_graph_copy_buffer_node_attrs_t copy = {
+      .src = {source_, 64, 0},
+      .dst = {destination_, 64, 0},
+      .region =
+          {
+              .row_length = UINT64_MAX,
+              .row_count = UINT64_MAX,
+              .slice_count = 0,
+          },
+  };
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_add_copy_buffer_node(graph, &previous, 1, &copy, &previous)));
+  copy = {
+      .src = {source_, 0, 64},
+      .dst = {destination_, 0, 64},
+      .region =
+          {
+              .row_length = 64,
+              .row_count = 1,
+              .slice_count = 1,
+          },
+  };
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_add_copy_buffer_node(graph, &previous, 1, &copy, nullptr)));
+  hrx::runtime::hrx_ptr<hrx_graph_exec_t, hrx_graph_exec_retain,
+                        hrx_graph_exec_release>
+      executable;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_instantiate(
+      graph, hrx_stream_get_queue(stream_), 0, executable.for_output())));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_graph_exec_launch(executable, stream_)));
+  std::array<uint8_t, 64> observed;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_synchronous_d2h_linear(hrx_stream_get_queue(stream_), destination_, 0,
+                                 observed.data(), observed.size())));
+  for (uint8_t value : observed) {
+    EXPECT_EQ(value, 0x4B);
+  }
 }
 
 TEST_F(GraphBufferTest, RejectsInvalidHandleRangesAndPatterns) {
@@ -281,13 +466,19 @@ TEST_F(GraphBufferTest, RejectsInvalidHandleRangesAndPatterns) {
   hrx_graph_copy_buffer_node_attrs_t copy_attrs = {
       .src = {source_, 60, 8},
       .dst = {destination_, 0, 8},
+      .region =
+          {
+              .row_length = 8,
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                         hrx_status_to_iree(hrx_graph_add_copy_buffer_node(
                             graph, nullptr, 0, &copy_attrs, nullptr)));
   copy_attrs.src = {source_, 0, 8};
   copy_attrs.dst = {destination_, 0, 4};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                         hrx_status_to_iree(hrx_graph_add_copy_buffer_node(
                             graph, nullptr, 0, &copy_attrs, nullptr)));
 
@@ -295,16 +486,48 @@ TEST_F(GraphBufferTest, RejectsInvalidHandleRangesAndPatterns) {
       .dst = {destination_, 0, 8},
       .pattern = 0,
       .pattern_size = 3,
+      .region =
+          {
+              .row_length = 8,
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         hrx_status_to_iree(hrx_graph_add_fill_buffer_node(
                             graph, nullptr, 0, &fill_attrs, nullptr)));
   fill_attrs.pattern_size = 4;
   fill_attrs.dst = {destination_, 0, 6};
+  fill_attrs.region.row_length = 6;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         hrx_status_to_iree(hrx_graph_add_fill_buffer_node(
                             graph, nullptr, 0, &fill_attrs, nullptr)));
   fill_attrs.dst = {destination_, 2, 8};
+  fill_attrs.region.row_length = 8;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        hrx_status_to_iree(hrx_graph_add_fill_buffer_node(
+                            graph, nullptr, 0, &fill_attrs, nullptr)));
+  copy_attrs.src = {source_, 0, 64};
+  copy_attrs.dst = {destination_, 0, 64};
+  copy_attrs.region.row_count = 2;
+  copy_attrs.region.source_strides.row_stride = UINT64_MAX;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        hrx_status_to_iree(hrx_graph_add_copy_buffer_node(
+                            graph, nullptr, 0, &copy_attrs, nullptr)));
+  copy_attrs.region.row_count = UINT64_MAX;
+  copy_attrs.region.source_strides.row_stride = 0;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        hrx_status_to_iree(hrx_graph_add_copy_buffer_node(
+                            graph, nullptr, 0, &copy_attrs, nullptr)));
+  fill_attrs.dst = {destination_, 0, 64};
+  fill_attrs.region.row_count = 2;
+  fill_attrs.region.target_strides.row_stride = 10;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        hrx_status_to_iree(hrx_graph_add_fill_buffer_node(
+                            graph, nullptr, 0, &fill_attrs, nullptr)));
+  fill_attrs.region.target_strides.row_stride = 4;
+  fill_attrs.region.slice_count = 2;
+  fill_attrs.region.target_strides.slice_stride = 18;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         hrx_status_to_iree(hrx_graph_add_fill_buffer_node(
                             graph, nullptr, 0, &fill_attrs, nullptr)));

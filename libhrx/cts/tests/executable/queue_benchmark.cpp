@@ -175,9 +175,9 @@ class Environment {
       const hrx_semaphore_list_t waits = {&semaphore, &tail_, 1};
       const hrx_semaphore_list_t signals = {&semaphore, &next, 1};
       if constexpr (Op == Operation::kFill) {
-        Check(hrx_queue_fill(queue_, &waits, &signals, output_, 0, 4096,
-                             &expected_, sizeof(expected_),
-                             Prepared ? &barriers_ : nullptr));
+        Check(hrx_queue_fill_linear(queue_, &waits, &signals, output_, 0, 4096,
+                                    &expected_, sizeof(expected_),
+                                    Prepared ? &barriers_ : nullptr));
       } else {
         const hrx_buffer_ref_t binding = {output_, 0, sizeof(expected_)};
         Check(hrx_queue_dispatch(
@@ -283,8 +283,9 @@ class Environment {
     expected_ = 0xAABBCCDD;
     for (size_t i = 0; i < kStreamCount; ++i) {
       Check(hrx_stream_create(queue_, 0, streams[i].for_output()));
-      Check(hrx_stream_fill_buffer(streams[i], output_, 0, sizeof(expected_),
-                                   &expected_, sizeof(expected_)));
+      Check(hrx_stream_fill_buffer_linear(streams[i], output_, 0,
+                                          sizeof(expected_), &expected_,
+                                          sizeof(expected_)));
       Check(hrx_stream_synchronize(streams[i]));
       Check(hrx_stream_get_timeline_position(streams[i], &points[i]));
     }
@@ -326,8 +327,8 @@ class Environment {
     expected_ = 0xAABBCCDD;
     for (auto& stream : streams) {
       Check(hrx_stream_create(queue_, 0, stream.for_output()));
-      Check(hrx_stream_fill_buffer(stream, output_, 0, sizeof(expected_),
-                                   &expected_, sizeof(expected_)));
+      Check(hrx_stream_fill_buffer_linear(stream, output_, 0, sizeof(expected_),
+                                          &expected_, sizeof(expected_)));
       Check(hrx_stream_synchronize(stream));
     }
     const size_t batch = state.range(0);
@@ -335,8 +336,9 @@ class Environment {
     const auto record = [&]() {
       if constexpr (Op == EventOperation::kFillAndRecord) {
         ++expected_;
-        Check(hrx_stream_fill_buffer(streams[0], output_, 0, sizeof(expected_),
-                                     &expected_, sizeof(expected_)));
+        Check(hrx_stream_fill_buffer_linear(streams[0], output_, 0,
+                                            sizeof(expected_), &expected_,
+                                            sizeof(expected_)));
       }
       Check(hrx_event_record(event, streams[producer]));
       if constexpr (Op == EventOperation::kAlternateRecord) {

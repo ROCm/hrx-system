@@ -16,8 +16,8 @@ TEST_CASE_METHOD(HrxTestFixture, "Stream fill buffer", "[stream_ops][fill]") {
       HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED, &buf));
 
   uint32_t pattern = 0xCAFEBABE;
-  REQUIRE_OK(hrx().stream_fill_buffer(stream, buf, 0, 1024, &pattern,
-                                      sizeof(pattern)));
+  REQUIRE_OK(hrx().stream_fill_buffer_linear(stream, buf, 0, 1024, &pattern,
+                                             sizeof(pattern)));
   REQUIRE_OK(hrx().stream_flush(stream));
   REQUIRE_OK(hrx().stream_synchronize(stream));
 
@@ -45,8 +45,8 @@ TEST_CASE_METHOD(HrxTestFixture, "Stream wait observes flushed work",
       HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED, &buf));
 
   uint32_t pattern = 0x0F0E0D0C;
-  REQUIRE_OK(hrx().stream_fill_buffer(stream, buf, 0, 1024, &pattern,
-                                      sizeof(pattern)));
+  REQUIRE_OK(hrx().stream_fill_buffer_linear(stream, buf, 0, 1024, &pattern,
+                                             sizeof(pattern)));
   REQUIRE_OK(hrx().stream_flush(stream));
   REQUIRE_OK(hrx().stream_wait(stream));
 
@@ -77,11 +77,11 @@ TEST_CASE_METHOD(HrxTestFixture, "Stream copy buffer", "[stream_ops][copy]") {
 
   // Stream ordering makes the fill visible to the copy in the same recording.
   uint32_t pattern = 0x12345678;
-  REQUIRE_OK(
-      hrx().stream_fill_buffer(stream, src, 0, 512, &pattern, sizeof(pattern)));
+  REQUIRE_OK(hrx().stream_fill_buffer_linear(stream, src, 0, 512, &pattern,
+                                             sizeof(pattern)));
 
   // Copy src -> dst.
-  REQUIRE_OK(hrx().stream_copy_buffer(stream, src, 0, dst, 0, 512));
+  REQUIRE_OK(hrx().stream_copy_buffer_linear(stream, src, 0, dst, 0, 512));
   REQUIRE_OK(hrx().stream_flush(stream));
   REQUIRE_OK(hrx().stream_synchronize(stream));
 
@@ -111,7 +111,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Stream update buffer", "[stream_ops][copy]") {
   // Upload host data.
   uint8_t host_data[64];
   memset(host_data, 0x77, sizeof(host_data));
-  REQUIRE_OK(hrx().stream_update_buffer(stream, host_data, 64, buf, 0));
+  REQUIRE_OK(hrx().stream_update_buffer_linear(stream, host_data, 64, buf, 0));
   REQUIRE_OK(hrx().stream_flush(stream));
   REQUIRE_OK(hrx().stream_synchronize(stream));
 
@@ -139,8 +139,8 @@ TEST_CASE_METHOD(HrxTestFixture, "Stream execution barrier",
       HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED, &buf));
 
   uint32_t first = 0x11223344;
-  REQUIRE_OK(
-      hrx().stream_fill_buffer(stream, buf, 0, 32, &first, sizeof(first)));
+  REQUIRE_OK(hrx().stream_fill_buffer_linear(stream, buf, 0, 32, &first,
+                                             sizeof(first)));
   REQUIRE_OK(hrx().stream_barrier(stream, nullptr));
   const hrx_buffer_barrier_t range = {
       .source_scope = HRX_ACCESS_SCOPE_TRANSFER_WRITE,
@@ -154,7 +154,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Stream execution barrier",
       .buffer_barriers = &range,
   };
   REQUIRE_OK(hrx().stream_barrier(stream, &barrier));
-  REQUIRE_OK(hrx().stream_copy_buffer(stream, buf, 0, buf, 32, 32));
+  REQUIRE_OK(hrx().stream_copy_buffer_linear(stream, buf, 0, buf, 32, 32));
   REQUIRE_OK(hrx().stream_flush(stream));
   REQUIRE_OK(hrx().stream_synchronize(stream));
 

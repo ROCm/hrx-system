@@ -83,20 +83,23 @@ static hrx_status_t hrx_stream_transfer(
 
 hrx_status_t hrx_synchronous_h2d(hrx_queue_t queue, const void* host_src,
                                  hrx_buffer_t dst, size_t dst_offset,
-                                 size_t size) {
+                                 const hrx_transfer_region_t* region) {
   HRX_TRACE_ZONE_BEGIN(z0, "hrx_synchronous_h2d");
-  HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
-  if (!queue || !host_src || !dst) {
+  if (!queue || !host_src || !dst || !region) {
     HRX_RETURN_AND_END_ZONE(
         z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument"));
   }
+  const iree_hal_transfer_region_t operation_region =
+      hrx_transfer_region_to_hal(region);
   if (dst->group != queue->device->group) {
     HRX_RETURN_AND_END_ZONE(
         z0,
         hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                         "destination buffer belongs to another device group"));
   }
-  if (dst_offset > dst->size || size > dst->size - dst_offset) {
+  if (!iree_hal_transfer_range_fits(
+          dst_offset, region->row_length, region->row_count,
+          region->slice_count, &operation_region.target_strides, dst->size)) {
     HRX_RETURN_AND_END_ZONE(z0,
                             hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
                                             "transfer exceeds buffer size"));
@@ -108,11 +111,8 @@ hrx_status_t hrx_synchronous_h2d(hrx_queue_t queue, const void* host_src,
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
-  const iree_hal_transfer_region_t operation_region = {
-      .row_length = (iree_device_size_t)size,
-      .row_count = 1,
-      .slice_count = 1,
-  };
+  HRX_TRACE_ZONE_APPEND_BYTES(
+      z0, iree_hal_transfer_region_length(&operation_region));
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
       .upload =
@@ -128,21 +128,32 @@ hrx_status_t hrx_synchronous_h2d(hrx_queue_t queue, const void* host_src,
               queue->hal_queue, 1, &operation, IREE_ASYNC_WAIT_FLAG_NONE)));
 }
 
+hrx_status_t hrx_synchronous_h2d_linear(hrx_queue_t queue, const void* host_src,
+                                        hrx_buffer_t dst, size_t dst_offset,
+                                        size_t size) {
+  const hrx_transfer_region_t region = {
+      .row_length = size, .row_count = 1, .slice_count = 1};
+  return hrx_synchronous_h2d(queue, host_src, dst, dst_offset, &region);
+}
+
 hrx_status_t hrx_synchronous_d2h(hrx_queue_t queue, hrx_buffer_t src,
                                  size_t src_offset, void* host_dst,
-                                 size_t size) {
+                                 const hrx_transfer_region_t* region) {
   HRX_TRACE_ZONE_BEGIN(z0, "hrx_synchronous_d2h");
-  HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
-  if (!queue || !src || !host_dst) {
+  if (!queue || !src || !host_dst || !region) {
     HRX_RETURN_AND_END_ZONE(
         z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument"));
   }
+  const iree_hal_transfer_region_t operation_region =
+      hrx_transfer_region_to_hal(region);
   if (src->group != queue->device->group) {
     HRX_RETURN_AND_END_ZONE(
         z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "source buffer belongs to another device group"));
   }
-  if (src_offset > src->size || size > src->size - src_offset) {
+  if (!iree_hal_transfer_range_fits(
+          src_offset, region->row_length, region->row_count,
+          region->slice_count, &operation_region.source_strides, src->size)) {
     HRX_RETURN_AND_END_ZONE(z0,
                             hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
                                             "transfer exceeds buffer size"));
@@ -154,11 +165,8 @@ hrx_status_t hrx_synchronous_d2h(hrx_queue_t queue, hrx_buffer_t src,
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
-  const iree_hal_transfer_region_t operation_region = {
-      .row_length = (iree_device_size_t)size,
-      .row_count = 1,
-      .slice_count = 1,
-  };
+  HRX_TRACE_ZONE_APPEND_BYTES(
+      z0, iree_hal_transfer_region_length(&operation_region));
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
@@ -172,6 +180,14 @@ hrx_status_t hrx_synchronous_d2h(hrx_queue_t queue, hrx_buffer_t src,
   HRX_RETURN_AND_END_ZONE(
       z0, hrx_status_from_iree(hrx_hal_queue_transfer_and_wait(
               queue->hal_queue, 1, &operation, IREE_ASYNC_WAIT_FLAG_NONE)));
+}
+
+hrx_status_t hrx_synchronous_d2h_linear(hrx_queue_t queue, hrx_buffer_t src,
+                                        size_t src_offset, void* host_dst,
+                                        size_t size) {
+  const hrx_transfer_region_t region = {
+      .row_length = size, .row_count = 1, .slice_count = 1};
+  return hrx_synchronous_d2h(queue, src, src_offset, host_dst, &region);
 }
 
 //===----------------------------------------------------------------------===//
@@ -180,25 +196,24 @@ hrx_status_t hrx_synchronous_d2h(hrx_queue_t queue, hrx_buffer_t src,
 
 hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream, const void* host_src,
                                  hrx_buffer_t dst, size_t dst_offset,
-                                 size_t size) {
-  if (!stream || !host_src || !dst) {
+                                 const hrx_transfer_region_t* region) {
+  if (!stream || !host_src || !dst || !region) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
   }
+  const iree_hal_transfer_region_t operation_region =
+      hrx_transfer_region_to_hal(region);
   if (dst->group != stream->queue->device->group) {
     return hrx_make_status(
         HRX_STATUS_INVALID_ARGUMENT,
         "destination buffer belongs to another device group");
   }
-  if (dst_offset > dst->size || size > dst->size - dst_offset) {
+  if (!iree_hal_transfer_range_fits(
+          dst_offset, region->row_length, region->row_count,
+          region->slice_count, &operation_region.target_strides, dst->size)) {
     return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
                            "transfer exceeds buffer size");
   }
 
-  const iree_hal_transfer_region_t operation_region = {
-      .row_length = (iree_device_size_t)size,
-      .row_count = 1,
-      .slice_count = 1,
-  };
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
       .upload =
@@ -212,26 +227,33 @@ hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream, const void* host_src,
   return hrx_stream_transfer(stream, &operation);
 }
 
+hrx_status_t hrx_stream_copy_h2d_linear(hrx_stream_t stream,
+                                        const void* host_src, hrx_buffer_t dst,
+                                        size_t dst_offset, size_t size) {
+  const hrx_transfer_region_t region = {
+      .row_length = size, .row_count = 1, .slice_count = 1};
+  return hrx_stream_copy_h2d(stream, host_src, dst, dst_offset, &region);
+}
+
 hrx_status_t hrx_stream_copy_d2h(hrx_stream_t stream, hrx_buffer_t src,
                                  size_t src_offset, void* host_dst,
-                                 size_t size) {
-  if (!stream || !src || !host_dst) {
+                                 const hrx_transfer_region_t* region) {
+  if (!stream || !src || !host_dst || !region) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
   }
+  const iree_hal_transfer_region_t operation_region =
+      hrx_transfer_region_to_hal(region);
   if (src->group != stream->queue->device->group) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                            "source buffer belongs to another device group");
   }
-  if (src_offset > src->size || size > src->size - src_offset) {
+  if (!iree_hal_transfer_range_fits(
+          src_offset, region->row_length, region->row_count,
+          region->slice_count, &operation_region.source_strides, src->size)) {
     return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
                            "transfer exceeds buffer size");
   }
 
-  const iree_hal_transfer_region_t operation_region = {
-      .row_length = (iree_device_size_t)size,
-      .row_count = 1,
-      .slice_count = 1,
-  };
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
@@ -243,4 +265,12 @@ hrx_status_t hrx_stream_copy_d2h(hrx_stream_t stream, hrx_buffer_t src,
           },
   };
   return hrx_stream_transfer(stream, &operation);
+}
+
+hrx_status_t hrx_stream_copy_d2h_linear(hrx_stream_t stream, hrx_buffer_t src,
+                                        size_t src_offset, void* host_dst,
+                                        size_t size) {
+  const hrx_transfer_region_t region = {
+      .row_length = size, .row_count = 1, .slice_count = 1};
+  return hrx_stream_copy_d2h(stream, src, src_offset, host_dst, &region);
 }

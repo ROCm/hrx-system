@@ -40,6 +40,24 @@ struct RecordedCommand {
   bool operator==(const RecordedCommand&) const = default;
 };
 
+struct RecordedCopy {
+  // Bounded source window passed to the HAL dependency.
+  iree_hal_buffer_ref_t source;
+  // Bounded target window passed to the HAL dependency.
+  iree_hal_buffer_ref_t target;
+  // Geometry captured during the recording call.
+  iree_hal_transfer_region_t region;
+  // Copy policy passed through from the graph producer.
+  iree_hal_copy_flags_t flags;
+};
+
+struct RecordedFill {
+  // Addressed destination window passed to HAL.
+  iree_hal_buffer_ref_t target;
+  // Useful byte extent and strides captured during recording.
+  iree_hal_fill_region_t region;
+};
+
 // Captures the real recorder's calls to its HAL dependency. Public command
 // validation remains enabled; payload execution is covered separately below.
 struct RecordingCommandBuffer {
@@ -87,16 +105,20 @@ struct RecordingCommandBuffer {
             },
         .fill_buffer =
             +[](iree_hal_command_buffer_t* command_buffer,
-                iree_hal_buffer_ref_t, const void*, iree_host_size_t,
-                const iree_hal_fill_region_t*, iree_hal_fill_flags_t) {
+                iree_hal_buffer_ref_t target, const void*, iree_host_size_t,
+                const iree_hal_fill_region_t* region, iree_hal_fill_flags_t) {
               Cast(command_buffer)->commands.push_back({RecordedKind::kFill});
+              Cast(command_buffer)->fills.push_back({target, *region});
               return iree_ok_status();
             },
         .copy_buffer =
             +[](iree_hal_command_buffer_t* command_buffer,
-                iree_hal_buffer_ref_t, iree_hal_buffer_ref_t,
-                const iree_hal_transfer_region_t*, iree_hal_copy_flags_t) {
+                iree_hal_buffer_ref_t source, iree_hal_buffer_ref_t target,
+                const iree_hal_transfer_region_t* region,
+                iree_hal_copy_flags_t flags) {
               Cast(command_buffer)->commands.push_back({RecordedKind::kCopy});
+              Cast(command_buffer)
+                  ->copies.push_back({source, target, *region, flags});
               return iree_ok_status();
             },
         .dispatch =
@@ -125,6 +147,10 @@ struct RecordingCommandBuffer {
   std::vector<uint64_t> validation;
   // Exact operation and visibility sequence received by the backend.
   std::vector<RecordedCommand> commands;
+  // Copy windows and geometry received by the backend.
+  std::vector<RecordedCopy> copies;
+  // Fill windows and geometry received by the backend.
+  std::vector<RecordedFill> fills;
 };
 
 class CommandRecordingTest : public ::testing::Test {
@@ -337,17 +363,65 @@ TEST_F(CommandRecordingTest,
   iree_hal_executable_release(&executable);
 }
 
+TEST_F(CommandRecordingTest, StridedFillRecordsOneOperation) {
+  hrx_command_fill_slices_t fill = {
+      .rows =
+          {
+              .fill =
+                  {
+                      .command = {HRX_COMMAND_FILL},
+                      .pattern_size = 4,
+                      .stride_count = 2,
+                      .pattern = 0x52A13C78u,
+                      .target = iree_hal_make_buffer_ref(
+                          target_.get()->hal_buffer, 8, 8),
+                  },
+              .row_count = 3,
+              .target_row_stride = 16,
+          },
+      .slice_count = 2,
+      .target_slice_stride = 64,
+  };
+  void* sources[] = {&fill};
+  uint32_t order[] = {0};
+  uint8_t flags[] = {0};
+  const hrx_graph_schedule_t schedule = {
+      .node_count = 1,
+      .sources = sources,
+      .order = order,
+      .flags = flags,
+  };
+  const hrx_graph_partition_t partition = {
+      .count = 1,
+      .stream_count = 1,
+      .command_mask = 1u << HRX_COMMAND_FILL,
+  };
+  RecordingCommandBuffer recorded(iree_hal_queue_family(queue_->hal_queue));
+  IREE_ASSERT_OK(
+      hrx_graph_record_partition(&schedule, &partition, 0, &recorded.base));
+  ASSERT_EQ(recorded.fills.size(), 1u);
+  const RecordedFill& observed = recorded.fills.front();
+  EXPECT_EQ(observed.target.buffer, target_.get()->hal_buffer);
+  EXPECT_EQ(observed.target.offset, 8u);
+  EXPECT_EQ(observed.target.length, 104u);
+  EXPECT_EQ(observed.region.row_length, 8u);
+  EXPECT_EQ(observed.region.row_count, 3u);
+  EXPECT_EQ(observed.region.slice_count, 2u);
+  EXPECT_EQ(observed.region.target_strides.row_stride, 16u);
+  EXPECT_EQ(observed.region.target_strides.slice_stride, 64u);
+}
+
 TEST_F(CommandRecordingTest, StridedCopiesPreserveGapsAndSelectOneWorkstream) {
+  std::array<uint8_t, 128> source_contents;
+  for (size_t i = 0; i < source_contents.size(); ++i) {
+    source_contents[i] = static_cast<uint8_t>(i + 1);
+  }
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_h2d_linear(
+      queue_, source_contents.data(), source_, 0, source_contents.size())));
   hrx_command_fill_t clear = {
       .command = {HRX_COMMAND_FILL},
       .pattern_size = 1,
       .target = iree_hal_make_buffer_ref(target_.get()->hal_buffer, 0, 128),
-  };
-  hrx_command_fill_t fill = {
-      .command = {HRX_COMMAND_FILL},
-      .pattern_size = 1,
-      .pattern = 0x3C,
-      .target = iree_hal_make_buffer_ref(source_.get()->hal_buffer, 0, 128),
   };
   hrx_command_copy_strided_t copy = {
       .copy =
@@ -355,6 +429,7 @@ TEST_F(CommandRecordingTest, StridedCopiesPreserveGapsAndSelectOneWorkstream) {
               .command = {HRX_COMMAND_COPY},
               .strided = true,
               .source_buffer = source_.get()->hal_buffer,
+              .source_offset = 7,
               .target_buffer = target_.get()->hal_buffer,
               .target_offset = 4,
               .length = 4,
@@ -368,33 +443,52 @@ TEST_F(CommandRecordingTest, StridedCopiesPreserveGapsAndSelectOneWorkstream) {
   };
   hrx_command_fill_t other_stream = clear;
   other_stream.pattern = 0xFF;
-  void* sources[] = {&clear, &fill, &copy, &other_stream};
-  uint32_t order[] = {0, 1, 2, 3};
+  void* sources[] = {&clear, &copy, &other_stream};
+  uint32_t order[] = {0, 1, 2};
   uint8_t flags[] = {0, HRX_GRAPH_ANALYSIS_NODE_BARRIER_BEFORE,
-                     HRX_GRAPH_ANALYSIS_NODE_BARRIER_BEFORE,
                      1 << HRX_GRAPH_ANALYSIS_NODE_STREAM_SHIFT};
   const hrx_graph_schedule_t schedule = {
-      .node_count = 4,
+      .node_count = 3,
       .sources = sources,
       .order = order,
       .flags = flags,
   };
   const hrx_graph_partition_t partition = {
-      .count = 4,
+      .count = 3,
       .stream_count = 2,
       .command_mask = (1u << HRX_COMMAND_COPY) | (1u << HRX_COMMAND_FILL),
   };
+  RecordingCommandBuffer recorded(iree_hal_queue_family(queue_->hal_queue));
+  IREE_ASSERT_OK(
+      hrx_graph_record_partition(&schedule, &partition, 0, &recorded.base));
+  ASSERT_EQ(recorded.copies.size(), 1u);
+  const RecordedCopy& observed = recorded.copies.front();
+  EXPECT_EQ(observed.source.buffer, source_.get()->hal_buffer);
+  EXPECT_EQ(observed.source.offset, 7u);
+  EXPECT_EQ(observed.source.length, 52u);
+  EXPECT_EQ(observed.target.buffer, target_.get()->hal_buffer);
+  EXPECT_EQ(observed.target.offset, 4u);
+  EXPECT_EQ(observed.target.length, 76u);
+  EXPECT_EQ(observed.region.row_length, 4u);
+  EXPECT_EQ(observed.region.row_count, 3u);
+  EXPECT_EQ(observed.region.slice_count, 2u);
+  EXPECT_EQ(observed.region.source_strides.row_stride, 8u);
+  EXPECT_EQ(observed.region.source_strides.slice_stride, 32u);
+  EXPECT_EQ(observed.region.target_strides.row_stride, 12u);
+  EXPECT_EQ(observed.region.target_strides.slice_stride, 48u);
+  EXPECT_EQ(observed.flags, IREE_HAL_COPY_FLAG_NONE);
   IREE_ASSERT_OK(
       hrx_graph_record_partition(&schedule, &partition, 0, command_buffer_));
   Execute();
   std::array<uint8_t, 128> contents;
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h(
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h_linear(
       queue_, target_, 0, contents.data(), contents.size())));
   std::array<uint8_t, 128> expected = {};
   for (size_t slice = 0; slice < 2; ++slice) {
     for (size_t row = 0; row < 3; ++row) {
       for (size_t byte = 0; byte < 4; ++byte) {
-        expected[4 + slice * 48 + row * 12 + byte] = 0x3C;
+        expected[4 + slice * 48 + row * 12 + byte] =
+            source_contents[7 + slice * 32 + row * 8 + byte];
       }
     }
   }

@@ -260,10 +260,10 @@ TEST_CASE("CPU NPU GPU work shares storage and explicit queue dependencies",
                                HRX_EXECUTION_STAGE_TRANSFER,
                                {{buffers[i], 0, kBufferLength}});
       const hrx_queue_barriers_t barriers = {&empty, &release.list};
-      REQUIRE_OK(hrx().queue_fill(queues[0], &waits, &cpu_signal, buffers[i], 0,
-                                  kBufferLength, &input_values[i],
-                                  sizeof(input_values[i]),
-                                  generation ? &barriers : nullptr));
+      REQUIRE_OK(hrx().queue_fill_linear(
+          queues[0], &waits, &cpu_signal, buffers[i], 0, kBufferLength,
+          &input_values[i], sizeof(input_values[i]),
+          generation ? &barriers : nullptr));
       resources.tails[0] = cpu_value;
     }
     uint64_t gpu_value = resources.tails[1] + 1;
@@ -272,9 +272,9 @@ TEST_CASE("CPU NPU GPU work shares storage and explicit queue dependencies",
                                    HRX_EXECUTION_STAGE_TRANSFER,
                                    {{buffers[3], 0, kBufferLength}});
     const hrx_queue_barriers_t guard_barriers = {&empty, &guard_release.list};
-    REQUIRE_OK(hrx().queue_fill(queues[1], &cpu_signal, &gpu_signal, buffers[3],
-                                0, kBufferLength, &kGuard, sizeof(kGuard),
-                                generation ? &guard_barriers : nullptr));
+    REQUIRE_OK(hrx().queue_fill_linear(
+        queues[1], &cpu_signal, &gpu_signal, buffers[3], 0, kBufferLength,
+        &kGuard, sizeof(kGuard), generation ? &guard_barriers : nullptr));
     resources.tails[1] = gpu_value;
     const hrx_dispatch_config_t dispatch = {
         .workgroup_count = {1, 1, 1},
@@ -308,9 +308,9 @@ TEST_CASE("CPU NPU GPU work shares storage and explicit queue dependencies",
                                  {{buffers[3], 0, kBufferLength}});
     const hrx_queue_barriers_t gpu_barriers = {&gpu_acquire.list,
                                                &gpu_release.list};
-    REQUIRE_OK(hrx().queue_copy(queues[1], &npu_signal, &gpu_signal, buffers[2],
-                                0, buffers[3], kOutputOffset, kPayloadLength,
-                                generation ? &gpu_barriers : nullptr));
+    REQUIRE_OK(hrx().queue_copy_linear(
+        queues[1], &npu_signal, &gpu_signal, buffers[2], 0, buffers[3],
+        kOutputOffset, kPayloadLength, generation ? &gpu_barriers : nullptr));
     resources.tails[1] = gpu_value;
     ++cpu_value;
     PreparedBoundary cpu_acquire(acquires[0], HRX_MEMORY_TRANSITION_ACQUIRE,
@@ -321,9 +321,9 @@ TEST_CASE("CPU NPU GPU work shares storage and explicit queue dependencies",
                                  {{buffers[4], 0, kBufferLength}});
     const hrx_queue_barriers_t cpu_barriers = {&cpu_acquire.list,
                                                &cpu_release.list};
-    REQUIRE_OK(hrx().queue_copy(queues[0], &gpu_signal, &cpu_signal, buffers[3],
-                                0, buffers[4], 0, kBufferLength,
-                                generation ? &cpu_barriers : nullptr));
+    REQUIRE_OK(hrx().queue_copy_linear(
+        queues[0], &gpu_signal, &cpu_signal, buffers[3], 0, buffers[4], 0,
+        kBufferLength, generation ? &cpu_barriers : nullptr));
     resources.tails[0] = cpu_value;
     if (!generation) {
       // All buffers and dependent operations were accepted before allocation

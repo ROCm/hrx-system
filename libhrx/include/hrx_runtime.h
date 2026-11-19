@@ -65,6 +65,49 @@ typedef struct hrx_buffer_params_t {
   hrx_buffer_usage_t usage;
 } hrx_buffer_params_t;
 
+typedef struct hrx_transfer_strides_t {
+  // Byte displacement between consecutive rows.
+  uint64_t row_stride;
+  // Byte displacement between consecutive slices.
+  uint64_t slice_stride;
+} hrx_transfer_strides_t;
+
+// Useful bytes within independently bounded source and destination windows.
+// Byte x in row y of slice z is addressed as the supplied endpoint origin plus
+// z*slice_stride + y*row_stride + x. Strides are explicit byte displacements;
+// zero does not mean packed. A count of one ignores that dimension's stride,
+// and any zero extent makes the operation empty. Padding is never copied.
+//
+// Geometry is captured before the call returns. Writes must not overlap other
+// writes or source reads, as with memcpy; repeated source reads are permitted.
+// Overlap between bounding windows alone does not imply useful-byte overlap.
+typedef struct hrx_transfer_region_t {
+  // Contiguous useful bytes copied in each row.
+  uint64_t row_length;
+  // Number of rows in each slice.
+  uint64_t row_count;
+  // Number of slices.
+  uint64_t slice_count;
+  // Byte displacements from the supplied source origin.
+  hrx_transfer_strides_t source_strides;
+  // Byte displacements from the supplied destination origin.
+  hrx_transfer_strides_t target_strides;
+} hrx_transfer_region_t;
+
+// Useful bytes filled within a destination window. Addressing and empty extents
+// follow hrx_transfer_region_t. The 1/2/4-byte pattern restarts in each row;
+// the origin, row length, and used strides must be multiples of its size.
+typedef struct hrx_fill_region_t {
+  // Contiguous useful bytes filled in each row.
+  uint64_t row_length;
+  // Number of rows in each slice.
+  uint64_t row_count;
+  // Number of slices.
+  uint64_t slice_count;
+  // Byte displacements from the supplied destination origin.
+  hrx_transfer_strides_t target_strides;
+} hrx_fill_region_t;
+
 // Export metadata for direct executable dispatch. |name| is owned by the
 // executable and remains valid until hrx_executable_release() drops the last
 // reference. |constant_byte_length| is the byte length of the constants buffer
@@ -336,16 +379,27 @@ HRX_API hrx_status_t hrx_buffer_allocate(hrx_stream_t stream, size_t size,
 //
 // These execute on the supplied transfer-capable queue and block until that
 // transfer completes. They do not join any stream's timeline. For async
-// transfers, use stream operations (hrx_stream_copy_buffer, etc).
+// transfers, use stream operations (hrx_stream_copy_buffer_linear, etc).
 //===----------------------------------------------------------------------===//
 
 HRX_API hrx_status_t hrx_synchronous_h2d(hrx_queue_t queue,
                                          const void* host_src, hrx_buffer_t dst,
-                                         size_t dst_offset, size_t size);
+                                         size_t dst_offset,
+                                         const hrx_transfer_region_t* region);
 
 HRX_API hrx_status_t hrx_synchronous_d2h(hrx_queue_t queue, hrx_buffer_t src,
                                          size_t src_offset, void* host_dst,
-                                         size_t size);
+                                         const hrx_transfer_region_t* region);
+
+HRX_API hrx_status_t hrx_synchronous_h2d_linear(hrx_queue_t queue,
+                                                const void* host_src,
+                                                hrx_buffer_t dst,
+                                                size_t dst_offset, size_t size);
+
+HRX_API hrx_status_t hrx_synchronous_d2h_linear(hrx_queue_t queue,
+                                                hrx_buffer_t src,
+                                                size_t src_offset,
+                                                void* host_dst, size_t size);
 
 //===----------------------------------------------------------------------===//
 // Execution and memory barriers
@@ -357,7 +411,7 @@ typedef struct hrx_buffer_ref_t {
   hrx_buffer_t buffer;
   // First byte relative to the buffer.
   size_t offset;
-  // Number of bytes accessed.
+  // Accessible byte count from offset; geometry may leave padding untouched.
   size_t length;
 } hrx_buffer_ref_t;
 
@@ -455,21 +509,40 @@ typedef struct hrx_queue_barriers_t {
 // Stream operations (batched via pending command buffer)
 //===----------------------------------------------------------------------===//
 
+// Captures the pattern and geometry before return; fills only useful bytes.
 HRX_API hrx_status_t hrx_stream_fill_buffer(hrx_stream_t stream,
                                             hrx_buffer_t buffer, size_t offset,
-                                            size_t size, const void* pattern,
-                                            size_t pattern_size);
+                                            const void* pattern,
+                                            size_t pattern_size,
+                                            const hrx_fill_region_t* region);
 
-HRX_API hrx_status_t hrx_stream_copy_buffer(hrx_stream_t stream,
-                                            hrx_buffer_t src, size_t src_offset,
-                                            hrx_buffer_t dst, size_t dst_offset,
-                                            size_t size);
+// Captures geometry before return; buffer contents are consumed at execution.
+HRX_API hrx_status_t hrx_stream_copy_buffer(
+    hrx_stream_t stream, hrx_buffer_t src, size_t src_offset, hrx_buffer_t dst,
+    size_t dst_offset, const hrx_transfer_region_t* region);
 
-HRX_API hrx_status_t hrx_stream_update_buffer(hrx_stream_t stream,
-                                              const void* host_data,
-                                              size_t host_data_size,
-                                              hrx_buffer_t dst,
-                                              size_t dst_offset);
+// Captures useful host bytes before return. |host_data_size| bounds the entire
+// source window, including padding; only useful bytes occupy command storage.
+// The useful byte count is at most 65536 bytes.
+HRX_API hrx_status_t hrx_stream_update_buffer(
+    hrx_stream_t stream, const void* host_data, size_t host_data_size,
+    hrx_buffer_t dst, size_t dst_offset, const hrx_transfer_region_t* region);
+
+HRX_API hrx_status_t hrx_stream_fill_buffer_linear(hrx_stream_t stream,
+                                                   hrx_buffer_t buffer,
+                                                   size_t offset, size_t size,
+                                                   const void* pattern,
+                                                   size_t pattern_size);
+
+HRX_API hrx_status_t hrx_stream_copy_buffer_linear(
+    hrx_stream_t stream, hrx_buffer_t src, size_t src_offset, hrx_buffer_t dst,
+    size_t dst_offset, size_t size);
+
+HRX_API hrx_status_t hrx_stream_update_buffer_linear(hrx_stream_t stream,
+                                                     const void* host_data,
+                                                     size_t host_data_size,
+                                                     hrx_buffer_t dst,
+                                                     size_t dst_offset);
 
 //===----------------------------------------------------------------------===//
 // Direct queue operations (single-op, no command buffer)
@@ -505,14 +578,26 @@ HRX_API hrx_status_t hrx_queue_dealloca(hrx_queue_t queue,
 HRX_API hrx_status_t hrx_queue_fill(
     hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
     const hrx_semaphore_list_t* signal_semaphores, hrx_buffer_t buffer,
+    size_t offset, const void* pattern, size_t pattern_size,
+    const hrx_fill_region_t* region, const hrx_queue_barriers_t* barriers);
+
+HRX_API hrx_status_t hrx_queue_copy(
+    hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
+    const hrx_semaphore_list_t* signal_semaphores, hrx_buffer_t src,
+    size_t src_offset, hrx_buffer_t dst, size_t dst_offset,
+    const hrx_transfer_region_t* region, const hrx_queue_barriers_t* barriers);
+
+HRX_API hrx_status_t hrx_queue_fill_linear(
+    hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
+    const hrx_semaphore_list_t* signal_semaphores, hrx_buffer_t buffer,
     size_t offset, size_t size, const void* pattern, size_t pattern_size,
     const hrx_queue_barriers_t* barriers);
 
-HRX_API hrx_status_t
-hrx_queue_copy(hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
-               const hrx_semaphore_list_t* signal_semaphores, hrx_buffer_t src,
-               size_t src_offset, hrx_buffer_t dst, size_t dst_offset,
-               size_t size, const hrx_queue_barriers_t* barriers);
+HRX_API hrx_status_t hrx_queue_copy_linear(
+    hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
+    const hrx_semaphore_list_t* signal_semaphores, hrx_buffer_t src,
+    size_t src_offset, hrx_buffer_t dst, size_t dst_offset, size_t size,
+    const hrx_queue_barriers_t* barriers);
 
 HRX_API hrx_status_t hrx_queue_barrier(
     hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
@@ -764,21 +849,37 @@ HRX_API hrx_status_t hrx_buffer_lookup(hrx_device_t device,
 // Async host/device transfers
 //===----------------------------------------------------------------------===//
 
+// Enqueues useful host bytes after prior stream work. |host_src| remains live
+// and unmodified through completion; the geometry is captured before return.
+HRX_API hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream,
+                                         const void* host_src, hrx_buffer_t dst,
+                                         size_t dst_offset,
+                                         const hrx_transfer_region_t* region);
+
+// Enqueues a download after prior stream work. |host_dst| remains live and
+// inaccessible through completion; padding remains unchanged. The geometry is
+// captured before return, and completion includes the host writes.
+HRX_API hrx_status_t hrx_stream_copy_d2h(hrx_stream_t stream, hrx_buffer_t src,
+                                         size_t src_offset, void* host_dst,
+                                         const hrx_transfer_region_t* region);
+
 // Enqueues a host-to-device transfer after prior work in |stream|. |host_src|
 // remains live and unmodified until the stream reaches the transfer's timeline
 // point. The stream must be non-NULL. For a blocking transfer on an explicit
-// queue, use hrx_synchronous_h2d.
-HRX_API hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream,
-                                         const void* host_src, hrx_buffer_t dst,
-                                         size_t dst_offset, size_t size);
+// queue, use hrx_synchronous_h2d_linear.
+HRX_API hrx_status_t hrx_stream_copy_h2d_linear(hrx_stream_t stream,
+                                                const void* host_src,
+                                                hrx_buffer_t dst,
+                                                size_t dst_offset, size_t size);
 
 // Enqueues a device-to-host transfer after prior work in |stream|. |host_dst|
 // remains live and inaccessible until the stream reaches the transfer's
 // timeline point. The stream must be non-NULL. For a blocking transfer on an
-// explicit queue, use hrx_synchronous_d2h.
-HRX_API hrx_status_t hrx_stream_copy_d2h(hrx_stream_t stream, hrx_buffer_t src,
-                                         size_t src_offset, void* host_dst,
-                                         size_t size);
+// explicit queue, use hrx_synchronous_d2h_linear.
+HRX_API hrx_status_t hrx_stream_copy_d2h_linear(hrx_stream_t stream,
+                                                hrx_buffer_t src,
+                                                size_t src_offset,
+                                                void* host_dst, size_t size);
 
 //===----------------------------------------------------------------------===//
 // Graphs (CUDA/HIP-style execution graphs)
@@ -815,26 +916,31 @@ typedef struct hrx_graph_kernel_node_attrs_t {
   uint32_t flags;
 } hrx_graph_kernel_node_attrs_t;
 
-// Native handle-based buffer copy. Source and destination lengths must be
-// equal and nonzero. The graph retains the native buffer handles;
-// the caller keeps their pools and allocation epochs live for every launch.
+// Native handle-based buffer copy. Geometry is captured when the node is added;
+// each reference independently bounds its addressed span. The graph retains
+// the native buffer handles; the caller keeps their pools and allocation
+// epochs live for every launch.
 typedef struct hrx_graph_copy_buffer_node_attrs_t {
-  // Source byte range.
+  // Accessible source byte window, including any inter-row padding.
   hrx_buffer_ref_t src;
-  // Destination byte range, with the same length as |src|.
+  // Accessible destination byte window, independent of the source window.
   hrx_buffer_ref_t dst;
+  // Useful byte extent and independent endpoint strides, copied into the node.
+  hrx_transfer_region_t region;
 } hrx_graph_copy_buffer_node_attrs_t;
 
 // Native handle-based buffer fill. |pattern_size| must be 1, 2, or 4 and the
-// destination offset and length must be integral multiples of it. Pattern
-// bytes are copied into the graph node during recording.
+// destination offset, row length, and used strides must be multiples of it.
+// Pattern bytes are copied into the graph node during recording.
 typedef struct hrx_graph_fill_buffer_node_attrs_t {
-  // Destination byte range.
+  // Accessible destination byte window, including any inter-row padding.
   hrx_buffer_ref_t dst;
   // Repeated pattern, using the first |pattern_size| bytes.
   uint32_t pattern;
   // Number of pattern bytes: 1, 2, or 4.
   size_t pattern_size;
+  // Useful byte extent and destination strides, copied into the node.
+  hrx_fill_region_t region;
 } hrx_graph_fill_buffer_node_attrs_t;
 
 typedef struct hrx_graph_host_call_node_attrs_t {

@@ -58,9 +58,9 @@ TEST(DeviceGroupTest, RetainedDeviceKeepsGroupAndServicesUsable) {
   hrx_semaphore_t signal = semaphore;
   const hrx_semaphore_list_t signals = {&signal, &value, 1};
   const uint32_t pattern = 0x12345678;
-  ASSERT_TRUE(Check(hrx_queue_fill(hrx_device_get_queue(second, 0, 0), nullptr,
-                                   &signals, buffer, 0, 256, &pattern,
-                                   sizeof(pattern), nullptr)));
+  ASSERT_TRUE(Check(hrx_queue_fill_linear(hrx_device_get_queue(second, 0, 0),
+                                          nullptr, &signals, buffer, 0, 256,
+                                          &pattern, sizeof(pattern), nullptr)));
   ASSERT_TRUE(Check(hrx_semaphore_wait(semaphore, value, UINT64_MAX)));
   second.reset();
   first.reset();
@@ -263,6 +263,12 @@ TEST(DeviceGroupTest, SharedReservationHasPerDeviceAddressesAndGraphAccess) {
       .dst = {buffer, 0, 256},
       .pattern = 0xA5A5A5A5u,
       .pattern_size = 4,
+      .region =
+          {
+              .row_length = 256,
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   hrx_graph_node_t node = nullptr;
   ASSERT_TRUE(
@@ -278,8 +284,9 @@ TEST(DeviceGroupTest, SharedReservationHasPerDeviceAddressesAndGraphAccess) {
   ASSERT_TRUE(Check(hrx_graph_exec_launch(executable, stream)));
   ASSERT_TRUE(Check(hrx_stream_synchronize(stream)));
   uint32_t output[64] = {};
-  ASSERT_TRUE(Check(hrx_synchronous_d2h(hrx_device_get_queue(devices[0], 0, 0),
-                                        buffer, 0, output, sizeof(output))));
+  ASSERT_TRUE(
+      Check(hrx_synchronous_d2h_linear(hrx_device_get_queue(devices[0], 0, 0),
+                                       buffer, 0, output, sizeof(output))));
   for (uint32_t element : output) {
     EXPECT_EQ(0xA5A5A5A5u, element);
   }
@@ -317,9 +324,9 @@ TEST_F(DeviceGroupLifetimeTest, ViewKeepsAllocationAndServicesAlive) {
   hrx_semaphore_t signal = done;
   const hrx_semaphore_list_t signals = {&signal, &value, 1};
   const uint32_t pattern = 0x87654321u;
-  ASSERT_TRUE(Check(hrx_queue_fill(hrx_device_get_queue(device_, 0, 0), nullptr,
-                                   &signals, borrowed_buffer, 0, 256, &pattern,
-                                   sizeof(pattern), nullptr)));
+  ASSERT_TRUE(Check(hrx_queue_fill_linear(
+      hrx_device_get_queue(device_, 0, 0), nullptr, &signals, borrowed_buffer,
+      0, 256, &pattern, sizeof(pattern), nullptr)));
   ASSERT_TRUE(Check(hrx_semaphore_wait(done, value, UINT64_MAX)));
   done.reset();
 
@@ -442,6 +449,12 @@ TEST_F(DeviceGroupLifetimeTest, GraphKeepsRecordingAndExecutionOwnersAlive) {
       .dst = {buffer, 0, sizeof(values)},
       .pattern = 0xA5A5A5A5u,
       .pattern_size = 4,
+      .region =
+          {
+              .row_length = sizeof(values),
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   hrx_graph_node_t node = nullptr;
   ASSERT_TRUE(

@@ -153,7 +153,7 @@ TEST_F(StreamingProfileGpuTest, SynchronizationDrainsLongRunningQueueCapture) {
   // work. Each boundary must drain output while the session remains active.
   for (uint32_t i = 0; i < 5000; ++i) {
     const uint8_t pattern = (uint8_t)i;
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer(
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer_linear(
         stream_, buffer_, 0, 64, &pattern, sizeof(pattern))));
     switch ((i / 1000) % 3) {
       case 0:

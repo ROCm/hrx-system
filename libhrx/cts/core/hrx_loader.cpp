@@ -219,13 +219,20 @@ void HrxLoader::load(const std::string& path) {
   LOAD(buffer_get_size);
 
   LOAD(synchronous_h2d);
+  LOAD(synchronous_h2d_linear);
   LOAD(synchronous_d2h);
+  LOAD(synchronous_d2h_linear);
   LOAD(stream_copy_h2d);
+  LOAD(stream_copy_h2d_linear);
   LOAD(stream_copy_d2h);
+  LOAD(stream_copy_d2h_linear);
 
   LOAD(stream_fill_buffer);
+  LOAD(stream_fill_buffer_linear);
   LOAD(stream_copy_buffer);
+  LOAD(stream_copy_buffer_linear);
   LOAD(stream_update_buffer);
+  LOAD(stream_update_buffer_linear);
 
   LOAD(executable_load_data);
   LOAD(executable_load_file);
@@ -236,7 +243,9 @@ void HrxLoader::load(const std::string& path) {
   LOAD(executable_lookup_export_by_name);
 
   LOAD(queue_fill);
+  LOAD(queue_fill_linear);
   LOAD(queue_copy);
+  LOAD(queue_copy_linear);
   LOAD(queue_barrier);
   LOAD(queue_dispatch);
   LOAD(queue_host_call);

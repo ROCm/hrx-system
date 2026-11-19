@@ -169,7 +169,7 @@ TEST_F(StreamingInitializationTest, FailureAndTeardownPreserveNativeRuntime) {
   uint64_t value = 1;
   const hrx_semaphore_list_t signals = {&signal, &value, 1};
   const uint32_t pattern = 0x12345678;
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_queue_fill(
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_queue_fill_linear(
       hrx_device_get_queue(native_device, 0, 0), nullptr, &signals, buffer, 0,
       256, &pattern, sizeof(pattern), nullptr)));
   IREE_ASSERT_OK(

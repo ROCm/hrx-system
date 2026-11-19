@@ -76,7 +76,7 @@ static int run_device_smoke_test(hrx_device_t device, const char* label) {
   }
 
   uint32_t pattern = 0xDEADBEEF;
-  if (result == 0 && report_status_error(hrx_stream_fill_buffer(
+  if (result == 0 && report_status_error(hrx_stream_fill_buffer_linear(
                          stream, buffer, 0, size, &pattern, sizeof(pattern)))) {
     result = 1;
   }
@@ -99,7 +99,7 @@ static int run_device_smoke_test(hrx_device_t device, const char* label) {
           &buffer2))) {
     result = 1;
   }
-  if (result == 0 && report_status_error(hrx_stream_copy_buffer(
+  if (result == 0 && report_status_error(hrx_stream_copy_buffer_linear(
                          stream, buffer, 0, buffer2, 0, size))) {
     result = 1;
   }

@@ -24,6 +24,24 @@ typedef struct iree_hip_copy_endpoint_t {
   iree_hal_streaming_context_t* context;
 } iree_hip_copy_endpoint_t;
 
+// Resolves one pointer, borrowing local ownership and optionally retaining its
+// foreign context. Unknown pointers remain pageable host memory. Release the
+// result with the same preferred context after consuming it.
+iree_hip_copy_endpoint_t iree_hip_copy_endpoint_resolve(
+    iree_hal_streaming_context_t* context, const void* pointer,
+    bool search_foreign);
+
+// Tests the complete requested span without another pointer lookup. Device
+// operands are bounded by their logical HIP extent; host registrations use
+// their registered range. An unknown pointer is valid only as a host operand.
+bool iree_hip_copy_endpoint_contains(const iree_hip_copy_endpoint_t* endpoint,
+                                     iree_host_size_t span,
+                                     bool device_operand);
+
+// Releases a resolved foreign context; local ownership remains borrowed.
+void iree_hip_copy_endpoint_deinitialize(iree_hal_streaming_context_t* context,
+                                         iree_hip_copy_endpoint_t* endpoint);
+
 // Temporary preparation state shared by direct execution, copy recording, and
 // parameter updates.
 typedef struct iree_hip_copy_endpoints_t {

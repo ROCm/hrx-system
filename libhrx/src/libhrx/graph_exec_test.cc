@@ -538,6 +538,12 @@ TEST_P(GraphKernelTest,
       .dst = {buffer, 0, sizeof(uint32_t)},
       .pattern = 41,
       .pattern_size = sizeof(uint32_t),
+      .region =
+          {
+              .row_length = sizeof(uint32_t),
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   hrx_graph_node_t producer = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_fill_buffer_node(

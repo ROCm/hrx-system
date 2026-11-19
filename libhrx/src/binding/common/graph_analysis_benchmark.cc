@@ -71,16 +71,25 @@ struct NativeGraph {
   static constexpr auto kNodeType = HRX_GRAPH_NODE_TYPE_INTERNAL_MEMSET;
   static constexpr auto kHostType = HRX_GRAPH_NODE_TYPE_INTERNAL_HOST_CALL;
 
-  static size_t NodeSize(uint8_t) { return sizeof(Node); }
+  static size_t NodeSize(uint8_t type) {
+    return sizeof(Node) +
+           (type == kNodeType
+                ? sizeof(hrx_command_fill_t)
+                : sizeof(hrx_graph_host_call_node_attrs_internal_t));
+  }
 
   static void Initialize(Node* node, uint8_t type) {
     node->type = type;
+    node->payload_size = static_cast<uint32_t>(NodeSize(type) - sizeof(Node));
     if (type == kNodeType) {
-      node->attrs.memset.command.kind = HRX_COMMAND_FILL;
+      reinterpret_cast<hrx_command_fill_t*>(node->payload)->command.kind =
+          HRX_COMMAND_FILL;
     }
   }
 
-  static Node** Dependencies(Node* node) { return node->dependencies; }
+  static Node** Dependencies(Node* node) {
+    return hrx_graph_node_dependencies(node);
+  }
 
   static void Link(Edge* edge, Node* from, Node* to, Edge** head) {
     *edge = {.next = *head, .from = from, .to = to};
@@ -112,7 +121,7 @@ struct BindingGraph {
     node->type = type;
     node->dependency_offset = NodeSize(type);
     if (type == kNodeType) {
-      iree_hal_streaming_graph_node_memset(node)->command.command.kind =
+      iree_hal_streaming_graph_node_memset(node)->command.fill.command.kind =
           HRX_COMMAND_FILL;
     }
   }

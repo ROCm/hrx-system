@@ -174,10 +174,11 @@ static bool iree_hal_streaming_graph_memcpy_update_is_compatible(
 static bool iree_hal_streaming_graph_memset_update_is_compatible(
     const iree_hal_streaming_graph_memset_node_attrs_t* old_attrs,
     const iree_hal_streaming_graph_memset_node_attrs_t* new_attrs) {
-  return old_attrs->command.pattern_size == new_attrs->command.pattern_size &&
-         old_attrs->command.target.length == new_attrs->command.target.length &&
-         old_attrs->hip_width == new_attrs->hip_width &&
-         old_attrs->hip_height == new_attrs->hip_height &&
+  return old_attrs->command.fill.pattern_size ==
+             new_attrs->command.fill.pattern_size &&
+         old_attrs->command.fill.target.length ==
+             new_attrs->command.fill.target.length &&
+         old_attrs->command.row_count == new_attrs->command.row_count &&
          old_attrs->hip_pitch == new_attrs->hip_pitch;
 }
 

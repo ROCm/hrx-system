@@ -8,7 +8,7 @@
 
 #include "common/context.h"
 
-static iree_hip_copy_endpoint_t iree_hip_copy_endpoint_resolve(
+iree_hip_copy_endpoint_t iree_hip_copy_endpoint_resolve(
     iree_hal_streaming_context_t* context, const void* pointer,
     bool search_foreign) {
   iree_hip_copy_endpoint_t endpoint = {0};
@@ -24,8 +24,8 @@ static iree_hip_copy_endpoint_t iree_hip_copy_endpoint_resolve(
   return endpoint;
 }
 
-static void iree_hip_copy_endpoint_deinitialize(
-    iree_hal_streaming_context_t* context, iree_hip_copy_endpoint_t* endpoint) {
+void iree_hip_copy_endpoint_deinitialize(iree_hal_streaming_context_t* context,
+                                         iree_hip_copy_endpoint_t* endpoint) {
   if (endpoint->context && endpoint->context != context) {
     iree_hal_streaming_context_release(endpoint->context);
   }
@@ -38,9 +38,9 @@ static bool iree_hip_copy_endpoint_is_device(
              IREE_HAL_STREAMING_MEMORY_KIND_HOST;
 }
 
-static bool iree_hip_copy_endpoint_contains(
-    const iree_hip_copy_endpoint_t* endpoint, iree_host_size_t span,
-    bool device_operand) {
+bool iree_hip_copy_endpoint_contains(const iree_hip_copy_endpoint_t* endpoint,
+                                     iree_host_size_t span,
+                                     bool device_operand) {
   if (!endpoint->reference.buffer) {
     return !device_operand;
   }

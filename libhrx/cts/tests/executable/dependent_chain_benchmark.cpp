@@ -169,8 +169,8 @@ class HrxRuntime {
       Check(hrx_allocator_allocate_buffer(hrx_device_allocator(device_), params,
                                           workload.bytes(), &buffer));
     }
-    Check(hrx_synchronous_h2d(queue_, workload.input.data(), buffers_[0], 0,
-                              workload.bytes()));
+    Check(hrx_synchronous_h2d_linear(queue_, workload.input.data(), buffers_[0],
+                                     0, workload.bytes()));
     if (submission == Submission::kGraph) {
       Check(hrx_graph_create(device_, 0, &graph_));
       hrx_graph_node_t previous = nullptr;
@@ -223,9 +223,9 @@ class HrxRuntime {
   }
   void Verify(const Workload& workload) {
     std::vector<uint32_t> actual(workload.count);
-    Check(hrx_synchronous_d2h(queue_,
-                              buffers_[workload.target(workload.depth - 1)], 0,
-                              actual.data(), workload.bytes()));
+    Check(hrx_synchronous_d2h_linear(
+        queue_, buffers_[workload.target(workload.depth - 1)], 0, actual.data(),
+        workload.bytes()));
     Require(actual == workload.expected, "HRX dependent-chain output mismatch");
   }
   void Reset() {

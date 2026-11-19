@@ -312,8 +312,8 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch") {
   REQUIRE_OK(hrx().stream_synchronize(stream));
 
   uint32_t actual = 0;
-  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, output, 0, &actual,
-                                   sizeof(actual)));
+  REQUIRE_OK(hrx().synchronous_d2h_linear(transfer_queue_, output, 0, &actual,
+                                          sizeof(actual)));
   REQUIRE(actual == expected);
 
   // The direct API targets an exact queue without joining the stream timeline.
@@ -342,8 +342,8 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch") {
       &direct_expected, sizeof(direct_expected), bindings, std::size(bindings),
       &barriers, HRX_DISPATCH_FLAG_NONE));
   REQUIRE_OK(hrx().semaphore_wait(completion, completion_value, UINT64_MAX));
-  REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, output, 0, &actual,
-                                   sizeof(actual)));
+  REQUIRE_OK(hrx().synchronous_d2h_linear(transfer_queue_, output, 0, &actual,
+                                          sizeof(actual)));
   REQUIRE(actual == direct_expected);
 
   // Invalid public bindings must unwind both inline and overflow translation
@@ -436,6 +436,12 @@ TEST_CASE_METHOD(GraphVisibilityTest,
       .dst = {buffer_, 0, sizeof(uint32_t)},
       .pattern = kInput,
       .pattern_size = sizeof(uint32_t),
+      .region =
+          {
+              .row_length = sizeof(uint32_t),
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   hrx_graph_node_t fill = nullptr;
   REQUIRE_OK(
@@ -443,6 +449,12 @@ TEST_CASE_METHOD(GraphVisibilityTest,
   const hrx_graph_copy_buffer_node_attrs_t input_copy_attrs = {
       .src = {buffer_, 0, sizeof(uint32_t)},
       .dst = {buffer_, 64 * sizeof(uint32_t), sizeof(uint32_t)},
+      .region =
+          {
+              .row_length = sizeof(uint32_t),
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   hrx_graph_node_t input_copy = nullptr;
   REQUIRE_OK(hrx().graph_add_copy_buffer_node(graph_, &fill, 1,
@@ -452,6 +464,12 @@ TEST_CASE_METHOD(GraphVisibilityTest,
   const hrx_graph_copy_buffer_node_attrs_t output_copy_attrs = {
       .src = {buffer_, 192 * sizeof(uint32_t), sizeof(uint32_t)},
       .dst = {buffer_, 224 * sizeof(uint32_t), sizeof(uint32_t)},
+      .region =
+          {
+              .row_length = sizeof(uint32_t),
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   REQUIRE_OK(hrx().graph_add_copy_buffer_node(graph_, &second_dispatch, 1,
                                               &output_copy_attrs, nullptr));

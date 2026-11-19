@@ -281,17 +281,23 @@ typedef struct hrx_graph_host_call_node_attrs_internal_t {
 } hrx_graph_host_call_node_attrs_internal_t;
 
 typedef struct hrx_graph_node_s {
+  // Semantic kind used while normalizing the construction graph.
   hrx_graph_node_type_internal_t type;
+  // Stable ordinal within the owning graph.
   uint32_t node_index;
+  // Number of predecessor pointers following the typed payload.
   uint32_t dependency_count;
-  union {
-    hrx_command_dispatch_t kernel;
-    hrx_command_copy_t memcpy;
-    hrx_command_fill_t memset;
-    hrx_graph_host_call_node_attrs_internal_t host;
-  } attrs;
-  struct hrx_graph_node_s* dependencies[];
+  // Byte size of the pointer-aligned typed payload, zero for an empty node.
+  uint32_t payload_size;
+  // Typed command or host-call attributes followed by dependency pointers.
+  // The fixed header offset preserves constant-time inverse node lookup.
+  iree_alignas(iree_max_align_t) uint8_t payload[];
 } hrx_graph_node_s;
+
+static inline hrx_graph_node_s** hrx_graph_node_dependencies(
+    const hrx_graph_node_s* node) {
+  return (hrx_graph_node_s**)(node->payload + node->payload_size);
+}
 
 typedef struct hrx_graph_node_block_t {
   struct hrx_graph_node_block_t* next;

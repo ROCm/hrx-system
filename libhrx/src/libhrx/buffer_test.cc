@@ -57,7 +57,7 @@ TEST_F(CpuBufferTest,
           HRX_BUFFER_USAGE_MAPPING_PERSISTENT,
       &buffer)));
   const uint8_t pattern = 0x5A;
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer(
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer_linear(
       stream_, buffer, 0, 64, &pattern, sizeof(pattern))));
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
 
@@ -78,7 +78,7 @@ TEST_F(CpuBufferTest,
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_unmap(buffer)));
 
   uint8_t result[64] = {};
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h(
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h_linear(
       hrx_device_get_queue(device_, 0, 0), buffer, 0, result, sizeof(result))));
   for (size_t i = 0; i < sizeof(result); ++i) {
     EXPECT_EQ(i >= 13 && i < 36 ? 0xA7 : pattern, result[i]);
@@ -115,8 +115,8 @@ TEST_F(CpuBufferTest, PublicConstructionPreservesNativePointerAccess) {
       }
       if (construction != 2) {
         IREE_ASSERT_OK(hrx_status_to_iree(
-            hrx_synchronous_h2d(hrx_device_get_queue(device_, 0, 0), storage,
-                                buffer, 0, sizeof(storage))));
+            hrx_synchronous_h2d_linear(hrx_device_get_queue(device_, 0, 0),
+                                       storage, buffer, 0, sizeof(storage))));
       }
       uint64_t pointer = 0;
       IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_query_address(
@@ -151,8 +151,8 @@ TEST_F(CpuBufferTest, PublicConstructionPreservesNativePointerAccess) {
 
       uint8_t result[64] = {};
       IREE_ASSERT_OK(hrx_status_to_iree(
-          hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), buffer, 0,
-                              result, sizeof(result))));
+          hrx_synchronous_d2h_linear(hrx_device_get_queue(device_, 0, 0),
+                                     buffer, 0, result, sizeof(result))));
       EXPECT_EQ(0, memcmp(result, storage, sizeof(storage)));
       hrx_buffer_release(buffer);
       for (uint8_t value : storage) {
@@ -289,7 +289,7 @@ TEST_F(CpuBufferTest, PreparedBackingAliasesRemainOrdinaryStreamBuffers) {
             hrx_device_allocator(device_), params, size, &backing)));
       }
       const uint8_t pattern = 0x5A;
-      IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer(
+      IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer_linear(
           stream_, backing, 0, size, &pattern, sizeof(pattern))));
       IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
 
@@ -341,13 +341,13 @@ TEST_F(CpuBufferTest, PreparedBackingAliasesRemainOrdinaryStreamBuffers) {
                                                 HRX_MEMORY_TYPE_HOST_LOCAL,
                                                 size, nullptr, &alias));
       const uint8_t update = 0xA7;
-      IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer(
+      IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer_linear(
           stream_, alias, 16, 64, &update, sizeof(update))));
       IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
       std::vector<uint8_t> output(size);
-      IREE_ASSERT_OK(hrx_status_to_iree(
-          hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), backing, 0,
-                              output.data(), output.size())));
+      IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h_linear(
+          hrx_device_get_queue(device_, 0, 0), backing, 0, output.data(),
+          output.size())));
       for (size_t i = 0; i < output.size(); ++i) {
         EXPECT_EQ(output[i], i >= 16 && i < 80 ? update : pattern);
       }
@@ -394,7 +394,7 @@ TEST_F(CpuBufferTest, MappingPermissionsAndDiscardProduceExpectedStreamOutput) {
       stream_, 64, HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE,
       HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED, &buffer)));
   const uint8_t pattern = 0x5A;
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer(
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer_linear(
       stream_, buffer, 0, 64, &pattern, sizeof(pattern))));
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
 
@@ -413,7 +413,7 @@ TEST_F(CpuBufferTest, MappingPermissionsAndDiscardProduceExpectedStreamOutput) {
   memset(pointer, 0xA7, 23);
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_unmap(buffer)));
   uint8_t result[64] = {};
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h(
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h_linear(
       hrx_device_get_queue(device_, 0, 0), buffer, 0, result, sizeof(result))));
   for (size_t i = 0; i < sizeof(result); ++i) {
     EXPECT_EQ(i >= 13 && i < 36 ? 0xA7 : pattern, result[i]);

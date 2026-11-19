@@ -188,8 +188,8 @@ TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
     std::vector<uint32_t> contents(2 * unit / sizeof(uint32_t), 0xAABBCCDD);
     std::fill_n(contents.begin(), unit / sizeof(uint32_t), 0x10203040);
     IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_synchronous_h2d(hrx_device_get_queue(device_, 0, 0),
-                            contents.data(), source, 0, 2 * unit)));
+        hrx_synchronous_h2d_linear(hrx_device_get_queue(device_, 0, 0),
+                                   contents.data(), source, 0, 2 * unit)));
 
     auto& gate = batch.gate;
     auto& completion = batch.completion;
@@ -252,20 +252,20 @@ TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
         .count = 1,
     };
     IREE_ASSERT_OK(batch.Record(
-        hrx_queue_fill(hrx_device_get_queue(device_, 0, 0), &wait_list,
-                       &signal_list, first, unit, sizeof(pattern), &pattern,
-                       sizeof(pattern), nullptr),
+        hrx_queue_fill_linear(hrx_device_get_queue(device_, 0, 0), &wait_list,
+                              &signal_list, first, unit, sizeof(pattern),
+                              &pattern, sizeof(pattern), nullptr),
         completed));
     IREE_ASSERT_OK(hrx_status_to_iree(
         hrx_semaphore_wait(completion, completed, UINT64_MAX)));
     uint32_t result = 0;
     IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), last, unit,
-                            &result, sizeof(result))));
+        hrx_synchronous_d2h_linear(hrx_device_get_queue(device_, 0, 0), last,
+                                   unit, &result, sizeof(result))));
     EXPECT_EQ(pattern, result);
     IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), source, unit,
-                            &result, sizeof(result))));
+        hrx_synchronous_d2h_linear(hrx_device_get_queue(device_, 0, 0), source,
+                                   unit, &result, sizeof(result))));
     EXPECT_EQ(pattern, result);
 
     hrx_memory_scope_t queue_scope, program_scope, host_scope;
@@ -316,12 +316,12 @@ TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
     IREE_ASSERT_OK(hrx_status_to_iree(
         hrx_semaphore_wait(completion, completed, UINT64_MAX)));
     IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), first, unit,
-                            &result, sizeof(result))));
+        hrx_synchronous_d2h_linear(hrx_device_get_queue(device_, 0, 0), first,
+                                   unit, &result, sizeof(result))));
     EXPECT_EQ(0x10203040u, result);
     IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), last, unit,
-                            &result, sizeof(result))));
+        hrx_synchronous_d2h_linear(hrx_device_get_queue(device_, 0, 0), last,
+                                   unit, &result, sizeof(result))));
     EXPECT_EQ(pattern, result);
 
     for (size_t i = 0; i < count; ++i) {

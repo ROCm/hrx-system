@@ -55,6 +55,46 @@ static iree_status_t iree_hip_staged_copy_execute(void* user_data) {
   iree_hip_staged_copy_t* copy = (iree_hip_staged_copy_t*)user_data;
   const bool source_is_device = copy->source->buffer != NULL;
   const bool destination_is_device = copy->destination->buffer != NULL;
+  if (!copy->staging) {
+    const iree_hal_transfer_region_t region = {
+        .row_length = copy->width,
+        .row_count = copy->height,
+        .slice_count = copy->depth,
+        .source_strides = {copy->source->row_pitch, copy->source->slice_pitch},
+        .target_strides = {copy->destination->row_pitch,
+                           copy->destination->slice_pitch},
+    };
+    iree_hal_transfer_operation_t operation = {0};
+    iree_hal_streaming_context_t* context = NULL;
+    if (source_is_device && destination_is_device) {
+      context = copy->source->context;
+      operation.type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
+      operation.copy.source_buffer = copy->source->buffer;
+      operation.copy.source_offset = copy->source->offset;
+      operation.copy.target_buffer = copy->destination->buffer;
+      operation.copy.target_offset = copy->destination->offset;
+      operation.copy.region = &region;
+    } else if (source_is_device) {
+      context = copy->source->context;
+      operation.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+      operation.download.source_buffer = copy->source->buffer;
+      operation.download.source_offset = copy->source->offset;
+      operation.download.target = copy->destination->host_pointer;
+      operation.download.region = &region;
+    } else {
+      context = copy->destination->context;
+      operation.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
+      operation.upload.source = copy->source->host_pointer;
+      operation.upload.target_buffer = copy->destination->buffer;
+      operation.upload.target_offset = copy->destination->offset;
+      operation.upload.region = &region;
+    }
+    return iree_hal_streaming_direct_transfer_context_and_wait(context, 1,
+                                                               &operation);
+  }
+
+  // Independently owned device contexts cannot share a transfer queue. Their
+  // compatibility bridge reuses one host row through both completed transfers.
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t z = 0; z < copy->depth && iree_status_is_ok(status);
        ++z) {
@@ -66,30 +106,12 @@ static iree_status_t iree_hip_staged_copy_execute(void* user_data) {
       const iree_device_size_t destination_offset =
           copy->destination->offset + z * copy->destination->slice_pitch +
           y * copy->destination->row_pitch;
-      if (source_is_device && destination_is_device) {
-        if (copy->source->context == copy->destination->context) {
-          status = iree_hal_streaming_direct_transfer_d2d(
-              copy->source->context, copy->source->buffer, source_offset,
-              copy->destination->buffer, destination_offset, copy->width);
-        } else {
-          status = iree_hal_streaming_direct_transfer_d2h(
-              copy->source->context, copy->source->buffer, source_offset,
-              copy->staging, copy->width);
-          if (iree_status_is_ok(status)) {
-            status = iree_hal_streaming_direct_transfer_h2d(
-                copy->destination->context, copy->staging,
-                copy->destination->buffer, destination_offset, copy->width);
-          }
-        }
-      } else if (source_is_device) {
-        status = iree_hal_streaming_direct_transfer_d2h(
-            copy->source->context, copy->source->buffer, source_offset,
-            (uint8_t*)copy->destination->host_pointer + destination_offset,
-            copy->width);
-      } else {
+      status = iree_hal_streaming_direct_transfer_d2h(
+          copy->source->context, copy->source->buffer, source_offset,
+          copy->staging, copy->width);
+      if (iree_status_is_ok(status)) {
         status = iree_hal_streaming_direct_transfer_h2d(
-            copy->destination->context,
-            (const uint8_t*)copy->source->host_pointer + source_offset,
+            copy->destination->context, copy->staging,
             copy->destination->buffer, destination_offset, copy->width);
       }
     }
@@ -117,8 +139,8 @@ iree_status_t iree_hip_staged_copy_3d(
   if (IREE_UNLIKELY((!source_is_device && !source_is_host) ||
                     (!destination_is_device && !destination_is_host) ||
                     (source_is_host && destination_is_host) ||
-                    width > source->row_pitch ||
-                    width > destination->row_pitch ||
+                    (height > 1 && (width > source->row_pitch ||
+                                    width > destination->row_pitch)) ||
                     width > IREE_HOST_SIZE_MAX)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "invalid staged copy endpoints or shape");

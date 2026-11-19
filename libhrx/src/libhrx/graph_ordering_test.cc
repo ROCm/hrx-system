@@ -143,7 +143,7 @@ class GraphOrderingTest : public ::testing::Test {
         streams_[0], sizeof(uint32_t) * kWordCount,
         HRX_MEMORY_TYPE_DEVICE_LOCAL, HRX_BUFFER_USAGE_DEFAULT, &buffer_)));
     const uint32_t zero = 0;
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer(
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer_linear(
         streams_[0], buffer_, 0, sizeof(uint32_t) * kWordCount, &zero,
         sizeof(zero))));
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(streams_[0])));
@@ -193,6 +193,12 @@ class GraphOrderingTest : public ::testing::Test {
           .dst = {buffer_, i * sizeof(uint32_t), sizeof(uint32_t)},
           .pattern = static_cast<uint32_t>(i + 1),
           .pattern_size = sizeof(uint32_t),
+          .region =
+              {
+                  .row_length = sizeof(uint32_t),
+                  .row_count = 1,
+                  .slice_count = 1,
+              },
       };
       IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_fill_buffer_node(
           graph_, dependency ? &dependency : nullptr, dependency ? 1 : 0,
@@ -216,8 +222,8 @@ class GraphOrderingTest : public ::testing::Test {
   void VerifyContents(size_t count) {
     std::array<uint32_t, kWordCount> contents;
     IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), buffer_, 0,
-                            contents.data(), sizeof(contents))));
+        hrx_synchronous_d2h_linear(hrx_device_get_queue(device_, 0, 0), buffer_,
+                                   0, contents.data(), sizeof(contents))));
     for (size_t i = 0; i < contents.size(); ++i) {
       EXPECT_EQ(contents[i], i < count ? i + 1 : 0) << i;
     }
@@ -533,7 +539,7 @@ TEST_P(GraphStreamWaitTest, CompletedExternalWaitPreservesPendingStreamWork) {
     IREE_ASSERT_OK(hrx_status_to_iree(
         hrx_event_create(device_, HRX_EVENT_FLAG_DISABLE_TIMING, &event_)));
     const uint32_t initial = 0;
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer(
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer_linear(
         streams_[1], buffer_, 0, sizeof(initial), &initial, sizeof(initial))));
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_record(event_, streams_[1])));
     IREE_ASSERT_OK(queue_.Submit(0));
@@ -544,7 +550,7 @@ TEST_P(GraphStreamWaitTest, CompletedExternalWaitPreservesPendingStreamWork) {
 
   const size_t first = queue_.submissions.size();
   const uint32_t pattern = 0x12345678;
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer(
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer_linear(
       streams_[0], buffer_, 0, sizeof(pattern), &pattern, sizeof(pattern))));
   if (GetParam()) {
     IREE_ASSERT_OK(
@@ -565,6 +571,12 @@ TEST_P(GraphStreamWaitTest, CompletedExternalWaitPreservesPendingStreamWork) {
   const hrx_graph_copy_buffer_node_attrs_t copy = {
       .src = {buffer_, 0, sizeof(pattern)},
       .dst = {buffer_, sizeof(pattern), sizeof(pattern)},
+      .region =
+          {
+              .row_length = sizeof(pattern),
+              .row_count = 1,
+              .slice_count = 1,
+          },
   };
   IREE_ASSERT_OK(hrx_status_to_iree(
       hrx_graph_add_copy_buffer_node(graph_, nullptr, 0, &copy, nullptr)));
@@ -574,8 +586,8 @@ TEST_P(GraphStreamWaitTest, CompletedExternalWaitPreservesPendingStreamWork) {
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(streams_[0])));
   uint32_t contents[2] = {};
   IREE_ASSERT_OK(hrx_status_to_iree(
-      hrx_synchronous_d2h(hrx_device_get_queue(device_, 0, 0), buffer_, 0,
-                          contents, sizeof(contents))));
+      hrx_synchronous_d2h_linear(hrx_device_get_queue(device_, 0, 0), buffer_,
+                                 0, contents, sizeof(contents))));
   EXPECT_EQ(contents[0], pattern);
   EXPECT_EQ(contents[1], pattern);
 }
@@ -585,7 +597,7 @@ INSTANTIATE_TEST_SUITE_P(TimelineAndEvent, GraphStreamWaitTest,
 
 TEST_F(GraphOrderingTest, SelfTimelineWaitCoalescesWithPendingStreamWork) {
   const uint32_t pattern = 1;
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer(
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer_linear(
       streams_[0], buffer_, 0, sizeof(pattern), &pattern, sizeof(pattern))));
   IREE_ASSERT_OK(hrx_status_to_iree(
       hrx_stream_wait_on(streams_[0], {streams_[0]->semaphore, 0})));

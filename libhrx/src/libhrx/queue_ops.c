@@ -10,6 +10,7 @@
 #include "device_group.h"
 #include "hrx_internal.h"
 #include "mem_pool.h"
+#include "transfer.h"
 
 // Number of semaphore wrappers converted without a transient allocation.
 #define HRX_INLINE_QUEUE_SEMAPHORES 16
@@ -330,16 +331,25 @@ static iree_status_t hrx_queue_host_call_thunk(
 hrx_status_t hrx_queue_fill(hrx_queue_t queue,
                             const hrx_semaphore_list_t* wait_semaphores,
                             const hrx_semaphore_list_t* signal_semaphores,
-                            hrx_buffer_t buffer, size_t offset, size_t size,
+                            hrx_buffer_t buffer, size_t offset,
                             const void* pattern, size_t pattern_size,
+                            const hrx_fill_region_t* region,
                             const hrx_queue_barriers_t* barriers) {
   HRX_TRACE_ZONE_BEGIN(z0, "hrx_queue_fill");
-  HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
-  if (!queue || !buffer || !pattern) {
+  if (!queue || !buffer || !pattern || !region) {
     HRX_RETURN_AND_END_ZONE(
         z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "queue, buffer, or pattern is NULL"));
+                            "queue, buffer, pattern, or region is NULL"));
   }
+  const iree_hal_fill_region_t hal_region = hrx_fill_region_to_hal(region);
+  if (!iree_hal_transfer_range_fits(offset, region->row_length,
+                                    region->row_count, region->slice_count,
+                                    &hal_region.target_strides, buffer->size)) {
+    HRX_RETURN_AND_END_ZONE(z0, hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                                                "fill exceeds buffer size"));
+  }
+  HRX_TRACE_ZONE_APPEND_BYTES(
+      z0, region->row_length * region->row_count * region->slice_count);
 
   iree_status_t status =
       hrx_queue_validate_roles(queue, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER);
@@ -359,11 +369,11 @@ hrx_status_t hrx_queue_fill(hrx_queue_t queue,
     status = hrx_barrier_storage_initialize(barriers, &storage);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_queue_fill_linear(
+    status = iree_hal_queue_fill(
         queue->hal_queue, semaphore_lists.wait.list,
         semaphore_lists.signal.list, buffer->hal_buffer,
-        (iree_device_size_t)offset, (iree_device_size_t)size, pattern,
-        (iree_host_size_t)pattern_size, barriers ? &storage.barriers : NULL,
+        (iree_device_size_t)offset, pattern, (iree_host_size_t)pattern_size,
+        &hal_region, barriers ? &storage.barriers : NULL,
         IREE_HAL_FILL_FLAG_NONE);
   }
   if (barriers) {
@@ -373,18 +383,42 @@ hrx_status_t hrx_queue_fill(hrx_queue_t queue,
   HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
 }
 
+hrx_status_t hrx_queue_fill_linear(
+    hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
+    const hrx_semaphore_list_t* signal_semaphores, hrx_buffer_t buffer,
+    size_t offset, size_t size, const void* pattern, size_t pattern_size,
+    const hrx_queue_barriers_t* barriers) {
+  const hrx_fill_region_t region = {
+      .row_length = size, .row_count = 1, .slice_count = 1};
+  return hrx_queue_fill(queue, wait_semaphores, signal_semaphores, buffer,
+                        offset, pattern, pattern_size, &region, barriers);
+}
+
 hrx_status_t hrx_queue_copy(hrx_queue_t queue,
                             const hrx_semaphore_list_t* wait_semaphores,
                             const hrx_semaphore_list_t* signal_semaphores,
                             hrx_buffer_t src, size_t src_offset,
-                            hrx_buffer_t dst, size_t dst_offset, size_t size,
+                            hrx_buffer_t dst, size_t dst_offset,
+                            const hrx_transfer_region_t* region,
                             const hrx_queue_barriers_t* barriers) {
   HRX_TRACE_ZONE_BEGIN(z0, "hrx_queue_copy");
-  HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
-  if (!queue || !src || !dst) {
-    HRX_RETURN_AND_END_ZONE(z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                                                "queue, src, or dst is NULL"));
+  if (!queue || !src || !dst || !region) {
+    HRX_RETURN_AND_END_ZONE(
+        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                            "queue, src, dst, or region is NULL"));
   }
+  const iree_hal_transfer_region_t hal_region =
+      hrx_transfer_region_to_hal(region);
+  if (!iree_hal_transfer_range_fits(src_offset, region->row_length,
+                                    region->row_count, region->slice_count,
+                                    &hal_region.source_strides, src->size) ||
+      !iree_hal_transfer_range_fits(dst_offset, region->row_length,
+                                    region->row_count, region->slice_count,
+                                    &hal_region.target_strides, dst->size)) {
+    HRX_RETURN_AND_END_ZONE(z0, hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                                                "copy exceeds buffer size"));
+  }
+  HRX_TRACE_ZONE_APPEND_BYTES(z0, iree_hal_transfer_region_length(&hal_region));
 
   iree_status_t status =
       hrx_queue_validate_roles(queue, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER);
@@ -404,11 +438,11 @@ hrx_status_t hrx_queue_copy(hrx_queue_t queue,
     status = hrx_barrier_storage_initialize(barriers, &storage);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_queue_copy_linear(
+    status = iree_hal_queue_copy(
         queue->hal_queue, semaphore_lists.wait.list,
         semaphore_lists.signal.list, src->hal_buffer,
         (iree_device_size_t)src_offset, dst->hal_buffer,
-        (iree_device_size_t)dst_offset, (iree_device_size_t)size,
+        (iree_device_size_t)dst_offset, &hal_region,
         barriers ? &storage.barriers : NULL, IREE_HAL_COPY_FLAG_NONE);
   }
   if (barriers) {
@@ -416,6 +450,17 @@ hrx_status_t hrx_queue_copy(hrx_queue_t queue,
   }
   hrx_hal_semaphore_lists_deinitialize(&semaphore_lists);
   HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
+}
+
+hrx_status_t hrx_queue_copy_linear(
+    hrx_queue_t queue, const hrx_semaphore_list_t* wait_semaphores,
+    const hrx_semaphore_list_t* signal_semaphores, hrx_buffer_t src,
+    size_t src_offset, hrx_buffer_t dst, size_t dst_offset, size_t size,
+    const hrx_queue_barriers_t* barriers) {
+  const hrx_transfer_region_t region = {
+      .row_length = size, .row_count = 1, .slice_count = 1};
+  return hrx_queue_copy(queue, wait_semaphores, signal_semaphores, src,
+                        src_offset, dst, dst_offset, &region, barriers);
 }
 
 hrx_status_t hrx_queue_barrier(hrx_queue_t queue,
