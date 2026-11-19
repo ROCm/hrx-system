@@ -843,6 +843,25 @@ typedef struct iree_hal_transfer_operation_t {
   };
 } iree_hal_transfer_operation_t;
 
+// Number of payload bytes transferred by an operation. A zero-length operation
+// has no buffer or host-memory requirements.
+static inline iree_device_size_t iree_hal_transfer_operation_length(
+    const iree_hal_transfer_operation_t* operation) {
+  switch (operation->type) {
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
+      return operation->fill.length;
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
+      return operation->update.length;
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
+      return operation->copy.length;
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
+      return operation->upload.length;
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
+      return operation->download.length;
+  }
+  return 0;
+}
+
 //===----------------------------------------------------------------------===//
 // iree_hal_queue_family_t
 //===----------------------------------------------------------------------===//

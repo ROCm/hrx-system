@@ -374,9 +374,51 @@ iree_status_t loom_runtime_execution_dispatch(
   return status;
 }
 
+// The HAL consumes the descriptors before return. UPDATE also takes its host
+// bytes at that boundary, so a pending device wait cannot delay staging the
+// inputs for the next dispatch. The common control batch fits on the stack.
+static iree_status_t loom_runtime_execution_capture_uploads(
+    iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_host_size_t count,
+    const iree_hal_transfer_operation_t* operations,
+    iree_allocator_t allocator) {
+  // The epoch and snapshot encoders batch up to 64 ranges. Reserve only the
+  // actual descriptor bytes for their submissions, including single updates.
+  iree_hal_transfer_operation_t* captured = NULL;
+  if (count <= 64) {
+    captured = iree_alloca(count * sizeof(*captured));
+  } else {
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array_uninitialized(
+        allocator, count, sizeof(*captured), (void**)&captured));
+  }
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    const iree_hal_transfer_operation_t* operation = &operations[i];
+    if (operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD &&
+        operation->upload.length) {
+      captured[i] = (iree_hal_transfer_operation_t){
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE,
+          .update = {.source_buffer = operation->upload.source,
+                     .target_buffer = operation->upload.target_buffer,
+                     .target_offset = operation->upload.target_offset,
+                     .length = operation->upload.length}};
+    } else {
+      captured[i] = *operation;
+    }
+  }
+  iree_status_t status =
+      iree_hal_queue_transfer(queue, waits, signals, count, captured, NULL);
+  if (count > 64) {
+    iree_allocator_free(allocator, captured);
+  }
+  return status;
+}
+
 iree_status_t loom_runtime_execution_transfer(
     loom_runtime_execution_t* execution, iree_host_size_t operation_count,
     const iree_hal_transfer_operation_t* operations, uint64_t* out_value) {
+  const loom_runtime_execution_transfer_plan_t plan =
+      loom_runtime_execution_binding_plan_transfer(&execution->binding,
+                                                   operation_count, operations);
   iree_slim_mutex_lock(&execution->mutex);
   if (execution->work.submitted_value == IREE_HAL_SEMAPHORE_MAX_VALUE) {
     iree_slim_mutex_unlock(&execution->mutex);
@@ -389,8 +431,12 @@ iree_status_t loom_runtime_execution_transfer(
   const iree_hal_semaphore_list_t signals = {1, &execution->work.semaphore,
                                              &next_value};
   iree_status_t status =
-      iree_hal_queue_transfer(execution->binding.transfer, waits, signals,
-                              operation_count, operations, NULL);
+      plan.capture_uploads
+          ? loom_runtime_execution_capture_uploads(plan.queue, waits, signals,
+                                                   operation_count, operations,
+                                                   execution->host_allocator)
+          : iree_hal_queue_transfer(plan.queue, waits, signals, operation_count,
+                                    operations, NULL);
   if (iree_status_is_ok(status)) {
     execution->work.submitted_value = next_value;
     *out_value = next_value;
@@ -402,6 +448,9 @@ iree_status_t loom_runtime_execution_transfer(
 iree_status_t loom_runtime_execution_feedback(
     loom_runtime_execution_t* execution, iree_host_size_t operation_count,
     const iree_hal_transfer_operation_t* operations, uint64_t* out_value) {
+  const loom_runtime_execution_transfer_plan_t plan =
+      loom_runtime_execution_binding_plan_transfer(&execution->binding,
+                                                   operation_count, operations);
   iree_slim_mutex_lock(&execution->mutex);
   if (execution->feedback.submitted_value == IREE_HAL_SEMAPHORE_MAX_VALUE) {
     iree_slim_mutex_unlock(&execution->mutex);
@@ -417,9 +466,8 @@ iree_status_t loom_runtime_execution_feedback(
                                            wait_semaphores, wait_values};
   const iree_hal_semaphore_list_t signals = {1, &execution->feedback.semaphore,
                                              &next_value};
-  iree_status_t status =
-      iree_hal_queue_transfer(execution->binding.transfer, waits, signals,
-                              operation_count, operations, NULL);
+  iree_status_t status = iree_hal_queue_transfer(
+      plan.queue, waits, signals, operation_count, operations, NULL);
   if (iree_status_is_ok(status)) {
     execution->feedback.submitted_value = next_value;
     *out_value = next_value;

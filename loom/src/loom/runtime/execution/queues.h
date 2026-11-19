@@ -63,6 +63,21 @@ typedef struct loom_runtime_execution_binding_t {
 loom_runtime_execution_binding_t loom_runtime_execution_queues_acquire(
     loom_runtime_execution_queues_t* queues);
 
+typedef struct loom_runtime_execution_transfer_plan_t {
+  // Borrowed exact queue for the complete transfer transaction.
+  iree_hal_queue_t* queue;
+  // Small transaction with immediately readable host uploads to capture.
+  bool capture_uploads;
+} loom_runtime_execution_transfer_plan_t;
+
+// Places small dependent batches beside dispatch and bulk batches on the
+// transfer queue, subject to family access for every nonempty device range.
+loom_runtime_execution_transfer_plan_t
+loom_runtime_execution_binding_plan_transfer(
+    const loom_runtime_execution_binding_t* binding,
+    iree_host_size_t operation_count,
+    const iree_hal_transfer_operation_t* operations);
+
 // Consumes one acquired binding after its final execution reference retires.
 // May run on a completion callback. Counts are placement hints, not completion
 // signals. While the device owner retains the inventory, returning a binding

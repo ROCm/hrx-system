@@ -25,6 +25,8 @@ struct loom_runtime_execution_queues_t {
   iree_host_size_t transfer_count;
   // First transfer entry; zero when both roles share one family.
   iree_host_size_t transfer_offset;
+  // Dispatch family if it provides a distinct, transfer-capable alternative.
+  const iree_hal_queue_family_t* local_transfer_family;
   // Unique queue entries, dispatch followed by any distinct transfer family.
   loom_runtime_execution_queue_t entries[];
 };
@@ -71,6 +73,11 @@ iree_status_t loom_runtime_execution_queues_create(
   queues->dispatch_count = dispatch_count;
   queues->transfer_count = transfer_count;
   queues->transfer_offset = transfer_offset;
+  if (transfer_offset &&
+      iree_any_bit_set(iree_hal_queue_family_spec(dispatch_family)->role_flags,
+                       IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER)) {
+    queues->local_transfer_family = dispatch_family;
+  }
   iree_status_t status = loom_runtime_execution_queues_initialize_family(
       dispatch_family, queues->entries);
   if (iree_status_is_ok(status) && transfer_offset) {
@@ -150,6 +157,87 @@ loom_runtime_execution_binding_t loom_runtime_execution_queues_acquire(
       .dispatch_ordinal = dispatch,
       .transfer_ordinal = transfer,
   };
+}
+
+// Bound the aggregate host capture and the transaction admitted beside model
+// dispatches. Count payload bytes across all ranges, including device copies.
+#define LOOM_RUNTIME_EXECUTION_LOCAL_TRANSFER_LIMIT (64 * 1024)
+
+static bool loom_runtime_transfer_family_accessible(
+    const iree_hal_queue_family_t* family,
+    const iree_hal_transfer_operation_t* operation) {
+  if (!iree_hal_transfer_operation_length(operation)) {
+    return true;
+  }
+  iree_hal_buffer_t* source = NULL;
+  iree_hal_buffer_t* target = NULL;
+  switch (operation->type) {
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
+      target = operation->fill.target_buffer;
+      break;
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
+      target = operation->update.target_buffer;
+      break;
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
+      source = operation->copy.source_buffer;
+      target = operation->copy.target_buffer;
+      break;
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
+      target = operation->upload.target_buffer;
+      break;
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
+      source = operation->download.source_buffer;
+      break;
+  }
+  return (!source ||
+          iree_any_bit_set(iree_hal_buffer_family_usage(source, family),
+                           IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE)) &&
+         (!target ||
+          iree_any_bit_set(iree_hal_buffer_family_usage(target, family),
+                           IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET));
+}
+
+loom_runtime_execution_transfer_plan_t
+loom_runtime_execution_binding_plan_transfer(
+    const loom_runtime_execution_binding_t* binding,
+    iree_host_size_t operation_count,
+    const iree_hal_transfer_operation_t* operations) {
+  loom_runtime_execution_transfer_plan_t plan = {.queue = binding->transfer};
+  if (!operations && operation_count) {
+    return plan;  // Diagnosed by HAL.
+  }
+  bool small = true;
+  iree_device_size_t remaining = LOOM_RUNTIME_EXECUTION_LOCAL_TRANSFER_LIMIT;
+  for (iree_host_size_t i = 0; i < operation_count; ++i) {
+    const iree_device_size_t length =
+        iree_hal_transfer_operation_length(&operations[i]);
+    if (length > remaining) {
+      small = false;
+      plan.capture_uploads = false;
+      break;
+    }
+    remaining -= length;
+    plan.capture_uploads |=
+        length && operations[i].type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
+  }
+  const iree_hal_queue_family_t* family = binding->owner->local_transfer_family;
+  if (!family) {
+    return plan;
+  }
+  if (small) {
+    plan.queue = binding->dispatch;
+  } else {
+    family = iree_hal_queue_family(binding->transfer);
+  }
+  // Pool and imported buffer scopes can restrict sources and targets to
+  // different families. HAL validates the entire batch on the selected queue.
+  for (iree_host_size_t i = 0; i < operation_count; ++i) {
+    if (!loom_runtime_transfer_family_accessible(family, &operations[i])) {
+      plan.queue = small ? binding->transfer : binding->dispatch;
+      break;
+    }
+  }
+  return plan;
 }
 
 void loom_runtime_execution_binding_release(

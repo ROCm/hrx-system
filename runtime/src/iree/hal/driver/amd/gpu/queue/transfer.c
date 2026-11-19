@@ -53,32 +53,13 @@ void iree_hal_amd_gpu_transfer_profile(
   }
 }
 
-static iree_device_size_t iree_hal_amd_gpu_transfer_length(
-    const iree_hal_transfer_operation_t* operation) {
-  switch (operation->type) {
-    case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
-      return operation->fill.length;
-    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
-      return operation->update.length;
-    case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
-      return operation->copy.length;
-    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
-      return operation->upload.length;
-    case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
-      return operation->download.length;
-    default:
-      IREE_BUILTIN_UNREACHABLE();
-      return 0;
-  }
-}
-
 iree_status_t iree_hal_amd_gpu_transfer_measure(
     iree_host_size_t count, const iree_hal_transfer_operation_t* operations,
     iree_hal_amd_gpu_transfer_layout_t* out_layout) {
   iree_hal_amd_gpu_transfer_layout_t layout = {0};
   for (iree_host_size_t i = 0; i < count; ++i) {
     const iree_device_size_t length =
-        iree_hal_amd_gpu_transfer_length(&operations[i]);
+        iree_hal_transfer_operation_length(&operations[i]);
     if (!length) {
       continue;
     }
@@ -155,7 +136,8 @@ iree_status_t iree_hal_amd_gpu_transfer_initialize(
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
     const iree_hal_transfer_operation_t* source = &operations[i];
-    const iree_device_size_t length = iree_hal_amd_gpu_transfer_length(source);
+    const iree_device_size_t length =
+        iree_hal_transfer_operation_length(source);
     if (!length) {
       continue;
     }

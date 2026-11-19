@@ -6,6 +6,7 @@
 #include "loom/runtime/execution/queues.h"
 
 #include <algorithm>
+#include <memory>
 #include <thread>
 #include <vector>
 
@@ -147,6 +148,17 @@ class ExecutionQueuesTest : public ::testing::TestWithParam<bool> {
     return allocator.ctl(allocator.self, command, parameters, inout_pointer);
   }
 
+  using Buffer =
+      std::unique_ptr<iree_hal_buffer_t, decltype(&iree_hal_buffer_release)>;
+
+  Buffer Allocate(iree_hal_pool_t* pool, iree_device_size_t length) {
+    iree_hal_buffer_t* buffer = nullptr;
+    IREE_EXPECT_OK(iree_hal_pool_allocate_buffer(
+        pool, iree_hal_make_pool_reservation_request(length, 16),
+        iree_infinite_timeout(), &buffer));
+    return Buffer(buffer, iree_hal_buffer_release);
+  }
+
   loom_runtime_execution_binding_t Acquire() {
     auto binding = loom_runtime_execution_queues_acquire(queues_);
     bindings_.push_back(binding);
@@ -231,6 +243,165 @@ TEST_P(ExecutionQueuesTest, BalancesLiveBindingsAcrossFixedInventory) {
   for (uint32_t i = 0; i < count; ++i) {
     ASSERT_NO_FATAL_FAILURE(
         Check(Acquire(), i % dispatch_count_, i % transfer_count_));
+  }
+}
+
+TEST_P(ExecutionQueuesTest, TransferPlacementCountsTheWholeBatch) {
+  const auto binding = Acquire();
+  constexpr size_t kLimit = 64 * 1024;
+  auto buffer = Allocate(storage_pool_, kLimit + 1);
+  ASSERT_NE(buffer, nullptr);
+  std::vector<uint8_t> data(kLimit / 2);
+  const uint8_t fill = 0xC5;
+  iree_hal_transfer_operation_t batch[] = {
+      {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD},  // Empty range.
+      {
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+          .upload =
+              {
+                  .source = data.data(),
+                  .target_buffer = buffer.get(),
+                  .length = data.size(),
+              },
+      },
+      {
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+          .fill =
+              {
+                  .target_buffer = buffer.get(),
+                  .target_offset = data.size(),
+                  .length = data.size(),
+                  .pattern = &fill,
+                  .pattern_length = 1,
+              },
+      },
+  };
+  auto plan = loom_runtime_execution_binding_plan_transfer(
+      &binding, IREE_ARRAYSIZE(batch), batch);
+  EXPECT_EQ(plan.queue, binding.dispatch);
+  EXPECT_TRUE(plan.capture_uploads);
+  ++batch[2].fill.length;
+  plan = loom_runtime_execution_binding_plan_transfer(
+      &binding, IREE_ARRAYSIZE(batch), batch);
+  EXPECT_EQ(plan.queue, binding.transfer);
+  EXPECT_FALSE(plan.capture_uploads);
+}
+
+TEST_P(ExecutionQueuesTest, CopiesHonorSourceAndTargetFamilyGrants) {
+  if (dispatch_family_ == transfer_family_) {
+    GTEST_SKIP() << "One family";
+  }
+  constexpr size_t kLength = 128 * 1024;
+  auto shared = Allocate(storage_pool_, kLength);
+  ASSERT_NE(shared, nullptr);
+  const iree_hal_pool_family_access_t access[] = {
+      {
+          .family = dispatch_family_,
+          .usage = IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
+      },
+      {
+          .family = transfer_family_,
+          .usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
+      },
+  };
+  const iree_hal_pool_scope_t scope = {
+      .family_count = IREE_ARRAYSIZE(access),
+      .families = access,
+  };
+  const iree_hal_slab_pool_options_t options = {};
+  iree_hal_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(
+      loom_runtime_device_group(loom_runtime_device_group_at(group_, 0)), scope,
+      &options, iree_allocator_system(), &pool));
+  const std::unique_ptr<iree_hal_pool_t, decltype(&iree_hal_pool_release)>
+      owner(pool, iree_hal_pool_release);
+  auto restricted = Allocate(pool, kLength);
+  ASSERT_NE(restricted, nullptr);
+  const auto binding = Acquire();
+  iree_hal_transfer_operation_t crossed[2] = {};
+  crossed[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
+  crossed[0].copy.source_buffer = restricted.get();
+  crossed[0].copy.target_buffer = shared.get();
+  crossed[1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
+  crossed[1].copy.source_buffer = shared.get();
+  crossed[1].copy.target_buffer = restricted.get();
+  for (size_t length : {kLength, size_t{4}}) {
+    crossed[0].copy.length = crossed[1].copy.length = length;
+    EXPECT_EQ(
+        loom_runtime_execution_binding_plan_transfer(&binding, 1, &crossed[0])
+            .queue,
+        binding.dispatch);
+    EXPECT_EQ(
+        loom_runtime_execution_binding_plan_transfer(&binding, 1, &crossed[1])
+            .queue,
+        binding.transfer);
+  }
+  // Combining the two short copies requires opposite families even though
+  // their byte ranges are disjoint. The batch must fail as a unit.
+  crossed[1].copy.source_offset = crossed[1].copy.target_offset = 4;
+  IREE_ASSERT_OK(loom_runtime_execution_create(
+      queues_, workspace_, iree_allocator_system(), &execution_));
+  const auto before = loom_runtime_execution_frontier(execution_);
+  uint64_t value = 0;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_PERMISSION_DENIED,
+      loom_runtime_execution_transfer(execution_, IREE_ARRAYSIZE(crossed),
+                                      crossed, &value));
+  EXPECT_EQ(loom_runtime_execution_frontier(execution_).values[0],
+            before.values[0]);
+}
+
+TEST_P(ExecutionQueuesTest, ControlUploadsCaptureBeforeTheirDeviceWait) {
+  IREE_ASSERT_OK(loom_runtime_execution_create(
+      queues_, workspace_, iree_allocator_system(), &execution_));
+  // Exercise the ordinary control packet and a larger list of sparse writes.
+  for (size_t count : {2u, 65u}) {
+    std::vector<uint32_t> words(count);
+    std::vector<uint32_t> result(count);
+    std::vector<iree_hal_transfer_operation_t> uploads(count);
+    const size_t length = count * sizeof(uint32_t);
+    auto buffer = Allocate(storage_pool_, length);
+    ASSERT_NE(buffer, nullptr);
+    for (size_t i = 0; i < count; ++i) {
+      words[i] = 0x13240000u + i;
+      uploads[i] = {
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+          .upload =
+              {
+                  .source = &words[i],
+                  .target_buffer = buffer.get(),
+                  .target_offset = i * sizeof(uint32_t),
+                  .length = sizeof(uint32_t),
+              },
+      };
+    }
+    const auto expected = words;
+    ++completion_value_;
+    IREE_ASSERT_OK(loom_runtime_execution_barrier(
+        execution_, {1, &completion_, &completion_value_}));
+    uint64_t work = 0, feedback = 0;
+    iree_status_t status = loom_runtime_execution_transfer(
+        execution_, uploads.size(), uploads.data(), &work);
+    std::fill(words.begin(), words.end(), 0xDEADBEEFu);
+    const iree_hal_transfer_operation_t download = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+        .download =
+            {
+                .source_buffer = buffer.get(),
+                .target = result.data(),
+                .length = length,
+            },
+    };
+    if (iree_status_is_ok(status)) {
+      status =
+          loom_runtime_execution_feedback(execution_, 1, &download, &feedback);
+    }
+    IREE_ASSERT_OK(iree_status_join(
+        status,
+        iree_hal_semaphore_signal(completion_, completion_value_, nullptr)));
+    EXPECT_EQ(loom_runtime_execution_frontier(execution_).values[0], work);
+    IREE_ASSERT_OK(loom_runtime_execution_feedback_wait(execution_, feedback));
+    EXPECT_EQ(result, expected);
   }
 }
 
