@@ -1275,7 +1275,7 @@ void GpuNativeDispatchTest::RunControlOrdering(ControlKind kind,
     }
     const iree_hal_buffer_binding_t binding = {output, 0, 32};
     uint64_t initialized = ++completion;
-    IREE_ASSERT_OK(iree_hal_queue_update(
+    IREE_ASSERT_OK(iree_hal_queue_update_linear(
         queues_[0], {}, {1, &done_handle, &initialized}, initial.data(), 0,
         output, 0, sizeof(initial), nullptr, 0));
     uint64_t executed = ++completion;
@@ -1284,10 +1284,10 @@ void GpuNativeDispatchTest::RunControlOrdering(ControlKind kind,
         {1, &done_handle, &executed}, recording, {1, &binding}, 0));
     std::array<uint64_t, 4> actual = {};
     ++completion;
-    IREE_ASSERT_OK(
-        iree_hal_queue_download(queues_[0], {1, &done_handle, &executed},
-                                {1, &done_handle, &completion}, output, 0,
-                                actual.data(), sizeof(actual), nullptr));
+    IREE_ASSERT_OK(iree_hal_queue_download_linear(
+        queues_[0], {1, &done_handle, &executed},
+        {1, &done_handle, &completion}, output, 0, actual.data(),
+        sizeof(actual), nullptr));
     IREE_ASSERT_OK(
         iree_hal_semaphore_wait(done, completion, iree_infinite_timeout(), 0));
     // User and control writes are disjoint within one cache line. No padding

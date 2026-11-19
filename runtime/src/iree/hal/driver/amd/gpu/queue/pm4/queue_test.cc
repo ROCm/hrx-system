@@ -610,17 +610,17 @@ TEST_F(KernelAllocationTest, WorkspaceUsesThePrecedingNativeCompletion) {
 
   auto result = Buffer(64);
   const uint32_t pattern = 0x5A5A5A5A;
-  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {1, &timeline, &one},
-                                     {1, &timeline, &two}, scratch, 0, 64,
-                                     &pattern, sizeof(pattern), nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
+      queues_[0], {1, &timeline, &one}, {1, &timeline, &two}, scratch, 0, 64,
+      &pattern, sizeof(pattern), nullptr, 0));
   auto* root = scratch.get();
   IREE_ASSERT_OK(iree_hal_queue_dealloca(queues_[0], {1, &timeline, &two},
                                          {1, &timeline, &three}, 1, &root));
   Publish(0);
   // The other queue must admit its native waiter before the first queue runs.
-  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[1], {1, &timeline, &three},
-                                     {1, &done, &one}, result, 0, 64, &pattern,
-                                     sizeof(pattern), nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
+      queues_[1], {1, &timeline, &three}, {1, &done, &one}, result, 0, 64,
+      &pattern, sizeof(pattern), nullptr, 0));
   Publish(1);
   EXPECT_EQ(native_queues_[0].commands.size(), 1u);
   EXPECT_EQ(native_queues_[1].commands.size(), 1u);
@@ -757,8 +757,9 @@ TEST_F(KernelQueueTest, PayloadGrowthPreservesLaunchArgumentCapacity) {
   auto* arguments = queue->producer.arguments;
   ASSERT_EQ(queue->producer.transfers.current, nullptr);
   const std::vector<uint8_t> first(11117, 0x39), second(22001, 0xA7);
-  IREE_ASSERT_OK(iree_hal_queue_update(queues_[0], {}, {}, first.data(), 0,
-                                       buffer, 0, first.size(), nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_update_linear(queues_[0], {}, {}, first.data(),
+                                              0, buffer, 0, first.size(),
+                                              nullptr, 0));
   iree_hal_amd_gpu_context_join_memory(&context_);
   Publish(0);
   const iree_hal_amd_gpu_completion_wait_t pending = Poll(0);
@@ -769,9 +770,9 @@ TEST_F(KernelQueueTest, PayloadGrowthPreservesLaunchArgumentCapacity) {
   auto* first_payload = queue->producer.transfers.current;
   ASSERT_NE(first_payload, nullptr);
   EXPECT_EQ(first_payload->capacity, 16384u);
-  IREE_ASSERT_OK(iree_hal_queue_update(queues_[0], {}, {}, second.data(), 0,
-                                       buffer, first.size(), second.size(),
-                                       nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_update_linear(queues_[0], {}, {}, second.data(),
+                                              0, buffer, first.size(),
+                                              second.size(), nullptr, 0));
   iree_hal_amd_gpu_context_join_memory(&context_);
   Publish(0);
   EXPECT_EQ(queue->producer.arguments, arguments);
@@ -796,9 +797,9 @@ TEST_F(KernelQueueTest, RetiredTransferStorageReusesItsFullCapacity) {
   const size_t lengths[] = {192, 128, 64};
   for (size_t i = 0; i < IREE_ARRAYSIZE(lengths); ++i) {
     const std::vector<uint8_t> payload(lengths[i], static_cast<uint8_t>(i + 1));
-    IREE_ASSERT_OK(iree_hal_queue_update(queues_[0], {}, {}, payload.data(), 0,
-                                         buffer, expected.size(),
-                                         payload.size(), nullptr, 0));
+    IREE_ASSERT_OK(iree_hal_queue_update_linear(
+        queues_[0], {}, {}, payload.data(), 0, buffer, expected.size(),
+        payload.size(), nullptr, 0));
     expected.insert(expected.end(), payload.begin(), payload.end());
     iree_hal_amd_gpu_context_join_memory(&context_);
     Publish(0);
@@ -827,8 +828,9 @@ TEST_F(KernelQueueTest, ShaderCopyArgumentsWrapPastShortTail) {
   bool wrapped = false;
   for (uint32_t i = 0; i < 96; ++i) {
     SCOPED_TRACE(i);
-    IREE_ASSERT_OK(iree_hal_queue_copy(queues_[0], {}, {}, buffer, 4, buffer, 0,
-                                       4, nullptr, IREE_HAL_COPY_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_queue_copy_linear(queues_[0], {}, {}, buffer, 4,
+                                              buffer, 0, 4, nullptr,
+                                              IREE_HAL_COPY_FLAG_NONE));
     Publish(0);
     ASSERT_EQ(native_queues_[0].commands.size(), i + 1);
     ASSERT_EQ(queue->producer.arguments, storage);
@@ -867,8 +869,8 @@ TEST_F(KernelQueueTest, RejectionRollsBackTheBorrowedPayloadGeneration) {
       reinterpret_cast<iree_hal_amd_gpu_pm4_queue_t*>(queues_[0].get());
   const std::vector<uint8_t> warm(73, 0x19), pending(17, 0x5B),
       large(1000, 0xD7);
-  IREE_ASSERT_OK(iree_hal_queue_update(queues_[0], {}, {}, warm.data(), 0,
-                                       buffer, 0, warm.size(), nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_update_linear(
+      queues_[0], {}, {}, warm.data(), 0, buffer, 0, warm.size(), nullptr, 0));
   iree_hal_amd_gpu_context_join_memory(&context_);
   Publish(0);
   auto* borrowed = queue->producer.transfers.current;
@@ -881,12 +883,12 @@ TEST_F(KernelQueueTest, RejectionRollsBackTheBorrowedPayloadGeneration) {
     allocation_entered.release();
     resume_allocation.acquire();
   };
-  IREE_EXPECT_OK(iree_hal_queue_update(
+  IREE_EXPECT_OK(iree_hal_queue_update_linear(
       queues_[0], {}, {1, &completed_handle, &one}, large.data(), 0, buffer,
       256, large.size(), nullptr, 0));
   allocation_entered.acquire();
   native_queues_[0].busy = true;
-  IREE_EXPECT_OK(iree_hal_queue_update(
+  IREE_EXPECT_OK(iree_hal_queue_update_linear(
       queues_[0], {}, {1, &rejected_handle, &one}, pending.data(), 0, buffer,
       80, pending.size(), nullptr, 0));
   EXPECT_EQ(queue->kernel->rollback.storage, borrowed);
@@ -1110,8 +1112,8 @@ TEST_F(KernelQueueTest, NarrowFillAcquiresPayloadWithoutUsingArguments) {
   auto* queue =
       reinterpret_cast<iree_hal_amd_gpu_pm4_queue_t*>(queues_[0].get());
   const uint8_t pattern = 0xB5;
-  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {}, {}, buffer, 1, 9, &pattern,
-                                     sizeof(pattern), nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
+      queues_[0], {}, {}, buffer, 1, 9, &pattern, sizeof(pattern), nullptr, 0));
   iree_hal_amd_gpu_context_join_memory(&context_);
   Publish(0);
   ASSERT_NE(queue->producer.transfers.current, nullptr);
@@ -1408,7 +1410,7 @@ TEST_F(KernelQueueTest, TransfersAndControlShareTheLocalVisibilityBoundary) {
           buffer, 0, {.value = pattern, .width = IREE_HAL_ATOMIC_WIDTH_32},
           nullptr));
     } else {
-      IREE_ASSERT_OK(iree_hal_queue_fill(
+      IREE_ASSERT_OK(iree_hal_queue_fill_linear(
           queues_[0], {1, &producer_handle, &one}, {1, &consumer_handle, &one},
           buffer, 0, 4, &pattern, sizeof(pattern), nullptr, 0));
     }

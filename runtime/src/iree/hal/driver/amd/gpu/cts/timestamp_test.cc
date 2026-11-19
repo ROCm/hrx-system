@@ -125,15 +125,15 @@ TEST_P(GpuNativeTimestampTest, PendingTargetSurvivesConsumerBeforeProducer) {
   IREE_ASSERT_OK(iree_hal_queue_timestamp(
       queues_[1], {1, &semaphores_[2], &one}, {1, &semaphores_[2], &two},
       buffer_, 8, Barriers(), IREE_HAL_TIMESTAMP_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {1, &semaphores_[1], &one},
-                                     {1, &semaphores_[2], &one}, buffer_, 0, 32,
-                                     &kGuard, 4, nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
+      queues_[0], {1, &semaphores_[1], &one}, {1, &semaphores_[2], &one},
+      buffer_, 0, 32, &kGuard, 4, nullptr, 0));
   // The empty-boundary form needs the explicit publication before host use.
   IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[1], {1, &semaphores_[2], &two},
                                         {1, &semaphores_[2], &three}, nullptr,
                                         IREE_HAL_QUEUE_BARRIER_FLAG_NONE));
   std::array<uint64_t, 4> output = {};
-  IREE_ASSERT_OK(iree_hal_queue_download(
+  IREE_ASSERT_OK(iree_hal_queue_download_linear(
       queues_[0], {1, &semaphores_[2], &three}, {1, &semaphores_[3], &one},
       buffer_, 0, output.data(), sizeof(output), nullptr));
   iree_hal_buffer_release(buffer_);
@@ -155,7 +155,7 @@ TEST_P(GpuNativeTimestampTest, SameFamilyTicksRemainOrderedAcrossRingReuse) {
   }
   uint64_t value = 1;
   const uint32_t guard = 0xA57C99E1;
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       queues_[0], {}, {1, &semaphores_[2], &value}, buffer_, 0,
       (kCount + 2) * sizeof(uint64_t), &guard, sizeof(guard), nullptr, 0));
   for (size_t i = 0; i < kCount; ++i) {
@@ -175,7 +175,7 @@ TEST_P(GpuNativeTimestampTest, SameFamilyTicksRemainOrderedAcrossRingReuse) {
   }
   std::vector<uint64_t> output(kCount + 2);
   uint64_t done = 1;
-  IREE_ASSERT_OK(iree_hal_queue_download(
+  IREE_ASSERT_OK(iree_hal_queue_download_linear(
       queues_[0], {2, semaphores_.data(), released.data()},
       {1, &semaphores_[3], &done}, buffer_, 0, output.data(),
       output.size() * sizeof(uint64_t), nullptr));
@@ -221,7 +221,7 @@ TEST_P(GpuNativeTimestampTest, RecordedCommandsRetainBindingsAcrossSlotReuse) {
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
     IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
     ++value;
-    IREE_ASSERT_OK(iree_hal_queue_fill(
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
         queues_[0], {}, {1, &semaphores_[2], &value}, buffer_, 0,
         (kReplays * kStride + 2) * sizeof(uint64_t), &kGuard, 4, nullptr, 0));
     for (size_t i = 0; i < kReplays; ++i) {
@@ -237,7 +237,7 @@ TEST_P(GpuNativeTimestampTest, RecordedCommandsRetainBindingsAcrossSlotReuse) {
     }
     std::vector<uint64_t> output(kReplays * kStride + 2);
     uint64_t previous = value++;
-    IREE_ASSERT_OK(iree_hal_queue_download(
+    IREE_ASSERT_OK(iree_hal_queue_download_linear(
         queues_[0], {1, &semaphores_[2], &previous},
         {1, &semaphores_[2], &value}, buffer_, 0, output.data(),
         output.size() * sizeof(uint64_t), nullptr));
@@ -288,9 +288,9 @@ TEST_P(GpuNativeTimestampTest, FailedDependencyPreservesTarget) {
   }
   uint64_t one = 1;
   const uint32_t guard = 0xA57C99E1;
-  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {}, {1, &semaphores_[2], &one},
-                                     buffer_, 0, 32, &guard, sizeof(guard),
-                                     nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
+      queues_[0], {}, {1, &semaphores_[2], &one}, buffer_, 0, 32, &guard,
+      sizeof(guard), nullptr, 0));
   Wait(2, one);
   IREE_ASSERT_OK(iree_hal_queue_timestamp(
       queues_[0], {1, &semaphores_[1], &one}, {1, &semaphores_[3], &one},
@@ -302,7 +302,7 @@ TEST_P(GpuNativeTimestampTest, FailedDependencyPreservesTarget) {
       iree_hal_semaphore_wait(semaphores_[3], one, iree_infinite_timeout(), 0));
   std::array<uint64_t, 4> output = {};
   uint64_t two = 2;
-  IREE_ASSERT_OK(iree_hal_queue_download(
+  IREE_ASSERT_OK(iree_hal_queue_download_linear(
       queues_[1], {}, {1, &semaphores_[2], &two}, buffer_, 0, output.data(),
       sizeof(output), nullptr));
   Wait(2, two);

@@ -374,7 +374,7 @@ TEST_P(TaskBufferAccessTest, ExecutionOnlyNestedViews) {
                                       IREE_HAL_WHOLE_BUFFER, &mapping));
         const iree_hal_semaphore_list_t upload_done = {
             1, &uploaded.semaphores[i], &uploaded.payload_values[i]};
-        IREE_ASSERT_OK(iree_hal_queue_upload(
+        IREE_ASSERT_OK(iree_hal_queue_upload_linear(
             queue, transient ? allocated : gate, upload_done, inputs[i].data(),
             roots[i], 0, sizeof(inputs[i]), /*barriers=*/NULL));
       }
@@ -425,7 +425,7 @@ TEST_P(TaskBufferAccessTest, ExecutionOnlyNestedViews) {
       }
       IREE_ASSERT_OK(release_gate.Signal());
       std::array<float, 8> result = {};
-      IREE_ASSERT_OK(iree_hal_queue_download(
+      IREE_ASSERT_OK(iree_hal_queue_download_linear(
           queue, executed, downloaded, roots[2], 0, result.data(),
           sizeof(result), /*barriers=*/NULL));
       IREE_ASSERT_OK(iree_hal_semaphore_list_wait(

@@ -89,7 +89,7 @@ class CommandBufferTimestampTest : public CtsTestBase<> {
     IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
         command_buffer, IREE_HAL_EXECUTION_STAGE_TRANSFER,
         IREE_HAL_EXECUTION_STAGE_TRANSFER, RefAt(buffer, 56), 0));
-    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
         command_buffer, RefAt(buffer, 64, kPayloadLength), &kPattern,
         sizeof(kPattern), IREE_HAL_FILL_FLAG_NONE));
     const iree_hal_memory_barrier_t overwrite_memory = {
@@ -120,7 +120,7 @@ class CommandBufferTimestampTest : public CtsTestBase<> {
     // The fill overwrites the end timestamp's location: capture must follow
     // its completion. Resolving only at command-buffer end would also make
     // this consumer stale.
-    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
         command_buffer, RefAt(buffer, 56, 16), RefAt(buffer, 24, 16), 0));
     const iree_hal_barrier_t publish = {
         .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
@@ -282,7 +282,7 @@ TEST_P(CommandBufferTimestampTest, RangedConsumerAndOverwrite) {
       .buffer_barriers = &read,
   };
   IREE_ASSERT_OK(iree_hal_command_buffer_barrier(commands, &dependency));
-  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
       commands, RefAt(buffer, 24), RefAt(buffer, 48), 0));
   const iree_hal_buffer_barrier_t overwrite = {
       .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
@@ -292,7 +292,7 @@ TEST_P(CommandBufferTimestampTest, RangedConsumerAndOverwrite) {
   };
   dependency.buffer_barriers = &overwrite;
   IREE_ASSERT_OK(iree_hal_command_buffer_barrier(commands, &dependency));
-  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
       commands, RefAt(buffer, 24), &kPattern, sizeof(kPattern), 0));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(commands));
   std::array<uint64_t, 2> bounds;
@@ -416,16 +416,16 @@ TEST_P(CommandBufferTimestampTest, PendingAllocationAndReleasedOwners) {
       return iree_make_status(IREE_STATUS_INTERNAL);
     }
     const uint32_t guard = static_cast<uint32_t>(kGuard);
-    IREE_RETURN_IF_ERROR(iree_hal_queue_fill(queue_, allocated, initialized,
-                                             buffer, 0, kRangeLength, &guard,
-                                             sizeof(guard), nullptr, 0));
+    IREE_RETURN_IF_ERROR(iree_hal_queue_fill_linear(
+        queue_, allocated, initialized, buffer, 0, kRangeLength, &guard,
+        sizeof(guard), nullptr, 0));
     last_completion = initialized;
     IREE_RETURN_IF_ERROR(
         Submit(queue_, command_buffer, buffer, 0, initialized, executed));
     last_completion = executed;
-    IREE_RETURN_IF_ERROR(iree_hal_queue_download(queue_, executed, downloaded,
-                                                 buffer, 0, output.data(),
-                                                 kRangeLength, nullptr));
+    IREE_RETURN_IF_ERROR(
+        iree_hal_queue_download_linear(queue_, executed, downloaded, buffer, 0,
+                                       output.data(), kRangeLength, nullptr));
     last_completion = downloaded;
     return iree_ok_status();
   }();

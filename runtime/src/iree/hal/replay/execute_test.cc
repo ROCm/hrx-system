@@ -1877,7 +1877,7 @@ TEST(ReplayExecuteTest, ExecutesPoolAllocationImportAndTrimRecords) {
       semaphores,
       &signal_value,
   };
-  IREE_ASSERT_OK(iree_hal_queue_copy(
+  IREE_ASSERT_OK(iree_hal_queue_copy_linear(
       wrapped_queue, iree_hal_semaphore_list_empty(), signal_list,
       imported_buffer,
       /*source_offset=*/0, target_buffer, /*target_offset=*/0,
@@ -2246,7 +2246,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedCommandBufferTransfers) {
       /*binding_capacity=*/0, &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   uint32_t fill_pattern = 0xCDCDCDCDu;
-  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
       command_buffer, iree_hal_make_buffer_ref(buffer, 0, 16), &fill_pattern,
       sizeof(fill_pattern), IREE_HAL_FILL_FLAG_NONE));
   const iree_hal_memory_barrier_t transfer_barrier = {
@@ -2269,7 +2269,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedCommandBufferTransfers) {
   const uint8_t update_data[8] = {
       0xE0, 0x20, 0x21, 0x22, 0x23, 0xE1, 0xE2, 0xE3,
   };
-  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
       command_buffer, update_data, /*source_offset=*/1,
       iree_hal_make_buffer_ref(buffer, 4, 4), IREE_HAL_UPDATE_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
@@ -2400,7 +2400,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedIndirectCommandBufferBindings) {
       IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT, IREE_HAL_COMMAND_CATEGORY_TRANSFER,
       /*binding_capacity=*/1, &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
-  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
       command_buffer, iree_hal_make_buffer_ref(source_buffer, 0, 16),
       iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, 0, 16),
       IREE_HAL_COPY_FLAG_NONE));

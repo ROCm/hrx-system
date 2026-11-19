@@ -685,7 +685,7 @@ class ProgramGrowthTest : public GrowthTest {
     };
     observed_buffer_caller_owned_ = true;
     const uint32_t pattern = 0;
-    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
         command_buffer_, iree_hal_make_buffer_ref(&observed_buffer_.base, 0, 4),
         &pattern, sizeof(pattern), 0));
     iree_hal_buffer_release(&observed_buffer_.base);

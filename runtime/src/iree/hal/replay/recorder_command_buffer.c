@@ -513,9 +513,9 @@ static iree_status_t iree_hal_replay_recorder_command_buffer_fill_buffer(
   if (iree_status_is_ok(status)) {
     status = iree_hal_replay_recorder_end_operation_with_payload(
         &pending_record,
-        iree_hal_command_buffer_fill_buffer(command_buffer->base_command_buffer,
-                                            base_target_ref, pattern,
-                                            pattern_length, flags),
+        iree_hal_command_buffer_fill_buffer_linear(
+            command_buffer->base_command_buffer, base_target_ref, pattern,
+            pattern_length, flags),
         IREE_ARRAYSIZE(iovecs), iovecs);
   }
   iree_hal_replay_recorder_buffer_release_temporary(temporary_target_buffer);
@@ -573,7 +573,7 @@ static iree_status_t iree_hal_replay_recorder_command_buffer_update_buffer(
   if (iree_status_is_ok(status)) {
     status = iree_hal_replay_recorder_end_operation_with_payload(
         &pending_record,
-        iree_hal_command_buffer_update_buffer(
+        iree_hal_command_buffer_update_buffer_linear(
             command_buffer->base_command_buffer, source_buffer, source_offset,
             base_target_ref, flags),
         IREE_ARRAYSIZE(iovecs), iovecs);
@@ -624,9 +624,9 @@ static iree_status_t iree_hal_replay_recorder_command_buffer_copy_buffer(
   if (iree_status_is_ok(status)) {
     status = iree_hal_replay_recorder_end_operation_with_payload(
         &pending_record,
-        iree_hal_command_buffer_copy_buffer(command_buffer->base_command_buffer,
-                                            base_source_ref, base_target_ref,
-                                            flags),
+        iree_hal_command_buffer_copy_buffer_linear(
+            command_buffer->base_command_buffer, base_source_ref,
+            base_target_ref, flags),
         1, &payload_iovec);
   }
   iree_hal_replay_recorder_buffer_release_temporary(temporary_target_buffer);

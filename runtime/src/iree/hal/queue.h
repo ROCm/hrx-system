@@ -1299,7 +1299,7 @@ iree_hal_queue_transfer(iree_hal_queue_t* queue,
                         const iree_hal_queue_barriers_t* barriers);
 
 // Enqueues a scalar fill as a one-operation transfer transaction.
-IREE_API_EXPORT iree_status_t iree_hal_queue_fill(
+IREE_API_EXPORT iree_status_t iree_hal_queue_fill_linear(
     iree_hal_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
@@ -1312,7 +1312,7 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_fill(
 // The source range must be readable and unmodified from the start of the call
 // until return. Its bytes are captured before returning, independent of
 // |wait_semaphore_list|, and the caller may then reuse the source storage.
-IREE_API_EXPORT iree_status_t iree_hal_queue_update(
+IREE_API_EXPORT iree_status_t iree_hal_queue_update_linear(
     iree_hal_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
@@ -1322,7 +1322,7 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_update(
     iree_hal_update_flags_t flags);
 
 // Enqueues a scalar device buffer copy as a one-operation transaction.
-IREE_API_EXPORT iree_status_t iree_hal_queue_copy(
+IREE_API_EXPORT iree_status_t iree_hal_queue_copy_linear(
     iree_hal_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
@@ -1336,7 +1336,7 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_copy(
 // starts and remain live and unmodified until the transaction retires, as
 // described by iree_hal_queue_transfer. HAL may read or capture the source
 // immediately; |wait_semaphore_list| orders device accesses, not source reads.
-IREE_API_EXPORT iree_status_t iree_hal_queue_upload(
+IREE_API_EXPORT iree_status_t iree_hal_queue_upload_linear(
     iree_hal_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list, const void* source,
@@ -1349,7 +1349,7 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_upload(
 // as described by iree_hal_queue_transfer. HAL may write the target
 // immediately; |wait_semaphore_list| orders device accesses, not permission to
 // use |target|.
-IREE_API_EXPORT iree_status_t iree_hal_queue_download(
+IREE_API_EXPORT iree_status_t iree_hal_queue_download_linear(
     iree_hal_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,

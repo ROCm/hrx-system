@@ -253,7 +253,7 @@ class TransferChain {
         status = iree_hal_command_buffer_barrier(command_buffer, &barrier);
       }
       if (iree_status_is_ok(status)) {
-        status = iree_hal_command_buffer_copy_buffer(
+        status = iree_hal_command_buffer_copy_buffer_linear(
             command_buffer,
             iree_hal_make_buffer_ref(buffer_, i * sizeof(uint32_t),
                                      sizeof(uint32_t)),
@@ -293,13 +293,13 @@ class TransferChain {
     const auto length = values_.size() * sizeof(uint32_t);
     uint64_t next_value = submitted_value_ + 1;
     iree_hal_semaphore_list_t signals = {1, &timeline_, &next_value};
-    IREE_RETURN_IF_ERROR(
-        iree_hal_queue_upload(queue_, iree_hal_semaphore_list_empty(), signals,
-                              values_.data(), buffer_, 0, length, nullptr));
+    IREE_RETURN_IF_ERROR(iree_hal_queue_upload_linear(
+        queue_, iree_hal_semaphore_list_empty(), signals, values_.data(),
+        buffer_, 0, length, nullptr));
     submitted_value_ = next_value;
     IREE_RETURN_IF_ERROR(Wait());
     ++next_value;
-    IREE_RETURN_IF_ERROR(iree_hal_queue_download(
+    IREE_RETURN_IF_ERROR(iree_hal_queue_download_linear(
         queue_, iree_hal_semaphore_list_empty(), signals, buffer_, 0,
         received_.data(), length, nullptr));
     submitted_value_ = next_value;
@@ -345,9 +345,9 @@ class TransferChain {
     if (iree_status_is_ok(status)) {
       // Erase the source so a skipped file read cannot pass the oracle.
       const uint32_t zero = 0;
-      status =
-          iree_hal_queue_fill(queue_, waits, signals, buffer_, 0, length, &zero,
-                              sizeof(zero), nullptr, IREE_HAL_FILL_FLAG_NONE);
+      status = iree_hal_queue_fill_linear(queue_, waits, signals, buffer_, 0,
+                                          length, &zero, sizeof(zero), nullptr,
+                                          IREE_HAL_FILL_FLAG_NONE);
       if (iree_status_is_ok(status)) {
         submitted_value_ = next_value++;
       }
@@ -385,12 +385,12 @@ class TransferChain {
     uint64_t next_value = submitted_value_ + 1;
     const iree_hal_semaphore_list_t waits = {1, &timeline_, &submitted_value_};
     const iree_hal_semaphore_list_t signals = {1, &timeline_, &next_value};
-    IREE_RETURN_IF_ERROR(iree_hal_queue_upload(
+    IREE_RETURN_IF_ERROR(iree_hal_queue_upload_linear(
         queue_, waits, signals, values_.data(), buffer_, 0, length, nullptr));
     submitted_value_ = next_value;
     IREE_RETURN_IF_ERROR(Submit(submission));
     next_value = submitted_value_ + 1;
-    IREE_RETURN_IF_ERROR(iree_hal_queue_download(
+    IREE_RETURN_IF_ERROR(iree_hal_queue_download_linear(
         queue_, waits, signals, buffer_, 0, received_.data(), length, nullptr));
     submitted_value_ = next_value;
     return iree_ok_status();
@@ -420,7 +420,7 @@ class TransferChain {
       } else {
         const iree_host_size_t source =
             submission == Submission::kMixed ? values_.size() - 2 : i;
-        status = iree_hal_queue_copy(
+        status = iree_hal_queue_copy_linear(
             peer_ && (i & 1) ? peer_ : queue_, waits, signals, buffer_,
             source * sizeof(uint32_t), buffer_, (source + 1) * sizeof(uint32_t),
             sizeof(uint32_t), nullptr, IREE_HAL_COPY_FLAG_NONE);
@@ -816,19 +816,19 @@ static void BM_RecordedTransfer(benchmark::State& state,
     const auto* payload = expected.data() + (i + 1) * words_per_node;
     switch (operation) {
       case RecordedTransfer::kCopy: {
-        IREE_CHECK_OK(iree_hal_command_buffer_copy_buffer(
+        IREE_CHECK_OK(iree_hal_command_buffer_copy_buffer_linear(
             recording, iree_hal_make_buffer_ref(buffer, i * length, length),
             target, IREE_HAL_COPY_FLAG_NONE));
         break;
       }
       case RecordedTransfer::kFill: {
-        IREE_CHECK_OK(iree_hal_command_buffer_fill_buffer(
+        IREE_CHECK_OK(iree_hal_command_buffer_fill_buffer_linear(
             recording, target, payload, sizeof(*payload),
             IREE_HAL_FILL_FLAG_NONE));
         break;
       }
       case RecordedTransfer::kUpdate: {
-        IREE_CHECK_OK(iree_hal_command_buffer_update_buffer(
+        IREE_CHECK_OK(iree_hal_command_buffer_update_buffer_linear(
             recording, payload, 0, target, IREE_HAL_UPDATE_FLAG_NONE));
         break;
       }

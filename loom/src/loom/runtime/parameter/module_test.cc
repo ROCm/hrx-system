@@ -134,7 +134,7 @@ class ParameterModuleTest : public loom_runtime::testing::ParameterTest {
     std::array<uint8_t, 24> record = {};
     iree_unaligned_store_le_u64(record.data() + 16, 16);
     uint64_t one = 1;
-    IREE_ASSERT_OK(iree_hal_queue_update(
+    IREE_ASSERT_OK(iree_hal_queue_update_linear(
         queue_, {1, &gates_[domain], &one}, {1, &produced_[domain], &one},
         record.data(), 0, descriptors_[domain], 0, record.size(), nullptr,
         IREE_HAL_UPDATE_FLAG_NONE));
@@ -166,7 +166,7 @@ class ParameterModuleTest : public loom_runtime::testing::ParameterTest {
           iree_hal_fence_ptr_from_variant_borrowed(&types_, result, &ready);
     }
     if (iree_status_is_ok(status)) {
-      status = iree_hal_queue_download(
+      status = iree_hal_queue_download_linear(
           queue_, iree_hal_fence_semaphore_list(ready),
           {1, &consumed_[domain], &one}, targets_[domain], 0,
           output_[domain].data(), output_[domain].size(), nullptr);
@@ -302,7 +302,7 @@ TEST_P(ParameterModuleTest, WholeFilesSurviveSourceReplacementAndRemoval) {
         offsets[domain], targets_[domain], 0, lengths[domain], nullptr,
         IREE_HAL_READ_FLAG_NONE));
     iree_hal_file_release(std::exchange(files_[domain], nullptr));
-    IREE_ASSERT_OK(iree_hal_queue_download(
+    IREE_ASSERT_OK(iree_hal_queue_download_linear(
         queue_, {1, &produced_[domain], &one}, {1, &consumed_[domain], &one},
         targets_[domain], 0, output_[domain].data(), output_[domain].size(),
         nullptr));

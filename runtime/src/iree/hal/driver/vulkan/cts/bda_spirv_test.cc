@@ -592,14 +592,14 @@ TEST_P(BdaSpirvTest, OwnedPoolHonorsOveralignedDeviceAddresses) {
               address + sizeof(uint32_t));
 
     SemaphoreList uploaded(device_, {0}, {1});
-    IREE_ASSERT_OK(iree_hal_queue_upload(
+    IREE_ASSERT_OK(iree_hal_queue_upload_linear(
         transfer_queue_, iree_hal_semaphore_list_empty(), uploaded,
         input.data(), buffer, 0, sizeof(input), /*barriers=*/NULL));
     std::array<uint32_t, 3> output = {};
     SemaphoreList downloaded(device_, {0}, {1});
-    IREE_ASSERT_OK(iree_hal_queue_download(transfer_queue_, uploaded,
-                                           downloaded, view, 0, output.data(),
-                                           sizeof(output), /*barriers=*/NULL));
+    IREE_ASSERT_OK(iree_hal_queue_download_linear(
+        transfer_queue_, uploaded, downloaded, view, 0, output.data(),
+        sizeof(output), /*barriers=*/NULL));
     IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
         downloaded, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
     EXPECT_THAT(output, ContainerEq(std::array<uint32_t, 3>{22, 33, 44}));
@@ -1343,7 +1343,7 @@ TEST_P(BdaSpirvTest, NativeBindingsExecuteFromInteriorPoolRanges) {
         for (size_t i = 0; i < roots.size(); ++i) {
           const iree_hal_semaphore_list_t done = {1, &uploaded.semaphores[i],
                                                   &uploaded.payload_values[i]};
-          IREE_ASSERT_OK(iree_hal_queue_upload(
+          IREE_ASSERT_OK(iree_hal_queue_upload_linear(
               transfer_queue_, ready, done, upload_data[i], roots[i], 0,
               upload_lengths[i], /*barriers=*/NULL));
         }
@@ -1392,7 +1392,7 @@ TEST_P(BdaSpirvTest, NativeBindingsExecuteFromInteriorPoolRanges) {
         }
         std::array<int32_t, 8> result = {};
         SemaphoreList downloaded(device_, {0}, {1});
-        IREE_ASSERT_OK(iree_hal_queue_download(
+        IREE_ASSERT_OK(iree_hal_queue_download_linear(
             transfer_queue_, executed, downloaded, roots[1], 0, result.data(),
             sizeof(result), /*barriers=*/NULL));
         IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -1550,13 +1550,13 @@ TEST_P(BdaSpirvTest, CommandBufferExecutesBdaShaderWithSparseBindings) {
   const int32_t input_pattern = 5;
   const int32_t output_pattern = -1;
   SemaphoreList fill_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       transfer_queue_, iree_hal_semaphore_list_empty(), fill_signal,
       input_buffer.get(), /*target_offset=*/0, 8 * sizeof(input_pattern),
       &input_pattern, sizeof(input_pattern), /*barriers=*/NULL,
       IREE_HAL_FILL_FLAG_NONE));
   SemaphoreList output_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       transfer_queue_, fill_signal, output_signal, output_buffer.get(),
       /*target_offset=*/0, 8 * sizeof(output_pattern), &output_pattern,
       sizeof(output_pattern), /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));
@@ -1583,7 +1583,7 @@ TEST_P(BdaSpirvTest, CommandBufferExecutesBdaShaderWithSparseBindings) {
   IREE_ASSERT_OK(
       CreateZeroedDeviceBuffer(8 * sizeof(int32_t), readback_buffer.out()));
   SemaphoreList copy_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_copy(
+  IREE_ASSERT_OK(iree_hal_queue_copy_linear(
       transfer_queue_, iree_hal_semaphore_list_empty(), copy_signal,
       output_buffer.get(), /*source_offset=*/0, readback_buffer.get(),
       /*target_offset=*/0, 8 * sizeof(int32_t), /*barriers=*/NULL,
@@ -1802,7 +1802,7 @@ TEST_P(BdaSpirvReplayCacheTest, CommandBufferSkipsUnchangedBdaPublication) {
 
   const int32_t reset_pattern = 0;
   SemaphoreList fill_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       transfer_queue_, iree_hal_semaphore_list_empty(), fill_signal,
       output_buffer.get(), /*target_offset=*/0, kDispatchByteLength,
       &reset_pattern, sizeof(reset_pattern), /*barriers=*/NULL,

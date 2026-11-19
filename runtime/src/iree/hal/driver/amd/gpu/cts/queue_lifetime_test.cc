@@ -184,10 +184,10 @@ void GpuNativeQueueLifetimeTest::MembershipProgress(
   }
   const uint32_t pattern = 0x1234CAFE;
   uint64_t one = 1;
-  IREE_ASSERT_OK(iree_hal_queue_fill(acquired.back(),
-                                     {1, &progress_handle, &previous},
-                                     {1, &done_handle, &one}, output, 0, 256,
-                                     &pattern, sizeof(pattern), nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
+      acquired.back(), {1, &progress_handle, &previous},
+      {1, &done_handle, &one}, output, 0, 256, &pattern, sizeof(pattern),
+      nullptr, 0));
   pause.Join();
   std::array<uint32_t, 64> observed = {};
   const iree_hal_transfer_operation_t download = {
@@ -277,7 +277,7 @@ void GpuNativeQueueLifetimeTest::FrontierAllocationProgress(bool fail) {
     EXPECT_EQ(host_allocation_gate_.allocation_thread, constructor.get_id());
     // The host wait forces deferred publication, proving the device service
     // thread can progress as well as caller-inline submission.
-    IREE_ASSERT_OK(iree_hal_queue_fill(
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
         queues_[0], {1, &start_handle, &one}, {1, &filled_handle, &one}, output,
         0, 256, &pattern, sizeof(pattern), nullptr, 0));
     std::array<uint32_t, 64> observed = {};
@@ -367,7 +367,7 @@ void GpuNativeQueueLifetimeTest::AllocationReleaseProgress(
     Ref<iree_hal_queue_t> reused;
     IREE_ASSERT_OK(AcquireQueue(reused.out()));
     constexpr uint32_t pattern = 0xCAFED00D;
-    IREE_ASSERT_OK(iree_hal_queue_fill(
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
         reused, {1, &retired_handle, &one}, {1, &filled_handle, &one}, output,
         0, 256, &pattern, sizeof(pattern), nullptr, 0));
     reused.reset();
@@ -519,7 +519,7 @@ TEST_P(GpuNativeQueueLifetimeTest,
       IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0, recording.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
   const uint32_t pattern = 0x1234CAFE;
-  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
       recording, iree_hal_make_buffer_ref(output, 0, 256), &pattern,
       sizeof(pattern), 0));
   const iree_hal_barrier_t release = {
@@ -612,7 +612,7 @@ TEST_P(GpuNativeQueueLifetimeTest,
   uint64_t one = 1;
   iree_hal_semaphore_t* initialized_handle = initialized;
   constexpr uint32_t pattern = 0x1234CAFE;
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       queues_[0], {}, {1, &initialized_handle, &one}, source, 0, 64, &pattern,
       sizeof(pattern), nullptr, IREE_HAL_FILL_FLAG_NONE));
   IREE_ASSERT_OK(
@@ -653,10 +653,10 @@ TEST_P(GpuNativeQueueLifetimeTest,
           iree_hal_semaphore_t* copied_handle = copied;
           iree_hal_semaphore_t* failed_handle = failed;
           Gates gates{{copy_gate, error_gate}};
-          IREE_ASSERT_OK(
-              iree_hal_queue_download(queues_[0], {1, &copy_gate_handle, &one},
-                                      {1, &copied_handle, &one}, view, 0,
-                                      downloaded->data.data(), 64, nullptr));
+          IREE_ASSERT_OK(iree_hal_queue_download_linear(
+              queues_[0], {1, &copy_gate_handle, &one},
+              {1, &copied_handle, &one}, view, 0, downloaded->data.data(), 64,
+              nullptr));
           view.reset();
           const auto call = iree_hal_make_host_call(
               [](void*, const uint64_t[4], iree_hal_host_call_context_t*) {
@@ -801,7 +801,7 @@ TEST_P(GpuNativeQueueLifetimeTest,
       .before = &acquires,
       .after = &releases,
   };
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       queues_[1], {}, {1, &produced_handle, &one}, source, 0, 256,
       &first_pattern, sizeof(first_pattern), &release_barriers, 0));
   IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[1], {1, &produced_handle, &one},
@@ -819,10 +819,10 @@ TEST_P(GpuNativeQueueLifetimeTest,
   // join must leave this physical queue free to publish that missing producer.
   iree_hal_semaphore_t* waits[] = {produced, future};
   uint64_t values[] = {one, one};
-  IREE_ASSERT_OK(iree_hal_queue_copy(queues_[0], {2, waits, values},
-                                     {1, &joined_handle, &one}, source, 0,
-                                     output, 0, 128, &copy_barriers, 0));
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_copy_linear(
+      queues_[0], {2, waits, values}, {1, &joined_handle, &one}, source, 0,
+      output, 0, 128, &copy_barriers, 0));
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       queues_[0], {}, {1, &future_handle, &one}, output, 128, 128,
       &second_pattern, sizeof(second_pattern), &release_barriers, 0));
 

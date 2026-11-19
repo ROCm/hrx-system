@@ -76,7 +76,7 @@ TEST_P(VulkanAllocatorGuardrailTest, QueueAllocaAcceptsSparseSizedAllocation) {
 
   const uint32_t pattern = 0x1234CAFEu;
   SemaphoreList fill_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       transfer_queue_, empty_wait, fill_signal, buffer.get(),
       /*target_offset=*/0, sizeof(pattern), &pattern, sizeof(pattern),
       /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));
@@ -146,7 +146,7 @@ TEST_P(VulkanAllocatorGuardrailTest,
       buffer.out()));
   const uint32_t pattern = 0x1234ABCDu;
   SemaphoreList filled(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       transfer_queue_, empty_wait, filled, buffer, 0, kBlockSize, &pattern,
       sizeof(pattern), /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(filled, iree_infinite_timeout(),

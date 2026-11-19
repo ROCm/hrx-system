@@ -211,7 +211,7 @@ TEST_F(GpuProtocolInteropTest, ConsumerFirstHandoffsPreserveSharedBacking) {
         IREE_HAL_COMMAND_CATEGORY_TRANSFER, 2, recordings[i].out()));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(recordings[i]));
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recordings[i], &acquire));
-    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
         recordings[i], iree_hal_make_indirect_buffer_ref(0, 0, kRangeBytes),
         iree_hal_make_indirect_buffer_ref(1, 0, kRangeBytes), 0));
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recordings[i], &release));
@@ -232,7 +232,7 @@ TEST_F(GpuProtocolInteropTest, ConsumerFirstHandoffsPreserveSharedBacking) {
         uint64_t returned = ++epochs[first];
         uint64_t downloaded = ++epochs[first];
         uint64_t copied = ++epochs[second];
-        IREE_ASSERT_OK(iree_hal_queue_fill(
+        IREE_ASSERT_OK(iree_hal_queue_fill_linear(
             protocol_queues_[first], iree_hal_semaphore_list_empty(),
             {1, &timelines[first], &initialized}, buffer, 0,
             kWordCount * sizeof(uint32_t), &kGuard, sizeof(kGuard), nullptr,
@@ -248,9 +248,9 @@ TEST_F(GpuProtocolInteropTest, ConsumerFirstHandoffsPreserveSharedBacking) {
                                           {IREE_ARRAYSIZE(bindings), bindings},
                                           0);
           }
-          return iree_hal_queue_copy(protocol_queues_[participant], waits,
-                                     signals, buffer, source, buffer, target,
-                                     kRangeBytes, nullptr, 0);
+          return iree_hal_queue_copy_linear(
+              protocol_queues_[participant], waits, signals, buffer, source,
+              buffer, target, kRangeBytes, nullptr, 0);
         };
         // Enqueue both consumers before their producers. These are distinct
         // native domains, so readiness crosses asynchronous host admission;
@@ -261,7 +261,7 @@ TEST_F(GpuProtocolInteropTest, ConsumerFirstHandoffsPreserveSharedBacking) {
         IREE_ASSERT_OK(copy(second, kOffsets[0], kOffsets[1],
                             {1, &timelines[first], &produced},
                             {1, &timelines[second], &copied}));
-        IREE_ASSERT_OK(iree_hal_queue_fill(
+        IREE_ASSERT_OK(iree_hal_queue_fill_linear(
             protocol_queues_[first], {1, &timelines[first], &initialized},
             {1, &timelines[first], &produced}, buffer, kOffsets[0], kRangeBytes,
             &pattern, sizeof(pattern), nullptr, 0));

@@ -208,7 +208,7 @@ void QueueDispatchTest::RunDeferredFileGather(iree_hal_queue_t* io_queue) {
   SemaphoreList gathered_signal(device_, {0}, {1});
   SemaphoreList consumed(device_, {0}, {1});
   SemaphoreList finished(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_update(
+  IREE_ASSERT_OK(iree_hal_queue_update_linear(
       io_queue, gate, uploaded, seeds, 0, input, 0, sizeof(seeds),
       /*barriers=*/nullptr, IREE_HAL_UPDATE_FLAG_NONE));
 
@@ -224,9 +224,9 @@ void QueueDispatchTest::RunDeferredFileGather(iree_hal_queue_t* io_queue) {
       /*barriers=*/nullptr, IREE_HAL_DISPATCH_FLAG_NONE));
 
   uint32_t rows[4] = {};
-  IREE_ASSERT_OK(iree_hal_queue_download(io_queue, produced, downloaded,
-                                         addresses, 0, rows, sizeof(rows),
-                                         /*barriers=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_queue_download_linear(
+      io_queue, produced, downloaded, addresses, 0, rows, sizeof(rows),
+      /*barriers=*/nullptr));
   std::promise<void> callback_released;
   auto callback_released_future = callback_released.get_future();
   auto* callback =
@@ -253,9 +253,9 @@ void QueueDispatchTest::RunDeferredFileGather(iree_hal_queue_t* io_queue) {
       /*barriers=*/nullptr, IREE_HAL_DISPATCH_FLAG_NONE));
   gathered.reset();
   std::array<uint32_t, 4> result = {};
-  IREE_ASSERT_OK(iree_hal_queue_download(io_queue, consumed, finished, output,
-                                         0, result.data(), sizeof(result),
-                                         /*barriers=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_queue_download_linear(
+      io_queue, consumed, finished, output, 0, result.data(), sizeof(result),
+      /*barriers=*/nullptr));
 
   IREE_ASSERT_OK(iree_hal_semaphore_list_signal(gate, /*frontier=*/nullptr));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(finished, iree_infinite_timeout(),
@@ -302,7 +302,7 @@ TEST_P(QueueDispatchTest, DispatchWithConstantsAndBindings) {
   IREE_ASSERT_OK(
       CreateUninitializedDeviceBuffer(sizeof(input_data), input_buffer.out()));
   SemaphoreList upload_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_update(
+  IREE_ASSERT_OK(iree_hal_queue_update_linear(
       transfer_queue_, iree_hal_semaphore_list_empty(), upload_signal,
       input_data, 0, input_buffer, 0, sizeof(input_data), /*barriers=*/NULL,
       IREE_HAL_UPDATE_FLAG_NONE));
@@ -947,7 +947,7 @@ class QueueDispatchIndirectParametersTest : public CtsTestBase<> {
     };
     SemaphoreList update_signal(device_, {0}, {1});
     SemaphoreList empty_wait;
-    IREE_ASSERT_OK(iree_hal_queue_update(
+    IREE_ASSERT_OK(iree_hal_queue_update_linear(
         transfer_queue_, empty_wait, update_signal, parameter_data,
         /*source_offset=*/0, parameter_buffer, /*target_offset=*/0,
         sizeof(parameter_data), /*barriers=*/NULL, IREE_HAL_UPDATE_FLAG_NONE));

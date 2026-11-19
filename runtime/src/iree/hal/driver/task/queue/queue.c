@@ -3519,10 +3519,10 @@ iree_status_t iree_hal_task_queue_submit_fill(
     const void* pattern, iree_host_size_t pattern_length,
     iree_hal_semaphore_list_t wait_semaphores,
     iree_hal_semaphore_list_t signal_semaphores) {
-  return iree_hal_queue_fill(&queue->base, wait_semaphores, signal_semaphores,
-                             target_buffer, target_offset, length, pattern,
-                             pattern_length, /*barriers=*/NULL,
-                             IREE_HAL_FILL_FLAG_NONE);
+  return iree_hal_queue_fill_linear(
+      &queue->base, wait_semaphores, signal_semaphores, target_buffer,
+      target_offset, length, pattern, pattern_length, /*barriers=*/NULL,
+      IREE_HAL_FILL_FLAG_NONE);
 }
 
 iree_status_t iree_hal_task_queue_submit_copy(
@@ -3531,10 +3531,10 @@ iree_status_t iree_hal_task_queue_submit_copy(
     iree_device_size_t target_offset, iree_device_size_t length,
     iree_hal_semaphore_list_t wait_semaphores,
     iree_hal_semaphore_list_t signal_semaphores) {
-  return iree_hal_queue_copy(&queue->base, wait_semaphores, signal_semaphores,
-                             source_buffer, source_offset, target_buffer,
-                             target_offset, length, /*barriers=*/NULL,
-                             IREE_HAL_COPY_FLAG_NONE);
+  return iree_hal_queue_copy_linear(
+      &queue->base, wait_semaphores, signal_semaphores, source_buffer,
+      source_offset, target_buffer, target_offset, length, /*barriers=*/NULL,
+      IREE_HAL_COPY_FLAG_NONE);
 }
 
 iree_status_t iree_hal_task_queue_submit_update(
@@ -3543,10 +3543,10 @@ iree_status_t iree_hal_task_queue_submit_update(
     iree_device_size_t target_offset, iree_device_size_t length,
     iree_hal_semaphore_list_t wait_semaphores,
     iree_hal_semaphore_list_t signal_semaphores) {
-  return iree_hal_queue_update(&queue->base, wait_semaphores, signal_semaphores,
-                               source_buffer, source_offset, target_buffer,
-                               target_offset, length, /*barriers=*/NULL,
-                               IREE_HAL_UPDATE_FLAG_NONE);
+  return iree_hal_queue_update_linear(
+      &queue->base, wait_semaphores, signal_semaphores, source_buffer,
+      source_offset, target_buffer, target_offset, length, /*barriers=*/NULL,
+      IREE_HAL_UPDATE_FLAG_NONE);
 }
 
 iree_status_t iree_hal_task_queue_submit_atomic_wait(

@@ -185,7 +185,7 @@ enum iree_hal_buffer_usage_bits_t {
 
   // Buffer is used as a source for transfer operations.
   // Buffer may be a source for:
-  //   iree_hal_command_buffer_copy_buffer
+  //   iree_hal_command_buffer_copy_buffer_linear
   //
   // Maps to:
   //  - D3D12_RESOURCE_STATE_COPY_SOURCE
@@ -195,9 +195,9 @@ enum iree_hal_buffer_usage_bits_t {
 
   // Buffer is used as a target for transfer operations.
   // Buffer may be a target for:
-  //   iree_hal_command_buffer_fill_buffer
-  //   iree_hal_command_buffer_update_buffer
-  //   iree_hal_command_buffer_copy_buffer
+  //   iree_hal_command_buffer_fill_buffer_linear
+  //   iree_hal_command_buffer_update_buffer_linear
+  //   iree_hal_command_buffer_copy_buffer_linear
   //
   // Maps to:
   //  - D3D12_RESOURCE_STATE_COPY_DEST
@@ -207,9 +207,9 @@ enum iree_hal_buffer_usage_bits_t {
 
   // Buffer contents are transferred using DMA operations.
   // Buffer may be a source or target for:
-  //   iree_hal_command_buffer_fill_buffer
-  //   iree_hal_command_buffer_update_buffer
-  //   iree_hal_command_buffer_copy_buffer
+  //   iree_hal_command_buffer_fill_buffer_linear
+  //   iree_hal_command_buffer_update_buffer_linear
+  //   iree_hal_command_buffer_copy_buffer_linear
   //
   // Maps to:
   //  - D3D12_RESOURCE_STATE_COPY_SOURCE | D3D12_RESOURCE_STATE_COPY_DEST
@@ -1313,7 +1313,7 @@ iree_hal_buffer_export(iree_hal_buffer_t* buffer, iree_hal_buffer_range_t range,
 // It is strongly recommended that buffer operations are performed on transfer
 // queues; using this synchronous function may incur additional cache flushes
 // and synchronous blocking behavior and is not supported on all buffer types.
-// See iree_hal_command_buffer_fill_buffer.
+// See iree_hal_command_buffer_fill_buffer_linear.
 IREE_API_EXPORT iree_status_t iree_hal_buffer_map_zero(
     iree_hal_buffer_t* buffer, iree_device_size_t byte_offset,
     iree_device_size_t byte_length);
@@ -1327,7 +1327,7 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_map_zero(
 // It is strongly recommended that buffer operations are performed on transfer
 // queues; using this synchronous function may incur additional cache flushes
 // and synchronous blocking behavior and is not supported on all buffer types.
-// See iree_hal_command_buffer_fill_buffer.
+// See iree_hal_command_buffer_fill_buffer_linear.
 IREE_API_EXPORT iree_status_t iree_hal_buffer_map_fill(
     iree_hal_buffer_t* buffer, iree_device_size_t byte_offset,
     iree_device_size_t byte_length, const void* pattern,
@@ -1341,7 +1341,7 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_map_fill(
 // It is strongly recommended that buffer operations are performed on transfer
 // queues; using this synchronous function may incur additional cache flushes
 // and synchronous blocking behavior and is not supported on all buffer types.
-// See iree_hal_command_buffer_copy_buffer.
+// See iree_hal_command_buffer_copy_buffer_linear.
 IREE_API_EXPORT iree_status_t iree_hal_buffer_map_read(
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     void* target_buffer, iree_device_size_t data_length);
@@ -1354,8 +1354,8 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_map_read(
 // It is strongly recommended that buffer operations are performed on transfer
 // queues; using this synchronous function may incur additional cache flushes
 // and synchronous blocking behavior and is not supported on all buffer types.
-// See iree_hal_command_buffer_update_buffer and
-// iree_hal_command_buffer_copy_buffer.
+// See iree_hal_command_buffer_update_buffer_linear and
+// iree_hal_command_buffer_copy_buffer_linear.
 IREE_API_EXPORT iree_status_t iree_hal_buffer_map_write(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     const void* source_buffer, iree_device_size_t data_length);
@@ -1370,7 +1370,7 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_map_write(
 // It is strongly recommended that buffer operations are performed on transfer
 // queues; using this synchronous function may incur additional cache flushes
 // and synchronous blocking behavior and is not supported on all buffer types.
-// See iree_hal_command_buffer_copy_buffer.
+// See iree_hal_command_buffer_copy_buffer_linear.
 IREE_API_EXPORT iree_status_t iree_hal_buffer_map_copy(
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,

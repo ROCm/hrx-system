@@ -170,7 +170,7 @@ TEST_F(HalDispatchTest, GridCallsAndIndependentImageLifetime) {
       iree_hal_make_pool_reservation_request(sizeof(output), alignof(uint32_t)),
       iree_infinite_timeout(), &buffer_));
   uint64_t uploaded = 1, first_done = 2, second_done = 3, downloaded = 4;
-  IREE_ASSERT_OK(iree_hal_queue_upload(
+  IREE_ASSERT_OK(iree_hal_queue_upload_linear(
       queue_, iree_hal_semaphore_list_empty(), Completion(&uploaded),
       output.data(), buffer_, 0, sizeof(output), /*barriers=*/NULL));
   const iree_hal_buffer_ref_t binding = iree_hal_make_buffer_ref(
@@ -193,7 +193,7 @@ TEST_F(HalDispatchTest, GridCallsAndIndependentImageLifetime) {
   }
   if (iree_status_is_ok(status)) {
     completion = second_done;
-    status = iree_hal_queue_download(
+    status = iree_hal_queue_download_linear(
         queue_, Completion(&second_done), Completion(&downloaded), buffer_, 0,
         output.data(), sizeof(output), /*barriers=*/NULL);
   }
@@ -233,7 +233,7 @@ TEST_F(HalDispatchTest, NarrowParameterAndZeroWork) {
       pool_, iree_hal_make_pool_reservation_request(output.size(), 1),
       iree_infinite_timeout(), &buffer_));
   uint64_t uploaded = 1, filled = 2, skipped = 3, downloaded = 4;
-  IREE_ASSERT_OK(iree_hal_queue_upload(
+  IREE_ASSERT_OK(iree_hal_queue_upload_linear(
       queue_, iree_hal_semaphore_list_empty(), Completion(&uploaded),
       output.data(), buffer_, 0, output.size(), /*barriers=*/NULL));
   const iree_hal_buffer_ref_t binding = iree_hal_make_buffer_ref(buffer_, 1, 5);
@@ -255,7 +255,7 @@ TEST_F(HalDispatchTest, NarrowParameterAndZeroWork) {
   }
   if (iree_status_is_ok(status)) {
     completion = skipped;
-    status = iree_hal_queue_download(
+    status = iree_hal_queue_download_linear(
         queue_, Completion(&skipped), Completion(&downloaded), buffer_, 0,
         output.data(), output.size(), /*barriers=*/NULL);
   }
@@ -318,7 +318,7 @@ TEST_F(HalDispatchTest, ConstantsCrossPhysicalCarriers) {
       pool_, iree_hal_make_pool_reservation_request(output.size(), 8),
       iree_infinite_timeout(), &buffer_));
   uint64_t uploaded = 1, dispatched = 2, downloaded = 3;
-  IREE_ASSERT_OK(iree_hal_queue_upload(
+  IREE_ASSERT_OK(iree_hal_queue_upload_linear(
       queue_, iree_hal_semaphore_list_empty(), Completion(&uploaded),
       output.data(), buffer_, 0, output.size(), /*barriers=*/NULL));
   const iree_hal_buffer_ref_t binding =
@@ -332,7 +332,7 @@ TEST_F(HalDispatchTest, ConstantsCrossPhysicalCarriers) {
   uint64_t completion = uploaded;
   if (iree_status_is_ok(status)) {
     completion = dispatched;
-    status = iree_hal_queue_download(
+    status = iree_hal_queue_download_linear(
         queue_, Completion(&dispatched), Completion(&downloaded), buffer_, 0,
         output.data(), output.size(), /*barriers=*/NULL);
   }

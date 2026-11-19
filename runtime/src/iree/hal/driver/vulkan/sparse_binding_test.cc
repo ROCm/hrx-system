@@ -162,9 +162,9 @@ TEST_P(VulkanSparseBindingTest, BoundBlocksReportCompleteNativePayload) {
   EXPECT_EQ(requirements.alignment, allocation.granularity);
   const uint32_t pattern = 0x1234CAFEu;
   SemaphoreList filled(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_fill(transfer_queue_, {}, filled, buffer, 0,
-                                     length, &pattern, sizeof(pattern), nullptr,
-                                     IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
+      transfer_queue_, {}, filled, buffer, 0, length, &pattern, sizeof(pattern),
+      nullptr, IREE_HAL_FILL_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(filled, iree_infinite_timeout(),
                                               IREE_ASYNC_WAIT_FLAG_NONE));
   const auto bytes =
@@ -255,7 +255,7 @@ TEST_P(VulkanSparseBindingTest, DeferredMultiBufferBindingsAliasAndReplace) {
     input[i] = 0x12340000u + i;
   }
   SemaphoreList uploaded(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_update(
+  IREE_ASSERT_OK(iree_hal_queue_update_linear(
       transfer_queue_, {}, uploaded, input.data(), 0, source, 0,
       input.size() * sizeof(uint32_t), nullptr, IREE_HAL_UPDATE_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(uploaded, iree_infinite_timeout(),
@@ -314,7 +314,7 @@ TEST_P(VulkanSparseBindingTest, DeferredMultiBufferBindingsAliasAndReplace) {
     replacement[i] = 0xCAFE0000u + i;
   }
   SemaphoreList written(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_update(
+  IREE_ASSERT_OK(iree_hal_queue_update_linear(
       transfer_queue_, mapped, written, replacement.data(), 0, targets[0], 0,
       sizeof(replacement), nullptr, IREE_HAL_UPDATE_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(written, iree_infinite_timeout(),
@@ -434,9 +434,9 @@ TEST_P(VulkanSparseBindingTest, CoarseMappingUnitsPreserveExactTail) {
     input[i] = 0x12340000u + i;
   }
   SemaphoreList uploaded(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_upload(transfer_queue_, mapped, uploaded,
-                                       input.data(), source, 0, length,
-                                       nullptr));
+  IREE_ASSERT_OK(iree_hal_queue_upload_linear(transfer_queue_, mapped, uploaded,
+                                              input.data(), source, 0, length,
+                                              nullptr));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(uploaded, iree_infinite_timeout(),
                                               IREE_ASYNC_WAIT_FLAG_NONE));
   ExpectPage(target, unit, input[unit / sizeof(uint32_t)]);
@@ -652,7 +652,7 @@ TEST_P(VulkanSparseBindingTest, QueueMapCapturesPendingAllocations) {
     input[i] = 0x56780000u + i;
   }
   SemaphoreList uploaded(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_upload(
+  IREE_ASSERT_OK(iree_hal_queue_upload_linear(
       transfer_queue_, mapped, uploaded, input.data(), source, 0,
       input.size() * sizeof(uint32_t), nullptr));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(uploaded, iree_infinite_timeout(),
@@ -668,9 +668,9 @@ TEST_P(VulkanSparseBindingTest, QueueMapCapturesPendingAllocations) {
     output[i] = 0xFACE0000u + i;
   }
   SemaphoreList written(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_upload(transfer_queue_, uploaded, written,
-                                       output.data(), targets[0], 0,
-                                       sizeof(output), nullptr));
+  IREE_ASSERT_OK(iree_hal_queue_upload_linear(
+      transfer_queue_, uploaded, written, output.data(), targets[0], 0,
+      sizeof(output), nullptr));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(written, iree_infinite_timeout(),
                                               IREE_ASYNC_WAIT_FLAG_NONE));
   ExpectPage(source, 0, output[0]);

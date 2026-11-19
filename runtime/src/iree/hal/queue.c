@@ -1206,7 +1206,7 @@ iree_hal_queue_transfer(iree_hal_queue_t* queue,
   return status;
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_queue_fill(
+IREE_API_EXPORT iree_status_t iree_hal_queue_fill_linear(
     iree_hal_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
@@ -1231,7 +1231,7 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_fill(
                                  barriers);
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_queue_update(
+IREE_API_EXPORT iree_status_t iree_hal_queue_update_linear(
     iree_hal_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
@@ -1256,7 +1256,7 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_update(
                                  barriers);
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_queue_copy(
+IREE_API_EXPORT iree_status_t iree_hal_queue_copy_linear(
     iree_hal_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
@@ -1281,7 +1281,7 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_copy(
                                  barriers);
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_queue_upload(
+IREE_API_EXPORT iree_status_t iree_hal_queue_upload_linear(
     iree_hal_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list, const void* source,
@@ -1302,7 +1302,7 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_upload(
                                  barriers);
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_queue_download(
+IREE_API_EXPORT iree_status_t iree_hal_queue_download_linear(
     iree_hal_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,

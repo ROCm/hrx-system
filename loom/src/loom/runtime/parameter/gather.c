@@ -167,7 +167,7 @@ iree_status_t loom_runtime_parameter_gather(
   }
   uint64_t value = 1;
   if (iree_status_is_ok(status)) {
-    status = iree_hal_queue_download(
+    status = iree_hal_queue_download_linear(
         queue, waits, (iree_hal_semaphore_list_t){1, &downloaded, &value},
         source, 0, snapshot, snapshot_length, /*barriers=*/NULL);
   }

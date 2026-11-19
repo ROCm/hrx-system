@@ -154,9 +154,9 @@ void RunSubgroupExecution(
   }
   if (iree_status_is_ok(status)) {
     completion_value = dispatch_value;
-    status = iree_hal_queue_download(execution.transfer_queue, dispatched,
-                                     downloaded, output_buffer, 0,
-                                     output.data(), sizeof(output), nullptr);
+    status = iree_hal_queue_download_linear(
+        execution.transfer_queue, dispatched, downloaded, output_buffer, 0,
+        output.data(), sizeof(output), nullptr);
   }
   if (iree_status_is_ok(status)) {
     completion_value = download_value;

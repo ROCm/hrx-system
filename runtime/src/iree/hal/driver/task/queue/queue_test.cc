@@ -332,7 +332,7 @@ TEST_P(TaskQueueTest, RecordedCacheRecipesSurviveBindingAndReplay) {
       IREE_ASSERT_OK(iree_hal_command_buffer_begin(commands));
       IREE_ASSERT_OK(
           iree_hal_command_buffer_barrier(commands, &acquire.barrier));
-      IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+      IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
           commands, source_ref, target_ref, IREE_HAL_COPY_FLAG_NONE));
       IREE_ASSERT_OK(
           iree_hal_command_buffer_barrier(commands, &release.barrier));
@@ -400,9 +400,9 @@ TEST_P(TaskQueueTest, OneShotCacheDefaultsAndExplicitEmptyBoundaries) {
     target->remote.fill(0xA5);
     ++value;
     const iree_hal_semaphore_list_t signals = {1, &done, &value};
-    IREE_ASSERT_OK(iree_hal_queue_copy(queue, {}, signals, source, 10, target,
-                                       7, 24, barriers,
-                                       IREE_HAL_COPY_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_queue_copy_linear(queue, {}, signals, source, 10,
+                                              target, 7, 24, barriers,
+                                              IREE_HAL_COPY_FLAG_NONE));
     IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
         signals, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
     EXPECT_EQ(target->host[7], barriers == &no_cache ? 0x19 : 0x37);
@@ -448,7 +448,7 @@ TEST_P(TaskQueueTest, CacheFailureFailsCompletionBeforeDependentWork) {
         IREE_ASSERT_OK(iree_hal_command_buffer_begin(commands));
         IREE_ASSERT_OK(
             iree_hal_command_buffer_barrier(commands, &acquire.barrier));
-        IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+        IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
             commands, acquire.range.buffer_ref, release.range.buffer_ref,
             IREE_HAL_COPY_FLAG_NONE));
         IREE_ASSERT_OK(
@@ -459,9 +459,9 @@ TEST_P(TaskQueueTest, CacheFailureFailsCompletionBeforeDependentWork) {
                                    IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
         iree_hal_command_buffer_release(commands);
       } else {
-        IREE_ASSERT_OK(iree_hal_queue_copy(queue, {}, signals, source, 10,
-                                           target, 7, 24, nullptr,
-                                           IREE_HAL_COPY_FLAG_NONE));
+        IREE_ASSERT_OK(iree_hal_queue_copy_linear(queue, {}, signals, source,
+                                                  10, target, 7, 24, nullptr,
+                                                  IREE_HAL_COPY_FLAG_NONE));
       }
       IREE_EXPECT_STATUS_IS(
           IREE_STATUS_DATA_LOSS,
@@ -737,7 +737,7 @@ TEST_P(TaskQueueTest, IndirectFilesUsePublishedPrefixAndAllowIndependentWork) {
                              {1, &buffer_binding}, &list, nullptr,
                              reading ? IREE_HAL_MEMORY_ACCESS_READ
                                      : IREE_HAL_MEMORY_ACCESS_WRITE));
-      IREE_ASSERT_OK(iree_hal_queue_copy(
+      IREE_ASSERT_OK(iree_hal_queue_copy_linear(
           &queue->base, signals, consumed, buffer, 0, consumed_buffer, 0,
           buffer_bytes.size(), nullptr, IREE_HAL_COPY_FLAG_NONE));
       iree_hal_buffer_release(consumed_buffer);
@@ -1082,7 +1082,7 @@ TEST_P(TaskQueueTest, ExecutesBindingsWithDeclaredPermissions) {
         iree_hal_queue_family(queue), IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
         IREE_HAL_COMMAND_CATEGORY_TRANSFER, binding_count, &command_buffer));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
-    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
         command_buffer,
         binding_count ? iree_hal_make_indirect_buffer_ref(0, 0, 16)
                       : iree_hal_make_buffer_ref(source_buffer, 0, 16),
@@ -1201,9 +1201,9 @@ TEST_P(TaskQueueTest, TransfersReleaseBuffersBeforeTerminalSignal) {
         };
         const iree_hal_barrier_list_t list = {1, &after};
         const iree_hal_queue_barriers_t barriers = {nullptr, &list};
-        IREE_ASSERT_OK(iree_hal_queue_upload(queue, waits, signals,
-                                             source.data(), buffer, 0, length,
-                                             &barriers));
+        IREE_ASSERT_OK(iree_hal_queue_upload_linear(queue, waits, signals,
+                                                    source.data(), buffer, 0,
+                                                    length, &barriers));
       }
       // Descriptor storage has expired while the wait is unresolved. The
       // backend owns captured actions, not references to the caller's arrays.
@@ -1262,7 +1262,7 @@ TEST_P(TaskQueueTest, ReleasesDeviceGroupWithAcceptedExecuteInFlight) {
           IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
           IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0, &command_buffers[i]));
       IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffers[i]));
-      IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+      IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
           command_buffers[i],
           iree_hal_make_buffer_ref(buffer, 0, outputs[i].size()), &patterns[i],
           sizeof(patterns[i]), IREE_HAL_FILL_FLAG_NONE));

@@ -276,7 +276,7 @@ class TaskQueueAllocaTest : public ::testing::TestWithParam<iree_host_size_t> {
       iree_hal_semaphore_list_t filled = {1, &semaphores_[i + 1],
                                           &filled_value};
       const uint32_t pattern = 0xCAFE1000u + i;
-      IREE_ASSERT_OK(iree_hal_queue_fill(
+      IREE_ASSERT_OK(iree_hal_queue_fill_linear(
           queues_[1], allocated, filled, pending_buffers_[i], 0, kBlockSize,
           &pattern, sizeof(pattern), /*barriers=*/NULL,
           IREE_HAL_FILL_FLAG_NONE));
@@ -378,7 +378,7 @@ TEST_P(TaskQueueAllocaTest, SharedPoolResumesThroughNotificationOwner) {
     iree_hal_semaphore_list_t released = {1, &semaphores_[i + 1],
                                           &released_value};
     const uint32_t pattern = 0xBADC0000u + i;
-    IREE_ASSERT_OK(iree_hal_queue_fill(
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
         queues_[i], allocated, filled, pending_buffers_[i], 0, kBlockSize,
         &pattern, sizeof(pattern), /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));
     ASSERT_NO_FATAL_FAILURE(Wait(semaphores_[i + 1], filled_value));
@@ -481,7 +481,7 @@ TEST_P(TaskQueueAllocaTest, SiblingPoolResumesThroughBackingNotificationOwner) {
   ASSERT_NO_FATAL_FAILURE(Wait(semaphores_[1], allocated_value));
   EXPECT_EQ(iree_hal_buffer_memory_view(second).backing, backing);
   const uint32_t pattern = 0x1234CAFEu;
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       queues_[1], allocated, filled, second, 0, kBlockSize, &pattern,
       sizeof(pattern), /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));
   ASSERT_NO_FATAL_FAILURE(Wait(semaphores_[1], filled_value));
@@ -543,7 +543,7 @@ TEST_P(TaskQueueAllocaTest, CompletedDeallocationIsImmediatelyReusable) {
     const uint32_t pattern = 0x1234ABCDu;
     ++filled_value;
     iree_hal_semaphore_list_t filled = {1, &semaphores_[1], &filled_value};
-    IREE_ASSERT_OK(iree_hal_queue_fill(
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
         queues_[1], no_waits, filled, buffer, 0, kBlockSize, &pattern,
         sizeof(pattern), /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));
     ASSERT_NO_FATAL_FAILURE(Wait(semaphores_[1], filled_value));
@@ -587,7 +587,7 @@ TEST_P(TaskQueueAllocaTest, DeferredAllocationDoesNotBlockSameQueueWork) {
                                        pool_, 1, &request,
                                        &initial_buffers_[0]));
   const uint32_t pattern = 0x3210ABCDu;
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       queues_[0], ready_allocated, ready_filled, initial_buffers_[0], 0,
       kBlockSize, &pattern, sizeof(pattern), nullptr, IREE_HAL_FILL_FLAG_NONE));
   ASSERT_NO_FATAL_FAILURE(Wait(semaphores_[1], filled_value));
@@ -607,7 +607,7 @@ TEST_P(TaskQueueAllocaTest, DeferredAllocationDoesNotBlockSameQueueWork) {
   completion.join();
   ASSERT_NO_FATAL_FAILURE(Wait(semaphores_[0], allocated_value));
   iree_hal_semaphore_list_t held_filled = {1, &semaphores_[0], &filled_value};
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       queues_[0], held_allocated, held_filled, pending_buffers_[0], 0,
       kBlockSize, &pattern, sizeof(pattern), nullptr, IREE_HAL_FILL_FLAG_NONE));
   ASSERT_NO_FATAL_FAILURE(Wait(semaphores_[0], filled_value));
@@ -941,10 +941,10 @@ class TaskQueueNativeAllocationTest : public TaskQueueAllocaTest {
     const iree_hal_semaphore_list_t filled = {1, &semaphores_[0],
                                               &filled_value};
     const uint32_t pattern = 0xF00DC0DEu;
-    IREE_ASSERT_OK(iree_hal_queue_fill(queues_[GetParam()], allocated, filled,
-                                       initial_buffers_[0], 0, kBlockSize,
-                                       &pattern, sizeof(pattern), nullptr,
-                                       IREE_HAL_FILL_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
+        queues_[GetParam()], allocated, filled, initial_buffers_[0], 0,
+        kBlockSize, &pattern, sizeof(pattern), nullptr,
+        IREE_HAL_FILL_FLAG_NONE));
     ASSERT_NO_FATAL_FAILURE(Wait(semaphores_[0], filled_value));
     std::array<uint32_t, kBlockSize / sizeof(uint32_t)> words;
     IREE_ASSERT_OK(iree_hal_buffer_map_read(initial_buffers_[0], 0,
@@ -1001,7 +1001,7 @@ TEST_P(TaskQueueNativeAllocationTest, ReadyWorkPassesBlockedNativeAllocation) {
   uint64_t filled_value = 2;
   const iree_hal_semaphore_list_t filled = {1, &semaphores_[2], &filled_value};
   const uint32_t pattern = 0x1234CAFEu;
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       queues_[0], cached_allocated, filled, initial_buffers_[1], 0, kBlockSize,
       &pattern, sizeof(pattern), nullptr, IREE_HAL_FILL_FLAG_NONE));
   ASSERT_NO_FATAL_FAILURE(Wait(semaphores_[2], filled_value));
@@ -1177,7 +1177,7 @@ TEST_P(TaskQueueNativeRetirementTest, QueueBytesRetireThroughInlineProvider) {
   uint64_t filled_value = 2;
   const iree_hal_semaphore_list_t filled = {1, &semaphores_[1], &filled_value};
   const uint32_t pattern = 0xC0FFEE12u;
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       queues_[0], allocated, filled, initial_buffers_[0], 0, kBlockSize,
       &pattern, sizeof(pattern), /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));
   ASSERT_NO_FATAL_FAILURE(Wait(semaphores_[1], filled_value));
@@ -1323,7 +1323,7 @@ TEST_P(TaskQueueNativeRetirementTest, CompletionCanDestroyItsPool) {
   uint64_t completed_value = 1;
   const iree_hal_semaphore_list_t filled = {1, &semaphores_[0],
                                             &completed_value};
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       queues_[0], iree_hal_semaphore_list_empty(), filled, initial_buffers_[0],
       0, kBlockSize, &pattern, sizeof(pattern), /*barriers=*/NULL,
       IREE_HAL_FILL_FLAG_NONE));

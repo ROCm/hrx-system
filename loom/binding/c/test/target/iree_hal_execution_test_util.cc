@@ -658,11 +658,11 @@ void ExecuteIreeHalKernelWithBuffers(const IreeHalKernelExecution& execution,
   };
   if (iree_status_is_ok(status)) {
     completion_value = dispatch_value;
-    status = iree_hal_queue_download(execution.transfer_queue, download_wait,
-                                     download_signal, output_buffer_ptr.get(),
-                                     /*source_offset=*/0, output_data.data,
-                                     output_data.data_length,
-                                     /*barriers=*/NULL);
+    status = iree_hal_queue_download_linear(
+        execution.transfer_queue, download_wait, download_signal,
+        output_buffer_ptr.get(),
+        /*source_offset=*/0, output_data.data, output_data.data_length,
+        /*barriers=*/NULL);
   }
   if (iree_status_is_ok(status)) {
     completion_value = download_value;

@@ -248,9 +248,9 @@ TEST_P(VulkanQueueTest, UploadRunsBeforeProducerRetirement) {
     const iree_hal_semaphore_list_t consumer_waits = {
         1, producer_signals.semaphores.data(),
         producer_signals.payload_values.data()};
-    Status consumer_status(
-        iree_hal_queue_upload(transfer_queue_, consumer_waits, consumer_signals,
-                              input.data(), target, 0, input.size(), nullptr));
+    Status consumer_status(iree_hal_queue_upload_linear(
+        transfer_queue_, consumer_waits, consumer_signals, input.data(), target,
+        0, input.size(), nullptr));
     Status availability_status;
     if (consumer_status.ok()) {
       iree_async_semaphore_t* availability = nullptr;

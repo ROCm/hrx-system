@@ -429,7 +429,7 @@ inline iree_status_t SanitizerReadBufferBytes(iree_hal_device_t* device,
   std::vector<uint8_t> data((iree_host_size_t)length);
   SemaphoreList empty_wait;
   SemaphoreList download_signal(device, {0}, {1});
-  IREE_RETURN_IF_ERROR(iree_hal_queue_download(
+  IREE_RETURN_IF_ERROR(iree_hal_queue_download_linear(
       queue, empty_wait, download_signal, source_buffer, source_offset,
       data.data(), length, /*barriers=*/NULL));
   IREE_RETURN_IF_ERROR(iree_hal_semaphore_list_wait(

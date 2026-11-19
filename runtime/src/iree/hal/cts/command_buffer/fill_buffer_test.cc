@@ -45,7 +45,7 @@ class CommandBufferFillBufferTest : public CtsTestBase<> {
           iree_hal_make_buffer_ref(device_buffer, target_offset, fill_length);
     }
 
-    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
         command_buffer, target_ref, pattern, pattern_length,
         IREE_HAL_FILL_FLAG_NONE));
     IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
@@ -433,7 +433,7 @@ TEST_P(CommandBufferFillBufferTest, ReuseRemainingRangeBindings) {
       /*mode=*/0, IREE_HAL_COMMAND_CATEGORY_TRANSFER,
       /*binding_capacity=*/1, command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
-  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
       command_buffer,
       iree_hal_make_indirect_buffer_ref(0, 8, IREE_HAL_WHOLE_BUFFER), &pattern,
       sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
@@ -469,7 +469,7 @@ TEST_P(CommandBufferFillBufferTest, RemainingRangeLengthAlignment) {
                                      indirect ? 1 : 0, command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   if (indirect) {
-    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
         command_buffer,
         iree_hal_make_indirect_buffer_ref(0, 4, IREE_HAL_WHOLE_BUFFER),
         &pattern, sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
@@ -483,12 +483,12 @@ TEST_P(CommandBufferFillBufferTest, RemainingRangeLengthAlignment) {
   } else {
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
-        iree_hal_command_buffer_fill_buffer(
+        iree_hal_command_buffer_fill_buffer_linear(
             command_buffer,
             iree_hal_make_buffer_ref(buffer, 4, IREE_HAL_WHOLE_BUFFER),
             &pattern, sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
     // A fixed, aligned range may leave an unaligned unused buffer tail.
-    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
         command_buffer, iree_hal_make_buffer_ref(buffer, 4, 12), &pattern,
         sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
     IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));

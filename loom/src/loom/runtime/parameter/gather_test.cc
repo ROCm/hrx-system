@@ -145,7 +145,7 @@ class ParameterGatherTest : public loom_runtime::testing::ParameterTest {
     }
     auto* produced = Semaphore();
     auto* producer_gate = Semaphore();
-    IREE_ASSERT_OK(iree_hal_queue_update(
+    IREE_ASSERT_OK(iree_hal_queue_update_linear(
         queue_, {1, &producer_gate, &one}, {1, &produced, &one}, records.data(),
         0, descriptors, 0, records.size(), nullptr, IREE_HAL_UPDATE_FLAG_NONE));
 
@@ -229,7 +229,7 @@ class ParameterGatherTest : public loom_runtime::testing::ParameterTest {
           &ready[domain]));
       key.assign(key.size(), 'x');
       iree_io_parameter_provider_release(gated);
-      IREE_ASSERT_OK(iree_hal_queue_download(
+      IREE_ASSERT_OK(iree_hal_queue_download_linear(
           queue_, iree_hal_fence_semaphore_list(ready[domain]),
           {1, &consumed[domain], &one}, target, 0, outputs[domain].data(),
           outputs[domain].size(), nullptr));

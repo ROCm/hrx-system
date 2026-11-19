@@ -150,9 +150,9 @@ class VulkanFiniteFileTest : public CtsTestBase<> {
     SemaphoreList gate(device_, {0}, {1}), ready(device_, {0}, {1});
     SemaphoreList loaded(device_, {0}, {1}), written(device_, {0}, {1});
     SemaphoreList finished(device_, {0}, {1});
-    IREE_ASSERT_OK(iree_hal_queue_upload(transfer_queue_, gate, ready,
-                                         words.data(), metadata, 0,
-                                         sizeof(words), nullptr));
+    IREE_ASSERT_OK(iree_hal_queue_upload_linear(transfer_queue_, gate, ready,
+                                                words.data(), metadata, 0,
+                                                sizeof(words), nullptr));
     std::array<iree_hal_file_binding_t, 2> sources = {{
         {input_file, kOrigin, kRows * kFileStride},
         {memory_input, kOrigin, kRows * kFileStride},
@@ -187,9 +187,9 @@ class VulkanFiniteFileTest : public CtsTestBase<> {
       }
     }
     if (iree_status_is_ok(status) && !invalid) {
-      status =
-          iree_hal_queue_download(transfer_queue_, written, finished, payload,
-                                  0, actual.data(), actual.size(), nullptr);
+      status = iree_hal_queue_download_linear(
+          transfer_queue_, written, finished, payload, 0, actual.data(),
+          actual.size(), nullptr);
       if (iree_status_is_ok(status)) {
         tail = finished;
       }
@@ -201,17 +201,17 @@ class VulkanFiniteFileTest : public CtsTestBase<> {
     iree_hal_semaphore_list_t independent_tail =
         iree_hal_semaphore_list_empty();
     if (iree_status_is_ok(status)) {
-      status = iree_hal_queue_fill(transfer_queue_, {}, filled, independent, 0,
-                                   sizeof(value), &pattern, sizeof(pattern),
-                                   nullptr, 0);
+      status = iree_hal_queue_fill_linear(
+          transfer_queue_, {}, filled, independent, 0, sizeof(value), &pattern,
+          sizeof(pattern), nullptr, 0);
       if (iree_status_is_ok(status)) {
         independent_tail = filled;
       }
     }
     if (iree_status_is_ok(status)) {
-      status = iree_hal_queue_download(transfer_queue_, filled, downloaded,
-                                       independent, 0, &value, sizeof(value),
-                                       nullptr);
+      status = iree_hal_queue_download_linear(transfer_queue_, filled,
+                                              downloaded, independent, 0,
+                                              &value, sizeof(value), nullptr);
       if (iree_status_is_ok(status)) {
         independent_tail = downloaded;
       }

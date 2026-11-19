@@ -28,7 +28,7 @@ class CommandBufferStressTest : public CtsTestBase<> {
                         iree_host_size_t pattern_length) {
     SemaphoreList empty_wait;
     SemaphoreList fill_signal(device_, {0}, {1});
-    IREE_ASSERT_OK(iree_hal_queue_fill(
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
         transfer_queue_, empty_wait, fill_signal, target_buffer,
         /*target_offset=*/0, length, pattern, pattern_length, /*barriers=*/NULL,
         IREE_HAL_FILL_FLAG_NONE));
@@ -56,7 +56,7 @@ TEST_P(CommandBufferStressTest, RapidFillSubmit) {
                                        /*binding_capacity=*/0,
                                        command_buffer.out()));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
-    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
         command_buffer, iree_hal_make_buffer_ref(buffer, 0, buffer_size),
         &pattern, sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
     IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
@@ -91,7 +91,7 @@ TEST_P(CommandBufferStressTest, RapidCopySubmit) {
                                        /*binding_capacity=*/0,
                                        command_buffer.out()));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
-    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
         command_buffer, iree_hal_make_buffer_ref(source, 0, buffer_size),
         iree_hal_make_buffer_ref(target, 0, buffer_size),
         IREE_HAL_COPY_FLAG_NONE));
@@ -124,7 +124,7 @@ TEST_P(CommandBufferStressTest, LargeFillCommandBuffer) {
   std::vector<uint32_t> expected(kFillCount);
   for (uint32_t i = 0; i < kFillCount; ++i) {
     expected[i] = 0xBD370000u | i;
-    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
         command_buffer,
         iree_hal_make_buffer_ref(buffer, i * sizeof(uint32_t),
                                  sizeof(uint32_t)),

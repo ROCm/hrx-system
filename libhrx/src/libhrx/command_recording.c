@@ -80,7 +80,7 @@ static iree_status_t hrx_command_record_copy(
         copy->source_offset == copy->target_offset) {
       return iree_ok_status();
     }
-    return iree_hal_command_buffer_copy_buffer(
+    return iree_hal_command_buffer_copy_buffer_linear(
         command_buffer,
         iree_hal_make_buffer_ref(copy->source_buffer, copy->source_offset,
                                  copy->length),
@@ -100,7 +100,7 @@ static iree_status_t hrx_command_record_copy(
          iree_status_is_ok(status) && y < strided->row_count; ++y) {
       if (copy->source_buffer != copy->target_buffer ||
           source_offset != target_offset) {
-        status = iree_hal_command_buffer_copy_buffer(
+        status = iree_hal_command_buffer_copy_buffer_linear(
             command_buffer,
             iree_hal_make_buffer_ref(copy->source_buffer, source_offset,
                                      copy->length),
@@ -152,7 +152,7 @@ static iree_status_t hrx_graph_record_commands(
       }
       case HRX_COMMAND_FILL: {
         const hrx_command_fill_t* fill = (const void*)command;
-        status = iree_hal_command_buffer_fill_buffer(
+        status = iree_hal_command_buffer_fill_buffer_linear(
             command_buffer, fill->target, &fill->pattern, fill->pattern_size,
             fill->flags);
         break;

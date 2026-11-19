@@ -521,7 +521,7 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_advise_buffer(
   return status;
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_command_buffer_fill_buffer(
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_fill_buffer_linear(
     iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_ref_t target_ref,
     const void* pattern, iree_host_size_t pattern_length,
     iree_hal_fill_flags_t flags) {
@@ -543,7 +543,7 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_fill_buffer(
   return status;
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_command_buffer_update_buffer(
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_update_buffer_linear(
     iree_hal_command_buffer_t* command_buffer, const void* source_buffer,
     iree_host_size_t source_offset, iree_hal_buffer_ref_t target_ref,
     iree_hal_update_flags_t flags) {
@@ -566,7 +566,7 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_update_buffer(
   return status;
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_command_buffer_copy_buffer(
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_copy_buffer_linear(
     iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_ref_t source_ref,
     iree_hal_buffer_ref_t target_ref, iree_hal_copy_flags_t flags) {
   IREE_ASSERT_ARGUMENT(command_buffer);

@@ -779,11 +779,11 @@ TEST(ReplayRecorderTest, UploadWithDeviceDependencyCanBeCapturedAndReplayed) {
   // Capture may read it immediately without waiting for the fill to complete.
   const uint8_t fill_pattern = 0xA5;
   const uint8_t upload_data[] = {0x10, 0x11, 0x12, 0x13};
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       queue, iree_hal_semaphore_list_empty(), wait_list, target_buffer, 0,
       sizeof(upload_data), &fill_pattern, sizeof(fill_pattern), nullptr,
       IREE_HAL_FILL_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_queue_upload(
+  IREE_ASSERT_OK(iree_hal_queue_upload_linear(
       queue, wait_list, signal_list, upload_data, target_buffer,
       /*target_offset=*/0, sizeof(upload_data), /*barriers=*/NULL));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -1219,7 +1219,7 @@ TEST(ReplayRecorderTest, WrappedDeviceRecordsQueueExecuteWithSparseBindings) {
       /*binding_capacity=*/2, &command_buffer));
   const uint32_t fill_pattern = 0xA5A5A5A5u;
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
-  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
       command_buffer,
       iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/1, /*offset=*/0,
                                         /*length=*/64),

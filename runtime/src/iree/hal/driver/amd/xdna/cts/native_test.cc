@@ -547,9 +547,9 @@ TEST_F(XdnaNativeTest, RecordedHostAndNativePhasesReplayWithIndirectBindings) {
   for (size_t i = 0; i < rhs.size(); ++i) {
     rhs[i] = i + 1;
   }
-  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
       command_buffer, refs[0], &pattern, sizeof(pattern), 0));
-  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
       command_buffer, rhs.data(), 0, refs[1], 0));
   // Recording owns source bytes independently of this caller's stack.
   pattern = 0;
@@ -571,8 +571,8 @@ TEST_F(XdnaNativeTest, RecordedHostAndNativePhasesReplayWithIndirectBindings) {
       command_buffer, executable_, function_,
       iree_hal_make_static_dispatch_config(1, 1, 1), {}, {3, refs.data()}, 0));
   IREE_ASSERT_OK(iree_hal_command_buffer_barrier(command_buffer, &barrier));
-  IREE_ASSERT_OK(
-      iree_hal_command_buffer_copy_buffer(command_buffer, refs[2], refs[3], 0));
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
+      command_buffer, refs[2], refs[3], 0));
   IREE_ASSERT_OK(iree_hal_command_buffer_barrier(command_buffer, &barrier));
   // A long dependent run and a short run separated by a host phase exercise
   // native arrays and ordinary packets within the same immutable recording.
@@ -583,8 +583,8 @@ TEST_F(XdnaNativeTest, RecordedHostAndNativePhasesReplayWithIndirectBindings) {
         iree_hal_make_static_dispatch_config(1, 1, 1), {}, {3, add_refs}, 0));
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(command_buffer, &barrier));
   }
-  IREE_ASSERT_OK(
-      iree_hal_command_buffer_copy_buffer(command_buffer, refs[3], refs[4], 0));
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
+      command_buffer, refs[3], refs[4], 0));
   IREE_ASSERT_OK(iree_hal_command_buffer_barrier(command_buffer, &barrier));
   const iree_hal_buffer_ref_t tail_refs[] = {refs[4], refs[0], refs[4]};
   for (uint32_t i = 0; i < 2; ++i) {
@@ -822,7 +822,7 @@ TEST_P(XdnaFirstWriterTest, NativeConstructionPreparesFirstDeviceWrite) {
       {bindings.size(), bindings.data()}, &barriers,
       IREE_HAL_DISPATCH_FLAG_NONE));
   std::array<uint32_t, 16> output;
-  IREE_ASSERT_OK(iree_hal_queue_download(
+  IREE_ASSERT_OK(iree_hal_queue_download_linear(
       queue_, {1, &progress, &dispatched}, {1, &progress, &downloaded},
       buffers[2], 0, output.data(), kBytes, /*barriers=*/nullptr));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(progress, downloaded,
@@ -1152,7 +1152,7 @@ TEST_F(XdnaNativeTest, FiniteFileGroupsCaptureAndRetireTheirLivePrefix) {
       ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&finished));
       ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&unrelated));
       uint64_t one = 1, two = 2;
-      IREE_ASSERT_OK(iree_hal_queue_upload(
+      IREE_ASSERT_OK(iree_hal_queue_upload_linear(
           queue_, {1, &gate, &one}, {1, &ready, &one}, words.data(), metadata,
           0, sizeof(words), nullptr));
       std::array<iree_hal_file_binding_t, 2> sources = {{
@@ -1189,9 +1189,9 @@ TEST_F(XdnaNativeTest, FiniteFileGroupsCaptureAndRetireTheirLivePrefix) {
       std::vector<uint8_t> actual(kLength);
       if (iree_status_is_ok(status) && !invalid) {
         tail = written;
-        status = iree_hal_queue_download(queue_, {1, &written, &one},
-                                         {1, &finished, &one}, payload, 0,
-                                         actual.data(), actual.size(), nullptr);
+        status = iree_hal_queue_download_linear(
+            queue_, {1, &written, &one}, {1, &finished, &one}, payload, 0,
+            actual.data(), actual.size(), nullptr);
       }
       if (iree_status_is_ok(status) && !invalid) {
         tail = finished;
@@ -1200,15 +1200,15 @@ TEST_F(XdnaNativeTest, FiniteFileGroupsCaptureAndRetireTheirLivePrefix) {
       const uint32_t pattern = 0x35791ACE;
       uint64_t independent_tail = 0;
       if (iree_status_is_ok(status)) {
-        status = iree_hal_queue_fill(queue_, {}, {1, &unrelated, &one},
-                                     independent, 0, sizeof(value), &pattern,
-                                     sizeof(pattern), nullptr, 0);
+        status = iree_hal_queue_fill_linear(
+            queue_, {}, {1, &unrelated, &one}, independent, 0, sizeof(value),
+            &pattern, sizeof(pattern), nullptr, 0);
       }
       if (iree_status_is_ok(status)) {
         independent_tail = one;
-        status = iree_hal_queue_download(queue_, {1, &unrelated, &one},
-                                         {1, &unrelated, &two}, independent, 0,
-                                         &value, sizeof(value), nullptr);
+        status = iree_hal_queue_download_linear(
+            queue_, {1, &unrelated, &one}, {1, &unrelated, &two}, independent,
+            0, &value, sizeof(value), nullptr);
         if (iree_status_is_ok(status)) {
           independent_tail = two;
         }

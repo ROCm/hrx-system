@@ -328,7 +328,7 @@ static iree_status_t loom_cmd_program_hal_record_wave(
         uint8_t pattern[4];
         iree_unaligned_store_le_u32(pattern, command.payload.fill.pattern);
         if (iree_status_is_ok(status)) {
-          status = iree_hal_command_buffer_fill_buffer(
+          status = iree_hal_command_buffer_fill_buffer_linear(
               command_buffer, target, pattern,
               command.payload.fill.pattern_length, IREE_HAL_FILL_FLAG_NONE);
         }
@@ -348,7 +348,7 @@ static iree_status_t loom_cmd_program_hal_record_wave(
               fixed_bindings, &target);
         }
         if (iree_status_is_ok(status)) {
-          status = iree_hal_command_buffer_copy_buffer(
+          status = iree_hal_command_buffer_copy_buffer_linear(
               command_buffer, source, target, IREE_HAL_COPY_FLAG_NONE);
         }
         break;

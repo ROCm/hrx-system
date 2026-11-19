@@ -146,7 +146,7 @@ TEST_P(GpuTransferQueueTest,
       .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
   };
   IREE_ASSERT_OK(iree_hal_command_buffer_barrier(copy, &acquire));
-  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
       copy, iree_hal_make_indirect_buffer_ref(0, 0, kLength),
       iree_hal_make_indirect_buffer_ref(1, 0, kLength), 0));
   IREE_ASSERT_OK(iree_hal_command_buffer_barrier(copy, &release));

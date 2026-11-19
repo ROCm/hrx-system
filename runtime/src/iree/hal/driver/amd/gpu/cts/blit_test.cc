@@ -85,14 +85,14 @@ TEST_P(BlitTest, ExactRangesAcrossVectorGroupAndGridBoundaries) {
         iree_hal_make_indirect_buffer_ref(1, 0, IREE_HAL_WHOLE_BUFFER);
     const auto filled =
         iree_hal_make_indirect_buffer_ref(2, 0, IREE_HAL_WHOLE_BUFFER);
-    IREE_ASSERT_OK(
-        iree_hal_command_buffer_copy_buffer(recording, source, target, 0));
+    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(recording, source,
+                                                              target, 0));
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &dependency));
-    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
         recording, source, pattern.data(), size_t{1} << i, 0));
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &dependency));
-    IREE_ASSERT_OK(
-        iree_hal_command_buffer_copy_buffer(recording, source, filled, 0));
+    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(recording, source,
+                                                              filled, 0));
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
     IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
   }
@@ -150,7 +150,7 @@ TEST_P(BlitTest, ExactRangesAcrossVectorGroupAndGridBoundaries) {
         }
         std::fill_n(actual.begin(), byte_length, 0xDD);
         uint64_t next = submitted + 1;
-        IREE_ASSERT_OK(iree_hal_queue_upload(
+        IREE_ASSERT_OK(iree_hal_queue_upload_linear(
             queues_[0], {}, {1, &semaphore, &next}, initial.data(), buffer, 0,
             byte_length, nullptr));
         submitted = next++;
@@ -164,7 +164,7 @@ TEST_P(BlitTest, ExactRangesAcrossVectorGroupAndGridBoundaries) {
             recordings[pattern_index], {IREE_ARRAYSIZE(bindings), bindings},
             IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
         submitted = next++;
-        IREE_ASSERT_OK(iree_hal_queue_download(
+        IREE_ASSERT_OK(iree_hal_queue_download_linear(
             queues_[1], {1, &semaphore, &submitted}, {1, &semaphore, &next},
             buffer, 0, actual.data(), byte_length, nullptr));
         submitted = next;

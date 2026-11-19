@@ -671,13 +671,13 @@ TEST_P(AsyncFileTest, DirectFileRoundTripUsesReportedRequirements) {
   const std::vector<uint8_t> target_contents(buffer_length, 0xA5);
   SemaphoreList empty_wait;
   SemaphoreList initialized(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_upload(transfer_queue_, empty_wait, initialized,
-                                       source_contents.data(), source.get(), 0,
-                                       buffer_length, nullptr));
+  IREE_ASSERT_OK(iree_hal_queue_upload_linear(
+      transfer_queue_, empty_wait, initialized, source_contents.data(),
+      source.get(), 0, buffer_length, nullptr));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       initialized, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
   SemaphoreList target_initialized(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_upload(
+  IREE_ASSERT_OK(iree_hal_queue_upload_linear(
       transfer_queue_, empty_wait, target_initialized, target_contents.data(),
       target.get(), 0, buffer_length, nullptr));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(

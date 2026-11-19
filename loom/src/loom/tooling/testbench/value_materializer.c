@@ -1468,7 +1468,7 @@ static iree_status_t loom_testbench_copy_buffer_view_to_target(
         .semaphores = &completion_semaphore,
         .payload_values = &completion_value,
     };
-    status = iree_hal_queue_copy(
+    status = iree_hal_queue_copy_linear(
         options->transfer_queue, iree_hal_semaphore_list_empty(),
         signal_semaphore_list, iree_hal_buffer_view_buffer(source_buffer_view),
         0, iree_hal_buffer_view_buffer(target_buffer_view), 0,

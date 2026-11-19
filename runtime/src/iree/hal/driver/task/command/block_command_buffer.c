@@ -879,7 +879,7 @@ static iree_status_t iree_hal_block_command_buffer_advise_buffer(
 }
 
 //===----------------------------------------------------------------------===//
-// iree_hal_command_buffer_fill_buffer
+// iree_hal_command_buffer_fill_buffer_linear
 //===----------------------------------------------------------------------===//
 
 static iree_status_t iree_hal_block_command_buffer_fill_buffer(
@@ -914,7 +914,7 @@ static iree_status_t iree_hal_block_command_buffer_fill_buffer(
 }
 
 //===----------------------------------------------------------------------===//
-// iree_hal_command_buffer_update_buffer
+// iree_hal_command_buffer_update_buffer_linear
 //===----------------------------------------------------------------------===//
 
 static iree_status_t iree_hal_block_command_buffer_update_buffer(
@@ -965,7 +965,7 @@ static iree_status_t iree_hal_block_command_buffer_update_buffer(
 }
 
 //===----------------------------------------------------------------------===//
-// iree_hal_command_buffer_copy_buffer
+// iree_hal_command_buffer_copy_buffer_linear
 //===----------------------------------------------------------------------===//
 
 static iree_status_t iree_hal_block_command_buffer_copy_buffer(

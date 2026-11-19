@@ -549,10 +549,10 @@ TEST_P(QueueTest, HostTransferWrapsNativeSlotsAndRetainsBorrowedBytes) {
   iree_hal_semaphore_t* upload = uploaded;
   iree_hal_semaphore_t* download = downloaded;
   uint64_t one = 1;
-  IREE_ASSERT_OK(iree_hal_queue_upload(queue_, {}, Point(&upload, &one),
-                                       source.data(), buffer_, 3, source.size(),
-                                       nullptr));
-  IREE_ASSERT_OK(iree_hal_queue_download(
+  IREE_ASSERT_OK(iree_hal_queue_upload_linear(queue_, {}, Point(&upload, &one),
+                                              source.data(), buffer_, 3,
+                                              source.size(), nullptr));
+  IREE_ASSERT_OK(iree_hal_queue_download_linear(
       queue_, Point(&upload, &one), Point(&download, &one), buffer_, 3,
       target.data(), target.size(), nullptr));
   Publish();
@@ -573,9 +573,9 @@ TEST_P(QueueTest, MembershipGrowthDoesNotWaitForFullNativeSlots) {
   auto completed = Semaphore(true);
   iree_hal_semaphore_t* output = completed;
   uint64_t one = 1;
-  IREE_ASSERT_OK(iree_hal_queue_upload(queue_, {}, Point(&output, &one),
-                                       source.data(), buffer_, 3, source.size(),
-                                       nullptr));
+  IREE_ASSERT_OK(iree_hal_queue_upload_linear(queue_, {}, Point(&output, &one),
+                                              source.data(), buffer_, 3,
+                                              source.size(), nullptr));
   Publish();
   EXPECT_EQ(commands_.size(), 64u);
   EXPECT_EQ(retired_, 0u);
@@ -616,12 +616,12 @@ TEST_P(QueueTest, UnreadyInputDoesNotHoldIndependentReadyWork) {
   iree_hal_semaphore_t* second = independent;
   uint64_t one = 1;
   const uint32_t pattern = 0x53c1a72e;
-  IREE_ASSERT_OK(iree_hal_queue_fill(queue_, Point(&input, &one),
-                                     Point(&first, &one), buffer_, 0, 1024,
-                                     &pattern, sizeof(pattern), nullptr, 0));
-  IREE_ASSERT_OK(iree_hal_queue_fill(queue_, {}, Point(&second, &one), buffer_,
-                                     4096, 1024, &pattern, sizeof(pattern),
-                                     nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
+      queue_, Point(&input, &one), Point(&first, &one), buffer_, 0, 1024,
+      &pattern, sizeof(pattern), nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(queue_, {}, Point(&second, &one),
+                                            buffer_, 4096, 1024, &pattern,
+                                            sizeof(pattern), nullptr, 0));
   Publish();
   ASSERT_NO_FATAL_FAILURE(ExecuteAccepted());
   Poll();
@@ -640,7 +640,7 @@ TEST_P(QueueTest, ReusableRecordingCapturesIndependentBindingTables) {
       IREE_HAL_COMMAND_CATEGORY_TRANSFER, 1, allocator_, recording.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
   const std::vector<uint8_t> input = {19, 37, 67, 89, 131, 193, 251};
-  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
       recording, input.data(), 0,
       iree_hal_make_indirect_buffer_ref(0, 0, input.size()), 0));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
@@ -673,7 +673,7 @@ TEST_P(QueueTest, FullSubmissionSpillsOnlyAnEncodedSignal) {
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
   for (size_t i = 0; i < kCopies; ++i) {
     bytes_[i] = static_cast<uint8_t>(i + 1);
-    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
         recording, iree_hal_make_buffer_ref(buffer_, i, 1),
         iree_hal_make_buffer_ref(buffer_, kCopies + i, 1), 0));
   }
@@ -695,9 +695,9 @@ TEST_P(QueueTest, NativeFailureRetainsAcceptedOperandsUntilStop) {
   uint64_t one = 1;
   std::vector<uint8_t> input(3073, 0x97);
   notification_status_ = amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
-  IREE_ASSERT_OK(iree_hal_queue_upload(queue_, {}, Point(&output, &one),
-                                       input.data(), buffer_, 0, input.size(),
-                                       nullptr));
+  IREE_ASSERT_OK(iree_hal_queue_upload_linear(queue_, {}, Point(&output, &one),
+                                              input.data(), buffer_, 0,
+                                              input.size(), nullptr));
   Publish();
   ExpectValue(completed, 0);
   buffer_.reset();
@@ -721,12 +721,12 @@ TEST_P(QueueTest, NativeDependencyPublishesBeforeHostRetirement) {
   iree_hal_semaphore_t* after = consumer;
   uint64_t one = 1;
   const uint32_t pattern = 0x71bca345;
-  IREE_ASSERT_OK(iree_hal_queue_fill(queue_, {}, Point(&before, &one), buffer_,
-                                     0, 512, &pattern, sizeof(pattern), nullptr,
-                                     0));
-  IREE_ASSERT_OK(iree_hal_queue_copy(queue_, Point(&before, &one),
-                                     Point(&after, &one), buffer_, 0, buffer_,
-                                     4096, 512, nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(queue_, {}, Point(&before, &one),
+                                            buffer_, 0, 512, &pattern,
+                                            sizeof(pattern), nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_copy_linear(queue_, Point(&before, &one),
+                                            Point(&after, &one), buffer_, 0,
+                                            buffer_, 4096, 512, nullptr, 0));
   Publish();
   EXPECT_EQ(commands_.size(), SubmissionGcr() ? 1u : 2u);
   ExpectValue(producer, 0);
@@ -775,9 +775,9 @@ TEST_P(QueueTest, PreparationFailureJoinsAlreadyPublishedInputs) {
   // A missing allocation dependency is diagnosed during address resolution.
   // Failure still joins the captured producer before releasing its outputs.
   const uint32_t pattern = 0x753917bc;
-  IREE_ASSERT_OK(iree_hal_queue_fill(queue_, Point(&points[2], &one),
-                                     Point(&points[3], &one), pending, 0, 4096,
-                                     &pattern, sizeof(pattern), nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
+      queue_, Point(&points[2], &one), Point(&points[3], &one), pending, 0,
+      4096, &pattern, sizeof(pattern), nullptr, 0));
   Publish();
   ExpectValue(failed, 0);
   ASSERT_NO_FATAL_FAILURE(ExecuteAccepted());
@@ -825,7 +825,7 @@ TEST_P(QueueTest, FileReadRecordingAndWriteUseThePublicTransferQueue) {
       families_[0], &programs_, 0, options_.barriers, 0,
       IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0, allocator_, recording.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
-  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
       recording, iree_hal_make_buffer_ref(buffer_, 5, expected.size()),
       iree_hal_make_buffer_ref(buffer_, 16387, expected.size()), 0));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
@@ -861,7 +861,7 @@ TEST_P(QueueTest, PoolAllocationAndDeallocationFollowTheSameTimeline) {
   IREE_ASSERT_OK(iree_hal_queue_alloca(queue_, {}, Point(&points[0], &one),
                                        pool_, 1, &request, transient.out()));
   const uint32_t pattern = 0x835b4e29;
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       queue_, Point(&points[0], &one), Point(&points[1], &one), transient, 0,
       16384, &pattern, sizeof(pattern), nullptr, 0));
   iree_hal_buffer_t* buffer = transient;
@@ -881,7 +881,7 @@ TEST_P(QueueTest, PartialRecordingReservationResumesBeforeCloneAcquisition) {
   std::vector<uint8_t> expected(600);
   for (uint32_t i = 0; i < expected.size(); ++i) {
     expected[i] = uint8_t(i * 23 + 19);
-    IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
         recording, &expected[i], 0, iree_hal_make_indirect_buffer_ref(0, i, 1),
         0));
   }

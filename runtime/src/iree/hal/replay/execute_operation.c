@@ -1338,7 +1338,7 @@ static iree_status_t iree_hal_replay_executor_command_buffer_fill_buffer(
   iree_const_byte_span_t pattern =
       iree_make_const_byte_span(record->payload.data + sizeof(payload),
                                 (iree_host_size_t)payload.pattern_length);
-  return iree_hal_command_buffer_fill_buffer(
+  return iree_hal_command_buffer_fill_buffer_linear(
       command_buffer_entry->value.command_buffer, target_ref, pattern.data,
       pattern.data_length, payload.flags);
 }
@@ -1373,7 +1373,7 @@ static iree_status_t iree_hal_replay_executor_command_buffer_update_buffer(
   iree_const_byte_span_t data =
       iree_make_const_byte_span(record->payload.data + sizeof(payload),
                                 (iree_host_size_t)payload.data_length);
-  return iree_hal_command_buffer_update_buffer(
+  return iree_hal_command_buffer_update_buffer_linear(
       command_buffer_entry->value.command_buffer, data.data,
       /*source_offset=*/0, target_ref, payload.flags);
 }
@@ -1396,7 +1396,7 @@ static iree_status_t iree_hal_replay_executor_command_buffer_copy_buffer(
   iree_hal_buffer_ref_t target_ref;
   IREE_RETURN_IF_ERROR(iree_hal_replay_executor_make_buffer_ref(
       executor, &payload.target_ref, &target_ref));
-  return iree_hal_command_buffer_copy_buffer(
+  return iree_hal_command_buffer_copy_buffer_linear(
       command_buffer_entry->value.command_buffer, source_ref, target_ref,
       payload.flags);
 }

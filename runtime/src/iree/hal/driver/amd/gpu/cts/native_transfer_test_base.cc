@@ -59,14 +59,14 @@ void GpuNativeTransferTest::RunConcurrentTransfers(size_t lane_count,
         uint64_t downloaded = before + 2;
         source.front() = static_cast<uint8_t>(iteration);
         source.back() = static_cast<uint8_t>(lane ^ iteration);
-        auto status = iree_hal_queue_upload(
+        auto status = iree_hal_queue_upload_linear(
             queues_[0], {iteration ? 1u : 0u, &timeline, &before},
             {1, &timeline, &uploaded}, source.data(), buffers[lane], 3,
             kTransferLength, barriers);
         uint64_t completion = 0;
         if (iree_status_is_ok(status)) {
           completion = uploaded;
-          status = iree_hal_queue_download(
+          status = iree_hal_queue_download_linear(
               queues_[0], {1, &timeline, &uploaded},
               {1, &timeline, &downloaded}, buffers[lane], 3, target.data() + 1,
               kTransferLength, barriers);

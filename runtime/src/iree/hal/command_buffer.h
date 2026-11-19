@@ -432,7 +432,7 @@ iree_hal_command_buffer_mode_format(iree_hal_command_buffer_mode_t value,
 IREE_API_EXPORT iree_string_view_t iree_hal_command_category_format(
     iree_hal_command_category_t value, iree_bitfield_string_temp_t* out_temp);
 
-// Maximum size of any update in iree_hal_command_buffer_update_buffer.
+// Maximum size of any update in iree_hal_command_buffer_update_buffer_linear.
 // 64KB is the limit on Vulkan and we uniformly use that today across all
 // targets as to not need too much command buffer memory.
 #define IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE \
@@ -732,7 +732,7 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_advise_buffer(
 // length are aligned to the natural alignment of the value.
 // The target buffer must be compatible with the devices owned by this
 // device queue and be allocated with IREE_HAL_BUFFER_USAGE_TRANSFER.
-IREE_API_EXPORT iree_status_t iree_hal_command_buffer_fill_buffer(
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_fill_buffer_linear(
     iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_ref_t target_ref,
     const void* pattern, iree_host_size_t pattern_length,
     iree_hal_fill_flags_t flags);
@@ -740,16 +740,14 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_fill_buffer(
 // Updates a range of the given target buffer from the source host memory.
 // The source host memory is copied immediately into the command buffer and
 // occupies command buffer space. It is strongly recommended that large buffer
-// updates are performed via iree_hal_command_buffer_copy_buffer where there is
-// the possibility of a zero-copy path.
-// The |source_buffer| may be released by the caller immediately after this
-// call returns.
-// The target range has an explicit length of at most
-// IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE; WHOLE_BUFFER cannot specify the
-// amount of host data captured during recording.
-// The |target_buffer| must be compatible with the devices owned by this
-// device queue and be allocated with IREE_HAL_BUFFER_USAGE_TRANSFER.
-IREE_API_EXPORT iree_status_t iree_hal_command_buffer_update_buffer(
+// updates are performed via iree_hal_command_buffer_copy_buffer_linear where
+// there is the possibility of a zero-copy path. The |source_buffer| may be
+// released by the caller immediately after this call returns. The target range
+// has an explicit length of at most IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE;
+// WHOLE_BUFFER cannot specify the amount of host data captured during
+// recording. The |target_buffer| must be compatible with the devices owned by
+// this device queue and be allocated with IREE_HAL_BUFFER_USAGE_TRANSFER.
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_update_buffer_linear(
     iree_hal_command_buffer_t* command_buffer, const void* source_buffer,
     iree_host_size_t source_offset, iree_hal_buffer_ref_t target_ref,
     iree_hal_update_flags_t flags);
@@ -762,7 +760,7 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_update_buffer(
 //
 // This can be used to perform device->host, host->device, and device->device
 // copies.
-IREE_API_EXPORT iree_status_t iree_hal_command_buffer_copy_buffer(
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_copy_buffer_linear(
     iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_ref_t source_ref,
     iree_hal_buffer_ref_t target_ref, iree_hal_copy_flags_t flags);
 

@@ -420,9 +420,9 @@ static iree_status_t execute_kernel(jit_state_t* state, const char* name,
     }
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_queue_download(state->transfer_queue, dispatched,
-                                     downloaded, output_buffer, 0, output,
-                                     sizeof(output), /*barriers=*/NULL);
+    status = iree_hal_queue_download_linear(
+        state->transfer_queue, dispatched, downloaded, output_buffer, 0, output,
+        sizeof(output), /*barriers=*/NULL);
     if (iree_status_is_ok(status)) {
       completion = download;
     }

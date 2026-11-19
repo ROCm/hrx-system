@@ -130,7 +130,7 @@ class GpuNativeAllocationTest : public GpuNativeTest {
     std::memcpy(mappings[0].contents.data, expected.data(), sizeof(expected));
     IREE_ASSERT_OK(iree_hal_buffer_mapping_flush_range(&mappings[0], 0, 4096));
     uint64_t one = 1;
-    IREE_ASSERT_OK(iree_hal_queue_copy(
+    IREE_ASSERT_OK(iree_hal_queue_copy_linear(
         queues_[0], {}, {1, &semaphores_[0], &one}, buffers[0], 0, buffers[1],
         0, 4096, nullptr, IREE_HAL_COPY_FLAG_NONE));
     Wait(semaphores_[0]);
@@ -412,11 +412,11 @@ TEST_P(GpuNativeOrderedAllocationTest,
     // fill through a native dependency, including while host retirement pauses.
     iree_hal_semaphore_t* filled = fill_complete;
     uint64_t value = ++fill_value;
-    IREE_RETURN_IF_ERROR(iree_hal_queue_fill(
+    IREE_RETURN_IF_ERROR(iree_hal_queue_fill_linear(
         queues_[1], waits, {1, &filled, &value}, buffer, 0,
         sizeof(actual[index]), &patterns[index], sizeof(patterns[index]),
         nullptr, IREE_HAL_FILL_FLAG_NONE));
-    return iree_hal_queue_copy(
+    return iree_hal_queue_copy_linear(
         queues_[1], {1, &filled, &value}, signals, buffer, 0, snapshots[index],
         0, sizeof(actual[index]), nullptr, IREE_HAL_COPY_FLAG_NONE);
   };
@@ -858,7 +858,7 @@ TEST_P(GpuNativeRecordingProgressTest,
         IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0, recording.out()));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
     for (uint32_t i = 0; i < kFillCount; ++i) {
-      IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+      IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
           recording, &pattern, 0, iree_hal_make_buffer_ref(output, i * 4, 4),
           0));
     }
@@ -923,7 +923,7 @@ TEST_P(GpuNativeRecordingProgressTest,
   constexpr uint32_t kCopyLength = kCopyCount * sizeof(uint32_t);
   const uint32_t pattern = 0x1234CAFE;
   uint64_t initialized = 2;
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       queues_[0], {}, {1, &semaphores_[0], &initialized}, output, 0,
       kCopyLength, &pattern, sizeof(pattern), nullptr, 0));
   Wait(semaphores_[0], initialized);
@@ -932,10 +932,10 @@ TEST_P(GpuNativeRecordingProgressTest,
       iree_hal_queue_family(queues_[0]), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
       IREE_HAL_COMMAND_CATEGORY_TRANSFER, 1, recording.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
-  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
       recording, &pattern, 0, iree_hal_make_indirect_buffer_ref(0, 0, 4), 0));
   for (uint32_t i = 1; i < kCopyCount; ++i) {
-    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
         recording, iree_hal_make_buffer_ref(output, i * 4, 4),
         iree_hal_make_indirect_buffer_ref(0, i * 4, 4), 0));
   }
@@ -1020,7 +1020,7 @@ TEST_P(GpuNativeRecordingProgressTest,
       IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0, recording.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
   const uint32_t pattern = 0x1234CAFE;
-  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
       recording, iree_hal_make_buffer_ref(output, 0, 16), &pattern,
       sizeof(pattern), 0));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
@@ -1187,7 +1187,7 @@ TEST_F(GpuNativeMemoryProgressTest,
     EXPECT_EQ(iree_hal_buffer_native_binding(reused, slot_).device_address,
               address);
 
-    IREE_ASSERT_OK(iree_hal_queue_fill(
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
         queues_[1], {1, &semaphores_[1], &one}, {1, &semaphores_[1], &two},
         reused, 0, sizeof(pattern), &pattern, sizeof(pattern), nullptr, 0));
     Wait(semaphores_[1], two);
@@ -1295,16 +1295,16 @@ TEST_F(GpuNativeMemoryProgressTest,
     // Native mapping must have overtaken slab two. Its public completion and
     // GPU consumers cannot need any further turn on the held allocation owner.
     Wait(semaphores_[0]);
-    IREE_ASSERT_OK(iree_hal_queue_fill(queues_[1], {1, &semaphores_[0], &one},
-                                       {1, &semaphores_[1], &one}, reservation,
-                                       0, sizeof(pattern), &pattern,
-                                       sizeof(pattern), nullptr, 0));
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
+        queues_[1], {1, &semaphores_[0], &one}, {1, &semaphores_[1], &one},
+        reservation, 0, sizeof(pattern), &pattern, sizeof(pattern), nullptr,
+        0));
     Wait(semaphores_[1]);
   }
   Wait(semaphores_[3]);
   // Verification transport may acquire its own native payload backing.
   uint32_t observed = 0;
-  IREE_ASSERT_OK(iree_hal_queue_download(
+  IREE_ASSERT_OK(iree_hal_queue_download_linear(
       queues_[0], {1, &semaphores_[1], &one}, {1, &semaphores_[2], &one},
       reservation, 0, &observed, sizeof(observed), nullptr));
   Wait(semaphores_[2]);

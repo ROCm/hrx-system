@@ -59,7 +59,7 @@ TEST_P(CommandBufferUpdateBufferTest, WholeBuffer) {
                                      binding_capacity(), &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
-  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
       command_buffer,
       /*source_buffer=*/source_buffer.data(), /*source_offset=*/0,
       MakeTargetRef(device_buffer, 0, target_buffer_size),
@@ -92,7 +92,7 @@ TEST_P(CommandBufferUpdateBufferTest, LargerPayload) {
                                      binding_capacity(), &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
-  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
       command_buffer,
       /*source_buffer=*/source_buffer.data(), /*source_offset=*/0,
       MakeTargetRef(device_buffer, 0, target_buffer_size),
@@ -125,7 +125,7 @@ TEST_P(CommandBufferUpdateBufferTest, WithOffsets) {
                                      binding_capacity(), &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
-  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
       command_buffer,
       /*source_buffer=*/source_buffer.data(), /*source_offset=*/4,
       MakeTargetRef(device_buffer, /*target_offset=*/4, /*length=*/8),
@@ -169,7 +169,7 @@ TEST_P(CommandBufferUpdateBufferTest, Subspan) {
                                      binding_capacity(), &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
-  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
       command_buffer,
       /*source_buffer=*/source_buffer.data(), /*source_offset=*/4,
       MakeTargetRef(buffer_subspan, /*target_offset=*/4, /*length=*/4),
@@ -216,20 +216,20 @@ TEST_P(CommandBufferUpdateBufferTest, CaptureExtentIsExplicitAndBounded) {
   }
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_command_buffer_update_buffer(
+      iree_hal_command_buffer_update_buffer_linear(
           recording, source.data(), 0,
           MakeTargetRef(target, 0, IREE_HAL_WHOLE_BUFFER), 0));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
-      iree_hal_command_buffer_update_buffer(
+      iree_hal_command_buffer_update_buffer_linear(
           recording, source.data(), 0,
           MakeTargetRef(target, 0, IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE + 1),
           0));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        iree_hal_command_buffer_update_buffer(
+                        iree_hal_command_buffer_update_buffer_linear(
                             recording, source.data(), IREE_HOST_SIZE_MAX,
                             MakeTargetRef(target, 0, 4), 0));
-  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
       recording, source.data(), 7,
       MakeTargetRef(target, 4, IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE), 0));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));

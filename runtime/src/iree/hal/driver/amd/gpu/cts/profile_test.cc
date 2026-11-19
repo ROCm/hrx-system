@@ -282,8 +282,9 @@ TEST_P(GpuNativeArgumentProfileTest,
   auto* timeline = done.get();
   uint64_t next = 1;
   uint32_t zero = 0, observed = 0, expected = 0;
-  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {}, {1, &timeline, &next},
-                                     output, 0, 4, &zero, 4, nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(queues_[0], {},
+                                            {1, &timeline, &next}, output, 0, 4,
+                                            &zero, 4, nullptr, 0));
   auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
   config.workgroup_size[0] = 32;
   config.workgroup_size[1] = config.workgroup_size[2] = 1;
@@ -323,7 +324,7 @@ TEST_P(GpuNativeArgumentProfileTest,
     // Host visibility belongs to the explicit download, not each interior
     // dispatch. Every next round reuses retired argument and sample storage.
     uint64_t previous = next++;
-    IREE_ASSERT_OK(iree_hal_queue_download(
+    IREE_ASSERT_OK(iree_hal_queue_download_linear(
         queues_[0], {1, &timeline, &previous}, {1, &timeline, &next}, output, 0,
         &observed, sizeof(observed), nullptr));
     ASSERT_NO_FATAL_FAILURE(Wait(done, next));
@@ -417,9 +418,9 @@ TEST_P(GpuNativeArgumentProfileTest,
     IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
         pool_, iree_hal_make_pool_reservation_request(sizeof(expected), 4),
         iree_infinite_timeout(), outputs[q].out()));
-    IREE_ASSERT_OK(iree_hal_queue_fill(queues_[q], {}, {1, &timeline, &one},
-                                       outputs[q], 0, sizeof(expected), &zero,
-                                       sizeof(zero), nullptr, 0));
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
+        queues_[q], {}, {1, &timeline, &one}, outputs[q], 0, sizeof(expected),
+        &zero, sizeof(zero), nullptr, 0));
   }
   for (uint64_t replay = 0; replay < kReplays; ++replay) {
     uint64_t previous = replay + 1, next = previous + 1;
@@ -438,7 +439,7 @@ TEST_P(GpuNativeArgumentProfileTest,
     auto* timeline = completions[q].get();
     uint64_t previous = kReplays + 1, next = previous + 1;
     std::array<uint32_t, kWidth> observed = {};
-    IREE_ASSERT_OK(iree_hal_queue_download(
+    IREE_ASSERT_OK(iree_hal_queue_download_linear(
         queues_[q], {1, &timeline, &previous}, {1, &timeline, &next},
         outputs[q], 0, observed.data(), sizeof(observed), nullptr));
     ASSERT_NO_FATAL_FAILURE(Wait(timeline, next));
@@ -489,8 +490,9 @@ TEST_P(GpuNativeDispatchProfileTest,
   uint64_t value = 1;
   uint32_t zero = 0;
   std::array<uint64_t, 3> observed = {};
-  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {}, {1, &timeline, &value},
-                                     output, 0, 24, &zero, 4, nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(queues_[0], {},
+                                            {1, &timeline, &value}, output, 0,
+                                            24, &zero, 4, nullptr, 0));
   iree_hal_buffer_binding_t binding = {.buffer = output, .length = 24};
   for (uint32_t i = 0; i < 2; ++i) {
     Ref<iree_hal_queue_t> acquired;
@@ -500,7 +502,7 @@ TEST_P(GpuNativeDispatchProfileTest,
                                           {1, &timeline, &value}, recording,
                                           {1, &binding}, 0));
     wait = value++;
-    IREE_ASSERT_OK(iree_hal_queue_download(
+    IREE_ASSERT_OK(iree_hal_queue_download_linear(
         queues_[0], {1, &timeline, &wait}, {1, &timeline, &value}, output, 0,
         observed.data(), sizeof(observed), nullptr));
     acquired.reset();
@@ -555,8 +557,9 @@ TEST_P(GpuNativeDispatchProfileTest,
   auto* timeline = done.get();
   uint64_t value = 1;
   uint32_t zero = 0, observed = 0;
-  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {}, {1, &timeline, &value},
-                                     output, 0, 4, &zero, 4, nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(queues_[0], {},
+                                            {1, &timeline, &value}, output, 0,
+                                            4, &zero, 4, nullptr, 0));
   for (uint32_t i = 0; i < 2; ++i) {
     uint64_t wait = value++;
     IREE_ASSERT_OK(iree_hal_queue_execute(queues_[i], {1, &timeline, &wait},
@@ -566,9 +569,9 @@ TEST_P(GpuNativeDispatchProfileTest,
   recording.reset();
   executable.reset();
   uint64_t wait = value++;
-  IREE_ASSERT_OK(iree_hal_queue_download(queues_[0], {1, &timeline, &wait},
-                                         {1, &timeline, &value}, output, 0,
-                                         &observed, sizeof(observed), nullptr));
+  IREE_ASSERT_OK(iree_hal_queue_download_linear(
+      queues_[0], {1, &timeline, &wait}, {1, &timeline, &value}, output, 0,
+      &observed, sizeof(observed), nullptr));
   ASSERT_NO_FATAL_FAILURE(Wait(done, value));
   EXPECT_EQ(observed, 12u);
   sink_.expected_dispatch_flags =
@@ -643,8 +646,9 @@ TEST_P(GpuNativeDispatchProfileTest, DirectSamplesSurviveExecutableRelease) {
   auto* timeline = done.get();
   uint64_t previous = 0, next = 1;
   uint32_t zero = 0, increment = 1, observed = 0;
-  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {}, {1, &timeline, &next},
-                                     output, 0, 4, &zero, 4, nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(queues_[0], {},
+                                            {1, &timeline, &next}, output, 0, 4,
+                                            &zero, 4, nullptr, 0));
   auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
   config.workgroup_size[0] = 32;
   config.workgroup_size[1] = config.workgroup_size[2] = 1;
@@ -658,9 +662,9 @@ TEST_P(GpuNativeDispatchProfileTest, DirectSamplesSurviveExecutableRelease) {
         {1, &reference}, nullptr, 0));
   }
   previous = next++;
-  IREE_ASSERT_OK(iree_hal_queue_download(queues_[0], {1, &timeline, &previous},
-                                         {1, &timeline, &next}, output, 0,
-                                         &observed, sizeof(observed), nullptr));
+  IREE_ASSERT_OK(iree_hal_queue_download_linear(
+      queues_[0], {1, &timeline, &previous}, {1, &timeline, &next}, output, 0,
+      &observed, sizeof(observed), nullptr));
   ASSERT_NO_FATAL_FAILURE(Wait(done, next));
   EXPECT_EQ(observed, 16u);
   executable.reset();
@@ -806,7 +810,7 @@ TEST_P(GpuNativeDispatchProfileTest,
     IREE_ASSERT_OK(capture.Begin(&options));
     uint32_t zero = 0;
     uint64_t previous = value++;
-    IREE_ASSERT_OK(iree_hal_queue_fill(
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
         queues_[0], {previous ? 1u : 0u, &timeline, &previous},
         {1, &timeline, &value}, output, 0, 4, &zero, 4, nullptr, 0));
     const uint32_t increment = 1;
@@ -845,7 +849,7 @@ TEST_P(GpuNativeDispatchProfileTest,
     }
     uint32_t observed = 0;
     previous = value++;
-    IREE_ASSERT_OK(iree_hal_queue_download(
+    IREE_ASSERT_OK(iree_hal_queue_download_linear(
         queues_[0], {1, &timeline, &previous}, {1, &timeline, &value}, output,
         0, &observed, sizeof(observed), nullptr));
     ASSERT_NO_FATAL_FAILURE(Wait(done, value));
@@ -877,8 +881,9 @@ TEST_P(GpuNativeDispatchProfileTest,
   auto* timeline = done.get();
   uint64_t value = 1;
   uint32_t zero = 0;
-  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {}, {1, &timeline, &value},
-                                     output, 0, 8192, &zero, 4, nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(queues_[0], {},
+                                            {1, &timeline, &value}, output, 0,
+                                            8192, &zero, 4, nullptr, 0));
 
   Ref<iree_hal_command_buffer_t> recording;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
@@ -908,7 +913,7 @@ TEST_P(GpuNativeDispatchProfileTest,
       .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
   };
   IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
-  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
       recording, iree_hal_make_buffer_ref(output, 0, 4096),
       iree_hal_make_buffer_ref(output, 4096, 4096), 0));
   // Program exit owns the final asynchronous copy join, including when the
@@ -922,7 +927,7 @@ TEST_P(GpuNativeDispatchProfileTest,
   }
   std::array<uint32_t, 1024> observed;
   uint64_t previous = value++;
-  IREE_ASSERT_OK(iree_hal_queue_download(
+  IREE_ASSERT_OK(iree_hal_queue_download_linear(
       queues_[0], {1, &timeline, &previous}, {1, &timeline, &value}, output,
       4096, observed.data(), sizeof(observed), nullptr));
   ASSERT_NO_FATAL_FAILURE(Wait(done, value));
@@ -975,9 +980,9 @@ TEST_P(GpuNativeDispatchProfileTest,
         pool_, iree_hal_make_pool_reservation_request(4, 4),
         iree_infinite_timeout(), outputs[q].out()));
     auto* timeline = done[q].get();
-    IREE_ASSERT_OK(iree_hal_queue_fill(queues_[q], {},
-                                       {1, &timeline, &values[q]}, outputs[q],
-                                       0, 4, &zero, 4, nullptr, 0));
+    IREE_ASSERT_OK(
+        iree_hal_queue_fill_linear(queues_[q], {}, {1, &timeline, &values[q]},
+                                   outputs[q], 0, 4, &zero, 4, nullptr, 0));
   }
   for (size_t i = 0; i < kReplayCount; ++i) {
     for (size_t q = 0; q < 2; ++q) {
@@ -992,7 +997,7 @@ TEST_P(GpuNativeDispatchProfileTest,
   for (size_t q = 0; q < 2; ++q) {
     auto* timeline = done[q].get();
     uint64_t previous = values[q]++;
-    IREE_ASSERT_OK(iree_hal_queue_download(
+    IREE_ASSERT_OK(iree_hal_queue_download_linear(
         queues_[q], {1, &timeline, &previous}, {1, &timeline, &values[q]},
         outputs[q], 0, &observed[q], sizeof(observed[q]), nullptr));
     ASSERT_NO_FATAL_FAILURE(Wait(done[q], values[q]));
@@ -1059,15 +1064,16 @@ TEST_P(GpuNativeProfileTest, ProfileCapableRecordingRunsWithoutDeviceCapture) {
   auto* timeline = done.get();
   uint64_t one = 1, two = 2, three = 3;
   uint32_t zero = 0, observed = 0;
-  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {}, {1, &timeline, &one},
-                                     output, 0, 4, &zero, 4, nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(queues_[0], {},
+                                            {1, &timeline, &one}, output, 0, 4,
+                                            &zero, 4, nullptr, 0));
   iree_hal_buffer_binding_t binding = {.buffer = output, .length = 4};
   IREE_ASSERT_OK(iree_hal_queue_execute(queues_[0], {1, &timeline, &one},
                                         {1, &timeline, &two}, recording,
                                         {1, &binding}, 0));
-  IREE_ASSERT_OK(iree_hal_queue_download(queues_[0], {1, &timeline, &two},
-                                         {1, &timeline, &three}, output, 0,
-                                         &observed, sizeof(observed), nullptr));
+  IREE_ASSERT_OK(iree_hal_queue_download_linear(
+      queues_[0], {1, &timeline, &two}, {1, &timeline, &three}, output, 0,
+      &observed, sizeof(observed), nullptr));
   ASSERT_NO_FATAL_FAILURE(Wait(done, three));
   EXPECT_EQ(observed, 3u);
   ASSERT_NO_FATAL_FAILURE(End());
@@ -1129,7 +1135,7 @@ TEST_P(GpuNativeDispatchProfileTest,
     const uint32_t zero = 0;
     auto run = [&]() {
       uint64_t previous = value++;
-      IREE_ASSERT_OK(iree_hal_queue_fill(
+      IREE_ASSERT_OK(iree_hal_queue_fill_linear(
           queues_[0], {previous ? 1u : 0u, &timeline, &previous},
           {1, &timeline, &value}, output, 0, 4, &zero, 4, nullptr, 0));
       previous = value++;
@@ -1139,7 +1145,7 @@ TEST_P(GpuNativeDispatchProfileTest,
           recording, {fixed ? 0u : 1u, &binding}, 0));
       previous = value++;
       uint32_t observed = 0;
-      IREE_ASSERT_OK(iree_hal_queue_download(
+      IREE_ASSERT_OK(iree_hal_queue_download_linear(
           queues_[0], {1, &timeline, &previous}, {1, &timeline, &value}, output,
           0, &observed, sizeof(observed), nullptr));
       ASSERT_NO_FATAL_FAILURE(Wait(done, value));
@@ -1215,11 +1221,11 @@ TEST_P(GpuNativeDispatchProfileTest,
         SCOPED_TRACE(::testing::Message()
                      << packet << "/" << recorded << "/" << flags);
         uint64_t previous = value++;
-        IREE_ASSERT_OK(iree_hal_queue_fill(
+        IREE_ASSERT_OK(iree_hal_queue_fill_linear(
             queues_[0], {previous ? 1u : 0u, &timeline, &previous},
             {1, &timeline, &value}, buffer, 0, 4096, &zero, 4, nullptr, 0));
         previous = value++;
-        IREE_ASSERT_OK(iree_hal_queue_upload(
+        IREE_ASSERT_OK(iree_hal_queue_upload_linear(
             queues_[0], {1, &timeline, &previous}, {1, &timeline, &value},
             counts.data(), buffer, 2048, sizeof(counts), nullptr));
         auto config = iree_hal_make_static_dispatch_config(0, 0, 0);
@@ -1262,7 +1268,7 @@ TEST_P(GpuNativeDispatchProfileTest,
         }
         std::array<uint32_t, 512> observed = {};
         previous = value++;
-        IREE_ASSERT_OK(iree_hal_queue_download(
+        IREE_ASSERT_OK(iree_hal_queue_download_linear(
             queues_[0], {1, &timeline, &previous}, {1, &timeline, &value},
             buffer, 0, observed.data(), sizeof(observed), nullptr));
         ASSERT_NO_FATAL_FAILURE(Wait(done, value));
@@ -1409,8 +1415,9 @@ TEST_P(GpuNativeProfileTest,
   auto* timeline = done.get();
   uint64_t one = 1, two = 2, three = 3, four = 4, five = 5;
   uint32_t zero = 0, increment = 1, observed = 0;
-  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {}, {1, &timeline, &one},
-                                     output, 0, 4, &zero, 4, nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(queues_[0], {},
+                                            {1, &timeline, &one}, output, 0, 4,
+                                            &zero, 4, nullptr, 0));
   auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
   config.workgroup_size[0] = 32;
   config.workgroup_size[1] = config.workgroup_size[2] = 1;
@@ -1452,9 +1459,9 @@ TEST_P(GpuNativeProfileTest,
   IREE_ASSERT_OK(iree_hal_queue_execute(queues_[1], {1, &timeline, &three},
                                         {1, &timeline, &four}, recording,
                                         {1, &binding}, 0));
-  IREE_ASSERT_OK(iree_hal_queue_download(queues_[0], {1, &timeline, &four},
-                                         {1, &timeline, &five}, output, 0,
-                                         &observed, sizeof(observed), nullptr));
+  IREE_ASSERT_OK(iree_hal_queue_download_linear(
+      queues_[0], {1, &timeline, &four}, {1, &timeline, &five}, output, 0,
+      &observed, sizeof(observed), nullptr));
   ASSERT_NO_FATAL_FAILURE(Wait(done, five));
   EXPECT_EQ(observed, 3u);
   ASSERT_NO_FATAL_FAILURE(End());
@@ -1706,15 +1713,16 @@ TEST_P(GpuNativeProfileTest, ChunkedRecordingHasOnePublicEvent) {
   auto* timeline = done.get();
   uint64_t one = 1, two = 2, three = 3;
   uint32_t zero = 0, observed = 0;
-  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {}, {1, &timeline, &one},
-                                     output, 0, 4, &zero, 4, nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(queues_[0], {},
+                                            {1, &timeline, &one}, output, 0, 4,
+                                            &zero, 4, nullptr, 0));
   iree_hal_buffer_binding_t binding = {.buffer = output, .length = 4};
   IREE_ASSERT_OK(iree_hal_queue_execute(queues_[0], {1, &timeline, &one},
                                         {1, &timeline, &two}, recording,
                                         {1, &binding}, 0));
-  IREE_ASSERT_OK(iree_hal_queue_download(queues_[0], {1, &timeline, &two},
-                                         {1, &timeline, &three}, output, 0,
-                                         &observed, sizeof(observed), nullptr));
+  IREE_ASSERT_OK(iree_hal_queue_download_linear(
+      queues_[0], {1, &timeline, &two}, {1, &timeline, &three}, output, 0,
+      &observed, sizeof(observed), nullptr));
   ASSERT_NO_FATAL_FAILURE(Wait(done, three));
   EXPECT_EQ(observed, kDispatchCount * (kDispatchCount + 1) / 2);
   ASSERT_NO_FATAL_FAILURE(End());

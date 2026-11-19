@@ -41,7 +41,7 @@ TEST_P(VulkanQueueDescriptorCacheTest, DeferredUploadsOverlapCallerRecording) {
           .semaphores = &signals.semaphores[ordinal],
           .payload_values = &signals.payload_values[ordinal],
       };
-      status = iree_hal_queue_upload(
+      status = iree_hal_queue_upload_linear(
           transfer_queue_,
           batch == 0 ? static_cast<iree_hal_semaphore_list_t>(gate)
                      : iree_hal_semaphore_list_empty(),
@@ -92,7 +92,7 @@ TEST_P(VulkanQueueDescriptorCacheTest, DeferredUnalignedFillsExceedOneBlock) {
         .semaphores = &signals.semaphores[i],
         .payload_values = &signals.payload_values[i],
     };
-    IREE_ASSERT_OK(iree_hal_queue_fill(
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
         transfer_queue_, gate, signal_list, target_buffer.get(), i,
         /*length=*/1, &kPattern, sizeof(kPattern), /*barriers=*/NULL,
         IREE_HAL_FILL_FLAG_NONE));
@@ -161,10 +161,10 @@ TEST_P(VulkanQueueDescriptorCacheTest,
           .semaphores = &signals.semaphores[i],
           .payload_values = &signals.payload_values[i],
       };
-      status =
-          iree_hal_queue_fill(transfer_only_queue, gate, signal, target, offset,
-                              length, pattern, pattern_length,
-                              /*barriers=*/nullptr, IREE_HAL_FILL_FLAG_NONE);
+      status = iree_hal_queue_fill_linear(
+          transfer_only_queue, gate, signal, target, offset, length, pattern,
+          pattern_length,
+          /*barriers=*/nullptr, IREE_HAL_FILL_FLAG_NONE);
       if (iree_status_is_ok(status)) {
         ++submitted_count;
         for (iree_device_size_t j = 0; j < length; ++j) {

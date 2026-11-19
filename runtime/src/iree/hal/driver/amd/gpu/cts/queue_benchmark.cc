@@ -390,7 +390,7 @@ class NativeQueue {
   iree_status_t PrepareTransfers() {
     auto& lane = lanes_[0];
     uint64_t after = lane.epoch + 1;
-    IREE_RETURN_IF_ERROR(iree_hal_queue_fill(
+    IREE_RETURN_IF_ERROR(iree_hal_queue_fill_linear(
         queue_, {}, {1, &lane.timeline, &after}, lane.output, 0, 8,
         &lane.host_value, 4, nullptr, IREE_HAL_FILL_FLAG_NONE));
     lane.epoch = after;
@@ -482,16 +482,16 @@ class NativeQueue {
         auto target = reference;
         target.length = sizeof(payload);
         if (i % 3 == 0) {
-          status = iree_hal_command_buffer_update_buffer(recording, payload, 0,
-                                                         target, 0);
+          status = iree_hal_command_buffer_update_buffer_linear(
+              recording, payload, 0, target, 0);
         } else if (i % 3 == 1) {
-          status = iree_hal_command_buffer_fill_buffer(
+          status = iree_hal_command_buffer_fill_buffer_linear(
               recording, target, payload, sizeof(payload[0]), 0);
         } else {
           auto source = reference;
           source.offset += sizeof(payload[0]);
-          status = iree_hal_command_buffer_copy_buffer(recording, source,
-                                                       reference, 0);
+          status = iree_hal_command_buffer_copy_buffer_linear(recording, source,
+                                                              reference, 0);
         }
       } else if (iree_status_is_ok(status)) {
         struct {

@@ -449,7 +449,7 @@ TEST_P(AsyncQueueHostCallLifetimeTest,
   IREE_ASSERT_OK(iree_hal_queue_host_call(transfer_queue_, producer_wait,
                                           producer_signal, call, args,
                                           IREE_HAL_HOST_CALL_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_queue_download(
+  IREE_ASSERT_OK(iree_hal_queue_download_linear(
       transfer_queue_, producer_signal, terminal_signal, source_buffer,
       /*source_offset=*/0, target, sizeof(target), /*barriers=*/NULL));
 

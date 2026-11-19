@@ -374,10 +374,10 @@ class VulkanImportedFileTest : public VulkanFileTest {
             ? &no_payload_barriers
             : nullptr;
     const uint8_t guard = 0xCD;
-    IREE_ASSERT_OK(
-        iree_hal_queue_fill(transfer_queue_, allocated, initialized, backing, 0,
-                            iree_hal_buffer_byte_length(backing), &guard,
-                            sizeof(guard), nullptr, IREE_HAL_FILL_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
+        transfer_queue_, allocated, initialized, backing, 0,
+        iree_hal_buffer_byte_length(backing), &guard, sizeof(guard), nullptr,
+        IREE_HAL_FILL_FLAG_NONE));
     for (size_t i = 0; i < consumed.size(); ++i) {
       const auto source_offset = i * length + offset;
       SemaphoreList wait = i == 0 ? initialized : written;
@@ -386,13 +386,13 @@ class VulkanImportedFileTest : public VulkanFileTest {
       IREE_ASSERT_OK(iree_hal_queue_read_linear(
           transfer_queue_, wait, loaded, input, source_offset, view, offset,
           length, barriers, IREE_HAL_READ_FLAG_NONE));
-      IREE_ASSERT_OK(iree_hal_queue_copy(transfer_queue_, loaded, copied, view,
-                                         offset, consumed[i], 0, length,
-                                         barriers, IREE_HAL_COPY_FLAG_NONE));
+      IREE_ASSERT_OK(iree_hal_queue_copy_linear(
+          transfer_queue_, loaded, copied, view, offset, consumed[i], 0, length,
+          barriers, IREE_HAL_COPY_FLAG_NONE));
       // File writes must observe a device producer, not merely read back the
       // preceding native file input that is already resident in host caches.
       const uint8_t pattern = static_cast<uint8_t>(0x40 + i);
-      IREE_ASSERT_OK(iree_hal_queue_fill(
+      IREE_ASSERT_OK(iree_hal_queue_fill_linear(
           transfer_queue_, copied, modified, view, offset, length, &pattern,
           sizeof(pattern), barriers, IREE_HAL_FILL_FLAG_NONE));
       IREE_ASSERT_OK(iree_hal_queue_write_linear(

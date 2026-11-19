@@ -760,7 +760,7 @@ TEST_P(ExecutionTest, ConsumerFirstKernelsShareOneBacking) {
           {1, &memory_timeline, &acquired}, block_pool, 1, &request,
           reused.out()));
       const uint32_t pattern = 0x71727374u;
-      IREE_ASSERT_OK(iree_hal_queue_fill(
+      IREE_ASSERT_OK(iree_hal_queue_fill_linear(
           participants_[kGpu].queue, {1, &memory_timeline, &acquired},
           {1, &memory_timeline, &filled}, reused, 0, sizeof(Payload), &pattern,
           sizeof(pattern), nullptr, IREE_HAL_FILL_FLAG_NONE));

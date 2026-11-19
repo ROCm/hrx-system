@@ -2755,7 +2755,7 @@ iree_status_t iree_hal_streaming_memory_memset(
   iree_hal_buffer_ref_t target_ref =
       iree_hal_streaming_convert_range_buffer_ref(dst_ref, length);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_command_buffer_fill_buffer(
+    status = iree_hal_command_buffer_fill_buffer_linear(
         stream->command_buffer, target_ref, pattern, pattern_length,
         IREE_HAL_FILL_FLAG_NONE);
   }
@@ -2980,7 +2980,7 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device_2d(
         const iree_hal_buffer_ref_t destination = iree_hal_make_buffer_ref(
             operations[row].copy.target_buffer,
             operations[row].copy.target_offset + chunk_offset, chunk_size);
-        status = iree_hal_command_buffer_update_buffer(
+        status = iree_hal_command_buffer_update_buffer_linear(
             stream->command_buffer,
             (const uint8_t*)src + row * src_pitch + chunk_offset, 0,
             destination, IREE_HAL_UPDATE_FLAG_NONE);

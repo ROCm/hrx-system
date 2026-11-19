@@ -76,7 +76,7 @@ class CommandBufferCopyBufferTest : public CtsTestBase<> {
                                        binding_capacity(),
                                        command_buffer.out()));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
-    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
         command_buffer,
         MakeRef(source_buffer, kSourceBufferSlot, source_offset, length),
         MakeRef(target_buffer, kTargetBufferSlot, target_offset, length),
@@ -111,7 +111,7 @@ TEST_P(CommandBufferCopyBufferTest, CopyWholeBuffer) {
                                      IREE_HAL_COMMAND_CATEGORY_TRANSFER,
                                      binding_capacity(), command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
-  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
       command_buffer,
       MakeRef(source_buffer, kSourceBufferSlot, 0, kDefaultAllocationSize),
       MakeRef(target_buffer, kTargetBufferSlot, 0, kDefaultAllocationSize),
@@ -151,18 +151,18 @@ TEST_P(CommandBufferCopyBufferTest, CopySubBuffer) {
                                      binding_capacity(), command_buffer.out()));
   uint8_t zero_val = 0x0;
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
-  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
       command_buffer,
       MakeRef(target_buffer, kTargetBufferSlot, /*offset=*/0, /*length=*/8),
       &zero_val, /*pattern_length=*/sizeof(zero_val), IREE_HAL_FILL_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
       command_buffer,
       MakeRef(source_buffer, kSourceBufferSlot, /*offset=*/4,
               /*length=*/kDefaultAllocationSize / 2 - 4),
       MakeRef(target_buffer, kTargetBufferSlot, /*offset=*/8,
               /*length=*/kDefaultAllocationSize / 2 - 4),
       IREE_HAL_COPY_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
       command_buffer,
       MakeRef(target_buffer, kTargetBufferSlot,
               /*offset=*/8 + kDefaultAllocationSize / 2 - 4,
@@ -230,7 +230,7 @@ TEST_P(CommandBufferCopyBufferTest, RemainingRanges) {
         /*mode=*/0, IREE_HAL_COMMAND_CATEGORY_TRANSFER, binding_capacity(),
         reusable_command_buffer.out()));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(reusable_command_buffer));
-    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
         reusable_command_buffer,
         MakeRef(nullptr, kSourceBufferSlot, 7, IREE_HAL_WHOLE_BUFFER),
         MakeRef(nullptr, kTargetBufferSlot, 11, IREE_HAL_WHOLE_BUFFER),
@@ -264,7 +264,7 @@ TEST_P(CommandBufferCopyBufferTest, RemainingRanges) {
                                          IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0,
                                          command_buffer.out()));
       IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
-      IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+      IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
           command_buffer,
           MakeRef(source, kSourceBufferSlot, 7, IREE_HAL_WHOLE_BUFFER),
           MakeRef(target, kTargetBufferSlot, 11, IREE_HAL_WHOLE_BUFFER),
