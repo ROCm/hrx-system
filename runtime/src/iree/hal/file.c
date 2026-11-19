@@ -214,34 +214,6 @@ IREE_API_EXPORT iree_status_t iree_hal_file_transfer_record_decode(
   return iree_ok_status();
 }
 
-// Subtraction keeps the binding origin out of the calculation and avoids an
-// overflow at the end of an otherwise valid window. Counts are nonzero here.
-static bool iree_hal_file_transfer_range_fits(
-    uint64_t offset, const iree_hal_file_transfer_t* transfer,
-    const iree_hal_transfer_strides_t* strides, uint64_t length) {
-  if (offset > length || transfer->row_length > length - offset) {
-    return false;
-  }
-  uint64_t remaining = length - offset - transfer->row_length;
-  uint64_t displacement = 0;
-  if (transfer->row_count > 1) {
-    if (!iree_checked_mul_u64(transfer->row_count - 1, strides->row_stride,
-                              &displacement) ||
-        displacement > remaining) {
-      return false;
-    }
-    remaining -= displacement;
-  }
-  if (transfer->slice_count > 1) {
-    if (!iree_checked_mul_u64(transfer->slice_count - 1, strides->slice_stride,
-                              &displacement) ||
-        displacement > remaining) {
-      return false;
-    }
-  }
-  return true;
-}
-
 IREE_API_EXPORT iree_status_t
 iree_hal_file_transfer_validate(iree_hal_file_binding_table_t files,
                                 iree_hal_buffer_binding_table_t buffers,
@@ -254,14 +226,16 @@ iree_hal_file_transfer_validate(iree_hal_file_binding_table_t files,
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "file transfer binding index exceeds table size");
   }
-  if (IREE_UNLIKELY(!iree_hal_file_transfer_range_fits(
-          transfer->file_offset, transfer, &transfer->file_strides,
+  if (IREE_UNLIKELY(!iree_hal_transfer_range_fits(
+          transfer->file_offset, transfer->row_length, transfer->row_count,
+          transfer->slice_count, &transfer->file_strides,
           files.bindings[transfer->file_binding].length))) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "file transfer exceeds its file binding window");
   }
-  if (IREE_UNLIKELY(!iree_hal_file_transfer_range_fits(
-          transfer->buffer_offset, transfer, &transfer->buffer_strides,
+  if (IREE_UNLIKELY(!iree_hal_transfer_range_fits(
+          transfer->buffer_offset, transfer->row_length, transfer->row_count,
+          transfer->slice_count, &transfer->buffer_strides,
           buffers.bindings[transfer->buffer_binding].length))) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "file transfer exceeds its buffer binding window");

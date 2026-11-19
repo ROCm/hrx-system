@@ -616,6 +616,81 @@ typedef struct iree_hal_transfer_strides_t {
   uint64_t slice_stride;
 } iree_hal_transfer_strides_t;
 
+// Useful bytes within independently bounded source and target windows. For
+// byte x in row y of slice z, the address is the endpoint origin plus
+// z*slice_stride + y*row_stride + x. Strides are byte displacements, not
+// zero-means-packed defaults. A dimension with count one ignores its stride;
+// any zero extent makes the operation empty. Padding is never transferred.
+//
+// Geometry is captured before a recording or queue call returns. Repeated
+// source reads are valid, but writes must not overlap other writes or source
+// reads, as with memcpy. Bounding-window overlap alone does not imply that
+// useful bytes overlap. The caller owns this nonaliasing requirement.
+typedef struct iree_hal_transfer_region_t {
+  // Contiguous useful bytes transferred in each row.
+  uint64_t row_length;
+  // Number of rows in each slice.
+  uint64_t row_count;
+  // Number of slices.
+  uint64_t slice_count;
+  // Byte displacements from the supplied source origin.
+  iree_hal_transfer_strides_t source_strides;
+  // Byte displacements from the supplied target origin.
+  iree_hal_transfer_strides_t target_strides;
+} iree_hal_transfer_region_t;
+
+// Useful bytes filled within a bounded target window. Addressing and empty
+// extents follow iree_hal_transfer_region_t. The pattern starts at its first
+// byte in every row; the origin, row length, and used strides must all be
+// aligned to the pattern length. Padding remains unchanged.
+typedef struct iree_hal_fill_region_t {
+  // Contiguous useful bytes filled in each row.
+  uint64_t row_length;
+  // Number of rows in each slice.
+  uint64_t row_count;
+  // Number of slices.
+  uint64_t slice_count;
+  // Byte displacements from the supplied target origin.
+  iree_hal_transfer_strides_t target_strides;
+} iree_hal_fill_region_t;
+
+// Returns whether an endpoint's addressed bytes fit a window of |length| bytes.
+// |offset| is relative to the window origin. This checks external geometry in
+// constant time without overflow, resource queries, or row expansion. It does
+// not establish nonaliasing between useful rows. Empty extents ignore the
+// offset and strides, and unused dimensions do not read their stride fields.
+static inline bool iree_hal_transfer_range_fits(
+    uint64_t offset, uint64_t row_length, uint64_t row_count,
+    uint64_t slice_count, const iree_hal_transfer_strides_t* strides,
+    uint64_t length) {
+  if (!row_length || !row_count || !slice_count) {
+    return true;
+  }
+  if (offset > length || row_length > length - offset) {
+    return false;
+  }
+  // Subtraction preserves a valid window ending at UINT64_MAX without
+  // computing an overflowing absolute end address.
+  uint64_t remaining = length - offset - row_length;
+  uint64_t displacement = 0;
+  if (row_count > 1) {
+    if (!iree_checked_mul_u64(row_count - 1, strides->row_stride,
+                              &displacement) ||
+        displacement > remaining) {
+      return false;
+    }
+    remaining -= displacement;
+  }
+  if (slice_count > 1) {
+    if (!iree_checked_mul_u64(slice_count - 1, strides->slice_stride,
+                              &displacement) ||
+        displacement > remaining) {
+      return false;
+    }
+  }
+  return true;
+}
+
 typedef struct iree_hal_file_binding_t {
   // Borrowed file; an accepted operation retains this resource through use.
   iree_hal_file_t* file;
