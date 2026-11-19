@@ -344,17 +344,17 @@ pipeline.def public target(@target) @run(%seed: i32) run(%output: buffer) {
 // ----
 test.target<low_leaf> @target
 
-func.def target(@target) @inner(%value: i32) -> (i32) {
+func.def cold target(@target) @outer(%value: i32) -> (i32) {
   %result = test.addi %value, %value : i32
   func.return %result : i32
 }
 
 pipeline.def public target(@target) @run(%seed: i32) run(%output: buffer) {
   pipeline.strand workers([0], [1], [1]) {
-    %result = func.call @inner(%seed) : (i32) -> (i32)
+    %value = func.call @outer(%seed) : (i32) -> (i32)
     %origin = index.constant 0 : offset
     %view = buffer.view %output[%origin] : buffer -> view<1xi32>
-    view.store %result, %view[0] : i32, view<1xi32>
+    view.store %value, %view[0] : i32, view<1xi32>
   }
 }
 
