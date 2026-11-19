@@ -20,6 +20,7 @@
         "if": {"properties": {"requested": {"properties": {"kind": {"const": "hf"}}}}},
         "then": {"required": ["resolved"]},
         "else": {"not": {"required": ["resolved"]}},
+        "patternProperties": {"^x-": {}},
         "additionalProperties": false
       }
     },
@@ -38,17 +39,20 @@
         "if": {"properties": {"origin": {"type": "object", "required": ["kind"], "properties": {"kind": {"const": "hf"}}}}},
         "then": {"required": ["resolved"]},
         "else": {"not": {"required": ["resolved"]}},
+        "patternProperties": {"^x-": {}},
         "additionalProperties": false
       },
       "description": "One record per logical origin and optional transform. Aliased roots carry their repository resolution once. Updates replace the exact requested output set."
     }
   },
+  "patternProperties": {"^x-": {}},
   "additionalProperties": false,
   "$defs": {
     "resolved": {
       "type": "object",
       "required": ["revision"],
       "properties": {"revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"}},
+      "patternProperties": {"^x-": {}},
       "additionalProperties": false
     }
   }

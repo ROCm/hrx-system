@@ -79,6 +79,7 @@
       "description": "Canonical runnable, test, or benchmark selections. HTTP deployment policy belongs to a separate document."
     }
   },
+  "patternProperties": {"^x-": {}},
   "additionalProperties": false,
   "$defs": {
     "name": {
@@ -118,6 +119,7 @@
               "$ref": "#/$defs/name"
             }
           },
+          "patternProperties": {"^x-": {}},
           "additionalProperties": false,
           "description": "Hugging Face repository root. A floating or omitted revision is resolved once per acquisition; locks retain the immutable result."
         },
@@ -136,6 +138,7 @@
               "minLength": 1
             }
           },
+          "patternProperties": {"^x-": {}},
           "additionalProperties": false,
           "description": "HTTP(S) directory root. Source resolution validates its scheme and relative joining."
         },
@@ -154,6 +157,7 @@
               "minLength": 1
             }
           },
+          "patternProperties": {"^x-": {}},
           "additionalProperties": false,
           "description": "Local source root owned by a local card or caller override; a remote card cannot grant itself arbitrary host filesystem access."
         }
@@ -187,6 +191,7 @@
               "$ref": "#/$defs/path"
             }
           },
+          "patternProperties": {"^x-": {}},
           "additionalProperties": false
         },
         {
@@ -204,6 +209,7 @@
               "minLength": 1
             }
           },
+          "patternProperties": {"^x-": {}},
           "additionalProperties": false
         },
         {
@@ -221,6 +227,7 @@
               "minLength": 1
             }
           },
+          "patternProperties": {"^x-": {}},
           "additionalProperties": false
         },
         {
@@ -237,6 +244,7 @@
               "type": "string"
             }
           },
+          "patternProperties": {"^x-": {}},
           "additionalProperties": false,
           "description": "Inline content, useful for small constant parameter tables; decoding is validated before acquisition."
         }
@@ -272,6 +280,7 @@
               "$ref": "#/$defs/fileTransform"
             }
           },
+          "patternProperties": {"^x-": {}},
           "additionalProperties": false
         }
       ]
@@ -311,6 +320,7 @@
               "description": "Declared auxiliary files needed by this provider, including preparation inputs outside the link index."
             }
           },
+          "patternProperties": {"^x-": {}},
           "additionalProperties": false
         }
       ]
@@ -353,6 +363,7 @@
           "$ref": "#/$defs/config"
         }
       },
+      "patternProperties": {"^x-": {}},
       "additionalProperties": false
     },
     "service": {
@@ -406,6 +417,7 @@
           "description": "Roles defined by the service, such as text.image for image projection. Exports use <kind>_<role>_<entry>_vN."
         }
       },
+      "patternProperties": {"^x-": {}},
       "additionalProperties": false
     },
     "parameterIndex": {
@@ -426,6 +438,7 @@
           "description": "Ordered files/shards loaded into this one parameter scope."
         }
       },
+      "patternProperties": {"^x-": {}},
       "additionalProperties": false
     },
     "serviceVariant": {
@@ -473,6 +486,7 @@
           "description": "Original reference recordings registered as reusable voices before the speech service becomes ready. Paths and acquisition origins belong to file; decoding and model preparation happen once at registration."
         }
       },
+      "patternProperties": {"^x-": {}},
       "additionalProperties": false
     },
     "variant": {
@@ -503,6 +517,7 @@
           "description": "Arbitrary named executable partitions. Each owns a complete service closure; names imply no machine, device, or scheduling policy."
         }
       },
+      "patternProperties": {"^x-": {}},
       "additionalProperties": false,
       "oneOf": [
         {
@@ -570,11 +585,13 @@
                 "type": "object"
               }
             },
+            "patternProperties": {"^x-": {}},
             "additionalProperties": false
           },
           "description": "Canonical options and execution defaults for components declared by the selected service."
         }
       },
+      "patternProperties": {"^x-": {}},
       "additionalProperties": false
     },
     "model": {
@@ -619,9 +636,11 @@
               "$ref": "#/$defs/path"
             }
           },
+          "patternProperties": {"^x-": {}},
           "additionalProperties": false
         }
       },
+      "patternProperties": {"^x-": {}},
       "additionalProperties": false
     },
     "config": {
@@ -658,6 +677,7 @@
           }
         }
       },
+      "patternProperties": {"^x-": {}},
       "additionalProperties": false
     },
     "parameterFile": {
@@ -686,6 +706,7 @@
               "$ref": "#/$defs/safetensorsTransform"
             }
           },
+          "patternProperties": {"^x-": {}},
           "additionalProperties": false
         }
       ]
@@ -794,6 +815,7 @@
           ]
         }
       ],
+      "patternProperties": {"^x-": {}},
       "additionalProperties": false
     },
     "component": {
@@ -818,6 +840,7 @@
           "description": "Service-owned admission constraints; shape does not establish executable support."
         }
       },
+      "patternProperties": {"^x-": {}},
       "additionalProperties": false,
       "description": "Service-owned component sharing the selected providers and parameter scopes. Its ABI revision is independent of its parent service."
     },
@@ -848,6 +871,7 @@
           "description": "The same content type as a native or HTTP voice upload. Omit for encoded-container sniffing; raw PCM supplies rate, channels, and optional format=f32le."
         }
       },
+      "patternProperties": {"^x-": {}},
       "additionalProperties": false
     }
   }

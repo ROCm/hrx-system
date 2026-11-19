@@ -10,10 +10,9 @@ from __future__ import annotations
 
 import copy
 import hashlib
-import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
 
@@ -28,14 +27,13 @@ from .manifest import (
     _origin_object,
     _string,
     _transform,
+    operation_fields,
     parse_json,
+    project_fields,
 )
-
-
-def file_key(origin: str | dict, transform: dict | None = None) -> str:
-    """Logical output identity, independent of placement and transport override."""
-    value = {"origin": origin, "transform": transform} if transform else origin
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+from .manifest import (
+    file_key as file_key,
+)
 
 
 def lock_files(selection: Selection, scope: str) -> dict[str, ModelFile]:
@@ -99,6 +97,8 @@ class FileIdentity:
     resolved: dict | None = None
     # Normalized operation producing these bytes from the authored origin.
     transform: dict | None = None
+    # Optional publisher annotations carried by this lock entry.
+    extensions: dict = field(default_factory=dict, compare=False)
 
     def verify(
         self, path: Path, *, cancelled: Event | None = None, progress=None
@@ -112,6 +112,7 @@ class FileIdentity:
 
     def document(self) -> dict:
         result = {
+            **copy.deepcopy(self.extensions),
             "origin": copy.deepcopy(self.origin),
             "size": self.size,
             "sha256": self.sha256,
@@ -142,6 +143,7 @@ class ModelLock:
         # Version 1 committed to every file. Only an explicit version 2 scope
         # changes coverage; a missing identity never implies editable content.
         self.scope = doc["scope"] if version == 2 else "all"
+        self.extensions = project_fields(doc)
         if self.scope not in ("assets", "all"):
             raise ManifestError("lock.scope: expected 'assets' or 'all'")
         if "$schema" in doc:
@@ -207,11 +209,19 @@ class ModelLock:
                 digest,
                 record.get("resolved"),
                 transform,
+                project_fields(record),
             )
 
     @classmethod
     def parse(cls, source: str) -> ModelLock:
         return cls(parse_json(source))
+
+    @classmethod
+    def read_if_present(cls, path: Path) -> ModelLock | None:
+        try:
+            return cls.parse(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
 
     def cover(
         self, selection: Selection, *, assets_only: bool = False
@@ -226,10 +236,9 @@ class ModelLock:
         ).items():
             if isinstance(file.origin, str) and file.origin.startswith("@"):
                 alias = file.origin[1:].split("/", 1)[0]
-                if (
-                    alias not in self.origins
-                    or self.origins[alias]["requested"] != roots[alias]
-                ):
+                if alias not in self.origins or operation_fields(
+                    self.origins[alias]["requested"]
+                ) != operation_fields(roots[alias]):
                     raise ManifestError(
                         f"lock does not match origin {alias!r}; "
                         "use --update-lock or --no-lock"
@@ -244,7 +253,11 @@ class ModelLock:
 
     @staticmethod
     def snapshot(
-        origins: dict, identities: list[FileIdentity], *, scope: str = "all"
+        origins: dict,
+        identities: list[FileIdentity],
+        *,
+        scope: str = "all",
+        previous: ModelLock | None = None,
     ) -> dict:
         """Writes exactly this verified set, with no historical accumulation."""
         if scope not in ("assets", "all"):
@@ -253,18 +266,54 @@ class ModelLock:
         used_origins = set()
         for identity in identities:
             key = file_key(identity.origin, identity.transform)
-            if key in files and files[key] != identity:
+            other = files.get(key)
+            if other and (
+                other.size != identity.size
+                or other.sha256 != identity.sha256
+                or operation_fields(other.resolved)
+                != operation_fields(identity.resolved)
+            ):
                 raise ManifestError(
                     "selected sources have conflicting content identities"
                 )
             files[key] = identity
             if isinstance(identity.origin, str) and identity.origin.startswith("@"):
                 used_origins.add(identity.origin[1:].split("/", 1)[0])
+
+        def annotated(record, prior, descriptors):
+            result = copy.deepcopy(project_fields(prior)) | record
+            for name in descriptors:
+                if isinstance(record.get(name), dict) and isinstance(
+                    prior.get(name), dict
+                ):
+                    result[name] = (
+                        copy.deepcopy(project_fields(prior[name])) | record[name]
+                    )
+            return result
+
+        named_roots = {}
+        for name in sorted(used_origins):
+            record = copy.deepcopy(origins[name])
+            prior = previous.origins.get(name) if previous else None
+            if prior and operation_fields(prior["requested"]) == operation_fields(
+                record["requested"]
+            ):
+                record = annotated(record, prior, ("requested", "resolved"))
+            named_roots[name] = record
+        records = []
+        for key, identity in sorted(files.items()):
+            record = identity.document()
+            if previous and key in previous.files:
+                record = annotated(
+                    record,
+                    previous.files[key].document(),
+                    ("origin", "transform", "resolved"),
+                )
+            records.append(record)
         return {
+            **copy.deepcopy(previous.extensions if previous else {}),
             "schema_version": 2,
             "scope": scope,
-            "origins": {
-                name: copy.deepcopy(origins[name]) for name in sorted(used_origins)
-            },
-            "files": [files[key].document() for key in sorted(files)],
+            "origins": named_roots,
+            "files": records,
         }

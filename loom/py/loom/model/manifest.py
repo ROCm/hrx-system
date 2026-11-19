@@ -27,11 +27,39 @@ def _fail(path: str, message: str) -> None:
     raise ManifestError(f"{path}: {message}")
 
 
-def _object(value: Any, path: str, required=(), optional=()) -> dict:
+def project_fields(record: dict, fields=()) -> dict:
+    """Projects a typed portable record, forwarding its optional annotations."""
+    return {
+        key: value
+        for key, value in record.items()
+        if key in fields or key.startswith("x-")
+    }
+
+
+def operation_fields(value):
+    """Removes top-level annotations from a typed operation's semantic identity."""
+    if isinstance(value, dict):
+        return {key: item for key, item in value.items() if not key.startswith("x-")}
+    return value
+
+
+def file_key(origin: str | dict, transform: dict | None = None) -> str:
+    """Logical output identity, independent of placement, mirrors, and annotations."""
+    value = operation_fields(origin)
+    if transform is not None:
+        value = {"origin": value, "transform": operation_fields(transform)}
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+def _object(
+    value: Any, path: str, required=(), optional=(), *, extensions=True
+) -> dict:
     if not isinstance(value, dict):
         _fail(path, "expected an object")
     missing = set(required) - value.keys()
     unknown = value.keys() - set(required) - set(optional)
+    if extensions:
+        unknown = {key for key in unknown if not key.startswith("x-")}
     if missing:
         _fail(path, f"missing fields: {', '.join(sorted(missing))}")
     if unknown:
@@ -734,14 +762,12 @@ class ModelCard:
             )
             if name in files:
                 previous = files[name]
-                if (
-                    previous.origin != candidate.origin
-                    or previous.transform != candidate.transform
-                    or (
-                        previous.format
-                        and candidate.format
-                        and previous.format != candidate.format
-                    )
+                if file_key(previous.origin, previous.transform) != file_key(
+                    candidate.origin, candidate.transform
+                ) or (
+                    previous.format
+                    and candidate.format
+                    and previous.format != candidate.format
                 ):
                     _fail("files." + name, "conflicting selected file declarations")
                 candidate = replace(
@@ -771,25 +797,20 @@ class ModelCard:
                     "files." + path,
                     "destination collides with another file's directory",
                 )
-        projected = {
-            key: copy.deepcopy(doc[key])
-            for key in ("$schema", "schema_version", "model", "origins")
-            if key in doc
-        }
+        projected = copy.deepcopy(
+            project_fields(doc, ("$schema", "schema_version", "model", "origins"))
+        )
         projected["programs"] = {programs: copy.deepcopy(program)}
         projected["services"] = {service: copy.deepcopy(service_definition)}
         projected_variant_service = copy.deepcopy(variant_service)
         projected_variant_service["programs"] = [programs]
-        projected_scope = {"services": {service: projected_variant_service}}
+        projected_scope = copy.deepcopy(project_fields(variant_scope, ("description",)))
+        projected_scope["services"] = {service: projected_variant_service}
         if partition is not None:
-            if "description" in variant_scope:
-                projected_scope["description"] = variant_scope["description"]
-            projected_scope = {"partitions": {partition: projected_scope}}
+            projected_scope = copy.deepcopy(
+                project_fields(doc["variants"][variant], ("description",))
+            ) | {"partitions": {partition: projected_scope}}
         projected["variants"] = {variant: projected_scope}
-        if "description" in doc["variants"][variant]:
-            projected["variants"][variant]["description"] = doc["variants"][variant][
-                "description"
-            ]
         settings = copy.deepcopy(settings)
         if any(
             settings.get(key, value) != value

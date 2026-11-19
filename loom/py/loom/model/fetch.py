@@ -66,6 +66,8 @@ class FetchPlan:
     lock_scope: str
     # Explicit author's lock update destination; absent for ordinary acquisition.
     update_path: Path | None
+    # Source annotations carried by retained records when producing a lock.
+    previous_lock: ModelLock | None
     # Acquisition provenance for catalog or developer verification selections.
     provenance: dict | None = None
     # Parameter-only paths whose publisher byte expectations are explicitly skipped.
@@ -220,6 +222,7 @@ def plan_fetch(
         "none" if no_lock else "update" if update_lock else "verify",
         scope,
         update_path,
+        ModelLock.read_if_present(update_path) if update_path else lock,
         {
             "schema_version": 1,
             "card": {
@@ -259,6 +262,8 @@ class LockPlan:
     path: Path
     # Network prohibition retained across planning and acquisition.
     offline: bool
+    # Publication metadata on records that remain in the regenerated lock.
+    previous_lock: ModelLock | None
 
     def summary(self) -> dict:
         return {
@@ -348,6 +353,7 @@ def plan_lock(
         lock_scope,
         path,
         offline,
+        ModelLock.read_if_present(path),
     )
 
 
@@ -481,6 +487,7 @@ def update_lock(
             plan.origins,
             [item.identity for item in acquired.values()],
             scope=plan.scope,
+            previous=plan.previous_lock,
         )
         if cache.cancelled.is_set():
             raise FetchError("model acquisition cancelled")
@@ -624,7 +631,7 @@ def _check_installation_lock(path: Path, document: dict) -> None:
         return
     actual = ModelLock.parse(path.read_text(encoding="utf-8"))
     canonical = ModelLock.snapshot(
-        actual.origins, list(actual.files.values()), scope=actual.scope
+        actual.origins, list(actual.files.values()), scope=actual.scope, previous=actual
     )
     if canonical != document:
         raise FetchError(
@@ -713,6 +720,7 @@ def _check_lock_output(plan: FetchPlan, directory: Path, relocated: dict, roots:
             for name, identity in plan.identities.items()
         ],
         scope=plan.lock_scope,
+        previous=plan.previous_lock,
     )
     _check_installation_lock(path, expected)
 
@@ -882,7 +890,9 @@ def install(
             if name in required
         ]
         installation_lock_document = (
-            ModelLock.snapshot(roots, identities, scope=plan.lock_scope)
+            ModelLock.snapshot(
+                roots, identities, scope=plan.lock_scope, previous=plan.previous_lock
+            )
             if plan.lock_mode != "none"
             else None
         )
@@ -961,6 +971,7 @@ def install(
                         for file in required.values()
                     ],
                     scope=plan.lock_scope,
+                    previous=plan.previous_lock,
                 )
                 atomic_write(
                     plan.update_path,

@@ -23,7 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from loom.model import ModelCard
-from loom.model.catalog import generate
+from loom.model.catalog import ModelCatalog, generate
 
 
 def check_catalog(root):
@@ -33,9 +33,8 @@ def check_catalog(root):
         )
         for path in sorted(root.glob("model/*/model.json"))
     }
-    expected = generate(cards).document
-    actual = json.loads((root / "catalog.json").read_text(encoding="utf-8"))
-    if actual != expected:
+    actual = ModelCatalog.parse((root / "catalog.json").read_text(encoding="utf-8"))
+    if actual.document != generate(cards, previous=actual).document:
         raise ValueError(
             "catalog.json is stale; run python refresh.py and review the diff"
         )

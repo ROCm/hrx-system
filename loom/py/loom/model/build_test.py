@@ -113,6 +113,7 @@ def test_preservation_retains_provider_contract_without_a_linker(tmp_path):
     plan = _plan()
     document = json.loads(Path(plan["card"]).read_text())
     provider = document["programs"]["source"]["inputs"][0]
+    provider["x-author"] = ["sam", "lee"]
     provider.update(
         origin="https://example.com/prepare.cxx",
         format="cxx",
@@ -130,6 +131,7 @@ def test_preservation_retains_provider_contract_without_a_linker(tmp_path):
     build(plan)
     result = ModelCard.parse((tmp_path / "model.json").read_text()).select("check")
     assert result.program["inputs"][0] == {
+        "x-author": ["sam", "lee"],
         "path": "prepare.loom",
         "format": "cxx",
         "options": ["cxx:std=c++20"],

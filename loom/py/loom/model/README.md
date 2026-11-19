@@ -25,6 +25,19 @@ escaping destination paths are errors. The Moonshine metadata example declares
 inputs and service geometry; execution evidence belongs to the model
 implementation and its tests.
 
+Model cards, catalogs, and locks reserve member names beginning with `x-`
+for optional publisher metadata on schema-defined records. Their values may
+be any plain JSON. For example, `"x-example-labels": ["preview"]` on a model
+can appear in discovery UIs. Selection and publication retain annotations on
+the records they carry. Regenerating a lock or catalog retains annotations on
+matching records and drops records removed from the publication. Annotations
+on a file's origin or transform do not change its logical identity or digest.
+
+Named maps (such as program names and JIT configuration), service-specific
+options, and the contents of annotations keep their own key spaces. Required
+behavior belongs to the owning service contract, acquisition operation, or
+document version. A reader rejects a document version it cannot interpret.
+
 Provider-set names have no encoding semantics. A set named `source` may include
 bytecode libraries. `inputs` and `libraries` are arrays of path strings or
 objects with `path`, optional `format`, importer `options`, and auxiliary `data`.

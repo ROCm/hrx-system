@@ -23,7 +23,7 @@ from pathlib import Path
 from urllib.parse import quote, urljoin, urlsplit
 
 from .lock import FileIdentity, ModelLock
-from .manifest import ManifestError, _url
+from .manifest import ManifestError, _url, operation_fields, project_fields
 
 
 class FetchError(RuntimeError):
@@ -219,7 +219,7 @@ class SourceResolver:
         )
 
     def _file(self, descriptor: dict, *, caller_owned: bool) -> dict:
-        result = copy.deepcopy(descriptor)
+        result = operation_fields(descriptor)
         if result["kind"] == "local":
             if self.document.remote and not caller_owned:
                 raise FetchError(
@@ -244,7 +244,7 @@ class SourceResolver:
                 {"kind": "local", "path": str(Path(root["path"]) / path)},
                 caller_owned=caller_owned,
             )
-        return {**root, "path": path}
+        return {**operation_fields(root), "path": path}
 
     def local_file(self, origin: str | dict) -> Path | None:
         """Locates local inputs for output-overlap checks without provider IO."""
@@ -273,18 +273,25 @@ class SourceResolver:
             requested = self.roots[name]
             overridden = name in self.overrides
             if name not in self.origins:
-                record = {"requested": copy.deepcopy(requested)}
+                locked = self.lock.origins.get(name) if self.lock else None
+                if locked and operation_fields(locked["requested"]) != operation_fields(
+                    requested
+                ):
+                    locked = None
+                record = {
+                    **project_fields(locked or {}),
+                    "requested": project_fields(locked["requested"] if locked else {})
+                    | copy.deepcopy(requested),
+                }
                 if requested["kind"] == "hf" and (not overridden or self.pin_revisions):
-                    locked = self.lock.origins.get(name) if self.lock else None
-                    resolution = (
-                        locked.get("resolved")
-                        if locked and locked["requested"] == requested
-                        else None
-                    )
+                    resolution = locked.get("resolved") if locked else None
                     record["resolved"] = {
+                        **project_fields(resolution or {}),
                         "revision": self._revision(
-                            requested, resolution, overridden=overridden
-                        )
+                            operation_fields(requested),
+                            resolution,
+                            overridden=overridden,
+                        ),
                     }
                 self.origins[name] = record
             effective = copy.deepcopy(self.overrides.get(name, requested))
@@ -310,12 +317,14 @@ class SourceResolver:
             descriptor = origin
         resolved = None
         if descriptor["kind"] == "hf":
+            resolution = identity.resolved if identity else None
             resolved = {
+                **project_fields(resolution or {}),
                 "revision": self._revision(
-                    descriptor,
-                    identity.resolved if identity else None,
+                    operation_fields(descriptor),
+                    resolution,
                     overridden=False,
-                )
+                ),
             }
             descriptor = {**descriptor, **resolved}
         return Source(origin, self._file(descriptor, caller_owned=False), resolved)

@@ -345,12 +345,24 @@ def test_xz_program_uses_decoded_identity_and_reinstalls_offline(
     encoded = lzma.compress(raw[:11]) + bytes(4) + lzma.compress(raw[11:])
     transform = {"kind": "xz", "version": 1}
     card = _card()
+    card["x-publisher"] = {"labels": ["example", 3]}
+    card["variants"]["v"]["x-quality"] = "preview"
+    card["presets"]["check"]["x-display"] = True
     card["programs"]["p"]["inputs"] = [
-        {"path": "code.loombc", "origin": "code.loombc.xz", "transform": transform}
+        {
+            "path": "code.loombc",
+            "origin": "code.loombc.xz",
+            "x-source": "example",
+            "transform": transform | {"x-encoder": "author"},
+        }
     ]
     cache = ContentCache(tmp_path / "cache")
     identity = FileIdentity(
-        "code.loombc.xz", len(raw), hashlib.sha256(raw).hexdigest(), transform=transform
+        "code.loombc.xz",
+        len(raw),
+        hashlib.sha256(raw).hexdigest(),
+        transform=transform | {"x-encoder": "lock"},
+        extensions={"x-signer": ["release"]},
     )
     weights = b"weights"
     commitments = [
@@ -364,7 +376,7 @@ def test_xz_program_uses_decoded_identity_and_reinstalls_offline(
         resources,
     ):
         resources["/model.json.lock"] = json.dumps(
-            ModelLock.snapshot({}, commitments, scope=scope)
+            ModelLock.snapshot({}, commitments, scope=scope) | {"x-build": 17}
         ).encode()
         install(
             _remote_plan(base, cache),
@@ -387,6 +399,19 @@ def test_xz_program_uses_decoded_identity_and_reinstalls_offline(
         preserve_sources=preserve,
     )
     for directory in (tmp_path / "first", tmp_path / "second"):
+        installed = json.loads((directory / "model.json").read_text())
+        assert installed["x-publisher"] == card["x-publisher"]
+        assert installed["variants"]["v"]["x-quality"] == "preview"
+        assert installed["presets"]["check"]["x-display"] is True
+        provider = installed["programs"]["p"]["inputs"][0]
+        assert provider["x-source"] == "example"
+        assert provider["transform"]["x-encoder"] == "author"
+        lock = json.loads((directory / "model.json.lock").read_text())
+        assert lock["x-build"] == 17
+        if scope == "all":
+            entry = next(file for file in lock["files"] if "transform" in file)
+            assert entry["x-signer"] == ["release"]
+            assert entry["transform"]["x-encoder"] == "lock"
         assert (directory / "code.loombc").read_bytes() == raw
         assert not (directory / "code.loombc.xz").exists()
 
@@ -571,7 +596,12 @@ def test_publication_lock_unions_sources_without_merging_destinations(tmp_path):
         document = cache.read_document(base + "/model.json", offline=False)
         card = ModelCard.parse(document.text)
         lock_path = tmp_path / "publication.json.lock"
-        lock_path.write_text('{"stale":"record"}')
+        old = _lock({"code.loom": b"old", "removed": b"stale"})
+        old["x-release"] = 23
+        next(file for file in old["files"] if file["origin"] == "code.loom")[
+            "x-label"
+        ] = "source"
+        lock_path.write_text(json.dumps(old))
         plan = plan_lock(
             document, card, cache, lock_location=str(lock_path), lock_scope="all"
         )
@@ -596,6 +626,11 @@ def test_publication_lock_unions_sources_without_merging_destinations(tmp_path):
         assert set(requests) == {"/model.json", *("/" + name for name in files)}
         assert len(requests) == 4
         lock = ModelLock.parse(lock_path.read_text())
+        assert len(lock.files) == 3
+        assert lock.extensions == {"x-release": 23}
+        code = next(file for file in lock.files.values() if file.origin == "code.loom")
+        assert code.extensions == {"x-label": "source"}
+        assert code.sha256 == hashlib.sha256(b"code").hexdigest()
         for choice in plan.selections:
             selected = card.select(**choice)
             assert set(lock.cover(selected)) == set(selected.files)
@@ -633,14 +668,15 @@ def test_publication_lock_cancellation_never_changes_previous_bytes(tmp_path):
         cache = ContentCache(tmp_path / "cache")
         document = cache.read_document(base + "/model.json", offline=False)
         path = tmp_path / "model.json.lock"
-        path.write_text("previous bytes")
+        previous = json.dumps(_lock(files))
+        path.write_text(previous)
         plan = plan_lock(
             document, ModelCard.parse(document.text), cache, lock_location=str(path)
         )
         cache.cancel()
         with pytest.raises(FetchError, match="cancelled"):
             update_lock(plan, cache)
-        assert path.read_text() == "previous bytes"
+        assert path.read_text() == previous
         assert requests == ["/model.json"]
 
 

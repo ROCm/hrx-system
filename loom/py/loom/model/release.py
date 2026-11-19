@@ -75,7 +75,8 @@ def stage_release(
     assets = lock_files(selected, "assets")
     identities = {}
     roots = {}
-    if assets:
+    lock = None
+    if assets or asset_lock:
         lock_path = asset_lock or card.with_name(card.name + ".lock")
         lock = ModelLock.parse(lock_path.read_text(encoding="utf-8"))
         identities = lock.cover(selected, assets_only=True)
@@ -113,7 +114,7 @@ def stage_release(
                 identities[name] = _stage_program(card.parent, stage, file)
         for role in ("inputs", "libraries"):
             program[role] = [published(value) for value in program[role]]
-        snapshot = ModelLock.snapshot(roots, list(identities.values()))
+        snapshot = ModelLock.snapshot(roots, list(identities.values()), previous=lock)
         for name, contents in (("model.json", document), ("model.json.lock", snapshot)):
             with (stage / name).open("x", encoding="utf-8", newline="\n") as stream:
                 stream.write(json.dumps(contents, indent=2) + "\n")

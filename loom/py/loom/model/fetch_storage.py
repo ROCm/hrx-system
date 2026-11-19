@@ -25,7 +25,7 @@ from .fetch_source import Document, FetchError, Source, document_source, open_so
 from .fetch_transfer import run_transfer
 from .fetch_xz import unpack_xz
 from .lock import FileIdentity, ModelLock, file_digest, file_key
-from .manifest import ManifestError, parse_json
+from .manifest import ManifestError, operation_fields, parse_json
 
 # Document limits protect the public metadata boundary; payloads stream instead.
 _DOCUMENT_LIMIT = 16 * 1024 * 1024
@@ -42,7 +42,7 @@ def require_supported_transform(transform: dict, path: str) -> None:
         raise ManifestError(
             f"{path}: unsupported acquisition transform {kind!r} version {version}"
         )
-    unknown = transform.keys() - {"kind", "version", *options}
+    unknown = operation_fields(transform).keys() - {"kind", "version", *options}
     if unknown:
         raise ManifestError(
             f"{path}: unsupported options for acquisition transform {kind!r} "
@@ -458,7 +458,7 @@ class ContentCache:
                 if cached is not None
                 else self._publish(destination, observed, progress=progress)
             )
-            return AcquiredFile(path, observed)
+            return AcquiredFile(path, identity or observed)
 
     def read_document(self, location: str, *, offline: bool) -> Document:
         self.progress.emit("discover")
@@ -556,7 +556,7 @@ class ContentCache:
                 identity.sha256,
             ):
                 raise ManifestError(f"integrity mismatch for local source {path}")
-            return AcquiredFile(path, observed)
+            return AcquiredFile(path, identity or observed)
         receipt = None
         if kind == "url":
             receipt = self._source_receipt(source)
@@ -591,7 +591,7 @@ class ContentCache:
                 )
                 observed = FileIdentity(source.origin, size, digest, source.resolved)
                 path = self._publish(temporary, observed, progress=progress)
-                acquired = AcquiredFile(path, observed)
+                acquired = AcquiredFile(path, identity or observed)
             finally:
                 temporary.unlink(missing_ok=True)
         if receipt is not None and not offline:

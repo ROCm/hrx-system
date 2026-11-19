@@ -53,6 +53,11 @@ def main():
         run("refresh.py", "--cache=" + str(root / "author-cache"))
         assert lock.read_bytes() == original_lock
         assert catalog.read_bytes() == original_catalog
+        catalog.write_text(
+            json.dumps(json.loads(original_catalog) | {"x-owner": "publisher"}),
+            encoding="utf-8",
+        )
+        original_catalog = catalog.read_bytes()
 
         def contents():
             return {

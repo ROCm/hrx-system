@@ -73,7 +73,12 @@ def _header(content, data_length):
             except UnicodeEncodeError as error:
                 raise ManifestError("safetensors metadata requires UTF-8") from error
             continue
-        _object(tensor, "safetensors." + name, ("dtype", "shape", "data_offsets"))
+        _object(
+            tensor,
+            "safetensors." + name,
+            ("dtype", "shape", "data_offsets"),
+            extensions=False,
+        )
         dtype, shape, offsets = tensor["dtype"], tensor["shape"], tensor["data_offsets"]
         if not isinstance(dtype, str) or dtype not in DTYPE_BITS:
             raise ManifestError(f"unsupported safetensors dtype {dtype!r}")

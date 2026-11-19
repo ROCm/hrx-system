@@ -8,6 +8,7 @@
 
 import functools
 import http.server
+import json
 import shutil
 import subprocess
 import sys
@@ -25,9 +26,14 @@ def main():
         Path(value).absolute() for value in sys.argv[1:]
     )
     builds = dict(zip(("source", "archive", "mixed"), deployments, strict=True))
-    lock = fixture_card.parent / "native.card.json.lock"
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
+        authored = ModelCard.parse(fixture_card.read_text()).document
+        lock = root / "asset.lock"
+        asset_lock = json.loads(
+            (fixture_card.parent / "native.card.json.lock").read_text()
+        )
+        lock.write_text(json.dumps(asset_lock | {"x-publication": "example"}))
         publication = root / "publication"
         publication.mkdir()
         for representation, deployment in builds.items():
@@ -94,6 +100,11 @@ def main():
         )
         for representation, deployment in installations.items():
             selected = ModelCard.parse(deployment.read_text()).select()
+            assert selected.document.get("x-fixture") == authored.get("x-fixture")
+            installed_lock = json.loads(
+                deployment.with_name("model.json.lock").read_text()
+            )
+            assert installed_lock["x-publication"] == "example"
             for file in selected.files.values():
                 if file.roles & {"program", "auxiliary"}:
                     assert (deployment.parent / file.path).read_bytes() == (

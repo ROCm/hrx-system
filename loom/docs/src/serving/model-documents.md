@@ -248,6 +248,21 @@ by the selected files before transferring payloads. A different preset can
 therefore use a newer transform in the same publication. A native server
 opening an installed file reads its local path and format.
 
+### Extending a publication
+
+A publisher can add optional metadata to a model card, catalog, or lock by
+giving the field an `x-` prefix. For example, `"x-studio-label": "preview"`
+on a model can give a registry a display label. Loom carries these fields on
+retained records and ignores them during acquisition and execution. Changing
+the label leaves the file's lock identity and content cache entry intact.
+
+Fields that change how a file is acquired or a model runs belong to the
+corresponding operation or service contract. An installer can discover a
+model with a newer acquisition operation and will name the unsupported file
+if the user selects it. A new document major version requires a reader that
+understands it. Within a supported version, misspelled structural fields
+still produce an error.
+
 ## Deployment fields
 
 | Field | Contract |

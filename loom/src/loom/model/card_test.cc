@@ -310,6 +310,17 @@ TEST_F(CardTest, InstalledProvidersIgnoreAcquisitionInstructions) {
             "mixed");
 }
 
+TEST_F(CardTest, OptionalRecordAnnotationsDoNotChangeSelection) {
+  IREE_ASSERT_OK(Parse(
+      Replace(R"("directory": "program")",
+              R"("x-publisher": {"ranks":[1,2]}, "directory": "program")")));
+  EXPECT_EQ(String(loom_model_card_selection(card_)->selector.programs),
+            "mixed");
+  IREE_ASSERT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      Parse(Replace(R"("directory": "program")", R"("direcotry": "program")")));
+}
+
 TEST_F(CardTest, CanonicalOptionsBelongToTheSelectedService) {
   std::string json =
       Replace("\"execution\": {\"rows\": 2}",

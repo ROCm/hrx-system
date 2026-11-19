@@ -110,6 +110,9 @@ static iree_status_t loom_model_check_fields(
     return iree_ok_status();
   }
   for (iree_host_size_t i = 0; i < object->count; ++i) {
+    if (iree_string_view_starts_with(object->fields[i].key, IREE_SV("x-"))) {
+      continue;
+    }
     iree_string_view_t remaining = iree_make_cstring_view(allowed);
     bool found = false;
     while (remaining.size) {

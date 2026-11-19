@@ -1,6 +1,7 @@
 {
   "$schema": "../../../../../py/loom/model/model-card.v1.schema.json",
   "schema_version": 1,
+  "x-fixture": {"modality": "text"},
   "model": {
     "id": "loom-fixture/text",
     "name": "Weighted text fixture"

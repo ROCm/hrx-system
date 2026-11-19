@@ -24,6 +24,7 @@ from loom.model.manifest import (
     _string,
     _strings,
     parse_json,
+    project_fields,
 )
 
 
@@ -33,12 +34,13 @@ class ModelCatalog:
     def __init__(self, document: dict):
         document = copy.deepcopy(document)
         _json_value(document, "catalog")
-        _object(document, "catalog", ("schema_version", "models"), ("$schema",))
+        _mapping(document, "catalog")
         if (
-            type(document["schema_version"]) is not int
+            type(document.get("schema_version")) is not int
             or document["schema_version"] != 1
         ):
             raise ManifestError("unsupported model-catalog version; supported: 1")
+        _object(document, "catalog", ("schema_version", "models"), ("$schema",))
         if "$schema" in document:
             _string(document["$schema"], "catalog.$schema")
         for identity, entry in _mapping(
@@ -90,23 +92,27 @@ class ModelCatalog:
         return self._document["models"][identity]["card"]
 
 
-def generate(cards: dict[str, ModelCard]) -> ModelCatalog:
+def generate(
+    cards: dict[str, ModelCard], *, previous: ModelCatalog | None = None
+) -> ModelCatalog:
     """Summarizes validated cards keyed by their publication-relative paths."""
     models = {}
+    prior = previous.document if previous else {}
     for path, card in cards.items():
         _path(path, "catalog card path")
         document = card.document
         identity = document["model"]["id"]
         if identity in models:
             raise ManifestError(f"duplicate catalog model {identity!r}")
+        old_entry = prior.get("models", {}).get(identity, {})
         entry = {
-            "name": document["model"]["name"],
+            **project_fields(old_entry),
+            **project_fields(document["model"], ("name",)),
             "card": path,
             "services": {
                 name: {
-                    key: value
-                    for key, value in service.items()
-                    if key in ("kind", "version")
+                    **project_fields(old_entry.get("services", {}).get(name, {})),
+                    **project_fields(service, ("kind", "version")),
                 }
                 for name, service in document["services"].items()
             },
@@ -116,7 +122,13 @@ def generate(cards: dict[str, ModelCard]) -> ModelCatalog:
         if "description" in document["model"]:
             entry["description"] = document["model"]["description"]
         models[identity] = entry
-    return ModelCatalog({"schema_version": 1, "models": dict(sorted(models.items()))})
+    return ModelCatalog(
+        {
+            **project_fields(prior),
+            "schema_version": 1,
+            "models": dict(sorted(models.items())),
+        }
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -134,9 +146,12 @@ def main(argv: list[str] | None = None) -> int:
         if not separator or not local or path in cards:
             parser.error("--card requires a unique PUBLISHED_PATH=LOCAL_JSON")
         cards[path] = ModelCard.parse(Path(local).read_text(encoding="utf-8"))
-    args.output.write_text(
-        json.dumps(generate(cards).document, indent=2) + "\n", encoding="utf-8"
-    )
+    try:
+        prior = ModelCatalog.parse(args.output.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        prior = None
+    document = generate(cards, previous=prior).document
+    args.output.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
     return 0
 
 
