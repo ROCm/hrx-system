@@ -1354,3 +1354,67 @@ func.def @forwarding_tuple(%outer: i1, %inner: i1, %size: index, %input: view<[%
 ^_bb5:
   cfg.br ^result(%size: index, %input: view<[%size]xf32>, %output: buffer, %lanes: vector<4xi32>)
 }
+
+// ====
+
+// Two decisions share the same fallback, and a later decision forwards a
+// different value. Every path must preserve its selected payload through both
+// joins, including the original fallback when it acquires a unique predecessor.
+func.def @forwarding_choices(%choose: i1, %left: i1, %right: i1, %outer: i1, %inner: i1, %value: i32, %fallback: i32) -> (i32) {
+  cfg.cond_br %choose, ^left, ^right
+^left:
+  cfg.cond_br %left, ^fallback, ^left_work
+^right:
+  cfg.cond_br %right, ^right_work, ^fallback
+^left_work:
+  %twice = scalar.addi %value, %value : i32
+  cfg.br ^next(%twice: i32)
+^right_work:
+  test.use %value : i32
+  cfg.br ^next(%value: i32)
+^fallback:
+  cfg.br ^next(%fallback: i32)
+^next(%seed: i32):
+  cfg.cond_br %outer, ^evaluate, ^keep
+^evaluate:
+  cfg.cond_br %inner, ^work, ^keep
+^work:
+  %sum = scalar.addi %seed, %value : i32
+  cfg.br ^result(%sum: i32)
+^keep:
+  cfg.br ^result(%seed: i32)
+^result(%answer: i32):
+  func.return %answer : i32
+}
+
+// ----
+func.def @forwarding_choices(%choose: i1, %left: i1, %right: i1, %outer: i1, %inner: i1, %value: i32, %fallback: i32) -> (i32) {
+  cfg.cond_br %choose, ^left, ^right
+^left:
+  cfg.cond_br %left, ^fallback, ^left_work
+^right:
+  cfg.cond_br %right, ^right_work, ^_bb11
+^left_work:
+  %twice = scalar.addi %value, %value : i32
+  cfg.br ^next(%twice: i32)
+^right_work:
+  test.use %value : i32
+  cfg.br ^next(%value: i32)
+^fallback:
+  cfg.br ^next(%fallback: i32)
+^next(%seed: i32):
+  cfg.cond_br %outer, ^evaluate, ^keep
+^evaluate:
+  cfg.cond_br %inner, ^work, ^_bb12
+^work:
+  %sum = scalar.addi %seed, %value : i32
+  cfg.br ^result(%sum: i32)
+^keep:
+  cfg.br ^result(%seed: i32)
+^result(%answer: i32):
+  func.return %answer : i32
+^_bb11:
+  cfg.br ^next(%fallback: i32)
+^_bb12:
+  cfg.br ^result(%seed: i32)
+}
