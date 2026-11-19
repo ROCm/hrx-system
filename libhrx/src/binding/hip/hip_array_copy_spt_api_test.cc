@@ -1246,6 +1246,36 @@ TEST_F(HipArrayCopySptApiTest, SynchronousCopyRejectsCaptureBeforeMutation) {
   expect_original_contents();
 }
 
+TEST_F(HipArrayCopySptApiTest, PackedCopyRejectsKnownAllocationOverrun) {
+  AllocateArray(8, 2);
+  std::array<uint8_t, 16> original;
+  original.fill(0xA5);
+  ASSERT_EQ(hipSuccess,
+            api_.memcpy_to_array(array_, 0, 0, original.data(), original.size(),
+                                 hipMemcpyHostToDevice));
+  ASSERT_EQ(hipSuccess, api_.malloc(&device_pointer_, original.size()));
+  ASSERT_EQ(hipSuccess, api_.memcpy(device_pointer_, original.data(),
+                                    original.size(), hipMemcpyHostToDevice));
+  // A known allocation with an invalid window must not be reclassified as a
+  // pageable host pointer when inference cannot produce a valid endpoint.
+  EXPECT_EQ(hipErrorInvalidValue,
+            api_.memcpy_to_array(array_, 0, 0,
+                                 static_cast<uint8_t*>(device_pointer_) + 8,
+                                 original.size(), hipMemcpyDefault));
+  EXPECT_EQ(hipErrorInvalidValue,
+            api_.memcpy_from_array_spt(
+                static_cast<uint8_t*>(device_pointer_) + 8, array_, 0, 0,
+                original.size(), hipMemcpyDefault));
+  std::array<uint8_t, 16> actual = {};
+  ASSERT_EQ(hipSuccess,
+            api_.memcpy_from_array_spt(actual.data(), array_, 0, 0,
+                                       actual.size(), hipMemcpyDeviceToHost));
+  EXPECT_EQ(actual, original);
+  ASSERT_EQ(hipSuccess, api_.memcpy(actual.data(), device_pointer_,
+                                    actual.size(), hipMemcpyDeviceToHost));
+  EXPECT_EQ(actual, original);
+}
+
 TEST_F(HipArrayCopySptApiTest, CopiesPackedRowsAtRepresentativeHeights) {
   constexpr size_t kWidth = 31;
   const std::array<size_t, 3> row_counts = {1, 256, 4096};

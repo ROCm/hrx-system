@@ -8768,15 +8768,19 @@ static hipError_t iree_hip_array_copy_packed_rows(
     return hipErrorStreamCaptureImplicit;
   }
 
-  iree_hal_streaming_context_t* external_context = NULL;
-  iree_hal_streaming_buffer_ref_t external_ref = {0};
-  iree_status_t external_status =
-      iree_hal_streaming_memory_lookup_range_across_contexts(
-          (iree_hal_streaming_deviceptr_t)external_ptr, byte_count,
-          &external_context, &external_ref);
+  iree_hip_copy_endpoint_t external = iree_hip_copy_endpoint_resolve(
+      array_info->context, external_ptr, /*search_foreign=*/true);
+  iree_hal_streaming_context_t* external_context = external.context;
+  const iree_hal_streaming_buffer_ref_t external_ref = external.reference;
   const bool external_is_device =
-      iree_status_is_ok(external_status) &&
-      iree_hip_buffer_ref_is_device_memory(external_ref);
+      external_ref.buffer && iree_hip_buffer_ref_is_device_memory(external_ref);
+  if (!iree_hip_copy_endpoint_contains(&external, byte_count,
+                                       external_is_device)) {
+    iree_hip_copy_endpoint_deinitialize(array_info->context, &external);
+    iree_hip_resolved_stream_release(&resolved_stream);
+    iree_hip_array_release(array_info);
+    return hipErrorInvalidValue;
+  }
   if (kind == hipMemcpyDefault) {
     if (external_is_device) {
       kind = hipMemcpyDeviceToDevice;
@@ -8883,10 +8887,7 @@ static hipError_t iree_hip_array_copy_packed_rows(
       result = synchronize_result;
     }
   }
-  if (iree_status_is_ok(external_status)) {
-    iree_hal_streaming_context_release(external_context);
-  }
-  iree_status_ignore(external_status);
+  iree_hip_copy_endpoint_deinitialize(array_info->context, &external);
   iree_hip_resolved_stream_release(&resolved_stream);
   iree_hip_array_release(array_info);
   return result;
