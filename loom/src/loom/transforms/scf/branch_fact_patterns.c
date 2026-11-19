@@ -12,6 +12,7 @@
 #include "loom/analysis/symbolic_expr.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ir/type_dependencies.h"
 #include "loom/ir/type_refs.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
@@ -416,27 +417,37 @@ static bool loom_branch_facts_operand_binds_boundary_type(
          loom_module_value_has_type_uses(module, operand);
 }
 
-static bool loom_branch_facts_can_rewrite_edge_type_refs_for_result(
-    const loom_module_t* module, const loom_op_t* op,
-    loom_value_id_t result_id) {
-  if (result_id == LOOM_VALUE_ID_INVALID || result_id >= module->values.count) {
+static bool loom_branch_facts_op_can_refine_result_types(
+    const loom_module_t* module, const loom_op_t* op) {
+  // The index is created by the first nonempty declared dependency set.
+  if (!op->result_count || !module->type_uses.index) {
     return false;
   }
   const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
-  if (!vtable || !loom_traits_have_refinable_result_type_refs(vtable->traits)) {
-    return false;
+  return vtable && loom_traits_have_refinable_result_type_refs(vtable->traits);
+}
+
+static loom_type_dependency_id_t loom_branch_facts_rewritable_type_dependencies(
+    const loom_module_t* module, loom_value_id_t result) {
+  const loom_type_dependency_id_t dependencies =
+      loom_type_dependencies_declared(&module->type_uses, result);
+  if (!dependencies ||
+      loom_branch_facts_value_has_type_sensitive_use(module, result)) {
+    return 0;
   }
-  return !loom_branch_facts_value_has_type_sensitive_use(module, result_id);
+  return dependencies;
 }
 
 static void loom_branch_facts_scan_type_for_edge_uses(
     const loom_module_t* module,
-    loom_branch_facts_edge_assume_set_t* assume_set, loom_type_t type) {
-  for (uint16_t candidate_index = 0;
-       candidate_index < assume_set->candidate_count; ++candidate_index) {
+    loom_branch_facts_edge_assume_set_t* assume_set,
+    loom_type_dependency_id_t dependencies) {
+  for (uint16_t i = 0; i < assume_set->candidate_count; ++i) {
     loom_branch_facts_edge_assume_candidate_t* candidate =
-        &assume_set->candidates[candidate_index];
-    if (loom_type_references_value(module, type, candidate->source)) {
+        &assume_set->candidates[i];
+    if (!candidate->has_region_use &&
+        loom_type_dependencies_contains(&module->type_uses, dependencies,
+                                        candidate->source)) {
       candidate->has_region_use = true;
     }
   }
@@ -584,17 +595,18 @@ static iree_status_t loom_branch_facts_scan_region_uses(
     IREE_RETURN_IF_ERROR(
         loom_branch_facts_scan_edge_value_use(scan, operands[operand_index]));
   }
+  if (!loom_branch_facts_op_can_refine_result_types(scan->module, op)) {
+    return iree_ok_status();
+  }
   const loom_value_id_t* results = loom_op_const_results(op);
-  for (uint16_t result_index = 0; result_index < op->result_count;
-       ++result_index) {
-    loom_value_id_t result = results[result_index];
-    if (!loom_branch_facts_can_rewrite_edge_type_refs_for_result(scan->module,
-                                                                 op, result)) {
-      continue;
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    const loom_type_dependency_id_t dependencies =
+        loom_branch_facts_rewritable_type_dependencies(scan->module,
+                                                       results[i]);
+    if (dependencies) {
+      loom_branch_facts_scan_type_for_edge_uses(scan->module, scan->assume_set,
+                                                dependencies);
     }
-    loom_type_t result_type = loom_module_value_type(scan->module, result);
-    loom_branch_facts_scan_type_for_edge_uses(scan->module, scan->assume_set,
-                                              result_type);
   }
   return iree_ok_status();
 }
@@ -605,29 +617,6 @@ static bool loom_branch_facts_is_edge_assume_op(
   for (uint16_t i = 0; i < assume_set->candidate_count; ++i) {
     if (assume_set->candidates[i].assume_op == op) {
       return true;
-    }
-  }
-  return false;
-}
-
-static bool loom_branch_facts_region_contains_block(
-    const loom_region_t* region, const loom_block_t* target_block) {
-  if (!region || !target_block) {
-    return false;
-  }
-  const loom_block_t* block = NULL;
-  loom_region_for_each_block(region, block) {
-    if (block == target_block) {
-      return true;
-    }
-    const loom_op_t* op = NULL;
-    loom_block_for_each_op(block, op) {
-      loom_region_t** regions = loom_op_regions(op);
-      for (uint8_t i = 0; i < op->region_count; ++i) {
-        if (loom_branch_facts_region_contains_block(regions[i], target_block)) {
-          return true;
-        }
-      }
     }
   }
   return false;
@@ -646,13 +635,13 @@ static loom_op_t* loom_branch_facts_edge_assume_insertion_anchor(
   }
 
   loom_op_t* defining_op = loom_value_def_op(value);
-  if (!defining_op || !defining_op->parent_block) {
-    return NULL;
+  for (const loom_op_t* current = defining_op; current && current->parent_block;
+       current = current->parent_op) {
+    if (current->parent_block->parent_region == region) {
+      return defining_op;
+    }
   }
-  return loom_branch_facts_region_contains_block(region,
-                                                 defining_op->parent_block)
-             ? defining_op
-             : NULL;
+  return NULL;
 }
 
 typedef struct loom_branch_facts_region_replacement_t {
@@ -665,14 +654,19 @@ typedef struct loom_branch_facts_region_replacement_t {
 static iree_status_t loom_branch_facts_rewrite_type_with_edge_assumes(
     loom_rewriter_t* rewriter,
     const loom_branch_facts_edge_assume_set_t* assume_set, loom_type_t type,
-    loom_type_t* out_type, bool* out_changed) {
+    loom_type_dependency_id_t dependencies, loom_type_t* out_type,
+    bool* out_changed) {
   *out_type = type;
   *out_changed = false;
   for (uint16_t candidate_index = 0;
        candidate_index < assume_set->candidate_count; ++candidate_index) {
     const loom_branch_facts_edge_assume_candidate_t* candidate =
         &assume_set->candidates[candidate_index];
-    if (candidate->replacement == LOOM_VALUE_ID_INVALID) {
+    // Chained refinements share the original source, even when the input to
+    // this replacement was produced by the preceding one.
+    if (candidate->replacement == LOOM_VALUE_ID_INVALID ||
+        !loom_type_dependencies_contains(&rewriter->module->type_uses,
+                                         dependencies, candidate->source)) {
       continue;
     }
     loom_type_t rewritten_type = *out_type;
@@ -690,12 +684,18 @@ static iree_status_t loom_branch_facts_rewrite_type_with_edge_assumes(
 
 static iree_status_t loom_branch_facts_replace_result_type_refs(
     loom_branch_facts_region_replacement_t* replacement, loom_op_t* op) {
+  if (!loom_branch_facts_op_can_refine_result_types(
+          replacement->rewriter->module, op)) {
+    return iree_ok_status();
+  }
   const loom_value_id_t* results = loom_op_const_results(op);
   for (uint16_t result_index = 0; result_index < op->result_count;
        ++result_index) {
     loom_value_id_t result = results[result_index];
-    if (!loom_branch_facts_can_rewrite_edge_type_refs_for_result(
-            replacement->rewriter->module, op, result)) {
+    const loom_type_dependency_id_t dependencies =
+        loom_branch_facts_rewritable_type_dependencies(
+            replacement->rewriter->module, result);
+    if (!dependencies) {
       continue;
     }
     loom_type_t old_type =
@@ -703,8 +703,8 @@ static iree_status_t loom_branch_facts_replace_result_type_refs(
     loom_type_t new_type = old_type;
     bool changed = false;
     IREE_RETURN_IF_ERROR(loom_branch_facts_rewrite_type_with_edge_assumes(
-        replacement->rewriter, replacement->assume_set, old_type, &new_type,
-        &changed));
+        replacement->rewriter, replacement->assume_set, old_type, dependencies,
+        &new_type, &changed));
     if (changed) {
       IREE_RETURN_IF_ERROR(loom_rewriter_set_value_type(replacement->rewriter,
                                                         result, new_type));
