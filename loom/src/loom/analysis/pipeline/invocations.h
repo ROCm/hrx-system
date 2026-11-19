@@ -45,6 +45,9 @@ struct loom_pipeline_invocation_schedule_t {
   const loom_pipeline_schedule_t* source;
   // Per-block bindings indexed exactly like source->blocks[b].steps.
   const loom_pipeline_invocation_step_t* const* blocks;
+  // Dense position in the bound graph's construction order, including nested
+  // scopes and distinct occurrences of the same source.
+  iree_host_size_t ordinal;
 };
 
 // A static child call site with its actual resource correspondence. A loop

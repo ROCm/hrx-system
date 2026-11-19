@@ -601,10 +601,10 @@ static bool loom_pipeline_transport_input_recurrence(
   }
   if (scope == LOOM_CFG_LOOP_NEST_NONE ||
       !loom_symbolic_expr_is_linear(offset) || offset->term_count != 1 ||
-      phase->transfers % worker->loop_trip_counts[scope]) {
+      phase->transfers % worker->loop_trip_bounds[scope]) {
     return false;
   }
-  phase->period = worker->loop_trip_counts[scope];
+  phase->period = worker->loop_trip_bounds[scope];
   const loom_value_fact_induction_t* induction = &structure->inductions[scope];
   int64_t initial, increment, displacement;
   if (!loom_value_facts_as_exact_i64(
@@ -993,7 +993,7 @@ static iree_status_t loom_pipeline_worker_transport(
   }
   if (serial_records && (batch_count > 1 || nonuniform_copies)) {
     IREE_RETURN_IF_ERROR(loom_pipeline_transport_copy_stream(
-        &structure->loops, worker->loop_trip_counts, cohorts, cohort_count,
+        &structure->loops, worker->loop_trip_bounds, cohorts, cohort_count,
         copies, copy_count, nonuniform_copies, arena, &copy_stream));
   }
   const loom_pipeline_transport_loop_t* copy_loops = NULL;
@@ -1001,7 +1001,7 @@ static iree_status_t loom_pipeline_worker_transport(
   if ((copy_stream || nonuniform_copies || batch_count > 1) &&
       structure->loops.loop_count) {
     IREE_RETURN_IF_ERROR(loom_pipeline_transport_copy_loops(
-        &structure->loops, worker->loop_trip_counts, copies, copy_count, arena,
+        &structure->loops, worker->loop_trip_bounds, copies, copy_count, arena,
         &copy_loops));
     copy_loop_count = structure->loops.loop_count;
   }
@@ -1034,34 +1034,20 @@ static iree_status_t loom_pipeline_worker_execution_counts(
     loom_module_t* module, iree_arena_allocator_t* arena,
     const loom_value_fact_cfg_region_t* structure,
     loom_pipeline_worker_t* worker, const uint64_t** out_execution_bounds) {
-  uint64_t* trip_counts = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(arena, structure->loops.loop_count,
-                                sizeof(*trip_counts), (void**)&trip_counts));
-  bool exact = true;
-  for (iree_host_size_t i = 0; i < structure->loops.loop_count; ++i) {
-    const loom_loop_recurrence_facts_t recurrence =
-        loom_value_fact_induction_facts(&worker->facts, module,
-                                        &structure->inductions[i]);
-    exact &= recurrence.trip_count_kind == LOOM_LOOP_TRIP_COUNT_EXACT;
-    trip_counts[i] = recurrence.trip_count_kind == LOOM_LOOP_TRIP_COUNT_UNKNOWN
-                         ? UINT64_MAX
-                         : recurrence.trip_count;
-  }
+  const uint64_t* trip_bounds = NULL;
+  const bool* variable_trips = NULL;
+  IREE_RETURN_IF_ERROR(loom_value_fact_induction_trip_bounds(
+      &worker->facts, module, structure->inductions,
+      structure->loops.loop_count, arena, &trip_bounds, &variable_trips));
   uint64_t* counts;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, structure->graph.block_count, sizeof(*counts), (void**)&counts));
-  if (exact) {
-    IREE_RETURN_IF_ERROR(loom_cfg_execution_counts_calculate(
-        &structure->loops, trip_counts, &structure->control_structure, arena,
-        counts, &worker->execution_counts));
-  } else {
-    loom_cfg_loop_nest_calculate_block_execution_bounds(&structure->loops,
-                                                        trip_counts, counts);
-  }
+  IREE_RETURN_IF_ERROR(loom_cfg_execution_counts_calculate(
+      &structure->loops, trip_bounds, variable_trips,
+      &structure->control_structure, arena, counts, &worker->execution_counts));
   *out_execution_bounds = counts;
   if (worker->execution_counts.values) {
-    worker->loop_trip_counts = trip_counts;
+    worker->loop_trip_bounds = trip_bounds;
   }
   if (worker->execution_counts.single_path) {
     worker->block_execution_counts = counts;

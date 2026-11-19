@@ -47,8 +47,6 @@ typedef struct loom_aie2p_native_payload_class_t {
   bool routed;
   // Every use is a distribution with a receiver-owned admission protocol.
   bool distribution_only;
-  // Distinct selected distribution paths using this physical destination set.
-  uint32_t distribution_path_count;
 } loom_aie2p_native_payload_class_t;
 
 // All occurrence-owned uses of one physical memory-to-stream queue.
@@ -57,6 +55,9 @@ typedef struct loom_aie2p_native_payload_source_t {
   struct loom_aie2p_native_payload_source_t* next;
   // Physical sender selected by common lifetime allocation.
   loom_aie2p_native_payload_endpoint_t endpoint;
+  // Every selected distribution geometry submitting to this queue. Changing
+  // its packet framing requires a receive credit for each of these users.
+  loom_aie2p_native_distribution_t* distributions;
   // Distinct destination sets in this sender's packet namespace.
   loom_aie2p_native_payload_class_t* classes;
   // Number of destination sets, bounded by the hardware packet ID space.

@@ -23,25 +23,15 @@ static iree_status_t loom_low_lower_calculate_block_execution_counts(
   const loom_value_fact_cfg_region_t* region =
       loom_value_fact_table_lookup_cfg_region(context->fact_table, body);
   const loom_cfg_loop_nest_t* loops = &region->loops;
-  uint64_t* trip_counts = NULL;
-  if (loops->loop_count > 0) {
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(scratch_arena, loops->loop_count,
-                                  sizeof(*trip_counts), (void**)&trip_counts));
-  }
-  for (iree_host_size_t i = 0; i < loops->loop_count; ++i) {
-    const loom_loop_recurrence_facts_t recurrence =
-        loom_value_fact_induction_facts(context->fact_table, context->module,
-                                        &region->inductions[i]);
-    if (recurrence.trip_count_kind != LOOM_LOOP_TRIP_COUNT_EXACT) {
-      return iree_ok_status();
-    }
-    trip_counts[i] = recurrence.trip_count;
-  }
+  const uint64_t* trip_bounds = NULL;
+  const bool* variable_trips = NULL;
+  IREE_RETURN_IF_ERROR(loom_value_fact_induction_trip_bounds(
+      context->fact_table, context->module, region->inductions,
+      loops->loop_count, scratch_arena, &trip_bounds, &variable_trips));
   // The visibility heuristic consumes only whole-function exact counts.
   // Path-local uncertainty exists solely to enrich requested report rows.
   return loom_cfg_execution_counts_calculate(
-      loops, trip_counts,
+      loops, trip_bounds, variable_trips,
       loom_low_lower_context_wants_report_rows(context)
           ? &region->control_structure
           : NULL,

@@ -155,6 +155,7 @@ loom_cc_test(
 loom_cc_library(
     name = "execution_plan",
     srcs = [
+        "code_banks.c",
         "code_transport.c",
         "connectivity.c",
         "control_packet.c",
@@ -162,6 +163,7 @@ loom_cc_library(
         "switch.c",
     ],
     hdrs = [
+        "code_banks.h",
         "code_transport.h",
         "connectivity.h",
         "control_packet.h",
@@ -274,6 +276,18 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "code_banks_test",
+    srcs = ["code_banks_test.cc"],
+    deps = [
+        ":execution_plan",
+        "//loom/src/loom/target/arch/amd/xdna/array:facts",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

@@ -333,9 +333,10 @@ typedef struct loom_pipeline_worker_t {
   // Retained block multiplicity, including exact reconverged blocks when a
   // conditional path prevents the complete single-path proof above.
   loom_cfg_execution_counts_t execution_counts;
-  // Exact loop trip counts retained with execution_counts, or NULL when that
-  // result cannot establish enclosing multipliers.
-  const uint64_t* loop_trip_counts;
+  // Loop trip bounds retained with execution_counts. A header with an exact
+  // positive execution count has an exact trip count. NULL when block counts
+  // are unavailable.
+  const uint64_t* loop_trip_bounds;
 } loom_pipeline_worker_t;
 
 // Binds every outlined strand in one construction occurrence. The construction

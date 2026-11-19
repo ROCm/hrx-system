@@ -97,6 +97,21 @@ TEST_F(PipelineEntriesTest, SharedHelpersRetainTheirEnclosingConstruction) {
   EXPECT_EQ(extents[0].length, 240u);
 }
 
+TEST_F(PipelineEntriesTest, LoopPrioritySurvivesIndependentCompilation) {
+  uint32_t depths[] = {0, 0, 2, 1, 0};
+  lifetimes_.loop_depths = depths;
+  loom_pipeline_entry_scope_t* scope = nullptr;
+  IREE_ASSERT_OK(loom_pipeline_entry_scope_allocate(
+      &loom_pipeline_entry_scope_type, &lifetimes_, IREE_ARRAYSIZE(depths),
+      &arena_, &scope));
+  const loom_pipeline_entry_scope_t* copy = nullptr;
+  IREE_ASSERT_OK(loom_pipeline_entry_scope_clone(scope, &arena_, &copy));
+  EXPECT_NE(copy->lifetimes.loop_depths, scope->lifetimes.loop_depths);
+  depths[2] = 0;
+  EXPECT_EQ(copy->lifetimes.loop_depths[2], 2u);
+  EXPECT_EQ(copy->lifetimes.loop_depths[3], 1u);
+}
+
 TEST_F(PipelineEntriesTest, RootUsePromotesTheEntireSharedHelperChain) {
   // A direct root use of H must also keep H's callee G resident at the root.
   entries_.back().callee_count = 2;

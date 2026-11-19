@@ -14,62 +14,132 @@
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_capacity.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_loading.h"
 
-iree_status_t loom_aie2p_program_replacement_prepare(
+typedef struct loom_aie2p_body_owners_t {
+  // Ordinary aliases share this native body throughout their callers.
+  iree_host_size_t ordinary;
+  // Enclosing owner of bound phase aliases when measuring native demand.
+  iree_host_size_t bound;
+} loom_aie2p_body_owners_t;
+
+static iree_host_size_t loom_aie2p_join_owners(
+    const loom_pipeline_lifetimes_t* lifetimes, iree_host_size_t first,
+    iree_host_size_t second) {
+  return first == IREE_HOST_SIZE_MAX || first == second
+             ? second
+             : loom_pipeline_lifetimes_common_owner(lifetimes, first, second);
+}
+
+iree_status_t loom_aie2p_program_replacement_owners(
     loom_aie2p_program_source_table_t* sources,
     const loom_aie2p_program_source_function_t* source,
-    const loom_aie2p_program_object_t* native, iree_arena_allocator_t* arena,
-    loom_aie2p_program_layout_t* out_layout) {
+    const loom_aie2p_program_object_t* native, uint64_t* worker_lengths,
+    uint64_t* maximum_lengths, iree_arena_allocator_t* arena,
+    const iree_host_size_t** out_owners) {
+  const iree_host_size_t count = native->function_count;
+  const loom_pipeline_lifetimes_t* lifetimes =
+      &source->pipeline_entry->scope->lifetimes;
+  iree_host_size_t* owners = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, count + 1, sizeof(*owners), (void**)&owners));
   iree_arena_allocator_t scratch;
   iree_arena_initialize(arena->block_pool, &scratch);
-  const iree_host_size_t count = source->helpers.count + 2;
-  iree_host_size_t* owners = NULL;
-  iree_host_size_t* shared_owners = NULL;
+  loom_aie2p_body_owners_t* bodies = NULL;
   iree_status_t status = iree_arena_allocate_array(
-      &scratch, count, sizeof(*owners), (void**)&owners);
+      &scratch, count, sizeof(*bodies), (void**)&bodies);
   if (iree_status_is_ok(status)) {
-    status = iree_arena_allocate_array(&scratch, native->function_count,
-                                       sizeof(*shared_owners),
-                                       (void**)&shared_owners);
-  }
-  if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < native->function_count; ++i) {
-      shared_owners[i] = IREE_HOST_SIZE_MAX;
+    for (iree_host_size_t i = 0; i < count; ++i) {
+      bodies[i] =
+          (loom_aie2p_body_owners_t){IREE_HOST_SIZE_MAX, IREE_HOST_SIZE_MAX};
     }
-    // Native equivalence includes imported callee/data identities and all
-    // relocations. Equivalent ordinary helpers share their common caller
-    // lifetime even when source specialization produced distinct symbols.
-    // Bound phase entries keep their separate execution lifetimes.
-    const loom_pipeline_lifetimes_t* lifetimes =
-        &source->pipeline_entry->scope->lifetimes;
-    for (iree_host_size_t i = 0; i < source->helpers.count; ++i) {
-      if (loom_aie2p_program_source_table_lookup(sources,
-                                                 source->helpers.values[i])
-              ->pipeline_entry) {
-        continue;
-      }
-      const iree_host_size_t canonical =
-          native->functions[i + 1].equivalent_index;
-      const iree_host_size_t owner = source->entry_owners[i];
-      shared_owners[canonical] =
-          shared_owners[canonical] == IREE_HOST_SIZE_MAX
-              ? owner
-              : loom_pipeline_lifetimes_common_owner(
-                    lifetimes, shared_owners[canonical], owner);
-    }
+    // Entry and synthetic loader both stay with the worker's root.
     owners[0] = owners[1] = source->entry_owners[source->helpers.count];
-    for (iree_host_size_t i = 0; i < source->helpers.count; ++i) {
-      owners[i + 2] =
-          loom_aie2p_program_source_table_lookup(sources,
-                                                 source->helpers.values[i])
-                  ->pipeline_entry
-              ? source->entry_owners[i]
-              : shared_owners[native->functions[i + 1].equivalent_index];
+    bodies[0].bound = owners[0];
+    for (iree_host_size_t i = 1; i < count; ++i) {
+      const iree_host_size_t owner = source->entry_owners[i - 1];
+      loom_aie2p_body_owners_t* body =
+          &bodies[native->functions[i].equivalent_index];
+      // Bound entries keep their execution lifetime even when their native
+      // code matches another phase. Ordinary aliases share one enclosing owner.
+      if (loom_aie2p_program_source_table_lookup(sources,
+                                                 source->helpers.values[i - 1])
+              ->pipeline_entry) {
+        owners[i + 1] = owner;
+        if (maximum_lengths) {
+          body->bound = loom_aie2p_join_owners(lifetimes, body->bound, owner);
+        }
+      } else {
+        body->ordinary =
+            loom_aie2p_join_owners(lifetimes, body->ordinary, owner);
+        owners[i + 1] = IREE_HOST_SIZE_MAX;
+      }
     }
-    status = loom_aie2p_program_layout_initialize(lifetimes, owners, count,
-                                                  arena, &scratch, out_layout);
+    for (iree_host_size_t i = 0; i < count; ++i) {
+      const loom_aie2p_program_function_t* function = &native->functions[i];
+      if (owners[i + 1] == IREE_HOST_SIZE_MAX) {
+        owners[i + 1] = bodies[function->equivalent_index].ordinary;
+      }
+      if (maximum_lengths && function->equivalent_index == i) {
+        const uint64_t length =
+            function->contribution->realization.code.byte_length;
+        const uint64_t alignment =
+            function->contribution->realization.code.minimum_alignment;
+        // Fold ordinary and phase aliases once per distinct body.
+        if (bodies[i].ordinary != IREE_HOST_SIZE_MAX) {
+          bodies[i].bound = loom_aie2p_join_owners(lifetimes, bodies[i].bound,
+                                                   bodies[i].ordinary);
+        }
+        worker_lengths[bodies[i].bound] += iree_host_align(length, alignment);
+      }
+    }
+    if (maximum_lengths) {
+      for (iree_host_size_t i = 0; i < count; ++i) {
+        if (native->functions[i].equivalent_index != i) {
+          continue;
+        }
+        const iree_host_size_t owner = bodies[i].bound;
+        maximum_lengths[owner] =
+            iree_max(maximum_lengths[owner], worker_lengths[owner]);
+        worker_lengths[owner] = 0;
+      }
+    }
+    *out_owners = owners;
   }
   iree_arena_deinitialize(&scratch);
   return status;
+}
+
+iree_status_t loom_aie2p_program_replacement_prepare(
+    const loom_aie2p_program_source_function_t* source,
+    const iree_host_size_t* owners, const iree_host_size_t* code_owners,
+    iree_arena_allocator_t* arena, loom_aie2p_program_layout_t* out_layout) {
+  const iree_host_size_t count = source->helpers.count + 2;
+  iree_arena_allocator_t scratch;
+  iree_arena_initialize(arena->block_pool, &scratch);
+  iree_status_t status = iree_ok_status();
+  if (code_owners) {
+    iree_host_size_t* mapped = NULL;
+    status = iree_arena_allocate_array(&scratch, count, sizeof(*mapped),
+                                       (void**)&mapped);
+    if (iree_status_is_ok(status)) {
+      for (iree_host_size_t i = 0; i < count; ++i) {
+        mapped[i] = code_owners[owners[i]];
+      }
+      owners = mapped;
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_aie2p_program_layout_initialize(
+        &source->pipeline_entry->scope->lifetimes, owners, count, arena,
+        &scratch, out_layout);
+    out_layout->code_owners = code_owners;
+  }
+  iree_arena_deinitialize(&scratch);
+  return status;
+}
+
+static iree_host_size_t loom_aie2p_code_owner(
+    const loom_aie2p_program_layout_t* layout, iree_host_size_t owner) {
+  return layout->code_owners ? layout->code_owners[owner] : owner;
 }
 
 static iree_host_size_t loom_aie2p_program_replacement_group(
@@ -223,12 +293,16 @@ static iree_status_t loom_aie2p_program_replacement_prepare_native(
           loom_aie2p_program_source_table_lookup(sources, callee)
               ->pipeline_entry;
       call_descriptors[j] = UINT32_MAX;
-      if (binding == NULL || binding->owner == source->entry_owners[i] ||
-          binding->role == LOOM_PIPELINE_ENTRY_RETIRE) {
+      if (!binding || binding->role == LOOM_PIPELINE_ENTRY_RETIRE) {
+        continue;
+      }
+      const iree_host_size_t owner =
+          loom_aie2p_code_owner(layout, binding->owner);
+      if (owner == loom_aie2p_code_owner(layout, source->entry_owners[i])) {
         continue;
       }
       const iree_host_size_t group =
-          loom_aie2p_program_replacement_group(layout, binding->owner);
+          loom_aie2p_program_replacement_group(layout, owner);
       if (group != 0) {
         call_descriptors[j] = descriptors[group - 1];
       }
@@ -361,19 +435,25 @@ static iree_status_t loom_aie2p_program_replacement_compile_impl(
     // sizes, not the screening estimate, determine whether to keep the change.
     // The original native closure remains available with all loading calls.
     *out_selected = &candidates[0];
+    IREE_RETURN_IF_ERROR(loom_aie2p_program_layout_copy(
+        layout, native->function_count, arena, &selected_layout));
     IREE_RETURN_IF_ERROR(
-        loom_aie2p_program_layout_retain(native, 1, arena, layout));
-    IREE_RETURN_IF_ERROR(
-        loom_aie2p_program_replacement_compose(*out_selected, arena, layout));
-  } else {
-    *layout = selected_layout;
+        loom_aie2p_program_layout_retain(native, 1, arena, &selected_layout));
+    IREE_RETURN_IF_ERROR(loom_aie2p_program_replacement_compose(
+        *out_selected, arena, &selected_layout));
   }
+  *layout = selected_layout;
   loom_target_compile_report_t* report =
       request->compile_report ? &(*out_selected)->report : NULL;
   if (report) {
     loom_target_compile_report_record_emission(
         report, report->emitted_instruction_count,
         report->emitted_code_byte_count, layout->byte_length);
+  }
+  // A coalesced cut is provisional until every tile and its transport fit.
+  // Its caller may still use the independent construction boundaries.
+  if (layout->code_owners) {
+    return iree_ok_status();
   }
   return loom_aie2p_program_capacity_admit(
       request->module, source->function_op, layout->byte_length,
@@ -387,7 +467,8 @@ iree_status_t loom_aie2p_program_replacement_compile(
     const loom_aie2p_program_clone_t* source_clone,
     const loom_aie2p_program_compiler_t* source_compiler, uint32_t queue_header,
     uint32_t queue_command, const uint32_t* descriptors,
-    loom_aie2p_program_layout_t* layout, bool* out_compiled) {
+    loom_aie2p_program_layout_t* layout,
+    loom_target_compile_report_t* pending_report, bool* out_compiled) {
   *out_compiled = false;
   loom_aie2p_program_replacement_candidate_t candidates[2] = {0};
   loom_aie2p_program_replacement_candidate_t* selected = NULL;
@@ -395,12 +476,17 @@ iree_status_t loom_aie2p_program_replacement_compile(
       request, sources, source, source_clone, source_compiler, queue_header,
       queue_command, descriptors, candidates, layout, &selected, out_compiled);
   if (selected && request->compile_report) {
-    status = iree_status_join(
-        status, *out_compiled
-                    ? loom_target_compile_report_record_entry_report(
-                          request->compile_report, &selected->report)
-                    : loom_target_compile_report_merge_evidence(
-                          request->compile_report, &selected->report));
+    if (iree_status_is_ok(status) && *out_compiled && pending_report) {
+      *pending_report = selected->report;
+      selected->report = (loom_target_compile_report_t){0};
+    } else {
+      status = iree_status_join(
+          status, *out_compiled
+                      ? loom_target_compile_report_record_entry_report(
+                            request->compile_report, &selected->report)
+                      : loom_target_compile_report_merge_evidence(
+                            request->compile_report, &selected->report));
+    }
   }
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(candidates); ++i) {
     if (!candidates[i].module) {

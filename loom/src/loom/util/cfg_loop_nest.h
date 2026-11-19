@@ -42,6 +42,8 @@ typedef struct loom_cfg_natural_loop_t {
   // Shared destination of every exit, or CONTINUATION_NONE when exits have
   // distinct destinations or the loop has no exits.
   uint16_t continuation_index;
+  // Natural-loop nesting depth including this loop. Outermost loops have one.
+  uint16_t depth;
   // Edges entering the header from outside the loop.
   loom_cfg_loop_edge_summary_t entries;
   // Edges returning to the header from inside the loop.

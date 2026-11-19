@@ -51,13 +51,15 @@ class Aie2pSharingTest
     batch_.records = &records_;
     batch_.record_count = 1;
     distribution_.source = &batch_;
-    distribution_.path = &path_;
+    context_.payload_sources = &payload_source_;
     payload_source_.class_count = 1;
+    payload_source_.classes = &payload_;
+    payload_source_.distributions = &distribution_;
     payload_.source = &payload_source_;
     payload_.distribution_only = true;
-    payload_.distribution_path_count = 1;
-    path_.payloads = &payload_pointer_;
-    path_.first = path_.geometries = &distribution_;
+    destination_.tile = &tiles_[receiver_index_];
+    payload_.destinations = &destination_;
+    payload_.destination_count = 1;
     distribution_.repetitions = 2;
     distribution_.sender.channel = &channels_[0];
     distribution_.sender.tile = &tiles_[sender_index_];
@@ -66,7 +68,6 @@ class Aie2pSharingTest
     channels_[1].configuration_returns.count = 2;
     distribution_.receivers = &receiver_;
     distribution_.receiver_count = 1;
-    worker_.distributions = &distribution_;
     worker_.refills = &refill_;
     realization_.invocations.worker_count = 1;
     IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
@@ -75,7 +76,7 @@ class Aie2pSharingTest
     ASSERT_TRUE(loom_aie2p_array_route_workers(
         &context_.routing, 0, &tree, tiles_[sender_index_].coordinate, 0,
         tiles_[receiver_index_].coordinate, 0, false));
-    path_.routes.count = context_.routing.route_count;
+    payload_.route_count = context_.routing.route_count;
     for (size_t i = 0; i < context_.routing.route_count; ++i) {
       routes_.push_back({
           .edge = &context_.routing.routes[i],
@@ -124,14 +125,12 @@ class Aie2pSharingTest
   loom_pipeline_transport_batch_t batch_ = {};
   // Source DMA plan and its receiver.
   loom_aie2p_native_distribution_t distribution_ = {};
-  // Physical route retained independently of child geometry.
-  loom_aie2p_native_distribution_path_t path_ = {};
-  // One receiver class belongs exclusively to this distribution path.
+  // Physical DMA queue serving the receiver.
   loom_aie2p_native_payload_source_t payload_source_ = {};
   // Retained physical framing eligibility consumed by grant selection.
   loom_aie2p_native_payload_class_t payload_ = {};
-  // Logical class zero's physical correspondence.
-  loom_aie2p_native_payload_class_t* payload_pointer_ = &payload_;
+  // Physical receiver queue on the borrowed wire.
+  loom_aie2p_native_payload_endpoint_t destination_ = {};
   // Independently publishing destination.
   loom_aie2p_native_distribution_endpoint_t receiver_ = {};
   // Existing compute reader needing refill control traffic.
@@ -158,8 +157,8 @@ TEST_P(Aie2pSharingTest, DistinctDestinationClassesCannotShareOneGrant) {
   Prepare(false);
 }
 
-TEST_P(Aie2pSharingTest, IndependentPathsNeedIndependentAdmission) {
-  payload_.distribution_path_count = 2;
+TEST_P(Aie2pSharingTest, SharedWriterCannotOwnOneReleaseContinuation) {
+  channels_[1].cursor.writer.shared = true;
   Prepare(false);
 }
 
@@ -298,6 +297,53 @@ TEST_P(Aie2pSharingTest, UnusedCandidateDoesNotChangePacketOrQueuePolicy) {
   EXPECT_EQ(channels_[1].grant, nullptr);
   for (const auto& route : routes_) {
     EXPECT_EQ(route.packet, UINT8_MAX);
+  }
+}
+
+TEST_P(Aie2pSharingTest, CodeLoadingRetainsOnlyCommittedMemoryTileCarriers) {
+  ASSERT_NO_FATAL_FAILURE(Prepare(true));
+  auto* delivery = context_.deliveries[receiver_index_];
+  const uint8_t shim = loom_aie2p_native_delivery_packet(
+      delivery, 0, &tiles_[0], LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, 3);
+  const uint8_t memory = loom_aie2p_native_delivery_packet(
+      delivery, 0, &tiles_[1], LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, 4);
+  std::vector<loom_aie2p_native_control_path_t> paths(
+      context_.family->column_count);
+  std::vector<uint8_t> preferred(tiles_.size(), UINT8_MAX);
+  loom_aie2p_execution_plan_t plan = {
+      .column_command_packets = preferred.data(),
+      .control_paths = paths.data(),
+  };
+  paths[0].packets = 1u;
+  preferred[1] = shim;
+  loom_aie2p_native_retain_code_carriers(&context_, &plan);
+  EXPECT_EQ(paths[0].sharing.domain, 0u);
+  EXPECT_EQ(preferred[1], shim);
+
+  // A private suffix has its own namespace even when a granted path also
+  // descends this column.
+  delivery->sharing.used = true;
+  paths[0].count = 1;
+  loom_aie2p_native_retain_code_carriers(&context_, &plan);
+  EXPECT_EQ(paths[0].sharing.domain, 0u);
+  EXPECT_EQ(preferred[1], shim);
+
+  paths[0].count = 0;
+  loom_aie2p_native_retain_code_carriers(&context_, &plan);
+  if (receiver_index_ == 1) {
+    EXPECT_EQ(paths[0].sharing.domain, delivery->sharing.domain);
+    EXPECT_EQ(paths[0].sharing.carrier,
+              LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD);
+    EXPECT_EQ(paths[0].packets, 1u | (1u << shim) | (1u << memory));
+    EXPECT_EQ(preferred[1], UINT8_MAX);
+
+    preferred[1] = memory;
+    loom_aie2p_native_retain_code_carriers(&context_, &plan);
+    EXPECT_EQ(preferred[1], memory);
+  } else {
+    EXPECT_EQ(paths[0].sharing.domain, 0u);
+    EXPECT_EQ(paths[0].packets, 1u);
+    EXPECT_EQ(preferred[1], shim);
   }
 }
 

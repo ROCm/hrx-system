@@ -132,6 +132,10 @@ TEST_F(CfgLoopNestTest, CommonAndNestedExitOwnership) {
   const uint16_t outer_index = loom_cfg_loop_nest_innermost(&nested_nest, 1);
   ASSERT_LT(outer_index, nested_nest.loop_count);
   const auto& outer = nested_nest.loops[outer_index];
+  EXPECT_EQ(outer.depth, 1u);
+  EXPECT_EQ(
+      nested_nest.loops[loom_cfg_loop_nest_innermost(&nested_nest, 2)].depth,
+      2u);
   EXPECT_EQ(outer.exits.count, 2u);
   EXPECT_EQ(outer.direct_exit_count, 1u);
   EXPECT_EQ(outer.continuation_index, 6u);

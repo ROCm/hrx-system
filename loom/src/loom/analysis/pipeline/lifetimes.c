@@ -6,7 +6,11 @@
 
 #include "loom/analysis/pipeline/lifetimes.h"
 
+#include <string.h>
+
+#include "iree/base/internal/math.h"
 #include "loom/analysis/pipeline/invocations.h"
+#include "loom/util/cfg_loop_nest.h"
 
 iree_status_t loom_pipeline_lifetimes_index(
     iree_arena_allocator_t* arena, loom_pipeline_lifetimes_t* lifetimes) {
@@ -81,6 +85,8 @@ typedef struct loom_pipeline_lifetime_pending_t {
   const loom_pipeline_invocation_t* invocation;
   // Bound control for a serial node; NULL for a concurrent node.
   const loom_pipeline_invocation_schedule_t* schedule;
+  // Loop nesting inherited from the site entering this scope.
+  uint32_t loop_depth;
 } loom_pipeline_lifetime_pending_t;
 
 typedef struct loom_pipeline_lifetime_builder_t {
@@ -90,6 +96,10 @@ typedef struct loom_pipeline_lifetime_builder_t {
   loom_pipeline_lifetime_t* nodes;
   // OWNER node indexed by the original construction ordinal.
   iree_host_size_t* owners;
+  // Complete construction inventory, including entries outside all loops.
+  iree_host_size_t owner_count;
+  // Populated on the first construction reached inside a natural loop.
+  uint32_t* loop_depths;
   // Number of discovered nodes.
   iree_host_size_t count;
   // Allocated node capacity.
@@ -108,7 +118,7 @@ static iree_status_t loom_pipeline_lifetime_append(
     loom_pipeline_lifetime_builder_t* builder, iree_host_size_t parent,
     iree_host_size_t* last_child, loom_pipeline_lifetime_kind_t kind,
     const loom_pipeline_invocation_t* invocation,
-    const loom_pipeline_invocation_schedule_t* schedule) {
+    const loom_pipeline_invocation_schedule_t* schedule, uint32_t loop_depth) {
   if (builder->count == builder->capacity) {
     IREE_RETURN_IF_ERROR(iree_arena_grow_array(
         builder->arena, builder->count, builder->count + 1,
@@ -125,6 +135,16 @@ static iree_status_t loom_pipeline_lifetime_append(
   };
   if (kind == LOOM_PIPELINE_LIFETIME_OWNER) {
     builder->owners[invocation->ordinal] = index;
+    if (loop_depth) {
+      if (!builder->loop_depths) {
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            builder->arena, builder->owner_count, sizeof(*builder->loop_depths),
+            (void**)&builder->loop_depths));
+        memset(builder->loop_depths, 0,
+               builder->owner_count * sizeof(*builder->loop_depths));
+      }
+      builder->loop_depths[invocation->ordinal] = loop_depth;
+    }
   }
   if (parent != IREE_HOST_SIZE_MAX) {
     if (*last_child == IREE_HOST_SIZE_MAX) {
@@ -142,7 +162,8 @@ static iree_status_t loom_pipeline_lifetime_append(
           (void**)&builder->pending));
     }
     builder->pending[builder->pending_count++] =
-        (loom_pipeline_lifetime_pending_t){index, invocation, schedule};
+        (loom_pipeline_lifetime_pending_t){index, invocation, schedule,
+                                           loop_depth};
   }
   return iree_ok_status();
 }
@@ -150,13 +171,14 @@ static iree_status_t loom_pipeline_lifetime_append(
 iree_status_t loom_pipeline_lifetimes_build(
     const loom_pipeline_invocations_t* invocations,
     iree_arena_allocator_t* arena, loom_pipeline_lifetimes_t* out_lifetimes) {
-  loom_pipeline_lifetime_builder_t builder = {.arena = arena};
+  loom_pipeline_lifetime_builder_t builder = {
+      .arena = arena, .owner_count = invocations->count};
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, invocations->count,
                                                  sizeof(*builder.owners),
                                                  (void**)&builder.owners));
   IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_append(
       &builder, IREE_HOST_SIZE_MAX, NULL, LOOM_PIPELINE_LIFETIME_CONCURRENT,
-      invocations->entries[0], NULL));
+      invocations->entries[0], NULL, 0));
   for (iree_host_size_t i = 0; i < builder.pending_count; ++i) {
     const loom_pipeline_lifetime_pending_t pending = builder.pending[i];
     iree_host_size_t last = IREE_HOST_SIZE_MAX;
@@ -164,18 +186,18 @@ iree_status_t loom_pipeline_lifetimes_build(
       const loom_pipeline_invocation_t* invocation = pending.invocation;
       IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_append(
           &builder, pending.node, &last, LOOM_PIPELINE_LIFETIME_OWNER,
-          invocation, NULL));
+          invocation, NULL, pending.loop_depth));
       for (iree_host_size_t c = 0; c < invocation->resources->composition_count;
            ++c) {
         IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_append(
             &builder, pending.node, &last, LOOM_PIPELINE_LIFETIME_CONCURRENT,
-            invocation->compositions[c], NULL));
+            invocation->compositions[c], NULL, pending.loop_depth));
       }
       for (iree_host_size_t s = 0; s < invocation->resources->schedule_count;
            ++s) {
         IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_append(
             &builder, pending.node, &last, LOOM_PIPELINE_LIFETIME_SERIAL, NULL,
-            &invocation->schedules[s]));
+            &invocation->schedules[s], pending.loop_depth));
       }
     } else {
       const loom_pipeline_invocation_schedule_t* schedule = pending.schedule;
@@ -183,18 +205,25 @@ iree_status_t loom_pipeline_lifetimes_build(
       for (iree_host_size_t b = 0; b < source->control->graph.block_count;
            ++b) {
         const loom_pipeline_schedule_block_t* block = &source->blocks[b];
+        const loom_cfg_loop_nest_t* loops = &source->control->loops;
+        const uint16_t loop = loom_cfg_loop_nest_innermost(loops, (uint16_t)b);
+        const uint32_t depth =
+            loop == LOOM_CFG_LOOP_NEST_NONE
+                ? pending.loop_depth
+                : iree_math_saturating_add_u32(pending.loop_depth,
+                                               loops->loops[loop].depth);
         for (iree_host_size_t s = 0; s < block->step_count; ++s) {
           const loom_pipeline_invocation_step_t binding =
               schedule->blocks[b][s];
           if (block->steps[s].kind == LOOM_PIPELINE_SCHEDULE_STEP_COMPOSITION) {
             IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_append(
                 &builder, pending.node, &last,
-                LOOM_PIPELINE_LIFETIME_CONCURRENT, binding.child, NULL));
+                LOOM_PIPELINE_LIFETIME_CONCURRENT, binding.child, NULL, depth));
           } else if (block->steps[s].kind ==
                      LOOM_PIPELINE_SCHEDULE_STEP_SERIAL) {
             IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_append(
                 &builder, pending.node, &last, LOOM_PIPELINE_LIFETIME_SERIAL,
-                NULL, binding.nested));
+                NULL, binding.nested, depth));
           }
         }
       }
@@ -204,6 +233,7 @@ iree_status_t loom_pipeline_lifetimes_build(
       (loom_pipeline_lifetimes_t){.nodes = builder.nodes,
                                   .count = builder.count,
                                   .owners = builder.owners,
-                                  .has_serial = builder.has_serial};
+                                  .has_serial = builder.has_serial,
+                                  .loop_depths = builder.loop_depths};
   return loom_pipeline_lifetimes_index(arena, out_lifetimes);
 }

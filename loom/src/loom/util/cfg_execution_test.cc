@@ -105,12 +105,12 @@ TEST_F(CfgExecutionTest, FixedLoopCountsSurviveConditionalPrefetch) {
 
   // A whole-function transport path still requires modeled successors only.
   IREE_ASSERT_OK(loom_cfg_execution_counts_calculate(
-      &loops, trips, nullptr, &arena_, storage, &counts));
+      &loops, trips, nullptr, nullptr, &arena_, storage, &counts));
   EXPECT_EQ(counts.values, nullptr);
   EXPECT_FALSE(counts.single_path);
 
   IREE_ASSERT_OK(loom_cfg_execution_counts_calculate(
-      &loops, trips, &control, &arena_, storage, &counts));
+      &loops, trips, nullptr, &control, &arena_, storage, &counts));
   ASSERT_NE(counts.values, nullptr);
   EXPECT_FALSE(counts.single_path);
   const bool exact[] = {true, true, true, false, false, true, true};
@@ -119,6 +119,74 @@ TEST_F(CfgExecutionTest, FixedLoopCountsSurviveConditionalPrefetch) {
     EXPECT_EQ(loom_cfg_execution_count_is_exact(&counts, i), exact[i]);
     EXPECT_EQ(counts.values[i], expected[i]);
   }
+}
+
+TEST_F(CfgExecutionTest, FiniteVariableLoopPreservesSiblingCounts) {
+  // Each of two outer iterations clears 0..512 entries, then drains eight
+  // records. Block 6 handles an optional field within the drain.
+  testing::CfgGraph fixture(
+      {{1}, {2, 9}, {3, 4}, {2}, {5, 8}, {6, 7}, {7}, {4}, {1}, {}});
+  loom_cfg_dominance_t dominance;
+  IREE_ASSERT_OK(loom_cfg_dominance_build(fixture.get(), &arena_, &dominance));
+  loom_cfg_loop_nest_t loops;
+  IREE_ASSERT_OK(
+      loom_cfg_loop_nest_build(fixture.get(), &dominance, &arena_, &loops));
+  ASSERT_EQ(loops.loop_count, 3u);
+  loom_cfg_control_t control;
+  IREE_ASSERT_OK(loom_cfg_control_build(fixture.get(), &arena_, &control));
+  uint64_t trips[3];
+  const uint16_t outer = loom_cfg_loop_nest_innermost(&loops, 1);
+  const uint16_t clear = loom_cfg_loop_nest_innermost(&loops, 2);
+  const uint16_t drain = loom_cfg_loop_nest_innermost(&loops, 4);
+  ASSERT_LT(outer, IREE_ARRAYSIZE(trips));
+  ASSERT_LT(clear, IREE_ARRAYSIZE(trips));
+  ASSERT_LT(drain, IREE_ARRAYSIZE(trips));
+  trips[outer] = 2;
+  trips[clear] = 512;
+  trips[drain] = 8;
+  bool variable_trips[3] = {};
+  variable_trips[clear] = true;
+  uint64_t storage[10];
+  loom_cfg_execution_counts_t counts;
+  IREE_ASSERT_OK(loom_cfg_execution_counts_calculate(
+      &loops, trips, variable_trips, &control, &arena_, storage, &counts));
+  ASSERT_NE(counts.values, nullptr);
+  EXPECT_FALSE(counts.single_path);
+  const bool exact[] = {true, true,  false, false, true,
+                        true, false, true,  true,  true};
+  const uint64_t bounds[] = {1, 3, 1026, 1024, 18, 16, 16, 16, 2, 1};
+  for (uint16_t i = 0; i < 10; ++i) {
+    SCOPED_TRACE(i);
+    EXPECT_EQ(loom_cfg_execution_count_is_exact(&counts, i), exact[i]);
+    EXPECT_EQ(counts.values[i], bounds[i]);
+  }
+
+  // An unproven exit cannot promise the later reads will run.
+  trips[clear] = UINT64_MAX;
+  IREE_ASSERT_OK(loom_cfg_execution_counts_calculate(
+      &loops, trips, nullptr, &control, &arena_, storage, &counts));
+  EXPECT_FALSE(loom_cfg_execution_count_is_exact(&counts, 5));
+}
+
+TEST_F(CfgExecutionTest, MultiwayLoopHeaderDoesNotCertifyBothBodyPaths) {
+  testing::CfgGraph fixture({{1}, {2, 3, 5}, {4}, {4}, {1}, {}});
+  loom_cfg_dominance_t dominance;
+  IREE_ASSERT_OK(loom_cfg_dominance_build(fixture.get(), &arena_, &dominance));
+  loom_cfg_loop_nest_t loops;
+  IREE_ASSERT_OK(
+      loom_cfg_loop_nest_build(fixture.get(), &dominance, &arena_, &loops));
+  ASSERT_EQ(loops.loop_count, 1u);
+  loom_cfg_control_t control;
+  IREE_ASSERT_OK(loom_cfg_control_build(fixture.get(), &arena_, &control));
+  const uint64_t trips[] = {4};
+  uint64_t storage[6];
+  loom_cfg_execution_counts_t counts;
+  IREE_ASSERT_OK(loom_cfg_execution_counts_calculate(
+      &loops, trips, nullptr, &control, &arena_, storage, &counts));
+  EXPECT_FALSE(counts.single_path);
+  EXPECT_FALSE(loom_cfg_execution_count_is_exact(&counts, 2));
+  EXPECT_FALSE(loom_cfg_execution_count_is_exact(&counts, 3));
+  EXPECT_TRUE(loom_cfg_execution_count_is_exact(&counts, 5));
 }
 
 TEST_F(CfgExecutionTest, SinglePathLoopRetainsWholeTransportProof) {
@@ -133,7 +201,7 @@ TEST_F(CfgExecutionTest, SinglePathLoopRetainsWholeTransportProof) {
   uint64_t storage[4];
   loom_cfg_execution_counts_t counts;
   IREE_ASSERT_OK(loom_cfg_execution_counts_calculate(
-      &loops, trips, nullptr, &arena_, storage, &counts));
+      &loops, trips, nullptr, nullptr, &arena_, storage, &counts));
   ASSERT_NE(counts.values, nullptr);
   EXPECT_TRUE(counts.single_path);
   const uint64_t expected[] = {1, 65, 64, 1};
@@ -141,6 +209,12 @@ TEST_F(CfgExecutionTest, SinglePathLoopRetainsWholeTransportProof) {
     EXPECT_TRUE(loom_cfg_execution_count_is_exact(&counts, i));
     EXPECT_EQ(counts.values[i], expected[i]);
   }
+
+  const bool variable_trips[] = {true};
+  IREE_ASSERT_OK(loom_cfg_execution_counts_calculate(
+      &loops, trips, variable_trips, nullptr, &arena_, storage, &counts));
+  EXPECT_FALSE(counts.single_path);
+  EXPECT_EQ(counts.values, nullptr);
 }
 
 TEST_F(CfgExecutionTest, UnavailableControlKeepsReachableBlocksConservative) {

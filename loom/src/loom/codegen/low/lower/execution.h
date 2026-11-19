@@ -36,8 +36,8 @@ iree_status_t loom_low_lower_source_block_execution_counts(
     loom_low_lower_context_t* context, const uint64_t** out_counts);
 
 // Returns the execution count for one source-function block when exact.
-// Branch-local blocks are unknown while blocks after proven reconvergence can
-// retain the multiplier contributed by enclosing fixed-trip loops.
+// Branch-local and variable-trip body counts are unknown. Their reconverged
+// continuation can retain the multiplier of enclosing fixed-trip loops.
 iree_status_t loom_low_lower_source_block_execution_count(
     loom_low_lower_context_t* context, uint16_t block_index,
     uint64_t* out_count, bool* out_exact);

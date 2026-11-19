@@ -6,6 +6,8 @@
 
 #include "loom/util/fact_induction.h"
 
+#include <string.h>
+
 #include "loom/analysis/condition_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/cfg/ops.h"
@@ -809,4 +811,39 @@ loom_loop_recurrence_facts_t loom_value_fact_induction_facts(
     result.exit_value = result.values;
   }
   return result;
+}
+
+iree_status_t loom_value_fact_induction_trip_bounds(
+    const loom_value_fact_table_t* table, const loom_module_t* module,
+    const loom_value_fact_induction_t* inductions, iree_host_size_t loop_count,
+    iree_arena_allocator_t* arena, const uint64_t** out_bounds,
+    const bool** out_variable_trips) {
+  *out_bounds = NULL;
+  *out_variable_trips = NULL;
+  if (!loop_count) {
+    return iree_ok_status();
+  }
+  uint64_t* bounds;
+  bool* variable_trips = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, loop_count, sizeof(*bounds), (void**)&bounds));
+  for (iree_host_size_t i = 0; i < loop_count; ++i) {
+    const loom_loop_recurrence_facts_t recurrence =
+        loom_value_fact_induction_facts(table, module, &inductions[i]);
+    bounds[i] = recurrence.trip_count_kind == LOOM_LOOP_TRIP_COUNT_UNKNOWN
+                    ? UINT64_MAX
+                    : recurrence.trip_count;
+    if (recurrence.trip_count_kind == LOOM_LOOP_TRIP_COUNT_BOUNDED) {
+      if (!variable_trips) {
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            arena, loop_count, sizeof(*variable_trips),
+            (void**)&variable_trips));
+        memset(variable_trips, 0, loop_count * sizeof(*variable_trips));
+      }
+      variable_trips[i] = true;
+    }
+  }
+  *out_bounds = bounds;
+  *out_variable_trips = variable_trips;
+  return iree_ok_status();
 }

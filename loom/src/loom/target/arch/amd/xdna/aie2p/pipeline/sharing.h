@@ -16,12 +16,14 @@ extern "C" {
 // A physical payload path eligible to carry control packets. Every geometry
 // on this path grants a complete destination record before queuing its sender.
 typedef struct loom_aie2p_native_delivery_t {
-  // Uniform unicast path shared by all selected child geometries.
-  loom_aie2p_native_distribution_path_t* path;
+  // Uniform physical destination and switch edges used by all granted phases.
+  struct loom_aie2p_native_payload_class_t* payload;
   // Independent task/reader continuations for the path's geometry variants.
   struct loom_aie2p_native_grant_t* grants;
   // Directed lanes and actual-use result owned by route admission.
   loom_aie2p_array_route_sharing_t sharing;
+  // Control packet IDs assigned to terminals on this granted path.
+  uint32_t command_packets;
   // Terminal identity of each packet class crossing this shared path. Empty
   // entries have a NULL tile. Distinct core sources may reuse an ID only for
   // the same terminal, since their packets become indistinguishable on merge.
@@ -81,6 +83,13 @@ iree_status_t loom_aie2p_native_prepare_sharing(
 // Commits framing and receiver-granted admission for actually borrowed paths.
 // Receiver emission consumes the channel's retained grant.
 void loom_aie2p_native_commit_sharing(loom_aie2p_native_context_t* context);
+
+// Retains a committed receiver-granted command path for a code loader whose
+// SRAM column has no private command path. The retained scope owns all route
+// and packet facts after native construction workers retire.
+void loom_aie2p_native_retain_code_carriers(
+    const loom_aie2p_native_context_t* context,
+    loom_aie2p_execution_plan_t* plan);
 
 // Emits the resident receiver's next-record task submission helper. The caller
 // invokes it only after returning credit and before the last record retires.

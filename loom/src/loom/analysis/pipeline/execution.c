@@ -6,8 +6,6 @@
 
 #include "loom/analysis/pipeline/execution.h"
 
-#include "loom/util/adaptive_sort.h"
-
 typedef struct loom_pipeline_execution_component_t {
   // Parent component, or this component's own ordinal at a root.
   iree_host_size_t parent;
@@ -82,16 +80,6 @@ typedef struct loom_pipeline_execution_scope_t {
   // Enclosing scope index, or IREE_HOST_SIZE_MAX for an independent scope.
   iree_host_size_t parent;
 } loom_pipeline_execution_scope_t;
-
-static bool loom_pipeline_execution_schedule_less(
-    const loom_pipeline_execution_schedule_t* left,
-    const loom_pipeline_execution_schedule_t* right) {
-  return (uintptr_t)left->source < (uintptr_t)right->source;
-}
-
-LOOM_DEFINE_ADAPTIVE_SORT(loom_pipeline_execution_sort_schedules,
-                          loom_pipeline_execution_schedule_t,
-                          loom_pipeline_execution_schedule_less)
 
 static iree_status_t loom_pipeline_execution_append_scope(
     const loom_pipeline_invocation_schedule_t* source, iree_host_size_t parent,
@@ -236,30 +224,9 @@ iree_status_t loom_pipeline_execution_build(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, scope_count, sizeof(*schedules), (void**)&schedules));
   for (iree_host_size_t i = 0; i < scope_count; ++i) {
-    schedules[i] = scopes[i].schedule;
+    schedules[scopes[i].schedule.source->ordinal] = scopes[i].schedule;
   }
-  loom_pipeline_execution_sort_schedules(schedules, scope_count);
   out_execution->schedules = schedules;
   out_execution->schedule_count = scope_count;
   return iree_ok_status();
-}
-
-const loom_pipeline_execution_schedule_t* loom_pipeline_execution_schedule(
-    const loom_pipeline_execution_t* execution,
-    const loom_pipeline_invocation_schedule_t* schedule) {
-  iree_host_size_t begin = 0, end = execution->schedule_count;
-  while (begin < end) {
-    const iree_host_size_t middle = begin + (end - begin) / 2;
-    const loom_pipeline_execution_schedule_t* candidate =
-        &execution->schedules[middle];
-    if ((uintptr_t)candidate->source < (uintptr_t)schedule) {
-      begin = middle + 1;
-    } else {
-      end = middle;
-    }
-  }
-  IREE_ASSERT(begin < execution->schedule_count &&
-                  execution->schedules[begin].source == schedule,
-              "execution scope belongs to the admitted inventory");
-  return &execution->schedules[begin];
 }

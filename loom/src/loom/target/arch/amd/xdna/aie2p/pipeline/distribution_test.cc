@@ -663,13 +663,23 @@ TEST_P(DistributionPathTest, PacketClassesNameReceiversAcrossFreshChannels) {
 }
 
 TEST_P(DistributionPathTest, EveryGeometryOwnsItsReceiverGrant) {
-  Form(0, 4);
-  Form(2, 2);
+  // The last child imports a channel, so its logical controller path stays
+  // distinct even though the same physical queues carry all three phases.
+  channel_owners_[13].invocation = &constructions_[0];
+  Form(0, 12);
+  Form(2, 4);
+  Form(4, 2);
   PlanPayloads();
   const auto* first = Select(0);
   const auto* second = Select(2);
+  const auto* third = Select(4);
   ASSERT_NE(first, nullptr);
   ASSERT_NE(second, nullptr);
+  ASSERT_NE(third, nullptr);
+  ASSERT_EQ(first->path, second->path);
+  ASSERT_NE(first->path, third->path);
+  const auto* payload = first->path->payloads[0];
+  ASSERT_EQ(third->path->payloads[0], payload);
   workers_[Producer(0)].channels.remote_count = 1;
   IREE_ASSERT_OK(loom_aie2p_native_prepare_sharing(&context_, &realization_));
   auto* delivery = context_.deliveries[pools_[1] - context_.tiles];
@@ -677,17 +687,21 @@ TEST_P(DistributionPathTest, EveryGeometryOwnsItsReceiverGrant) {
   loom_aie2p_native_commit_sharing(&context_);
   EXPECT_EQ(channels_[1].grant, nullptr);
   EXPECT_EQ(channels_[7].grant, nullptr);
+  EXPECT_EQ(channels_[13].grant, nullptr);
   delivery->sharing.used = true;
   loom_aie2p_native_commit_sharing(&context_);
   ASSERT_NE(channels_[1].grant, nullptr);
   ASSERT_NE(channels_[7].grant, nullptr);
+  ASSERT_NE(channels_[13].grant, nullptr);
   EXPECT_NE(channels_[1].grant, channels_[7].grant);
   EXPECT_EQ(channels_[1].grant->distribution, first);
   EXPECT_EQ(channels_[7].grant->distribution, second);
+  EXPECT_EQ(channels_[13].grant->distribution, third);
   EXPECT_EQ(first->grant_reader, Producer(0) + 1);
   EXPECT_EQ(second->grant_reader, Producer(2) + 1);
+  EXPECT_EQ(third->grant_reader, Producer(4) + 1);
   const auto* layout = pools_[0]->memory_layout;
-  for (const auto* geometry : {first, second}) {
+  for (const auto* geometry : {first, second, third}) {
     EXPECT_EQ(geometry->sender.sequence.task_count, 1);
     EXPECT_EQ(geometry->sender.sequence.descriptor_count, 1);
     EXPECT_EQ(geometry->sender.sequence.words[0][layout->packet.word] &
@@ -695,13 +709,14 @@ TEST_P(DistributionPathTest, EveryGeometryOwnsItsReceiverGrant) {
               loom_xdna_register_field_encode(
                   layout->packet.id, LOOM_AIE2P_NATIVE_DELIVERY_PACKET_ID));
   }
-  for (size_t i = first->path->routes.first;
-       i < first->path->routes.first + first->path->routes.count; ++i) {
+  for (size_t i = payload->route_first;
+       i < payload->route_first + payload->route_count; ++i) {
     EXPECT_EQ(routes_[i].packet, LOOM_AIE2P_NATIVE_DELIVERY_PACKET_ID);
   }
 }
 
 TEST_P(DistributionPathTest, EveryGeometryMustSupportSharedFraming) {
+  channel_owners_[7].invocation = &constructions_[0];
   sources_[6].capacity = 2;
   Form(0, 4);
   Form(2, 2);
@@ -710,7 +725,25 @@ TEST_P(DistributionPathTest, EveryGeometryMustSupportSharedFraming) {
   const auto* second = Select(2);
   ASSERT_NE(first, nullptr);
   ASSERT_NE(second, nullptr);
-  ASSERT_EQ(first->path, second->path);
+  ASSERT_NE(first->path, second->path);
+  ASSERT_EQ(first->path->payloads[0], second->path->payloads[0]);
+  workers_[Producer(0)].channels.remote_count = 1;
+  IREE_ASSERT_OK(loom_aie2p_native_prepare_sharing(&context_, &realization_));
+  EXPECT_EQ(context_.deliveries[pools_[1] - context_.tiles], nullptr);
+}
+
+TEST_P(DistributionPathTest, PacketVisitsPreserveSenderFraming) {
+  Form(0, 4);
+  Form(2, 1, 1, true);
+  PlanPayloads();
+  const auto* uniform = Select(0);
+  const auto* packet = Select(2);
+  ASSERT_NE(uniform, nullptr);
+  ASSERT_NE(packet, nullptr);
+  const auto* payload = uniform->path->payloads[0];
+  ASSERT_EQ(packet->path->payloads[0], payload);
+  ASSERT_EQ(payload->source->class_count, 1);
+  ASSERT_TRUE(payload->source->framed);
   workers_[Producer(0)].channels.remote_count = 1;
   IREE_ASSERT_OK(loom_aie2p_native_prepare_sharing(&context_, &realization_));
   EXPECT_EQ(context_.deliveries[pools_[1] - context_.tiles], nullptr);

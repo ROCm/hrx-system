@@ -1238,8 +1238,6 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
         }
         distribution->path = demand->selected;
         distribution->path->last = invocation;
-        distribution->next_geometry = distribution->path->geometries;
-        distribution->path->geometries = distribution;
         distribution->selected = distribution;
         *geometry_tail = distribution;
         geometry_tail = &distribution->next;
@@ -1249,6 +1247,9 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
         selected->creates_geometry && distribution->selected == distribution;
     distribution = distribution->selected;
     if (creates_geometry) {
+      loom_aie2p_native_payload_source_t* payload_source = payloads[0]->source;
+      distribution->next_on_sender = payload_source->distributions;
+      payload_source->distributions = distribution;
       if (packet_program) {
         bool valid = false;
         IREE_RETURN_IF_ERROR(loom_aie2p_native_select_packet_distribution(
@@ -1336,11 +1337,6 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
             context, payloads[0], cohort->admission->op, next_source, &valid));
         if (!valid) {
           return iree_ok_status();
-        }
-        distribution->path->routes.first = payloads[0]->route_first;
-        distribution->path->routes.count = payloads[0]->route_count;
-        if (distribution->path->first == distribution) {
-          ++payloads[0]->distribution_path_count;
         }
       }
     }

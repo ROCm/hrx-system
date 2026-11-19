@@ -474,6 +474,13 @@ TEST_F(ExecutionPlanTest, CodeRequestsShareCommandsOnASaturatedColumn) {
       &context.routing, context.switches, &context.connections,
       &source_arena_));
   std::vector<loom_aie2p_execution_tile_t> occupancy(tile_count);
+  // Input DMA owns the even descriptors. Its MM2S sibling is idle, while the
+  // odd MM2S engine and its bank can carry all four code catalogs.
+  occupancy[1].descriptor_counts[0] =
+      loom_xdna_array_tile_kind_facts(family, LOOM_XDNA_TILE_KIND_MEMORY)
+          ->dma.buffer_descriptor_count /
+      2;
+  occupancy[1].s2mm_count = 1;
   const loom_aie2p_execution_plan_t selected = {
       .tiles = occupancy.data(),
       .routing = context.routing,
@@ -505,11 +512,14 @@ TEST_F(ExecutionPlanTest, CodeRequestsShareCommandsOnASaturatedColumn) {
     ASSERT_TRUE(iree_string_view_is_empty(requirement));
     EXPECT_EQ(binding.queue_packet, row == 3 ? 6u : 0u);
     EXPECT_EQ(binding.code_packet, row - 2u);
-    EXPECT_EQ(binding.engine, 0u);
+    EXPECT_EQ(binding.engine, 1u);
+    EXPECT_EQ(binding.first_descriptor, 24u + 2u * (row - 2u));
   }
   EXPECT_EQ(
       transport.plan.routing.link_channels.southbound[family->column_count],
       15u);
+  EXPECT_EQ(transport.plan.tiles[1].mm2s_count, 2u);
+  EXPECT_EQ(transport.plan.tiles[1].descriptor_counts[1], 8u);
   EXPECT_EQ(transport.plan.connections.group_count, 22u);
   bool saw_converged_request = false;
   for (size_t i = 0; i < transport.plan.routing.route_count; ++i) {
@@ -524,6 +534,93 @@ TEST_F(ExecutionPlanTest, CodeRequestsShareCommandsOnASaturatedColumn) {
   IREE_ASSERT_OK(loom_aie2p_code_transport_finish(&transport, &retained_arena_,
                                                   &requirement));
   ASSERT_TRUE(iree_string_view_is_empty(requirement));
+}
+
+TEST_F(ExecutionPlanTest, CodeRequestsJoinACreditedPayloadWithoutAPrivatePath) {
+  const auto* family = loom_xdna_npu2_array_family();
+  const size_t tile_count = loom_xdna_array_physical_tile_count(family);
+  const loom_xdna_tile_coordinate_t memory = {0, 1};
+  std::vector<loom_aie2p_execution_tile_t> tiles(tile_count);
+  std::vector<loom_aie2p_native_control_source_t> sources(tile_count * 2);
+  std::vector<uint32_t> owners(tile_count * 2, UINT32_MAX);
+  std::vector<uint8_t> preferred(tile_count, UINT8_MAX);
+  std::vector<loom_aie2p_native_control_path_t> paths(family->column_count);
+  std::vector<loom_aie2p_native_route_t> routes;
+  std::vector<loom_aie2p_native_connection_t> groups;
+  std::vector<loom_aie2p_native_connection_endpoint_t> destinations;
+  loom_aie2p_array_route_builder_t routing;
+  IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
+      family, 32, &source_arena_, &routing));
+  // Four simultaneous DMA streams occupy every southbound lane. The first
+  // receiver grants complete records, so only its stream can carry commands.
+  for (uint8_t channel = 0; channel < 4; ++channel) {
+    const loom_xdna_tile_coordinate_t sender = {
+        0, static_cast<uint16_t>(2 + channel)};
+    const uint8_t packet =
+        channel == 0 ? LOOM_AIE2P_NATIVE_DELIVERY_PACKET_ID : UINT8_MAX;
+    loom_aie2p_array_route_tree_t tree = {};
+    ASSERT_TRUE(loom_aie2p_array_route_workers(
+        &routing, channel, &tree, sender, 0, memory, channel, channel == 0));
+    for (size_t i = routes.size(); i < routing.route_count; ++i) {
+      routes.push_back({&routing.routes[i], packet, false, UINT32_MAX});
+    }
+    groups.push_back(
+        {{sender, LOOM_XDNA_STREAM_PORT_DMA, 0}, packet, false, channel, 1});
+    destinations.push_back({memory, LOOM_XDNA_STREAM_PORT_DMA, channel});
+    if (channel == 0) {
+      IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
+          &routing, 0, routing.route_count, memory,
+          LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD, &paths[0].sharing));
+    }
+  }
+  // An earlier core command already shares the first stream. Its ID zero
+  // must still reach the shim after a different core starts loading code.
+  const loom_xdna_tile_coordinate_t shim = {0, 0};
+  const loom_xdna_tile_coordinate_t controller = {0, 2};
+  const uint32_t source =
+      2 * loom_xdna_array_physical_tile_index(family, controller);
+  ASSERT_TRUE(loom_aie2p_array_route_control(
+      &routing, 4, &sources[source].tree, controller,
+      LOOM_XDNA_STREAM_PORT_CORE, 0, shim, &paths[0].sharing));
+  ASSERT_TRUE(paths[0].sharing.used);
+  paths[0].packets = 1u;
+  sources[source].packet_mask = 1u;
+  sources[source].register_packet_mask = 1u;
+  sources[source].destination = UINT32_MAX;
+  owners[1] = source;
+  for (size_t i = routes.size(); i < routing.route_count; ++i) {
+    routes.push_back({&routing.routes[i], 0, true, source});
+  }
+  groups.push_back(
+      {{controller, LOOM_XDNA_STREAM_PORT_CORE, 0}, 0, true, 4, 1});
+  destinations.push_back({shim, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0});
+  const loom_aie2p_execution_plan_t plan = {
+      .tiles = tiles.data(),
+      .routing = routing,
+      .routes = routes.data(),
+      .control_sources = sources.data(),
+      .control_destination_sources = owners.data(),
+      .column_command_packets = preferred.data(),
+      .control_paths = paths.data(),
+      .connections = {groups.data(), groups.size(), destinations.data(),
+                      destinations.size()},
+  };
+  loom_aie2p_code_transport_t transport;
+  IREE_ASSERT_OK(loom_aie2p_code_transport_initialize(
+      &plan, 1, &retained_arena_, &transport));
+  loom_aie2p_code_transport_binding_t binding;
+  iree_string_view_t requirement;
+  loom_aie2p_code_transport_select(&transport, {0, 3}, 1, &binding,
+                                   &requirement);
+  ASSERT_TRUE(iree_string_view_is_empty(requirement));
+  EXPECT_EQ(binding.queue_packet, 1u);
+  loom_aie2p_code_transport_bind(&transport, 1, &binding, &requirement);
+  ASSERT_TRUE(iree_string_view_is_empty(requirement));
+  EXPECT_EQ(transport.plan.control_sources[0].destination,
+            sources[0].destination);
+  IREE_ASSERT_OK(loom_aie2p_code_transport_finish(&transport, &retained_arena_,
+                                                  &requirement));
+  EXPECT_TRUE(iree_string_view_is_empty(requirement));
 }
 
 }  // namespace

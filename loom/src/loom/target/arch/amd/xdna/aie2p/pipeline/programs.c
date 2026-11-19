@@ -10,6 +10,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/credits.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/input.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/sharing.h"
 #include "loom/transforms/pipeline/control.h"
 
 static iree_status_t loom_aie2p_native_program_prepare(
@@ -150,6 +151,7 @@ static iree_status_t loom_aie2p_native_retain_plan(
   };
   IREE_RETURN_IF_ERROR(
       loom_aie2p_execution_plan_copy_resources(&selected, 0, arena, plan));
+  loom_aie2p_native_retain_code_carriers(context, plan);
   context->plan = plan;
   return iree_ok_status();
 }

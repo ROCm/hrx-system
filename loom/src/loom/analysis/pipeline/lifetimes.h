@@ -59,6 +59,9 @@ typedef struct loom_pipeline_lifetimes_t {
   const loom_pipeline_lifetime_ancestry_t* ancestry;
   // Whether any serial scope can establish reusable construction lifetimes.
   bool has_serial;
+  // Natural-loop nesting at each construction's entry across enclosing
+  // schedules. NULL when all entries are outside loops.
+  const uint32_t* loop_depths;
 } loom_pipeline_lifetimes_t;
 
 // Indexes the completed parent-before-child tree in linear time and space.

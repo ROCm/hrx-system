@@ -52,24 +52,26 @@ typedef struct loom_cfg_execution_counts_t {
   // Loop-derived count per block, or NULL when the requested exactness cannot
   // be established from the available loop and control information.
   const uint64_t* values;
-  // Blocks controlled by an unmodeled selector. An empty bitmap means every
-  // retained count is exact; unreachable blocks have exact count zero.
+  // Blocks controlled by an unmodeled selector, including variable loop
+  // trips. Their values are upper bounds. Unreachable blocks have count zero.
   iree_bitmap_t unmodeled_blocks;
   // The complete bounded CFG follows one modeled control path. Transport
   // ordering needs this stronger proof even when some block counts are exact.
   bool single_path;
 } loom_cfg_execution_counts_t;
 
-// Combines exact loop trip counts with retained control dependence. storage
-// has graph->block_count entries and outlives the result. NULL control requests
-// only the single-path proof, avoiding partial-count analysis when unused.
-// Otherwise branch-local counts remain unknown while reconverged blocks retain
-// their exact enclosing multiplier. No CFG/loop/control discovery is repeated.
+// Combines loop bounds with retained control dependence. A true variable_trips
+// entry marks a finite upper bound, and NULL means every finite bound is
+// exact. An unbounded cycle or an overflowing count precludes an exact result.
+// storage has graph->block_count entries and outlives the result. NULL control
+// requests only the single-path proof. Otherwise the exact enclosing count is
+// recovered after finite variable loops and conditional paths reconverge.
 // Status carries allocation failure for the uncertainty bitmap.
 iree_status_t loom_cfg_execution_counts_calculate(
-    const loom_cfg_loop_nest_t* loops, const uint64_t* trip_counts,
-    const loom_cfg_control_t* control, iree_arena_allocator_t* arena,
-    uint64_t* storage, loom_cfg_execution_counts_t* out_counts);
+    const loom_cfg_loop_nest_t* loops, const uint64_t* trip_bounds,
+    const bool* variable_trips, const loom_cfg_control_t* control,
+    iree_arena_allocator_t* arena, uint64_t* storage,
+    loom_cfg_execution_counts_t* out_counts);
 
 // Queries retained source information without revisiting control flow.
 static inline bool loom_cfg_execution_count_is_exact(
