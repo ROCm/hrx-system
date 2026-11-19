@@ -53,7 +53,10 @@ TEST(Aie2pProgramLayoutTest, LocalDemandReducesOnlyTheWorkersThatBenefit) {
   };
   const uint32_t depths[] = {0, 1, 0, 0};
   const loom_pipeline_lifetimes_t lifetimes = {
-      .nodes = nodes, .count = IREE_ARRAYSIZE(nodes), .loop_depths = depths};
+      .nodes = nodes,
+      .count = IREE_ARRAYSIZE(nodes),
+      .loop_depths = depths,
+  };
   // A 2 KiB repeated phase can stay beside either 12 KiB sibling. A worker
   // with 14 KiB siblings must keep all three phases replaceable.
   const iree_host_size_t function_owners[] = {0, 0, 1, 2, 2, 3};
