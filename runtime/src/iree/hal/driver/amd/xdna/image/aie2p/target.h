@@ -33,6 +33,8 @@ typedef struct iree_hal_amd_xdna_aie2p_target_t {
   } context;
   // Required firmware instruction-address alignment in bytes.
   uint32_t instruction_alignment;
+  // The active queue accepts firmware-addressed LOAD_PDI transactions.
+  bool supports_load_pdi;
 } iree_hal_amd_xdna_aie2p_target_t;
 
 #endif  // IREE_HAL_DRIVER_AMD_XDNA_IMAGE_AIE2P_TARGET_H_

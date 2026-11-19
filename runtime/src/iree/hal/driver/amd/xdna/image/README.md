@@ -15,6 +15,42 @@ The [Loom producer](../../../../../../../../loom/src/loom/target/arch/amd/xdna/a
 and reader share the fixed-width codecs in
 [xdna_executable.h](../../../../../schemas/xdna_executable.h).
 
+## Experimental standalone AIE executables
+
+The XDNA HAL also accepts the grouped AIE2P ELF produced by
+`aiecc --get-full-elf` (AIEBU ABI 2.1). An application supplies the original
+bytes to `iree_hal_executable_load`, looks up an export such as
+`main:sequence` with `iree_hal_executable_lookup_function_by_name`, and
+calls `iree_hal_queue_dispatch` with ordinary storage buffer ranges. Completion
+uses the queue's usual signal semaphore. The target context width must match
+the ELF partition. The application and HAL need only the emitted ELF.
+
+A group identifies a kernel and one runtime sequence. The sequence owns a
+controller transaction, which can reference immutable configuration images
+(PDIs) and caller buffers. A firmware-address relocation names one PDI section.
+Distinct sections retain distinct addresses even when their bytes are equal.
+A shim-DMA relocation names a buffer argument and carries a displacement into
+that range. Both the original buffer-descriptor displacement and the relocation
+addend survive rebinding. A pointer signature supplies no access direction.
+Supply read/write storage ranges at each referenced ordinal, preserving holes up
+to the highest referenced slot. Unused trailing signature slots need no values.
+
+The loader resolves these relationships once and uses the same storage, binding,
+and submission code as a native Loom image. Each independent dispatch must
+establish its array state and drain its work. Use `--expand-load-pdis` for a
+program that runs repeatedly or shares its placement with another executable.
+A default one-shot program requires a known initial placement and PDI cache
+state. Firmware can skip loading the last PDI address, including an address
+reused by a new executable after the old one was released.
+
+Standalone execution requires the active libamdf queue's
+`AMDF_XDNA_INSTRUCTION_FEATURE_LOAD_PDI` capability. Linux DRM exposes this
+operation. The current Windows MCDM submission path returns `INCOMPATIBLE` at
+HAL executable load. Grouped AIE2P transactions with buffer arguments are the
+experimental format. Auxiliary save/restore sections, scalar argument encodings,
+and other relocation kinds require additional ABI support.
+[Producer fixtures and regeneration](testdata/README.md#standalone-mlir-aie-elfs)
+
 ## Storage, identity, and ownership
 
 An allocation row is a requirement, not a runtime object. An entry's allocation
@@ -32,14 +68,14 @@ subject to the native memory scope and address lifetime. Exact file-range
 aliases let one stored payload initialize multiple destinations without
 replicating it in the file. This does not itself imply shared device backing.
 
-Image admission compares the exact device-profile identity and revision,
+Native Loom image admission compares the exact device-profile identity and revision,
 firmware ABI, instruction generation, and context geometry. Strix NPU4 and
 Strix Halo NPU5 share an array family but have distinct execution profiles.
 The loader does not guess compatibility from a family name or patch an image
 to fit another endpoint.
 
 `iree_hal_amd_xdna_image_allocate` retains the source byte sequence, decodes the
-load directory, and retains compact metadata. It does not flatten or copy the
+load directory, and owns the decoded table rows. It does not flatten or copy the
 native payload into another host image. Table queries borrow image-owned
 storage. The image has no device allocations, mappings, context, or submission
 ownership, and destroying it performs no device operation.
@@ -105,8 +141,9 @@ and contains no precompiled bootstrap PDI; family bootstrap belongs to libamdf.
 
 | Component | Contract |
 | --- | --- |
+| [aie_full_elf.h](aie_full_elf.h) | Grouped standalone AIE ELF exports, section-backed allocations, and firmware and shim address relocations. |
 | [directory.h](directory.h) | Retained source, canonical ELF envelope, load headers, and bounded source-range access. |
-| [tables.h](tables.h) | Compact little-endian rows with indexed, allocation-free queries. |
+| [tables.h](tables.h) | Decoded host rows, source ranges, and indexed, allocation-free queries. |
 | [validation.h](validation.h) | Admission of row relationships, ranges, and exact target requirements. |
 | [image.h](image.h) | Immutable owner and export lookup. |
 | [aie2p/target.h](aie2p/target.h) | Admitted context identity, geometry, and instruction alignment. |

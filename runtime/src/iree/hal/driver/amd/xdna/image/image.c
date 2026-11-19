@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "iree/hal/driver/amd/xdna/image/aie_full_elf.h"
 #include "iree/hal/driver/amd/xdna/image/directory.h"
 #include "iree/hal/driver/amd/xdna/image/validation.h"
 
@@ -97,14 +98,25 @@ iree_status_t iree_hal_amd_xdna_image_allocate(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "invalid XDNA target contract");
   }
+  if (!source_sequence) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "XDNA image source sequence is required");
+  }
+  uint8_t os_abi = 0;
+  IREE_RETURN_IF_ERROR(iree_byte_sequence_read(
+      source_sequence, 7 /* EI_OSABI */, iree_make_byte_span(&os_abi, 1)));
   iree_hal_amd_xdna_image_t* image = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*image), (void**)&image));
   image->host_allocator = host_allocator;
   image->source = source_sequence;
   iree_byte_sequence_retain(source_sequence);
-  iree_status_t status = iree_hal_amd_xdna_image_read_native(
-      source_sequence, target, host_allocator, &image->tables);
+  iree_status_t status =
+      os_abi == IREE_HAL_AMD_AIE_OS_ABI
+          ? iree_hal_amd_xdna_image_read_aie_full_elf(
+                source_sequence, target, host_allocator, &image->tables)
+          : iree_hal_amd_xdna_image_read_native(source_sequence, target,
+                                                host_allocator, &image->tables);
   if (iree_status_is_ok(status)) {
     *out_image = image;
   } else {

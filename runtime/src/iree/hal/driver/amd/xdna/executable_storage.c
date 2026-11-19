@@ -30,8 +30,8 @@ iree_status_t iree_hal_amd_xdna_executable_storage_validate_relocation(
   return iree_ok_status();
 }
 
-static void iree_hal_amd_xdna_executable_write_address(uint8_t* target,
-                                                       uint64_t address) {
+static void iree_hal_amd_xdna_executable_write_shim_address(uint8_t* target,
+                                                            uint64_t address) {
   const uint32_t low = iree_unaligned_load_le_u32(target);
   const uint32_t high = iree_unaligned_load_le_u32(target + 4);
   iree_unaligned_store_le_u32(target, (low & 3u) | (uint32_t)address);
@@ -126,11 +126,15 @@ iree_status_t iree_hal_amd_xdna_executable_storage_load(
                          IREE_HAL_AMD_XDNA_EXECUTABLE_STORAGE_FLAG_SHARED)) {
       continue;
     }
-    iree_hal_amd_xdna_executable_write_address(
-        storage[relocation.destination_use].mapping.data +
-            relocation.byte_offset,
-        storage[relocation.source_ordinal].device_address +
-            (uint64_t)relocation.addend);
+    uint8_t* field = storage[relocation.destination_use].mapping.data +
+                     relocation.byte_offset;
+    const uint64_t address = storage[relocation.source_ordinal].device_address +
+                             (uint64_t)relocation.addend;
+    if (relocation.kind == IREE_HAL_AMD_XDNA_RELOCATION_FIRMWARE_ADDRESS_64) {
+      iree_unaligned_store_le_u64(field, address);
+    } else {
+      iree_hal_amd_xdna_executable_write_shim_address(field, address);
+    }
   }
   return iree_ok_status();
 }
@@ -147,7 +151,7 @@ void iree_hal_amd_xdna_executable_storage_patch(
     const iree_xdna_elf_relocation_record_t relocation =
         iree_hal_amd_xdna_image_tables_relocation(
             tables, entry.first_dynamic_relocation + i);
-    iree_hal_amd_xdna_executable_write_address(
+    iree_hal_amd_xdna_executable_write_shim_address(
         storage[relocation.destination_use].mapping.data +
             relocation.byte_offset,
         bindings[relocation.source_ordinal].device_address +

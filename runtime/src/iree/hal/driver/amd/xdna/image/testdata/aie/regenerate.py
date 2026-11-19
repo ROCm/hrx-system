@@ -5,7 +5,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Rebuilds the standalone hello-world ELFs with a maintainer's aiecc."""
+"""Rebuilds the standalone AIE conformance ELFs with a maintainer's aiecc."""
 
 import shutil
 import subprocess
@@ -16,22 +16,23 @@ from pathlib import Path
 def main():
     fixture_dir = Path(__file__).resolve().parent
     variants = {
-        "full_elf_42.elf": [],
-        "full_elf_42_expanded.elf": ["--expand-load-pdis"],
+        "full_elf_42.elf": ("full_elf_42.mlir", []),
+        "full_elf_42_expanded.elf": ("full_elf_42.mlir", ["--expand-load-pdis"]),
+        "vector_scalar_add.elf": ("vector_scalar_add.mlir", ["--expand-load-pdis"]),
     }
     with tempfile.TemporaryDirectory(prefix="aie-full-elf-") as temporary:
         root = Path(temporary)
-        for filename, flags in variants.items():
+        for filename, (source_name, flags) in variants.items():
             build_dir = root / Path(filename).stem
             build_dir.mkdir()
-            shutil.copyfile(fixture_dir / "full_elf_42.mlir", build_dir / "aie.mlir")
+            shutil.copyfile(fixture_dir / source_name, build_dir / "aie.mlir")
             subprocess.run(
                 ["aiecc", "--get-full-elf", "--dynamic-objFifos", *flags, "aie.mlir"],
                 cwd=build_dir,
                 check=True,
             )
 
-        # Publish the pair only after both compiler invocations have succeeded.
+        # Publish only after every compiler invocation has succeeded.
         for filename in variants:
             output = root / Path(filename).stem / "aie.elf"
             shutil.copyfile(output, fixture_dir / filename)
