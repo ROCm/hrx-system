@@ -230,6 +230,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/driver/amd/gpu/queue:blit",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:control",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:control_program",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue:fixup",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:inputs",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:program",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:recording",
