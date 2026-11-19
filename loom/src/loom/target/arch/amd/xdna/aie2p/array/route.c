@@ -367,6 +367,7 @@ static bool loom_aie2p_array_plan_route(
   const bool command_carrier =
       sharing &&
       sharing->carrier == LOOM_AIE2P_ARRAY_ROUTE_CARRIER_HARDWARE_COMMAND;
+  iree_host_size_t shared_step_count = IREE_HOST_SIZE_MAX;
   // Existing multicast prefixes retain their physical arrival and lane. Only
   // the unreserved suffix participates in lane selection.
   while (builder->prefixes.nodes[node_index].coordinate.column !=
@@ -387,6 +388,12 @@ static bool loom_aie2p_array_plan_route(
       loom_aie2p_array_discard_route_prefix(builder, first_route);
       return false;
     }
+    // Once the reserved prefix passes the convergence tile, its new suffix
+    // may extend the carrier onto free lanes.
+    if (sharing && node->coordinate.column == sharing->destination.column &&
+        node->coordinate.row == sharing->destination.row) {
+      shared_step_count = 0;
+    }
     if (packet) {
       // Packet classes share the physical source tree to preserve stream
       // order. Every class retains its complete path so its filters also
@@ -406,7 +413,6 @@ static bool loom_aie2p_array_plan_route(
   loom_xdna_tile_coordinate_t coordinate = prefix->coordinate;
   loom_xdna_stream_port_t incoming_port = prefix->incoming_port;
   iree_host_size_t step_count = 0;
-  iree_host_size_t shared_step_count = IREE_HOST_SIZE_MAX;
   while (coordinate.column != destination.column ||
          coordinate.row != destination.row) {
     if (sharing && coordinate.column == sharing->destination.column &&

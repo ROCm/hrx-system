@@ -243,6 +243,44 @@ class Aie2pComputeRouteTest : public ::testing::Test {
   iree_arena_allocator_t arena;
 };
 
+TEST_F(Aie2pComputeRouteTest, CommandSenderExtendsItsBorrowedDeliveryPrefix) {
+  const auto* family = loom_xdna_npu2_array_family();
+  loom_aie2p_array_route_builder_t routing;
+  IREE_ASSERT_OK(
+      loom_aie2p_array_route_builder_initialize(family, 32, &arena, &routing));
+  const loom_xdna_tile_coordinate_t memory = {1, 1};
+  loom_aie2p_array_route_tree_t payload = {};
+  ASSERT_TRUE(loom_aie2p_array_route_workers(&routing, 0, &payload, memory, 0,
+                                             {1, 5}, 0, false));
+  loom_aie2p_array_route_sharing_t delivery;
+  IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
+      &routing, 0, 0, memory, LOOM_AIE2P_ARRAY_ROUTE_CARRIER_HARDWARE_COMMAND,
+      &delivery));
+  loom_aie2p_array_route_tree_t first = {}, second = {};
+  ASSERT_TRUE(loom_aie2p_array_route_control(&routing, 1, &first, memory,
+                                             LOOM_XDNA_STREAM_PORT_DMA, 2,
+                                             {1, 4}, &delivery));
+  ASSERT_TRUE(loom_aie2p_array_route_control(&routing, 2, &second, memory,
+                                             LOOM_XDNA_STREAM_PORT_DMA, 3,
+                                             {1, 3}, &delivery));
+  // The second sender reuses its prefix through row 3, follows the first
+  // sender through row 4, then extends the shared carrier to a new core.
+  const size_t begin = routing.route_count;
+  ASSERT_TRUE(loom_aie2p_array_route_control(&routing, 3, &second, memory,
+                                             LOOM_XDNA_STREAM_PORT_DMA, 3,
+                                             {1, 5}, &delivery));
+  ASSERT_EQ(routing.route_count - begin, 5u);
+  for (size_t i = 0; i < 4; ++i) {
+    const auto& edge = routing.routes[begin + i];
+    EXPECT_EQ(edge.coordinate.row, i + 1);
+    EXPECT_EQ(edge.destination_port, LOOM_XDNA_STREAM_PORT_NORTH);
+    EXPECT_EQ(edge.destination_channel, 1u);
+  }
+  const auto& terminal = routing.routes[begin + 4];
+  EXPECT_EQ(terminal.coordinate.row, 5u);
+  EXPECT_EQ(terminal.destination_port, LOOM_XDNA_STREAM_PORT_TILE_CONTROL);
+}
+
 TEST_F(Aie2pComputeRouteTest, CompleteCommandsShareAcrossSenderPorts) {
   const auto* family = loom_xdna_npu2_array_family();
   for (uint16_t row : {0, 1, 2}) {
