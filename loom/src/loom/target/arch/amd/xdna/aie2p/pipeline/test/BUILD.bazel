@@ -95,6 +95,7 @@ loom_test(
         "collective_readers.loom",
         "concurrent_distribution.loom",
         "conditional_admission.loom",
+        "counted_input.loom",
         "dynamic_packet_addresses.loom",
         "finite_ingress.loom",
         "input_origins.loom",

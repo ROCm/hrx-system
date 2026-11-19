@@ -6,6 +6,8 @@
 
 #include <stdlib.h>
 
+#include "loom/ops/index/ops.h"
+#include "loom/ops/scalar/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
 
 typedef struct loom_aie2p_native_join_scope_t {
@@ -153,16 +155,90 @@ static uint32_t loom_aie2p_native_endpoint_register(
                     origin);
 }
 
+iree_status_t loom_aie2p_native_queue_i32(loom_builder_t* builder,
+                                          loom_value_id_t value,
+                                          loom_value_id_t* out_value) {
+  const loom_type_t from = loom_module_value_type(builder->module, value);
+  const loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  const loom_scalar_type_t scalar = loom_type_element_type(from);
+  loom_op_t* cast;
+  if (scalar == LOOM_SCALAR_TYPE_I32) {
+    *out_value = value;
+    return iree_ok_status();
+  }
+  if (!loom_scalar_type_is_integer(scalar)) {
+    IREE_RETURN_IF_ERROR(loom_index_cast_build(builder, value, from, i32,
+                                               LOOM_LOCATION_UNKNOWN, &cast));
+  } else if (scalar == LOOM_SCALAR_TYPE_I64) {
+    IREE_RETURN_IF_ERROR(loom_scalar_trunci_build(
+        builder, value, from, i32, LOOM_LOCATION_UNKNOWN, &cast));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_scalar_extui_build(builder, value, from, i32,
+                                                 LOOM_LOCATION_UNKNOWN, &cast));
+  }
+  *out_value = loom_op_results(cast)[0];
+  return iree_ok_status();
+}
+
+iree_status_t loom_aie2p_native_skip_empty(loom_aie2p_worker_builder_t* code,
+                                           loom_builder_t* builder,
+                                           loom_op_t* function,
+                                           loom_value_id_t count) {
+  loom_region_t* body = loom_low_func_def_body(function);
+  loom_block_t *active, *empty;
+  IREE_RETURN_IF_ERROR(loom_region_append_block(code->module, body, &active));
+  IREE_RETURN_IF_ERROR(loom_region_append_block(code->module, body, &empty));
+  loom_op_t* branch;
+  IREE_RETURN_IF_ERROR(loom_low_cond_br_build(builder, count, active, empty,
+                                              LOOM_LOCATION_UNKNOWN, &branch));
+  loom_builder_set_block(builder, empty);
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_return(builder, NULL, 0));
+  loom_builder_set_block(builder, active);
+  return iree_ok_status();
+}
+
+iree_status_t loom_aie2p_native_counted_task(
+    loom_aie2p_worker_builder_t* code, loom_builder_t* builder,
+    loom_value_id_t count, uint32_t start,
+    loom_xdna_register_field_id_t repeat_field, loom_value_id_t* out_value) {
+  loom_value_id_t one, encoded, shift, base;
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(code, builder, 1, &one));
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_binary(
+      code, builder, AIE2P_CORE_DESCRIPTOR_REF_SUB_I32, count, one, &encoded));
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
+      code, builder,
+      loom_xdna_register_field_info(repeat_field).least_significant_bit,
+      &shift));
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_binary(
+      code, builder, AIE2P_CORE_DESCRIPTOR_REF_LSHL_I32, encoded, shift,
+      &encoded));
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(code, builder, start, &base));
+  return loom_aie2p_worker_binary(code, builder,
+                                  AIE2P_CORE_DESCRIPTOR_REF_OR_I32, base,
+                                  encoded, out_value);
+}
+
 iree_status_t loom_aie2p_native_endpoint_start(
     loom_aie2p_native_context_t* context, loom_builder_t* builder,
     const loom_aie2p_native_distribution_endpoint_t* endpoint,
-    loom_xdna_dma_direction_t direction, uint8_t packet) {
+    loom_xdna_dma_direction_t direction, uint8_t packet,
+    loom_value_id_t count) {
   const loom_aie2p_native_memory_layout_t* layout =
       endpoint->tile->memory_layout;
   const loom_aie2p_native_dma_sequence_t* sequence = &endpoint->sequence;
   const uint32_t address = loom_aie2p_native_endpoint_register(
       context, endpoint, layout->directions[direction - 1].start,
       endpoint->engine);
+  if (count != LOOM_VALUE_ID_INVALID) {
+    loom_value_id_t task;
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_counted_task(
+        &context->code, builder, count,
+        loom_xdna_register_field_encode(layout->directions[direction - 1].start,
+                                        sequence->descriptor),
+        layout->directions[direction - 1].repeat, &task));
+    return loom_aie2p_worker_control_write(&context->code, builder, packet,
+                                           address, &task, 1);
+  }
   for (uint8_t i = 0; i < sequence->task_count; ++i) {
     loom_value_id_t task;
     IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(&context->code, builder,
@@ -230,10 +306,27 @@ static iree_status_t loom_aie2p_native_endpoint_retire(
                                   &call);
 }
 
+static const loom_aie2p_native_distribution_command_t*
+loom_aie2p_native_next_boundary_command(
+    const loom_aie2p_native_distribution_command_t* command,
+    const loom_pipeline_invocation_t* invocation, bool before) {
+  while (command &&
+         (command->invocation != invocation || (!before && !command->retire))) {
+    command = command->next;
+  }
+  return command;
+}
+
+static bool loom_aie2p_native_same_repeat(
+    const loom_pipeline_channel_repeat_t* lhs,
+    const loom_pipeline_channel_repeat_t* rhs) {
+  return lhs == rhs || (lhs && rhs && lhs->count == rhs->count);
+}
+
 iree_status_t loom_aie2p_native_distribution_boundary(
     loom_aie2p_native_context_t* context, loom_builder_t* builder,
     iree_host_size_t worker_index, const loom_pipeline_invocation_t* invocation,
-    bool before) {
+    bool before, loom_value_slice_t captures) {
   const loom_aie2p_native_worker_t* worker = &context->workers[worker_index];
   if (!worker->distribution_commands) {
     return iree_ok_status();
@@ -243,33 +336,56 @@ iree_status_t loom_aie2p_native_distribution_boundary(
                             .workers[context->core_engines[worker_index]]];
   loom_aie2p_worker_builder_t* code = &context->code;
   code->worker_index = worker_index;
-  loom_builder_t helper;
-  loom_symbol_ref_t symbol;
-  loom_op_t* function;
-  IREE_RETURN_IF_ERROR(loom_aie2p_worker_helper(code, NULL, 0, NULL, 0, &helper,
-                                                &symbol, &function));
-  for (const loom_aie2p_native_distribution_command_t* command =
-           worker->distribution_commands;
-       command; command = command->next) {
-    if (command->invocation != invocation) {
-      continue;
+  const loom_aie2p_native_distribution_command_t* command =
+      loom_aie2p_native_next_boundary_command(worker->distribution_commands,
+                                              invocation, before);
+  while (command) {
+    // Keep adjacent writes using the same capture in one helper and preserve
+    // task publication order when independently counted streams share a core.
+    const loom_pipeline_channel_repeat_t* repeat =
+        before ? command->endpoint->channel->repeat : NULL;
+    loom_builder_t helper;
+    loom_symbol_ref_t symbol;
+    loom_op_t* function;
+    const uint16_t arguments = repeat ? 1 : 0;
+    IREE_RETURN_IF_ERROR(loom_aie2p_worker_helper(code, &code->scalar_type,
+                                                  arguments, NULL, 0, &helper,
+                                                  &symbol, &function));
+    loom_value_id_t count = LOOM_VALUE_ID_INVALID;
+    loom_value_id_t actual = LOOM_VALUE_ID_INVALID;
+    if (repeat) {
+      count =
+          loom_region_entry_block(loom_low_func_def_body(function))->arg_ids[0];
+      const uint16_t formal =
+          loom_value_def_index(loom_module_value(code->module, repeat->count));
+      IREE_RETURN_IF_ERROR(loom_aie2p_native_queue_i32(
+          builder, captures.values[formal], &actual));
+      if (!repeat->minimum) {
+        IREE_RETURN_IF_ERROR(
+            loom_aie2p_native_skip_empty(code, &helper, function, count));
+      }
     }
-    const iree_host_size_t tile = command->endpoint->tile - context->tiles;
-    if (before) {
-      IREE_RETURN_IF_ERROR(loom_aie2p_native_endpoint_start(
-          context, &helper, command->endpoint, command->direction,
-          owner->control_packets[tile]));
-    } else if (command->retire) {
-      // All async groups in the child have retired before its return. No
-      // distribution task emits tokens, so only this explicit register-read
-      // response can reach the scalar stream until the next child starts.
-      IREE_RETURN_IF_ERROR(loom_aie2p_native_endpoint_retire(
-          context, &helper, loom_low_func_def_body(function), command,
-          owner->control_packets[tile], owner->control_replies[tile]));
-    }
+    do {
+      const iree_host_size_t tile = command->endpoint->tile - context->tiles;
+      if (before) {
+        IREE_RETURN_IF_ERROR(loom_aie2p_native_endpoint_start(
+            context, &helper, command->endpoint, command->direction,
+            owner->control_packets[tile], count));
+      } else {
+        IREE_RETURN_IF_ERROR(loom_aie2p_native_endpoint_retire(
+            context, &helper, loom_low_func_def_body(function), command,
+            owner->control_packets[tile], owner->control_replies[tile]));
+      }
+      command = loom_aie2p_native_next_boundary_command(command->next,
+                                                        invocation, before);
+    } while (command &&
+             (!before || loom_aie2p_native_same_repeat(
+                             repeat, command->endpoint->channel->repeat)));
+    IREE_RETURN_IF_ERROR(loom_aie2p_worker_return(&helper, NULL, 0));
+    loom_op_t* call;
+    IREE_RETURN_IF_ERROR(
+        loom_low_invoke_build(builder, 0, 0, 0, 0, symbol, &actual, arguments,
+                              NULL, 0, NULL, 0, LOOM_LOCATION_UNKNOWN, &call));
   }
-  IREE_RETURN_IF_ERROR(loom_aie2p_worker_return(&helper, NULL, 0));
-  loom_op_t* call = NULL;
-  return loom_low_invoke_build(builder, 0, 0, 0, 0, symbol, NULL, 0, NULL, 0,
-                               NULL, 0, LOOM_LOCATION_UNKNOWN, &call);
+  return iree_ok_status();
 }

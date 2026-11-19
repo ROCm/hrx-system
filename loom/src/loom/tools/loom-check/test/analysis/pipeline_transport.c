@@ -138,6 +138,17 @@ static iree_status_t loom_check_test_pipeline_transport_print(
     iree_host_size_t worker_index, bool input_addresses, bool phase_details,
     iree_arena_allocator_t* arena, iree_string_builder_t* output) {
   const loom_pipeline_transport_t* transport = &worker->transport;
+  if (worker->channel_repeat) {
+    const loom_pipeline_channel_repeat_t* repeat = worker->channel_repeat;
+    const iree_string_view_t count =
+        loom_module_value_name(module, repeat->count);
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        output,
+        "worker %" PRIhsz ": channel_count=%%%.*s argument=%u range=[%" PRIu64
+        ",%" PRIu64 "] multiple=%" PRIu64 "\n",
+        worker_index, (int)count.size, count.data, repeat->argument,
+        repeat->minimum, repeat->maximum, repeat->multiple));
+  }
   if (input_addresses) {
     const loom_pipeline_transport_input_t* input = transport->input;
     if (!input || input->phase_count != 1) {

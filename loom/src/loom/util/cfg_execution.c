@@ -126,10 +126,13 @@ iree_status_t loom_cfg_execution_counts_calculate(
   bool single_path = false;
   const bool bounded = loom_cfg_loop_nest_calculate_bounds(
       loops, trip_bounds, storage, &single_path);
-  if (bounded && single_path && !variable_trips) {
-    out_counts->single_path = true;
-    out_counts->values = storage;
-    return iree_ok_status();
+  if (bounded && single_path) {
+    out_counts->path = variable_trips ? LOOM_CFG_EXECUTION_PATH_VARIABLE_TRIPS
+                                      : LOOM_CFG_EXECUTION_PATH_FIXED;
+    if (!variable_trips) {
+      out_counts->values = storage;
+      return iree_ok_status();
+    }
   }
   if (!control || !bounded) {
     return iree_ok_status();

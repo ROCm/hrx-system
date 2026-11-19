@@ -166,7 +166,8 @@ typedef struct loom_pipeline_transport_input_phase_t {
   const loom_kernel_async_transfer_t* transfer;
   // Number of this phase's completed transfers within each source lifetime.
   uint64_t transfers;
-  // Transfer count before the source address repeats, dividing transfers.
+  // Address period in records. Zero denotes an affine prefix with a captured
+  // length and no address wrap. A fixed period divides the executed count.
   uint64_t period;
   // First byte relative to the acquired payload or enclosing storage root.
   int64_t source_byte_offset;
@@ -199,7 +200,9 @@ typedef struct loom_pipeline_transport_input_t {
 } loom_pipeline_transport_input_t;
 
 typedef struct loom_pipeline_transport_t {
-  // All observable sites in structural execution order, visiting loop bodies
+  // All observable sites in structural execution order. Counts in this plan
+  // describe one iteration when the worker has a captured channel repeat,
+  // or the complete invocation otherwise. The traversal visits loop bodies
   // before their continuations; NULL when ordinary execution is required.
   // Borrowed movement retains each site's execution scope, including admission
   // and release outside inner transfer loops. Record-batch lifetime and replay
@@ -287,6 +290,22 @@ iree_status_t loom_pipeline_transport_stream_cursor_initialize(
 const loom_pipeline_transport_copy_t* loom_pipeline_transport_copy_cursor_next(
     loom_pipeline_transport_copy_cursor_t* cursor);
 
+// A strand that visits every channel action once per unit of one captured
+// value. The range bounds storage and descriptor selection. The capture
+// determines the number of actions actually executed in each invocation.
+typedef struct loom_pipeline_channel_repeat_t {
+  // SSA identity in the construction containing the strand call.
+  loom_value_id_t count;
+  // Position of the count in the strand's original formal argument tuple.
+  uint16_t argument;
+  // Inclusive lower bound on the number of iterations, possibly zero.
+  uint64_t minimum;
+  // Inclusive upper bound on the number of iterations.
+  uint64_t maximum;
+  // Every possible iteration count is divisible by this positive value.
+  uint64_t multiple;
+} loom_pipeline_channel_repeat_t;
+
 typedef struct loom_pipeline_worker_t {
   // Authored strand and its ordinary call, borrowed through consuming rewrite.
   const loom_pipeline_resource_strand_t* source;
@@ -312,6 +331,9 @@ typedef struct loom_pipeline_worker_t {
   loom_local_value_domain_t value_domain;
   // Communication membership and actions established in this occurrence.
   loom_channel_plan_t channels;
+  // Shared runtime multiplicity of all channel sites, or NULL for fixed
+  // counts, control-dependent rates, or a count unavailable at the call.
+  const loom_pipeline_channel_repeat_t* channel_repeat;
   // FIFO credit deltas and borrowed-payload record correspondence, or the
   // record-aware realization requirement.
   loom_channel_completion_t completion;

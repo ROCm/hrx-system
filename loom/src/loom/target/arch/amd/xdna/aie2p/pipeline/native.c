@@ -252,7 +252,12 @@ static iree_status_t loom_aie2p_native_claim_transport_cursor(
                                        worker_index);
   loom_aie2p_native_cursor_t* cursor =
       reader ? &channel->cursor.reader : &channel->cursor.writer;
-  if (!admissions || admissions > UINT32_MAX) {
+  const loom_pipeline_channel_repeat_t* repeat =
+      realization->workers[worker_index].channel_repeat;
+  const bool single_site = cursor->worker == UINT32_MAX && admissions == 1;
+  if ((repeat &&
+       !iree_checked_mul_u64(admissions, repeat->maximum, &admissions)) ||
+      !admissions || admissions > UINT32_MAX) {
     return loom_aie2p_native_reject(
         context, op,
         IREE_SV(
@@ -290,7 +295,8 @@ static iree_status_t loom_aie2p_native_claim_transport_cursor(
   cursor->worker = worker_index;
   cursor->transport_batch = batch_index;
   cursor->maximum_admissions += (uint32_t)admissions;
-  cursor->exact_admissions = true;
+  cursor->single_site = single_site;
+  cursor->exact_admissions = !repeat;
   cursor->advances = channel->source->capacity > 1 &&
                      (cursor->shared || cursor->maximum_admissions > 1);
   *out_valid = true;
@@ -715,6 +721,8 @@ static iree_status_t loom_aie2p_native_select(
        ++i) {
     loom_aie2p_native_channel_t* channel = &context->channels[i];
     loom_aie2p_native_finish_cursor_owners(channel);
+    channel->repeat = loom_aie2p_native_channel_repeat(realization, channel);
+    channel->balance.balanced |= channel->repeat != NULL;
     const loom_aie2p_native_tile_t* owner =
         context->pool_tiles[channel->pool_index];
     if (!channel->replay.record_count &&
@@ -771,7 +779,7 @@ static iree_status_t loom_aie2p_native_select(
     }
     bool configure = false;
     bool repeat = false;
-    if (source->transport.steps) {
+    if (source->transport.steps && !source->channel_repeat) {
       loom_local_value_domain_restore(&source->value_domain);
       repeat =
           loom_aie2p_native_can_repeat(context, realization, source, worker);

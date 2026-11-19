@@ -46,6 +46,18 @@ iree_status_t loom_cfg_execution_classify_unmodeled_blocks(
     loom_cfg_execution_selector_model_t selector_model,
     iree_arena_allocator_t* arena, iree_bitmap_t* out_unmodeled_blocks);
 
+// Whole-CFG execution order. Per-block exactness is independent of this proof.
+enum loom_cfg_execution_path_e {
+  // Some reachable control or loop bound has no complete execution model.
+  LOOM_CFG_EXECUTION_PATH_UNPROVEN = 0,
+  // Only counted loop headers select successors. At least one trip count
+  // varies at runtime, but execution order is exact given the trip counts.
+  LOOM_CFG_EXECUTION_PATH_VARIABLE_TRIPS,
+  // All reachable branches and trip counts are fixed.
+  LOOM_CFG_EXECUTION_PATH_FIXED,
+};
+typedef uint8_t loom_cfg_execution_path_t;
+
 // Execution multiplicity retained for one immutable CFG. Unknown alternatives
 // do not discard counts at blocks before their split or after reconvergence.
 typedef struct loom_cfg_execution_counts_t {
@@ -55,9 +67,8 @@ typedef struct loom_cfg_execution_counts_t {
   // Blocks controlled by an unmodeled selector, including variable loop
   // trips. Their values are upper bounds. Unreachable blocks have count zero.
   iree_bitmap_t unmodeled_blocks;
-  // The complete bounded CFG follows one modeled control path. Transport
-  // ordering needs this stronger proof even when some block counts are exact.
-  bool single_path;
+  // Control order of the complete region, including runtime-counted loops.
+  loom_cfg_execution_path_t path;
 } loom_cfg_execution_counts_t;
 
 // Combines loop bounds with retained control dependence. A true variable_trips

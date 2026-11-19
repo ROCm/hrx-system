@@ -25,7 +25,7 @@ static iree_status_t loom_aie2p_native_program_boundary(
     void* user_data, loom_builder_t* builder, iree_host_size_t engine,
     const loom_pipeline_invocation_schedule_t* scope,
     const loom_pipeline_invocation_t* child, bool before,
-    const loom_value_id_t* state_arguments) {
+    loom_value_slice_t captures, const loom_value_id_t* state_arguments) {
   loom_aie2p_native_context_t* context = user_data;
   if (child && before &&
       loom_aie2p_native_credits_require_initialization(context, child)) {
@@ -45,7 +45,7 @@ static iree_status_t loom_aie2p_native_program_boundary(
         context->distribution_controllers[child->ordinal], engine);
     if (worker != IREE_HOST_SIZE_MAX) {
       IREE_RETURN_IF_ERROR(loom_aie2p_native_distribution_boundary(
-          context, builder, worker, child, before));
+          context, builder, worker, child, before, captures));
     }
   }
   if (child && !before) {
@@ -169,7 +169,7 @@ iree_status_t loom_aie2p_native_emit_programs(
   for (iree_host_size_t i = 0; i < realization->invocations.worker_count; ++i) {
     state_arguments[i] = &context->workers[i].cursor_state_argument;
     const loom_aie2p_native_input_t* input = context->workers[i].input;
-    if (input && input->address_count) {
+    if (input && (input->address_count || input->repeat)) {
       if (!preparation_engines) {
         IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
             rewriter->arena, realization->invocations.worker_count,

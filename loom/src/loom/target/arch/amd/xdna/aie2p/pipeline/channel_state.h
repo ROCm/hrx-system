@@ -40,6 +40,12 @@ void loom_aie2p_native_cursor_bind(loom_aie2p_native_cursor_t* cursor,
 bool loom_aie2p_native_cursor_has_exact_admissions(
     const loom_aie2p_native_cursor_t* cursor, uint64_t count);
 
+// Returns the common capture when one admission site at either endpoint
+// belongs to the same construction and executes once for each record.
+const loom_pipeline_channel_repeat_t* loom_aie2p_native_channel_repeat(
+    const loom_pipeline_realization_t* realization,
+    const loom_aie2p_native_channel_t* channel);
+
 // Whether the direct reader's completion retires every delivered record.
 // Autonomous distribution has no independent completion anchor; its input DMA
 // must be observed instead. Terminal, partial, and shared readers cannot prove

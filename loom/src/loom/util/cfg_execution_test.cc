@@ -107,12 +107,12 @@ TEST_F(CfgExecutionTest, FixedLoopCountsSurviveConditionalPrefetch) {
   IREE_ASSERT_OK(loom_cfg_execution_counts_calculate(
       &loops, trips, nullptr, nullptr, &arena_, storage, &counts));
   EXPECT_EQ(counts.values, nullptr);
-  EXPECT_FALSE(counts.single_path);
+  EXPECT_EQ(counts.path, LOOM_CFG_EXECUTION_PATH_UNPROVEN);
 
   IREE_ASSERT_OK(loom_cfg_execution_counts_calculate(
       &loops, trips, nullptr, &control, &arena_, storage, &counts));
   ASSERT_NE(counts.values, nullptr);
-  EXPECT_FALSE(counts.single_path);
+  EXPECT_EQ(counts.path, LOOM_CFG_EXECUTION_PATH_UNPROVEN);
   const bool exact[] = {true, true, true, false, false, true, true};
   const uint64_t expected[] = {1, 89, 88, 88, 88, 88, 1};
   for (uint16_t i = 0; i < 7; ++i) {
@@ -151,7 +151,7 @@ TEST_F(CfgExecutionTest, FiniteVariableLoopPreservesSiblingCounts) {
   IREE_ASSERT_OK(loom_cfg_execution_counts_calculate(
       &loops, trips, variable_trips, &control, &arena_, storage, &counts));
   ASSERT_NE(counts.values, nullptr);
-  EXPECT_FALSE(counts.single_path);
+  EXPECT_EQ(counts.path, LOOM_CFG_EXECUTION_PATH_UNPROVEN);
   const bool exact[] = {true, true,  false, false, true,
                         true, false, true,  true,  true};
   const uint64_t bounds[] = {1, 3, 1026, 1024, 18, 16, 16, 16, 2, 1};
@@ -183,7 +183,7 @@ TEST_F(CfgExecutionTest, MultiwayLoopHeaderDoesNotCertifyBothBodyPaths) {
   loom_cfg_execution_counts_t counts;
   IREE_ASSERT_OK(loom_cfg_execution_counts_calculate(
       &loops, trips, nullptr, &control, &arena_, storage, &counts));
-  EXPECT_FALSE(counts.single_path);
+  EXPECT_EQ(counts.path, LOOM_CFG_EXECUTION_PATH_UNPROVEN);
   EXPECT_FALSE(loom_cfg_execution_count_is_exact(&counts, 2));
   EXPECT_FALSE(loom_cfg_execution_count_is_exact(&counts, 3));
   EXPECT_TRUE(loom_cfg_execution_count_is_exact(&counts, 5));
@@ -203,7 +203,7 @@ TEST_F(CfgExecutionTest, SinglePathLoopRetainsWholeTransportProof) {
   IREE_ASSERT_OK(loom_cfg_execution_counts_calculate(
       &loops, trips, nullptr, nullptr, &arena_, storage, &counts));
   ASSERT_NE(counts.values, nullptr);
-  EXPECT_TRUE(counts.single_path);
+  EXPECT_EQ(counts.path, LOOM_CFG_EXECUTION_PATH_FIXED);
   const uint64_t expected[] = {1, 65, 64, 1};
   for (uint16_t i = 0; i < 4; ++i) {
     EXPECT_TRUE(loom_cfg_execution_count_is_exact(&counts, i));
@@ -213,7 +213,7 @@ TEST_F(CfgExecutionTest, SinglePathLoopRetainsWholeTransportProof) {
   const bool variable_trips[] = {true};
   IREE_ASSERT_OK(loom_cfg_execution_counts_calculate(
       &loops, trips, variable_trips, nullptr, &arena_, storage, &counts));
-  EXPECT_FALSE(counts.single_path);
+  EXPECT_EQ(counts.path, LOOM_CFG_EXECUTION_PATH_VARIABLE_TRIPS);
   EXPECT_EQ(counts.values, nullptr);
 }
 

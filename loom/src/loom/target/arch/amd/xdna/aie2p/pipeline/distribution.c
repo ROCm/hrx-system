@@ -135,17 +135,27 @@ iree_status_t loom_aie2p_native_select_channel_endpoint(
         storage->last = invocation;
         out_endpoint->next_geometry = storage->geometries;
         storage->geometries = out_endpoint;
-        return iree_ok_status();
+        break;
       }
     }
   }
-  IREE_RETURN_IF_ERROR(loom_aie2p_native_select_sequence(
-      context, tile, out_endpoint->engine, direction,
-      batch_records ? NULL : progress_channel,
-      batch_records ? repetitions / batch_records : repetitions, capacity,
-      channel->byte_offset, byte_stride, credit_interval, reserved_tasks, words,
-      &out_endpoint->sequence, out_reason, out_valid));
-  if (*out_valid && private_geometry) {
+  if (!out_endpoint->storage) {
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_select_sequence(
+        context, tile, out_endpoint->engine, direction,
+        batch_records ? NULL : progress_channel,
+        batch_records ? repetitions / batch_records : repetitions, capacity,
+        channel->byte_offset, byte_stride, credit_interval, reserved_tasks,
+        words, &out_endpoint->sequence, out_reason, out_valid));
+    if (!*out_valid) {
+      return iree_ok_status();
+    }
+  }
+  // A clipped prefix can end mid-rotation even when its upper bound ends at
+  // slot zero. The channel owner restores the iterator on its next entry.
+  if (channel->repeat && channel->repeat->multiple % capacity) {
+    out_endpoint->sequence.rewind_iteration = true;
+  }
+  if (!out_endpoint->storage && private_geometry) {
     loom_aie2p_native_endpoint_storage_t* storage;
     IREE_RETURN_IF_ERROR(iree_arena_allocate(
         context->pass->arena, sizeof(*storage), (void**)&storage));
@@ -968,6 +978,26 @@ iree_status_t loom_aie2p_native_form_worker_distributions(
   // this worker uses that endpoint in more than one phase. Independent
   // distributions retain their autonomous paths.
   const bool packet_program = owner->distribution_packets;
+  const loom_pipeline_channel_repeat_t* repeat = source->channel_repeat;
+  if (repeat) {
+    const loom_value_t* count =
+        loom_module_value(context->code.module, repeat->count);
+    // Queue commands execute at the projected child boundary. Each turn
+    // forwards one whole record before admitting another, so every queue
+    // uses the same scalar repeat and keeps its own per-record credits.
+    if (!child || packet_program || streaming || phase_count != 1 ||
+        source->transport.batches[0].record_count != 1 ||
+        source->transport.batches[0].records->release ||
+        !loom_value_is_block_arg(count) ||
+        loom_value_def_block(count) !=
+            loom_region_entry_block(
+                loom_func_like_body(invocation->function))) {
+      return loom_aie2p_native_reject(
+          context, source->source->declaration,
+          IREE_SV("one forwarding transfer per record, counted by a child "
+                  "construction argument"));
+    }
+  }
   bool ordered = child || (!streaming && packet_program && phase_count > 1);
   for (iree_host_size_t i = 0; !streaming && i < phase_count; ++i) {
     const loom_pipeline_transport_batch_t* batch =
@@ -988,7 +1018,7 @@ iree_status_t loom_aie2p_native_form_worker_distributions(
     }
   }
   uint32_t* windows = NULL;
-  if (!packet_program && (!ordered || child)) {
+  if (!repeat && !packet_program && (!ordered || child)) {
     IREE_RETURN_IF_ERROR(loom_aie2p_native_distribution_windows(
         context, realization, &source->transport, &windows));
   }
@@ -1009,7 +1039,24 @@ iree_status_t loom_aie2p_native_form_worker_distributions(
         loom_aie2p_native_channel(context, realization,
                                   cohort->admission->channel);
     const uint32_t repetitions =
-        (uint32_t)(cohort->transfers * batch->record_count);
+        repeat ? (uint32_t)repeat->maximum
+               : (uint32_t)(cohort->transfers * batch->record_count);
+    if (repeat) {
+      for (iree_host_size_t j = 0; j <= cohort->destination_count; ++j) {
+        const loom_aie2p_native_channel_t* local =
+            j ? loom_aie2p_native_channel(context, realization,
+                                          cohort->destinations[j - 1].channel)
+              : source_channel;
+        if (!local->repeat || local->replay.record_count ||
+            repeat->maximum > context->pool_tiles[local->pool_index]
+                                  ->facts->dma.maximum_task_repeat_count) {
+          return loom_aie2p_native_reject(
+              context, cohort->admission->op,
+              IREE_SV("matching captured producer and consumer counts within "
+                      "one DMA task per FIFO endpoint"));
+        }
+      }
+    }
     loom_aie2p_native_distribution_batch_t* selected = &plan->batches[i];
     *selected = (loom_aie2p_native_distribution_batch_t){0};
     loom_aie2p_native_distribution_t* path = ordered   ? plan->geometries
@@ -1195,7 +1242,9 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
         distribution->sender.channel;
     const bool ordered = distribution->ordered;
     const uint32_t repetitions =
-        (uint32_t)(cohort->transfers * batch->record_count);
+        source->channel_repeat
+            ? (uint32_t)source->channel_repeat->maximum
+            : (uint32_t)(cohort->transfers * batch->record_count);
     const uint32_t* totals = selected->packet_totals;
     if (selected->creates_geometry) {
       loom_aie2p_native_distribution_t* existing =
@@ -1293,7 +1342,8 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
                 IREE_SV("the same ordered physical destinations in every "
                         "shared multicast phase"));
           }
-          if (ordered && repetitions % destination_channel->source->capacity) {
+          if (ordered && !source->channel_repeat &&
+              repetitions % destination_channel->source->capacity) {
             return loom_aie2p_native_reject(
                 context, destination->copy,
                 IREE_SV("complete destination-ring turns at a shared multicast "
