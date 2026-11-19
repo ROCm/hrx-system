@@ -153,9 +153,11 @@ class HrxLoader {
   decltype(&hrx_stream_get_semaphore) stream_get_semaphore;
   decltype(&hrx_stream_get_device) stream_get_device;
   decltype(&hrx_stream_get_timeline_position) stream_get_timeline_position;
+  decltype(&hrx_stream_advance_timeline) stream_advance_timeline;
   decltype(&hrx_stream_wait_on) stream_wait_on;
   decltype(&hrx_stream_dispatch) stream_dispatch;
   decltype(&hrx_stream_barrier) stream_barrier;
+  decltype(&hrx_stream_flush_with_barrier) stream_flush_with_barrier;
 
   // Event snapshots and queue timestamps.
   decltype(&hrx_event_create) event_create;

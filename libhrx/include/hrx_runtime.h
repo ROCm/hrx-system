@@ -262,7 +262,7 @@ HRX_API hrx_status_t hrx_semaphore_signal(hrx_semaphore_t semaphore,
 //===----------------------------------------------------------------------===//
 // Streams (ordered batching on an explicit queue)
 //
-// Each stream owns a timeline and a pending recording. Streams may share a
+// Each stream owns a timeline and a pending batch. Streams may share a
 // queue deliberately; dependencies between streams remain explicit, and queue
 // sharing does not promise concurrent execution. Stream mutation requires
 // external synchronization. Direct queue calls participate in a stream's
@@ -283,19 +283,19 @@ HRX_API void hrx_stream_release(hrx_stream_t stream);
 // Borrows the stream's immutable queue, or returns NULL for a NULL stream.
 HRX_API hrx_queue_t hrx_stream_get_queue(hrx_stream_t stream);
 
-// Flushes pending command buffer work and waits for the stream to complete.
+// Flushes pending work and waits for the stream to complete.
 // When HRX_PROFILE_FILE is enabled, also drains completed device profile
 // records to the capture file. This does not wait for unrelated streams.
 HRX_API hrx_status_t hrx_stream_synchronize(hrx_stream_t stream);
 
 // Waits for the stream's current timeline position without flushing pending
-// command buffer work. Use hrx_stream_synchronize() to flush and then wait.
+// work. Use hrx_stream_synchronize() to flush and then wait.
 // Also drains completed profile records when HRX_PROFILE_FILE is enabled.
 HRX_API hrx_status_t hrx_stream_wait(hrx_stream_t stream);
 
 HRX_API hrx_status_t hrx_stream_query(hrx_stream_t stream, bool* complete);
 
-// Submits and consumes the pending one-shot recording. A rejected submission
+// Submits and consumes the pending batch. A rejected submission
 // leaves the accepted timeline unchanged; callers may record a new batch.
 HRX_API hrx_status_t hrx_stream_flush(hrx_stream_t stream);
 
@@ -548,12 +548,19 @@ HRX_API hrx_status_t hrx_queue_host_call(
     const hrx_semaphore_list_t* signal_semaphores, hrx_host_call_fn_t callback,
     void* user_data);
 
-// Records one local barrier in the stream's pending command buffer. NULL keeps
-// the convenience of a full local read/write dependency. Explicit descriptors
-// carry prepared visibility and ranged recipes without a submission or host
-// wait.
+// Adds a local dependency to the pending batch without submitting or waiting.
+// NULL requests a full local read/write dependency. Explicit descriptors and
+// their borrowed ranges and recipes are captured during the call.
 HRX_API hrx_status_t hrx_stream_barrier(hrx_stream_t stream,
                                         const hrx_barrier_t* barrier);
+
+// Ends the batch with |barrier| and submits it on the stream timeline. With
+// earlier recorded commands the barrier travels in their submission. On an
+// empty batch it is a direct queue operation. NULL requests the same full
+// local read/write dependency as hrx_stream_barrier. Descriptor storage is
+// borrowed through this call. Use hrx_stream_wait to observe completion.
+HRX_API hrx_status_t hrx_stream_flush_with_barrier(
+    hrx_stream_t stream, const hrx_barrier_t* barrier);
 
 //===----------------------------------------------------------------------===//
 // Direct executables
