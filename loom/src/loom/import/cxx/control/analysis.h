@@ -392,6 +392,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Exact source parameter aliased by every reference return, when one exists.
   // Callers can reuse that evaluated argument instead of inventing a result.
   std::optional<size_t> reference_return_parameter() const;
+  // Whether the projected result selects among complete argument lvalues.
+  // The caller retains those lvalues and the callee supplies their ordinal.
+  bool selects_whole_parameters() const;
   // Caller-owned subobjects selected by a projected reference return. One
   // origin is reconstructed directly; two or more use an ordinal result.
   std::span<const ReferenceResultOrigin> projected_reference_return_origins(

@@ -510,7 +510,7 @@ unsigned selected_operator_result(bool condition, unsigned left,
 // ----
 func.def public @selected_operator_result(%condition: i1, %left$1: i32, %right$2: i32, %replacement: i32) -> (i32) {
   %selector_invert = scalar.constant 0 : i1
-  %6 = func.call pure @ReferenceSelector__operator_call_value(%selector_invert, %condition, %left$1, %right$2) : (i1, i1, i32, i32) -> (i32)
+  %6 = func.call pure @ReferenceSelector__operator_call_value(%selector_invert, %condition) : (i1, i1) -> (i32)
   %7 = scalar.constant 0 : i32
   %8 = scalar.cmpi eq, %6, %7 : i32
   %left$9 = scf.if %8 -> (i32) {
@@ -531,16 +531,16 @@ func.def public @selected_operator_result(%condition: i1, %left$1: i32, %right$2
   func.return %15 : i32
 }
 
-func.def @ReferenceSelector__operator_call_value(%this_invert: i1, %condition: i1, %left: i32, %right: i32) -> (i32) {
-  %21 = scalar.extui %condition : i1 to i32
-  %22 = scalar.extui %this_invert : i1 to i32
-  %23 = scalar.cmpi ne, %21, %22 : i32
-  %26 = scf.if %23 -> (i32) {
-    %24 = scalar.constant 0 : i32
-    scf.yield %24 : i32
+func.def @ReferenceSelector__operator_call_value(%this_invert: i1, %condition: i1) -> (i32) {
+  %19 = scalar.extui %condition : i1 to i32
+  %20 = scalar.extui %this_invert : i1 to i32
+  %21 = scalar.cmpi ne, %19, %20 : i32
+  %24 = scf.if %21 -> (i32) {
+    %22 = scalar.constant 0 : i32
+    scf.yield %22 : i32
   } else {
-    %25 = scalar.constant 1 : i32
-    scf.yield %25 : i32
+    %23 = scalar.constant 1 : i32
+    scf.yield %23 : i32
   }
-  func.return %26 : i32
+  func.return %24 : i32
 }

@@ -94,7 +94,7 @@ func.def public @mutable_reference_result(%value$8: i32) -> (i32) {
 }
 
 func.def public @mixed_reference_result(%condition: i1, %first: i32, %second: i32) -> (i32) {
-  %15 = func.call pure @choose_alias(%condition, %first, %second) : (i1, i32, i32) -> (i32)
+  %15 = func.call pure @choose_alias(%condition) : (i1) -> (i32)
   %16 = scalar.constant 0 : i32
   %17 = scalar.cmpi eq, %15, %16 : i32
   %18 = scf.if %17 -> (i32) {
@@ -122,15 +122,15 @@ func.def @increment_alias(%value$22: i32) -> (i32) {
   func.return %value$25 : i32
 }
 
-func.def @choose_alias(%condition: i1, %first: i32, %second: i32) -> (i32) {
-  %32 = scf.if %condition -> (i32) {
-    %30 = scalar.constant 0 : i32
-    scf.yield %30 : i32
+func.def @choose_alias(%condition: i1) -> (i32) {
+  %30 = scf.if %condition -> (i32) {
+    %28 = scalar.constant 0 : i32
+    scf.yield %28 : i32
   } else {
-    %31 = scalar.constant 1 : i32
-    scf.yield %31 : i32
+    %29 = scalar.constant 1 : i32
+    scf.yield %29 : i32
   }
-  func.return %32 : i32
+  func.return %30 : i32
 }
 
 // ====
@@ -909,7 +909,7 @@ unsigned write_selected_result(unsigned choice, unsigned first,
 
 // ----
 func.def public @write_selected_result(%choice: i32, %first$1: i32, %second$2: i32, %third$3: i32, %replacement: i32) -> (i32) {
-  %6 = func.call pure @choose_written_origin(%choice, %first$1, %second$2, %third$3) : (i32, i32, i32, i32) -> (i32)
+  %6 = func.call pure @choose_written_origin(%choice) : (i32) -> (i32)
   %7 = scalar.constant 0 : i32
   %8 = scalar.cmpi eq, %6, %7 : i32
   %second$9 = scf.if %8 -> (i32) {
@@ -940,34 +940,34 @@ func.def public @write_selected_result(%choice: i32, %first$1: i32, %second$2: i
   func.return %21 : i32
 }
 
-func.def @choose_written_origin(%choice: i32, %first: i32, %second: i32, %third: i32) -> (i32) {
-  %27 = scalar.constant 0 : i32
-  %28 = scalar.cmpi eq, %choice, %27 : i32
-  %29 = scf.if %28 -> (i32) {
-    %30 = scalar.constant 0 : i32
-    scf.yield %30 : i32
+func.def @choose_written_origin(%choice: i32) -> (i32) {
+  %24 = scalar.constant 0 : i32
+  %25 = scalar.cmpi eq, %choice, %24 : i32
+  %26 = scf.if %25 -> (i32) {
+    %27 = scalar.constant 0 : i32
+    scf.yield %27 : i32
   } else {
-    %31 = scalar.constant 1 : i32
-    %32 = scalar.cmpi eq, %choice, %31 : i32
-    %35 = scf.if %32 -> (i32) {
-      %33 = scalar.constant 0 : i32
-      scf.yield %33 : i32
+    %28 = scalar.constant 1 : i32
+    %29 = scalar.cmpi eq, %choice, %28 : i32
+    %32 = scf.if %29 -> (i32) {
+      %30 = scalar.constant 0 : i32
+      scf.yield %30 : i32
     } else {
-      %34 = scalar.constant 1 : i32
-      scf.yield %34 : i32
+      %31 = scalar.constant 1 : i32
+      scf.yield %31 : i32
     }
-    %36 = scalar.constant 0 : i32
-    %37 = scalar.cmpi eq, %35, %36 : i32
-    %38 = scf.if %37 -> (i32) {
-      %39 = scalar.constant 1 : i32
-      scf.yield %39 : i32
+    %33 = scalar.constant 0 : i32
+    %34 = scalar.cmpi eq, %32, %33 : i32
+    %35 = scf.if %34 -> (i32) {
+      %36 = scalar.constant 1 : i32
+      scf.yield %36 : i32
     } else {
-      %40 = scalar.constant 2 : i32
-      scf.yield %40 : i32
+      %37 = scalar.constant 2 : i32
+      scf.yield %37 : i32
     }
-    scf.yield %38 : i32
+    scf.yield %35 : i32
   }
-  func.return %29 : i32
+  func.return %26 : i32
 }
 
 // ====
@@ -987,45 +987,44 @@ unsigned write_mixed_result(bool automatic, unsigned local,
 // ----
 func.def public @write_mixed_result(%automatic: i1, %local$1: i32, %memory: buffer, %memory_byte_offset: index) -> (i32) {
   %5 = scalar.constant 3 : i32
-  %6 = func.call pure @choose_mixed_origin(%automatic, %local$1, %memory, %memory_byte_offset) : (i1, i32, buffer, index) -> (i32)
-  %7 = scalar.constant 0 : i32
-  %8 = scalar.cmpi eq, %6, %7 : i32
-  %9 = scf.if %8 -> (i32) {
+  %6 = buffer.view %memory[%memory_byte_offset] : buffer -> view<1xi32>
+  %7 = func.call pure @choose_mixed_origin(%automatic) : (i1) -> (i32)
+  %8 = scalar.constant 0 : i32
+  %9 = scalar.cmpi eq, %7, %8 : i32
+  %10 = scf.if %9 -> (i32) {
     scf.yield %local$1 : i32
   } else {
-    %10 = buffer.view %memory[%memory_byte_offset] : buffer -> view<1xi32>
-    %11 = view.load<root_in_bounds|type_disjoint> %10[0] : view<1xi32> -> i32
+    %11 = view.load<root_in_bounds|type_disjoint> %6[0] : view<1xi32> -> i32
     scf.yield %11 : i32
   }
-  %12 = scalar.addi %9, %5 : i32
+  %12 = scalar.addi %10, %5 : i32
   %13 = scalar.constant 0 : i32
-  %14 = scalar.cmpi eq, %6, %13 : i32
+  %14 = scalar.cmpi eq, %7, %13 : i32
   %local$15 = scf.if %14 -> (i32) {
     scf.yield %12 : i32
   } else {
     scf.yield %local$1 : i32
   }
   %16 = scalar.constant 1 : i32
-  %17 = scalar.cmpi eq, %6, %16 : i32
+  %17 = scalar.cmpi eq, %7, %16 : i32
   scf.if %17 {
-    %18 = buffer.view %memory[%memory_byte_offset] : buffer -> view<1xi32>
-    view.store<root_in_bounds|type_disjoint> %12, %18[0] : i32, view<1xi32>
+    view.store<root_in_bounds|type_disjoint> %12, %6[0] : i32, view<1xi32>
   }
-  %19 = buffer.view %memory[%memory_byte_offset] : buffer -> view<1xi32>
-  %20 = view.load<root_in_bounds|type_disjoint> %19[0] : view<1xi32> -> i32
-  %21 = scalar.addi %local$15, %20 : i32
-  func.return %21 : i32
+  %18 = buffer.view %memory[%memory_byte_offset] : buffer -> view<1xi32>
+  %19 = view.load<root_in_bounds|type_disjoint> %18[0] : view<1xi32> -> i32
+  %20 = scalar.addi %local$15, %19 : i32
+  func.return %20 : i32
 }
 
-func.def @choose_mixed_origin(%automatic: i1, %local: i32, %memory: buffer, %memory_byte_offset: index) -> (i32) {
-  %29 = scf.if %automatic -> (i32) {
-    %27 = scalar.constant 0 : i32
-    scf.yield %27 : i32
+func.def @choose_mixed_origin(%automatic: i1) -> (i32) {
+  %25 = scf.if %automatic -> (i32) {
+    %23 = scalar.constant 0 : i32
+    scf.yield %23 : i32
   } else {
-    %28 = scalar.constant 1 : i32
-    scf.yield %28 : i32
+    %24 = scalar.constant 1 : i32
+    scf.yield %24 : i32
   }
-  func.return %29 : i32
+  func.return %25 : i32
 }
 
 // ====
@@ -1085,7 +1084,7 @@ unsigned address_selected_result(bool first, unsigned left, unsigned right) {
 
 // ----
 func.def public @address_selected_result(%first: i1, %left$1: i32, %right$2: i32) -> (i32) {
-  %4 = func.call pure @choose_address(%first, %left$1, %right$2) : (i1, i32, i32) -> (i32)
+  %4 = func.call pure @choose_address(%first) : (i1) -> (i32)
   %5 = scalar.constant 0 : i32
   %6 = scalar.cmpi eq, %4, %5 : i32
   %7 = scf.if %6 -> (i32) {
@@ -1113,13 +1112,31 @@ func.def public @address_selected_result(%first: i1, %left$1: i32, %right$2: i32
   func.return %16 : i32
 }
 
-func.def @choose_address(%first: i1, %left: i32, %right: i32) -> (i32) {
-  %23 = scf.if %first -> (i32) {
-    %21 = scalar.constant 0 : i32
-    scf.yield %21 : i32
+func.def @choose_address(%first: i1) -> (i32) {
+  %21 = scf.if %first -> (i32) {
+    %19 = scalar.constant 0 : i32
+    scf.yield %19 : i32
   } else {
-    %22 = scalar.constant 1 : i32
-    scf.yield %22 : i32
+    %20 = scalar.constant 1 : i32
+    scf.yield %20 : i32
   }
-  func.return %23 : i32
+  func.return %21 : i32
 }
+
+// ====
+// RUN: with-checks roundtrip
+// Both calls return the index of a caller-owned lvalue. The selected object
+// can still be read after its contents change.
+static const double& greater(const double& a, const double& b) {
+  return a < b ? b : a;
+}
+double nested_selection(double* stored, double a, double b) {
+  const double& selected = greater(greater(*stored, a), b);
+  *stored = -1.0;
+  return selected;
+}
+
+// ----
+CHECK: func.def @greater(*: f64, *: f64) -> (i32) {
+CHECK-COUNT-2: * = func.call pure @greater(*) : (f64, f64) -> (i32)
+CHECK-NOT: * = buffer.alloca*
