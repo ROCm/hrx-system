@@ -60,6 +60,40 @@ TEST_F(FactCastTest, AbsentProofDoesNotAllocate) {
   EXPECT_EQ(arena_.used_allocation_size, bytes);
 }
 
+TEST_F(FactCastTest, RelationDiscoveryCoversComposedAndRetargetedEndpoints) {
+  auto may_project = [&](loom_value_id_t value) {
+    return loom_value_fact_table_may_project_integer_endpoint(&table_, value);
+  };
+  IREE_ASSERT_OK(loom_value_fact_table_define_exact_scalar_origin(
+      &table_, 4, {.source_value_id = 1}));
+  auto cast = Cast(4, 8, LOOM_INTEGER_CAST_UNSIGNED);
+  cast.composed.source_value_id = 2;
+  IREE_ASSERT_OK(loom_value_fact_table_define_integer_cast(&table_, 5, cast));
+  IREE_ASSERT_OK(
+      loom_value_fact_table_define(&table_, 6, loom_value_facts_unknown()));
+  IREE_ASSERT_OK(loom_value_fact_table_define_identity(&table_, 6, 2, nullptr));
+  IREE_ASSERT_OK(loom_value_fact_table_replace_identity_value(&table_, 2, 9));
+  for (loom_value_id_t endpoint : {1u, 2u, 4u, 5u, 6u, 9u}) {
+    EXPECT_TRUE(may_project(endpoint)) << endpoint;
+  }
+  EXPECT_FALSE(may_project(18));
+  loom_value_fact_table_clear_scope(&table_);
+  EXPECT_FALSE(may_project(4));
+  EXPECT_FALSE(may_project(9));
+}
+
+TEST_F(FactCastTest, ExternalSourceRemainsDiscoverableAfterScopeGrowth) {
+  IREE_ASSERT_OK(loom_value_fact_table_define_integer_cast(
+      &table_, 1024, Cast(3, 8, LOOM_INTEGER_CAST_UNSIGNED)));
+  EXPECT_EQ(loom_value_fact_table_find_entry(&table_, 3), nullptr);
+  EXPECT_TRUE(loom_value_fact_table_may_project_integer_endpoint(&table_, 3));
+  IREE_ASSERT_OK(
+      loom_value_fact_table_define(&table_, 3, loom_value_facts_unknown()));
+  EXPECT_TRUE(loom_value_fact_table_may_project_integer_endpoint(&table_, 3));
+  loom_value_fact_table_clear_scope(&table_);
+  EXPECT_FALSE(loom_value_fact_table_may_project_integer_endpoint(&table_, 3));
+}
+
 TEST_F(FactCastTest, PublicationReusesSlotsAndWithdrawsBothEndpoints) {
   auto cast = Cast(3, 8, LOOM_INTEGER_CAST_SIGNED);
   cast.composed.source_value_id = 1;
@@ -111,6 +145,8 @@ TEST_F(FactCastTest, ClonedScopeOwnsItsPublicationAndAbsence) {
   IREE_ASSERT_OK(loom_value_fact_table_clone_origins(&clone, &table_, 6));
   loom_value_fact_table_clear_scope(&table_);
   EXPECT_EQ(table_.integer_casts, nullptr);
+  EXPECT_TRUE(loom_value_fact_table_may_project_integer_endpoint(&clone, 2));
+  EXPECT_TRUE(loom_value_fact_table_may_project_integer_endpoint(&clone, 6));
   EXPECT_TRUE(loom_value_fact_integer_cast_equal(
       loom_value_fact_table_query_integer_cast(&clone, 6), cast));
   IREE_ASSERT_OK(loom_value_fact_table_clone_origins(&clone, &table_, 6));

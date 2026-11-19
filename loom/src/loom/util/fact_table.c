@@ -414,6 +414,7 @@ void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table) {
   table->has_conditioned_results = false;
   table->has_boolean_branch_regions = false;
   table->has_counted_loop_domains = false;
+  table->has_unindexed_numeric_endpoint = false;
   table->condition_integer_projection_count = 0;
   table->result_type_kind_bits = 0;
   table->replay.generation = 0;
@@ -433,6 +434,7 @@ void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table) {
     }
     segment_value_id = segment->next_touched_segment_id;
     segment->touched_bits = 0;
+    segment->numeric_endpoint_bits = 0;
     segment->next_touched_segment_id = LOOM_VALUE_ID_INVALID;
   }
   table->first_touched_segment_id = LOOM_VALUE_ID_INVALID;
@@ -977,6 +979,44 @@ iree_status_t loom_value_fact_table_get_or_build_cfg_region(
   }
   *out_region = structure;
   return iree_ok_status();
+}
+
+void loom_value_fact_table_record_numeric_endpoint(
+    loom_value_fact_table_t* table, loom_value_id_t value_id) {
+  const iree_host_size_t index =
+      (iree_host_size_t)value_id - table->first_value_id;
+  if (index < table->capacity) {
+    loom_value_fact_segment_t* segment =
+        table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT];
+    if (segment->touched_bits) {
+      segment->numeric_endpoint_bits |= UINT32_C(1) << (value_id & 31);
+      return;
+    }
+  }
+  // A projected input can come from outside the populated function (or
+  // before its own definition). Do not allocate fact storage for that value.
+  table->has_unindexed_numeric_endpoint = true;
+}
+
+bool loom_value_fact_table_may_project_integer_endpoint(
+    const loom_value_fact_table_t* table, loom_value_id_t value_id) {
+  if (!table) {
+    return false;
+  }
+  if (table->has_unindexed_numeric_endpoint) {
+    return true;
+  }
+  if (loom_value_fact_range_contains(table->identities.range, value_id) &&
+      table->identities.entries[loom_value_fact_range_offset(
+          table->identities.range, value_id)]) {
+    return true;
+  }
+  const iree_host_size_t index =
+      (iree_host_size_t)value_id - table->first_value_id;
+  return index < table->capacity &&
+         (table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT]
+              ->numeric_endpoint_bits &
+          (UINT32_C(1) << (value_id & 31)));
 }
 
 iree_status_t loom_value_fact_table_touch(loom_value_fact_table_t* table,

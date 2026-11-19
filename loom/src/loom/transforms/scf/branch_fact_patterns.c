@@ -880,12 +880,58 @@ static iree_status_t loom_branch_facts_normalize_exact_assumes(
   return iree_ok_status();
 }
 
+// A value used exclusively in the branch owner's block cannot be used in
+// a child region. A scalar interpretation of that value or a dependent
+// result type can still carry the edge fact without an ordinary operand use.
+static bool loom_branch_facts_sources_unused_in_region(
+    const loom_rewriter_t* rewriter, const loom_op_t* parent_op,
+    const loom_region_t* region, const loom_condition_fact_set_t* facts,
+    const loom_branch_facts_edge_assume_set_t* candidates) {
+  if (facts) {
+    for (iree_host_size_t i = 0; i < facts->integer_relation_count; ++i) {
+      const loom_condition_integer_relation_t* relation =
+          &facts->integer_relations[i];
+      if ((relation->left.kind == LOOM_CONDITION_INTEGER_OPERAND_VALUE &&
+           loom_value_fact_table_may_project_integer_endpoint(
+               rewriter->fact_table, relation->left.value_id)) ||
+          (relation->right.kind == LOOM_CONDITION_INTEGER_OPERAND_VALUE &&
+           loom_value_fact_table_may_project_integer_endpoint(
+               rewriter->fact_table, relation->right.value_id))) {
+        return false;
+      }
+    }
+  }
+  // Bound reverse-use inspection by the direct work of scanning this region.
+  // A frequently used outer value need not visit all its users for each edge.
+  uint32_t remaining = loom_region_const_entry_block(region)->op_count;
+  for (uint16_t i = 0; i < candidates->candidate_count; ++i) {
+    const loom_value_id_t source = candidates->candidates[i].source;
+    const loom_value_t* value = loom_module_value(rewriter->module, source);
+    if (value->use_count > remaining ||
+        loom_module_value_has_type_uses(rewriter->module, source)) {
+      return false;
+    }
+    remaining -= value->use_count;
+    const loom_use_t* uses = loom_value_uses(value);
+    for (uint32_t j = 0; j < value->use_count; ++j) {
+      if (loom_use_user_op(uses[j])->parent_block != parent_op->parent_block) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 static iree_status_t loom_branch_facts_materialize_edge_assumes(
     loom_rewriter_t* rewriter, loom_op_t* parent_op, loom_region_t* region,
     const loom_condition_fact_set_t* condition_facts,
     loom_branch_facts_edge_assume_set_t* assume_set, bool* out_changed) {
   *out_changed = false;
   if (!region || region->block_count == 0 || assume_set->candidate_count == 0) {
+    return iree_ok_status();
+  }
+  if (loom_branch_facts_sources_unused_in_region(rewriter, parent_op, region,
+                                                 condition_facts, assume_set)) {
     return iree_ok_status();
   }
 
