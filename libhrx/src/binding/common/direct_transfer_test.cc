@@ -7,7 +7,9 @@
 #include "common/direct_transfer.h"
 
 #include <array>
+#include <atomic>
 #include <cstring>
+#include <thread>
 
 #include "common/context.h"
 #include "common/device.h"
@@ -206,6 +208,81 @@ TEST_P(ContextTransferTest, FailedPredecessorPreservesBothEndpoints) {
   for (size_t i = 0; i < input.size(); ++i) {
     EXPECT_EQ(device_bytes[i], 0xCD);
     EXPECT_EQ(output[i], 0x67);
+  }
+}
+
+TEST_P(ContextTransferTest, HostCopyWaitsOnlyForItsPredecessor) {
+  std::array<uint8_t, 16> target;
+  target.fill(0x67);
+  iree_hal_semaphore_t* gate = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      contexts_[1]->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_NONE, &gate));
+  uint64_t gate_value = 1;
+  IREE_ASSERT_OK(iree_hal_streaming_stream_wait_semaphores(
+      stream_, {1, &gate, &gate_value}));
+  const uint64_t predecessor = stream_->pending_value;
+  const iree_hal_transfer_region_t region = {
+      .row_length = 12,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  std::atomic<bool> returned(false);
+  std::thread caller([&] {
+    IREE_EXPECT_OK(iree_hal_streaming_direct_transfer_host_and_wait(
+        stream_, buffer_->host_ptr, target.data(), &region));
+    returned.store(true, std::memory_order_release);
+  });
+
+  // Observe acceptance without releasing the prerequisite. The caller's copy
+  // must own its timeline point before another thread appends following work.
+  uint64_t copy_point = predecessor;
+  while (copy_point == predecessor) {
+    iree_slim_mutex_lock(&stream_->mutex);
+    copy_point = stream_->pending_value;
+    iree_slim_mutex_unlock(&stream_->mutex);
+    std::this_thread::yield();
+  }
+  EXPECT_EQ(predecessor + 1, copy_point);
+  EXPECT_FALSE(returned.load(std::memory_order_acquire));
+  for (uint8_t byte : target) {
+    EXPECT_EQ(0x67, byte);
+  }
+  gate_value = 2;
+  IREE_EXPECT_OK(iree_hal_streaming_stream_wait_semaphores(
+      stream_, {1, &gate, &gate_value}));
+  std::memset(buffer_->host_ptr, 0x42, 12);
+  IREE_EXPECT_OK(iree_hal_semaphore_signal(gate, 1, nullptr));
+  caller.join();
+  for (size_t i = 0; i < target.size(); ++i) {
+    EXPECT_EQ(i < 12 ? 0x42 : 0x67, target[i]);
+  }
+  uint64_t completed = 0;
+  IREE_EXPECT_OK(
+      iree_hal_semaphore_query(stream_->timeline_semaphore, &completed));
+  EXPECT_EQ(copy_point, completed);
+  IREE_EXPECT_OK(iree_hal_semaphore_signal(gate, 2, nullptr));
+  IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  iree_hal_semaphore_release(gate);
+}
+
+TEST_P(ContextTransferTest, FailedHostCopyDoesNotTouchDestination) {
+  std::array<uint8_t, 16> target;
+  target.fill(0x67);
+  const iree_hal_transfer_region_t region = {
+      .row_length = target.size(),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  expected_completion_ = IREE_STATUS_ABORTED;
+  iree_hal_semaphore_fail(stream_->timeline_semaphore,
+                          iree_status_from_code(expected_completion_));
+  IREE_EXPECT_STATUS_IS(
+      expected_completion_,
+      iree_hal_streaming_direct_transfer_host_and_wait(
+          stream_, buffer_->host_ptr, target.data(), &region));
+  for (uint8_t byte : target) {
+    EXPECT_EQ(0x67, byte);
   }
 }
 

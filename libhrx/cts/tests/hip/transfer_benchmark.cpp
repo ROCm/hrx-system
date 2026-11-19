@@ -1,6 +1,8 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#include <sys/mman.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -152,6 +154,7 @@ enum TransferFlags : uint32_t {
   kPitched = 1u << 1,
   kDeviceInterval = 1u << 2,
   kSynchronous = 1u << 3,
+  kFreshHostMapping = 1u << 4,
 };
 
 enum class CopyStorage {
@@ -441,8 +444,18 @@ GEOMETRY_VARIANT(GraphFill, true, true);
 #undef GEOMETRY_VARIANT
 #undef GEOMETRY_CASE
 
-void Download(benchmark::State& state, uint32_t flags,
-              size_t row_width = 4096) {
+// Cover publication-window and bulk-queue boundaries on both sides. The row
+// sizes divide each extent so pitched cases move the same useful byte count.
+void HostTransferSizes(benchmark::internal::Benchmark* benchmark) {
+  for (int64_t length :
+       {4096, 16384, 65536, 131072, 258048, 262144, 266240, 524288, 1044480,
+        1048576, 1052672, 2097152, 4194304, 8388608, 16777216, 67108864}) {
+    benchmark->Arg(length);
+  }
+}
+
+void Download(benchmark::State& state, uint32_t flags, size_t row_width = 4096,
+              size_t host_count = 1) {
   auto& runtime = Runtime();
   const bool registered = (flags & kRegistered) != 0;
   const bool pitched = (flags & kPitched) != 0;
@@ -454,13 +467,24 @@ void Download(benchmark::State& state, uint32_t flags,
   const size_t source_length = source_pitch * height;
   const size_t target_length = target_pitch * height;
   const size_t allocation_length = (target_length + 4095) & ~size_t{4095};
-  auto* target =
-      static_cast<uint8_t*>(std::aligned_alloc(4096, allocation_length));
-  Require(target != nullptr, "host allocation failed");
-  std::memset(target, kPadding, allocation_length);
+  const bool fresh_host_mapping = (flags & kFreshHostMapping) != 0;
+  const auto allocate_host = [&]() -> uint8_t* {
+    if (fresh_host_mapping) {
+      void* mapping = mmap(nullptr, allocation_length, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+      Require(mapping != MAP_FAILED, "host mapping failed");
+      return static_cast<uint8_t*>(mapping);
+    }
+    return static_cast<uint8_t*>(
+        std::aligned_alloc(4096, allocation_length * host_count));
+  };
+  auto* allocation = allocate_host();
+  Require(allocation != nullptr, "host allocation failed");
+  std::memset(allocation, kPadding, allocation_length * host_count);
+  uint8_t* target = allocation;
   if (registered) {
     Check(runtime.Resolve<decltype(&hipHostRegister)>("hipHostRegister")(
-        target, allocation_length, hipHostRegisterDefault));
+        allocation, allocation_length * host_count, hipHostRegisterDefault));
   }
   hipDeviceptr_t source = nullptr;
   Check(runtime.Resolve<decltype(&hipMalloc)>("hipMalloc")(&source,
@@ -509,11 +533,40 @@ void Download(benchmark::State& state, uint32_t flags,
       Require(target[i] == kPadding, "download overwrote allocation padding");
     }
   };
-  transfer();
-  runtime.Wait();
-  verify();
-  std::memset(target, kPadding, allocation_length);
-  if (flags & kDeviceInterval) {
+  for (size_t i = 0; i < host_count; ++i) {
+    target = allocation + i * allocation_length;
+    transfer();
+    runtime.Wait();
+    verify();
+    std::memset(target, kPadding, allocation_length);
+  }
+  target = allocation;
+  if (fresh_host_mapping) {
+    // Releasing the CPU mapping also removes runtime-retained GPU access.
+    // Allocation, first touch, verification, and CPU unmap are outside copy
+    // timing. Report unmap separately because a runtime may defer work to it.
+    Require(munmap(allocation, allocation_length) == 0, "host unmap failed");
+    double unmap_nanoseconds = 0;
+    for (auto _ : state) {
+      state.PauseTiming();
+      target = allocate_host();
+      std::memset(target, kPadding, allocation_length);
+      state.ResumeTiming();
+      transfer();
+      runtime.Wait();
+      state.PauseTiming();
+      verify();
+      const auto begin = std::chrono::steady_clock::now();
+      Require(munmap(target, allocation_length) == 0, "host unmap failed");
+      const auto end = std::chrono::steady_clock::now();
+      unmap_nanoseconds +=
+          std::chrono::duration<double, std::nano>(end - begin).count();
+      state.ResumeTiming();
+    }
+    allocation = nullptr;
+    state.counters["host_unmap_ns"] = benchmark::Counter(
+        unmap_nanoseconds, benchmark::Counter::kAvgIterations);
+  } else if (flags & kDeviceInterval) {
     auto create = runtime.Resolve<decltype(&hipEventCreate)>("hipEventCreate");
     auto destroy =
         runtime.Resolve<decltype(&hipEventDestroy)>("hipEventDestroy");
@@ -547,38 +600,69 @@ void Download(benchmark::State& state, uint32_t flags,
     state.counters["host_ns"] = benchmark::Counter(
         host_nanoseconds, benchmark::Counter::kAvgIterations);
   } else {
+    size_t host_index = 0;
     for (auto _ : state) {
+      target = allocation + host_index * allocation_length;
       transfer();
       runtime.Wait();
+      host_index = (host_index + 1) % host_count;
     }
   }
-  verify();
+  for (size_t i = 0;
+       !fresh_host_mapping &&
+       i < std::min(host_count, static_cast<size_t>(state.iterations()));
+       ++i) {
+    target = allocation + i * allocation_length;
+    verify();
+  }
   Check(runtime.Resolve<decltype(&hipFree)>("hipFree")(source));
   if (registered) {
     Check(runtime.Resolve<decltype(&hipHostUnregister)>("hipHostUnregister")(
-        target));
+        allocation));
   }
-  std::free(target);
+  std::free(allocation);
   state.SetLabel(runtime.label());
   state.SetBytesProcessed(state.iterations() * length);
   state.counters["width"] = width;
   state.counters["height"] = height;
   state.counters["source_pitch"] = source_pitch;
   state.counters["target_pitch"] = target_pitch;
+  state.counters["host_buffers"] = host_count;
 }
 
 #define DOWNLOAD_CASE(name, flags)         \
   BENCHMARK_CAPTURE(Download, name, flags) \
       ->Name("HIP/Download/" #name)        \
-      ->Arg(4 * 1024)                      \
-      ->Arg(1024 * 1024)                   \
-      ->Arg(64 * 1024 * 1024)              \
+      ->Apply(HostTransferSizes)           \
+      ->MeasureProcessCPUTime()            \
       ->UseRealTime()
 DOWNLOAD_CASE(PageableContiguous, kDefault);
 DOWNLOAD_CASE(RegisteredContiguous, kRegistered);
 DOWNLOAD_CASE(PageablePitched, kPitched);
 DOWNLOAD_CASE(RegisteredPitched, kRegistered | kPitched);
 #undef DOWNLOAD_CASE
+
+BENCHMARK_CAPTURE(Download, PageableRotating, kDefault, 4096, 4)
+    ->Name("HIP/Download/PageableRotating")
+    ->Apply(HostTransferSizes)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+BENCHMARK_CAPTURE(Download, PageableRotatingPitched, kPitched, 4096, 4)
+    ->Name("HIP/Download/PageableRotatingPitched")
+    ->Apply(HostTransferSizes)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+
+BENCHMARK_CAPTURE(Download, PageableFresh, kFreshHostMapping)
+    ->Name("HIP/Download/PageableFresh")
+    ->Apply(HostTransferSizes)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+BENCHMARK_CAPTURE(Download, PageableFreshPitched, kFreshHostMapping | kPitched)
+    ->Name("HIP/Download/PageableFreshPitched")
+    ->Apply(HostTransferSizes)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
 
 // Sparse event pairs expose device-timeline gaps independently of host return
 // and waiting. Intervals include any host gaps between device commands, and
@@ -606,9 +690,10 @@ DOWNLOAD_INTERVAL_CASE(PageablePitched4M, kPitched, 4 * 1024 * 1024);
 #undef DOWNLOAD_INTERVAL_CASE
 
 // A blocking HIP completion owns the borrowed upload bytes until return. Use
-// one persistent allocation per case so steady-state measurements include no
-// application allocation, registration, or validation work.
-void Upload(benchmark::State& state, uint32_t flags) {
+// persistent host ranges so steady-state measurements include no application
+// allocation, registration, or validation work. Rotating ranges have distinct
+// contents, allowing readback to identify the last submitted source.
+void Upload(benchmark::State& state, uint32_t flags, size_t host_count = 1) {
   auto& runtime = Runtime();
   const bool registered = (flags & kRegistered) != 0;
   const bool pitched = (flags & kPitched) != 0;
@@ -620,17 +705,21 @@ void Upload(benchmark::State& state, uint32_t flags) {
   const size_t target_length = target_pitch * height;
   const size_t allocation_length =
       ((target_length + 4095) & ~size_t{4095}) + 4096;
-  auto* source =
-      static_cast<uint8_t*>(std::aligned_alloc(4096, allocation_length));
-  Require(source != nullptr, "upload host allocation failed");
-  for (size_t row = 0; row < height; ++row) {
-    for (size_t column = 0; column < width; ++column) {
-      source[row * source_pitch + column] = (row * width + column) % 251;
+  auto* allocation = static_cast<uint8_t*>(
+      std::aligned_alloc(4096, allocation_length * host_count));
+  Require(allocation != nullptr, "upload host allocation failed");
+  for (size_t i = 0; i < host_count; ++i) {
+    for (size_t row = 0; row < height; ++row) {
+      for (size_t column = 0; column < width; ++column) {
+        allocation[i * allocation_length + row * source_pitch + column] =
+            (i + row * width + column) % 251;
+      }
     }
   }
+  uint8_t* source = allocation;
   if (registered) {
     Check(runtime.Resolve<decltype(&hipHostRegister)>("hipHostRegister")(
-        source, allocation_length, hipHostRegisterDefault));
+        allocation, allocation_length * host_count, hipHostRegisterDefault));
   }
   hipDeviceptr_t target = nullptr;
   Check(runtime.Resolve<decltype(&hipMalloc)>("hipMalloc")(&target,
@@ -657,21 +746,26 @@ void Upload(benchmark::State& state, uint32_t flags) {
     }
   };
   transfer();
+  size_t host_index = 0;
   for (auto _ : state) {
+    source = allocation + host_index * allocation_length;
     transfer();
+    host_index = (host_index + 1) % host_count;
   }
 
   // Reuse the input allocation for readback after all measured uploads finish.
   // Both the varying payload and a full guard page come from device memory.
+  source = allocation;
   std::memset(source, 0, allocation_length);
   Check(copy(source, target, allocation_length, hipMemcpyDeviceToHost,
              runtime.stream()));
   runtime.Wait();
+  const size_t last_host_index = (state.iterations() - 1) % host_count;
   for (size_t row = 0; row < height; ++row) {
     for (size_t column = 0; column < width; ++column) {
-      Require(
-          source[row * target_pitch + column] == (row * width + column) % 251,
-          "upload payload mismatch");
+      Require(source[row * target_pitch + column] ==
+                  (last_host_index + row * width + column) % 251,
+              "upload payload mismatch");
     }
     for (size_t column = width; column < target_pitch; ++column) {
       Require(source[row * target_pitch + column] == kPadding,
@@ -693,19 +787,30 @@ void Upload(benchmark::State& state, uint32_t flags) {
   state.counters["height"] = height;
   state.counters["source_pitch"] = source_pitch;
   state.counters["target_pitch"] = target_pitch;
+  state.counters["host_buffers"] = host_count;
 }
 
 #define UPLOAD_CASE(name, flags)         \
   BENCHMARK_CAPTURE(Upload, name, flags) \
       ->Name("HIP/Upload/" #name)        \
-      ->Arg(4 * 1024)                    \
+      ->Apply(HostTransferSizes)         \
       ->Arg(1024 * 1024 + 123)           \
-      ->Arg(64 * 1024 * 1024)            \
       ->MeasureProcessCPUTime()          \
       ->UseRealTime()
 UPLOAD_CASE(Pageable, kDefault);
 UPLOAD_CASE(Registered, kRegistered);
 #undef UPLOAD_CASE
+
+BENCHMARK_CAPTURE(Upload, PageableRotating, kDefault, 4)
+    ->Name("HIP/Upload/PageableRotating")
+    ->Apply(HostTransferSizes)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+BENCHMARK_CAPTURE(Upload, PageableRotatingPitched, kPitched, 4)
+    ->Name("HIP/Upload/PageableRotatingPitched")
+    ->Apply(HostTransferSizes)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
 
 BENCHMARK_CAPTURE(Upload, SynchronousPageable, kSynchronous)
     ->Name("HIP/Upload/SynchronousPageable")
@@ -719,9 +824,7 @@ BENCHMARK_CAPTURE(Upload, SynchronousPageable, kSynchronous)
 #define UPLOAD_PITCHED_CASE(name, flags)              \
   BENCHMARK_CAPTURE(Upload, name, (flags) | kPitched) \
       ->Name("HIP/Upload/" #name)                     \
-      ->Arg(4 * 1024)                                 \
-      ->Arg(1024 * 1024)                              \
-      ->Arg(64 * 1024 * 1024)                         \
+      ->Apply(HostTransferSizes)                      \
       ->MeasureProcessCPUTime()                       \
       ->UseRealTime()
 UPLOAD_PITCHED_CASE(PageablePitched, kDefault);

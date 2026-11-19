@@ -3052,6 +3052,20 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host_resolved(
                                                                &operation);
   }
   if (!dst_ref.buffer) {
+    const iree_hal_buffer_memory_view_t memory =
+        iree_hal_buffer_memory_view(src_ref.buffer->buffer);
+    if (src_ref.buffer->host_ptr && memory.backing &&
+        iree_all_bits_set(src_ref.buffer->memory_type,
+                          IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                              IREE_HAL_MEMORY_TYPE_HOST_COHERENT) &&
+        iree_all_bits_set(memory.backing->host_properties,
+                          IREE_HAL_HOST_MEMORY_PROPERTY_READ_CACHED)) {
+      // Stream completion includes device release to the system. A cached,
+      // coherent host source needs neither GPU staging nor host invalidation.
+      return iree_hal_streaming_direct_transfer_host_and_wait(
+          stream, (const uint8_t*)src_ref.buffer->host_ptr + src_ref.offset,
+          dst, region);
+    }
     return iree_hal_streaming_direct_transfer_and_wait(stream, 1, &operation);
   }
   if (dst_ref.buffer->memory_kind == IREE_HAL_STREAMING_MEMORY_KIND_DEVICE) {

@@ -242,6 +242,33 @@ iree_status_t iree_hal_streaming_direct_transfer_and_wait(
   return status;
 }
 
+typedef struct iree_hal_streaming_host_copy_t {
+  // Cached, coherent source borrowed through the calling thread's copy.
+  const void* source;
+  // Application destination borrowed through the calling thread's copy.
+  void* target;
+  // Validated geometry borrowed through the calling thread's copy.
+  const iree_hal_transfer_region_t* region;
+} iree_hal_streaming_host_copy_t;
+
+static iree_status_t iree_hal_streaming_host_copy_execute(void* user_data) {
+  const iree_hal_streaming_host_copy_t* copy = user_data;
+  iree_hal_transfer_copy_host(copy->source, copy->target, copy->region);
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_streaming_direct_transfer_host_and_wait(
+    iree_hal_streaming_stream_t* stream, const void* source, void* target,
+    const iree_hal_transfer_region_t* region) {
+  iree_hal_streaming_host_copy_t copy = {
+      .source = source,
+      .target = target,
+      .region = region,
+  };
+  return iree_hal_streaming_execute_host_operation(
+      stream, iree_hal_streaming_host_copy_execute, &copy);
+}
+
 typedef struct iree_hal_streaming_context_transfer_t {
   // Context owning the transfer queue, borrowed through this blocking call.
   iree_hal_streaming_context_t* context;

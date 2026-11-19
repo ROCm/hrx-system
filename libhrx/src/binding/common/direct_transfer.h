@@ -62,6 +62,15 @@ iree_status_t iree_hal_streaming_direct_transfer_and_wait(
     iree_hal_streaming_stream_t* stream, iree_host_size_t operation_count,
     const iree_hal_transfer_operation_t* operations);
 
+// Copies already-qualified cached, coherent host mappings on the caller in
+// stream order. Stream producers publish their device writes before signaling.
+// The reserved point prevents later work from passing the host copy; no native
+// transfer, staging allocation, or frontend worker is needed. All bytes and
+// geometry are borrowed through return.
+iree_status_t iree_hal_streaming_direct_transfer_host_and_wait(
+    iree_hal_streaming_stream_t* stream, const void* source, void* target,
+    const iree_hal_transfer_region_t* region);
+
 // Performs a blocking transfer on |context|'s device in |stream| order.
 // Same-device contexts use the stream's native submission path. A different
 // device cannot use the stream's queue or execution lease: the caller joins

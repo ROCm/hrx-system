@@ -1048,7 +1048,7 @@ iree_status_t iree_hal_streaming_execute_host_operation(
   }
   iree_slim_mutex_unlock(&stream->mutex);
 
-  if (iree_status_is_ok(status) && wait_value != 0) {
+  if (iree_status_is_ok(status)) {
     status = iree_hal_semaphore_wait(
         stream->timeline_semaphore, wait_value, iree_infinite_timeout(),
         stream->context ? iree_hal_streaming_context_wait_flags(stream->context)
