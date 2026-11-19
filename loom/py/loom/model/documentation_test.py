@@ -147,6 +147,20 @@ def _lock(card):
     return ModelLock(ModelLock.snapshot(origins, identities))
 
 
+def test_unfamiliar_origins_render_without_interpreting_their_payload():
+    document = _card().document
+    document["origins"]["checkpoint"] = {"kind": "vault", "store": 7}
+    document["model"]["origin"] = {"kind": "registry", "identifier": "source"}
+    document["programs"]["mixed"]["libraries"][0]["origin"] = {
+        "kind": "blobs",
+        "index": [3],
+    }
+    card = ModelCard(document)
+    rendered = render_markdown(card, lock=_lock(card))
+    for kind in ("vault", "registry", "blobs"):
+        assert f"<code>{kind}</code>" in rendered
+
+
 def test_documentation_preserves_order_scopes_configuration_and_source_coordinates():
     rendered = render_markdown(_card())
     assert "## Files: original / node&#45;0 / chat / mixed" in rendered

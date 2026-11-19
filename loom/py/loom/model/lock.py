@@ -78,11 +78,25 @@ def file_digest(
     return size, digest.hexdigest()
 
 
-def _resolved(value: dict, path: str) -> None:
-    _object(value, path, ("revision",))
-    revision = _string(value["revision"], path + ".revision")
-    if not re.fullmatch(r"[0-9a-f]{40}", revision):
-        raise ManifestError(f"{path}.revision: expected an immutable repository commit")
+def _check_resolution(record: dict, origin: str | dict, path: str) -> None:
+    kind = origin.get("kind") if isinstance(origin, dict) else None
+    if kind == "hf":
+        if "resolved" not in record:
+            raise ManifestError(
+                f"{path}: repository origin requires a resolved revision"
+            )
+        value = _mapping(record["resolved"], path + ".resolved")
+        revision = _string(value.get("revision"), path + ".resolved.revision")
+        if not re.fullmatch(r"[0-9a-f]{40}", revision):
+            raise ManifestError(
+                f"{path}.resolved.revision: expected an immutable repository commit"
+            )
+    elif "resolved" in record:
+        if kind in (None, "local", "url", "inline"):
+            raise ManifestError(
+                f"{path}: this origin does not have a resolved revision"
+            )
+        _mapping(record["resolved"], path + ".resolved", empty=True)
 
 
 @dataclass(frozen=True)
@@ -155,16 +169,7 @@ class ModelLock:
             _object(record, path, ("requested",), ("resolved",))
             _origin_object(record["requested"], path + ".requested", root=True)
             requested_origins[name] = record["requested"]
-            if "resolved" in record:
-                _resolved(record["resolved"], path + ".resolved")
-                if record["requested"]["kind"] != "hf":
-                    raise ManifestError(
-                        f"{path}: only repository origins have revisions"
-                    )
-            elif record["requested"]["kind"] == "hf":
-                raise ManifestError(
-                    f"{path}: repository origin requires a resolved revision"
-                )
+            _check_resolution(record, record["requested"], path)
         if not isinstance(doc["files"], list):
             raise ManifestError("lock.files: expected an array")
         self.files: dict[str, FileIdentity] = {}
@@ -188,18 +193,7 @@ class ModelLock:
                 raise ManifestError(
                     f"{path}.sha256: expected a lowercase SHA-256 digest"
                 )
-            repository_file = (
-                isinstance(record["origin"], dict)
-                and record["origin"].get("kind") == "hf"
-            )
-            if "resolved" in record:
-                _resolved(record["resolved"], path + ".resolved")
-                if not repository_file:
-                    raise ManifestError(f"{path}: only repository files have revisions")
-            elif repository_file:
-                raise ManifestError(
-                    f"{path}: repository file requires a resolved revision"
-                )
+            _check_resolution(record, record["origin"], path)
             key = file_key(record["origin"], transform)
             if key in self.files:
                 raise ManifestError(f"{path}: duplicate logical output")

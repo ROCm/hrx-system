@@ -15,11 +15,13 @@
         "required": ["requested"],
         "properties": {
           "requested": {"$ref": "model-card.v1.schema.json#/$defs/originRoot"},
-          "resolved": {"$ref": "#/$defs/resolved"}
+          "resolved": {"type": "object"}
         },
         "if": {"properties": {"requested": {"properties": {"kind": {"const": "hf"}}}}},
-        "then": {"required": ["resolved"]},
-        "else": {"not": {"required": ["resolved"]}},
+        "then": {"required": ["resolved"], "properties": {"resolved": {"$ref": "#/$defs/resolved"}}},
+        "else": {
+          "dependentSchemas": {"resolved": {"properties": {"requested": {"$ref": "model-card.v1.schema.json#/$defs/otherOrigin"}}}}
+        },
         "patternProperties": {"^x-": {}},
         "additionalProperties": false
       }
@@ -33,12 +35,14 @@
           "origin": {"$ref": "model-card.v1.schema.json#/$defs/fileOrigin"},
           "size": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615},
           "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-          "resolved": {"$ref": "#/$defs/resolved"},
+          "resolved": {"type": "object"},
           "transform": {"$ref": "model-card.v1.schema.json#/$defs/transform"}
         },
         "if": {"properties": {"origin": {"type": "object", "required": ["kind"], "properties": {"kind": {"const": "hf"}}}}},
-        "then": {"required": ["resolved"]},
-        "else": {"not": {"required": ["resolved"]}},
+        "then": {"required": ["resolved"], "properties": {"resolved": {"$ref": "#/$defs/resolved"}}},
+        "else": {
+          "dependentSchemas": {"resolved": {"properties": {"origin": {"$ref": "model-card.v1.schema.json#/$defs/otherOrigin"}}}}
+        },
         "patternProperties": {"^x-": {}},
         "additionalProperties": false
       },
@@ -51,9 +55,7 @@
     "resolved": {
       "type": "object",
       "required": ["revision"],
-      "properties": {"revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"}},
-      "patternProperties": {"^x-": {}},
-      "additionalProperties": false
+      "properties": {"revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"}}
     }
   }
 }

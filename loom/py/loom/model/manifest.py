@@ -187,34 +187,26 @@ def _url(value: Any, path: str) -> None:
 
 def _origin_object(value: Any, path: str, *, root: bool) -> dict:
     _mapping(value, path)
-    kind = value.get("kind")
-    fields = {
-        "hf": (("kind", "repository"), ("revision",) if root else ("revision", "path")),
-        "url": (("kind", "url"), ()),
-        "local": (("kind", "path"), ()),
-    }
-    if not root:
-        fields["inline"] = (("kind", "base64"), ())
-    if not isinstance(kind, str) or kind not in fields:
-        _fail(path + ".kind", f"unsupported origin {kind!r}")
-    _object(value, path, *fields[kind])
+    kind = _string(value.get("kind"), path + ".kind")
     if kind == "hf":
-        _path(value["repository"], path + ".repository")
+        _path(value.get("repository"), path + ".repository")
         if "revision" in value:
             _string(value["revision"], path + ".revision")
         if not root:
             _path(value.get("path"), path + ".path")
     elif kind == "url":
-        _url(value["url"], path + ".url")
+        _url(value.get("url"), path + ".url")
         if root and urlsplit(value["url"]).query:
             _fail(path + ".url", "directory origins cannot contain a query")
     elif kind == "local":
         # Acquisition knows if host-local coordinates came from a local caller
         # or an untrusted remote document; parsing alone cannot authorize them.
-        _string(value["path"], path + ".path")
-    else:
+        _string(value.get("path"), path + ".path")
+    elif kind == "inline":
+        if root:
+            _fail(path + ".kind", "inline content cannot be a directory origin")
         try:
-            base64.b64decode(value["base64"], validate=True)
+            base64.b64decode(value.get("base64"), validate=True)
         except (TypeError, ValueError):
             _fail(path + ".base64", "invalid base64 content")
     return value

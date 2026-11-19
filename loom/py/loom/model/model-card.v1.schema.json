@@ -100,6 +100,14 @@
       },
       "uniqueItems": true
     },
+    "otherOrigin": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {"$ref": "#/$defs/name", "not": {"enum": ["hf", "url", "local", "inline"]}}
+      },
+      "description": "An origin defined by another transport. Its descriptor can be carried through discovery and publication."
+    },
     "originRoot": {
       "oneOf": [
         {
@@ -119,8 +127,6 @@
               "$ref": "#/$defs/name"
             }
           },
-          "patternProperties": {"^x-": {}},
-          "additionalProperties": false,
           "description": "Hugging Face repository root. A floating or omitted revision is resolved once per acquisition; locks retain the immutable result."
         },
         {
@@ -138,8 +144,6 @@
               "minLength": 1
             }
           },
-          "patternProperties": {"^x-": {}},
-          "additionalProperties": false,
           "description": "HTTP(S) directory root. Source resolution validates its scheme and relative joining."
         },
         {
@@ -157,10 +161,9 @@
               "minLength": 1
             }
           },
-          "patternProperties": {"^x-": {}},
-          "additionalProperties": false,
           "description": "Local source root owned by a local card or caller override; a remote card cannot grant itself arbitrary host filesystem access."
-        }
+        },
+        {"$ref": "#/$defs/otherOrigin"}
       ]
     },
     "fileOrigin": {
@@ -190,9 +193,7 @@
             "path": {
               "$ref": "#/$defs/path"
             }
-          },
-          "patternProperties": {"^x-": {}},
-          "additionalProperties": false
+          }
         },
         {
           "type": "object",
@@ -208,9 +209,7 @@
               "type": "string",
               "minLength": 1
             }
-          },
-          "patternProperties": {"^x-": {}},
-          "additionalProperties": false
+          }
         },
         {
           "type": "object",
@@ -226,9 +225,7 @@
               "type": "string",
               "minLength": 1
             }
-          },
-          "patternProperties": {"^x-": {}},
-          "additionalProperties": false
+          }
         },
         {
           "type": "object",
@@ -244,10 +241,9 @@
               "type": "string"
             }
           },
-          "patternProperties": {"^x-": {}},
-          "additionalProperties": false,
           "description": "Inline content, useful for small constant parameter tables; decoding is validated before acquisition."
-        }
+        },
+        {"$ref": "#/$defs/otherOrigin"}
       ]
     },
     "groupOrigin": {

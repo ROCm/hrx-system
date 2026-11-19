@@ -34,6 +34,29 @@ class SourceNotFound(FetchError):
     """The transport reported absence; repository access is established separately."""
 
 
+_ORIGIN_FIELDS = {
+    "hf": {"kind", "repository", "revision"},
+    "url": {"kind", "url"},
+    "local": {"kind", "path"},
+    "inline": {"kind", "base64"},
+}
+
+
+def _require_origin_support(descriptor: dict, destination: str, *, root: bool) -> None:
+    kind = descriptor["kind"]
+    fields = _ORIGIN_FIELDS.get(kind)
+    if fields is None:
+        raise ManifestError(f"{destination}: unsupported acquisition origin {kind!r}")
+    if kind == "hf" and not root:
+        fields = fields | {"path"}
+    unknown = operation_fields(descriptor).keys() - fields
+    if unknown:
+        raise ManifestError(
+            f"{destination}: unsupported options for origin {kind!r}: "
+            + ", ".join(sorted(unknown))
+        )
+
+
 @dataclass(frozen=True)
 class Document:
     # Absolute authored URL or host-local file path, independent of redirects.
@@ -195,8 +218,20 @@ class SourceResolver:
         self.origins: dict[str, dict] = {}
 
     def _revision(
-        self, requested: dict, locked: dict | None, *, overridden: bool
+        self,
+        requested: dict,
+        locked: dict | None,
+        *,
+        overridden: bool,
+        destination: str,
     ) -> str:
+        if locked:
+            unknown = operation_fields(locked).keys() - {"revision"}
+            if unknown:
+                raise ManifestError(
+                    f"{destination}: unsupported Hugging Face resolution options: "
+                    + ", ".join(sorted(unknown))
+                )
         authored = requested.get("revision", "main")
         if re.fullmatch(r"[0-9a-f]{40}", authored):
             if locked is not None and locked["revision"] != authored:
@@ -267,12 +302,19 @@ class SourceResolver:
             return None
         return Path(self._file(descriptor, caller_owned=caller_owned)["path"])
 
-    def resolve(self, origin: str | dict, identity: FileIdentity | None) -> Source:
+    def resolve(
+        self,
+        origin: str | dict,
+        identity: FileIdentity | None,
+        *,
+        destination: str = "source",
+    ) -> Source:
         if isinstance(origin, str) and origin.startswith("@"):
             name, path = origin[1:].split("/", 1)
             requested = self.roots[name]
             overridden = name in self.overrides
             if name not in self.origins:
+                _require_origin_support(requested, destination, root=True)
                 locked = self.lock.origins.get(name) if self.lock else None
                 if locked and operation_fields(locked["requested"]) != operation_fields(
                     requested
@@ -291,6 +333,7 @@ class SourceResolver:
                             operation_fields(requested),
                             resolution,
                             overridden=overridden,
+                            destination=destination,
                         ),
                     }
                 self.origins[name] = record
@@ -315,6 +358,7 @@ class SourceResolver:
                 }
         else:
             descriptor = origin
+            _require_origin_support(descriptor, destination, root=False)
         resolved = None
         if descriptor["kind"] == "hf":
             resolution = identity.resolved if identity else None
@@ -324,6 +368,7 @@ class SourceResolver:
                     operation_fields(descriptor),
                     resolution,
                     overridden=False,
+                    destination=destination,
                 ),
             }
             descriptor = {**descriptor, **resolved}

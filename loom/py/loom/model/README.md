@@ -38,6 +38,14 @@ options, and the contents of annotations keep their own key spaces. Required
 behavior belongs to the owning service contract, acquisition operation, or
 document version. A reader rejects a document version it cannot interpret.
 
+Discovery and documentation can also carry a typed acquisition origin with
+an unfamiliar `kind`, including its opaque lock resolution. When fetching
+that origin, the installer must understand its transport, options, and
+resolution. This applies to direct descriptors and named roots, including
+roots with a caller-supplied mirror. Known repository revisions remain pinned
+to immutable commits. A local or HTTP origin cannot claim a repository
+revision. Source locator strings keep their existing syntax.
+
 Provider-set names have no encoding semantics. A set named `source` may include
 bytecode libraries. `inputs` and `libraries` are arrays of path strings or
 objects with `path`, optional `format`, importer `options`, and auxiliary `data`.

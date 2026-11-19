@@ -61,7 +61,7 @@ def _source(
     card_url: str | None,
 ) -> str:
     origin = file.origin
-    revision = identity.resolved["revision"] if identity and identity.resolved else None
+    revision = None
     if isinstance(origin, str):
         if origin.startswith("@"):
             alias, suffix = origin[1:].split("/", 1)
@@ -78,11 +78,13 @@ def _source(
                         descriptor["url"].rstrip("/") + "/", quote(suffix, safe="/")
                     ),
                 }
-            else:
+            elif kind == "local":
                 origin = {
                     "kind": "local",
                     "path": descriptor["path"].rstrip("/\\") + "/" + suffix,
                 }
+            else:
+                return _code(origin) + " (" + _code(kind) + " origin)"
         elif "://" in origin:
             origin = {"kind": "url", "url": origin}
         elif card_url:
@@ -91,6 +93,8 @@ def _source(
             return _code(origin) + " (relative to model card)"
     kind = origin["kind"]
     if kind == "hf":
+        if identity and identity.resolved:
+            revision = identity.resolved["revision"]
         revision = revision or origin.get("revision", "main")
         url = (
             "https://huggingface.co/"
@@ -109,7 +113,9 @@ def _source(
         return _link(origin["url"], origin["url"])
     if kind == "inline":
         return f"Inline data ({len(base64.b64decode(origin['base64']))} bytes)"
-    return _code(origin["path"]) + " (local source)"
+    if kind == "local":
+        return _code(origin["path"]) + " (local source)"
+    return _code(kind) + " origin"
 
 
 def _uses(selection: Selection) -> tuple[dict[str, list[str]], dict]:
@@ -197,8 +203,10 @@ def render_markdown(
                 )
         elif origin["kind"] == "url":
             source = _link(origin["url"], origin["url"])
-        else:
+        elif origin["kind"] == "local":
             source = _code(origin["path"]) + " (local source)"
+        else:
+            source = _code(origin["kind"]) + " origin"
         lines += [_text(name) + ": " + source + ".", ""]
     if overview:
         lines += [overview.strip(), ""]

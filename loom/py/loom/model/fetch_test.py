@@ -337,6 +337,80 @@ def test_unfamiliar_transforms_only_require_support_for_acquired_files(
         assert not any(request.startswith("/future-") for request in requests)
 
 
+def test_future_transports_do_not_prevent_installing_another_program(tmp_path, capsys):
+    card = _card()
+    card["origins"] = {"store": {"kind": "example.store", "bucket": "stable"}}
+    payloads = {"code.loom": b"code", "weights.data": b"weights"}
+    lock = _lock(payloads)
+    lock["origins"]["store"] = {
+        "requested": card["origins"]["store"],
+        "resolved": {"generation": [1, 7]},
+    }
+    origins = [
+        (
+            "direct",
+            {"kind": "example.blob", "keys": [1, 2]},
+            {"sequence": 2},
+            "example.blob",
+        ),
+        ("aliased", "@store/object", None, "example.store"),
+        (
+            "option",
+            {
+                "kind": "url",
+                "url": "https://example.invalid/file",
+                "signed_chunks": True,
+            },
+            None,
+            "signed_chunks",
+        ),
+        (
+            "resolution",
+            {"kind": "hf", "repository": "org/repo", "path": "file"},
+            {"revision": "a" * 40, "tree_ordinal": 17},
+            "tree_ordinal",
+        ),
+    ]
+    for name, origin, resolved, _ in origins:
+        path = name + ".loom"
+        card["programs"][name] = {
+            "inputs": [{"path": path, "origin": origin}],
+            "libraries": [],
+        }
+        card["variants"]["v"]["services"]["text"]["programs"].append(name)
+        record = {"origin": origin, "size": 1, "sha256": "b" * 64}
+        if resolved is not None:
+            record["resolved"] = resolved
+        lock["files"].append(record)
+    with _server(card, payloads) as (base, requests, resources):
+        resources["/model.json.lock"] = json.dumps(lock).encode()
+        args = [base + "/model.json", "--cache", str(tmp_path / "cache"), "--no-input"]
+        assert main([*args, "--list", "--json"]) == 0
+        assert "aliased" in capsys.readouterr().out
+        for name, _, _, diagnostic in origins:
+            assert main([*args, "--preset=check", "--programs", name, "--dry-run"]) == 1
+            error = capsys.readouterr().err
+            assert name + ".loom" in error and diagnostic in error
+        assert (
+            main(
+                [
+                    *args,
+                    "--preset=check",
+                    "--programs=aliased",
+                    "--dry-run",
+                    f"--origin=store={tmp_path}",
+                ]
+            )
+            == 1
+        )
+        assert "example.store" in capsys.readouterr().err
+        assert set(requests) <= {"/model.json", "/model.json.lock"}
+        assert (
+            main([*args, "--preset=check", "--output", str(tmp_path / "working")]) == 0
+        )
+        assert (tmp_path / "working/code.loom").read_bytes() == b"code"
+
+
 @pytest.mark.parametrize(("scope", "preserve"), [("all", False), ("assets", True)])
 def test_xz_program_uses_decoded_identity_and_reinstalls_offline(
     tmp_path, scope, preserve

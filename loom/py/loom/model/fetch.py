@@ -172,7 +172,7 @@ def plan_fetch(
         ),
     )
     sources = {
-        path: resolver.resolve(file.origin, identities.get(path))
+        path: resolver.resolve(file.origin, identities.get(path), destination=path)
         for path, file in selection.files.items()
     }
     protected = {
@@ -338,7 +338,10 @@ def plan_lock(
                 if file.transform is not None:
                     require_supported_transform(file.transform, name)
                     transforms[key] = file.transform
-    sources = {key: resolver.resolve(file.origin, None) for key, file in files.items()}
+    sources = {
+        key: resolver.resolve(file.origin, None, destination=paths[key])
+        for key, file in files.items()
+    }
     sources = _prepare_sources(
         sources, {}, cache, offline=offline, transforms=transforms
     )

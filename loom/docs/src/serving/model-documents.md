@@ -263,6 +263,11 @@ if the user selects it. A new document major version requires a reader that
 understands it. Within a supported version, misspelled structural fields
 still produce an error.
 
+The same rule lets a publication reference a new download transport with a
+typed `origin`. A fetcher can list its models or install a preset that uses
+ordinary files. Selecting a file that needs the new transport reports the
+file path and origin kind before payload transfer, even with a local mirror.
+
 ## Deployment fields
 
 | Field | Contract |
