@@ -9,8 +9,10 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "iree/base/internal/arena.h"
+#include "iree/io/memory_stream.h"
 #include "iree/io/vec_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -338,6 +340,39 @@ TEST(NativeElfTest, RejectsElf32FieldOverflowBeforeWriting) {
       IREE_STATUS_OUT_OF_RANGE,
       loom_native_elf32le_write_file(&file, &layout, stream.get()));
   EXPECT_EQ(iree_io_stream_length(stream.get()), 0);
+}
+
+TEST(NativeElfTest, ShortSinkStopsAtTheStartOfEachHeaderRecord) {
+  const loom_native_elf_segment_t segment = {
+      .type = LOOM_NATIVE_ELF_PROGRAM_TYPE_LOAD,
+  };
+  const loom_native_elf64le_file_t file = {
+      .type = LOOM_NATIVE_ELF_FILE_TYPE_DYN,
+      .machine = LOOM_NATIVE_ELF_MACHINE_AMDGPU,
+      .segments = &segment,
+      .segment_count = 1,
+  };
+  TestArena arena;
+  loom_native_elf_layout_t layout = {};
+  IREE_ASSERT_OK(
+      loom_native_elf64le_build_layout(&file, arena.arena(), &layout));
+  for (const uint64_t start : {uint64_t{0}, layout.program_header_offset,
+                               layout.section_header_offset}) {
+    SCOPED_TRACE(start);
+    std::vector<uint8_t> storage((size_t)start + 17, 0xCC);
+    iree_io_stream_t* sink = nullptr;
+    IREE_ASSERT_OK(iree_io_memory_stream_wrap(
+        IREE_IO_STREAM_MODE_WRITABLE,
+        iree_make_byte_span(storage.data(), storage.size()),
+        iree_io_stream_release_callback_null(), iree_allocator_system(),
+        &sink));
+    StreamPtr stream(sink, iree_io_stream_release);
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_OUT_OF_RANGE,
+        loom_native_elf64le_write_file(&file, &layout, stream.get()));
+    EXPECT_EQ(iree_io_stream_offset(stream.get()), (iree_io_stream_pos_t)start);
+    EXPECT_EQ(storage[(size_t)start], 0xCC);
+  }
 }
 
 TEST(NativeElfTest, WritesAmdgpuNoteElfEnvelope) {
