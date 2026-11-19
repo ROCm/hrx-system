@@ -1250,9 +1250,16 @@ void Functions::collect(cxx::DeclarationAST* declaration,
              !(variable->isConstexpr() ||
                (unit_.typeTraits().is_const(variable->type()) &&
                 variable->constValue())))) {
-          diagnostics_.reject(unit_, declarator,
-                              "global storage definitions require a "
-                              "global-storage projection");
+          // Mutable global storage has no projection. With
+          // SKIP_MUTABLE_GLOBALS the unit is also a host compile: its mutable
+          // globals are host storage that device code cannot reference, so
+          // they are skipped like the rest of the host-only code.
+          if (!skips_mutable_globals()) {
+            diagnostics_.reject(unit_, declarator,
+                                "global storage definitions require a "
+                                "global-storage projection");
+          }
+          continue;
         }
         immutable_objects_.retain_definition(variable, declarator);
       }

@@ -250,9 +250,14 @@ class Functions {
   // Discovery order grows as declare reaches helpers. Spans are invalidated by
   // growth; consumers obtain the next indexed entry after each body finishes.
   std::span<const FunctionInstance> pending() const { return pending_; }
-  // Import options borrowed for the translation: kernel_ref roots.
+  // Import options borrowed for the translation: kernel_ref roots and the
+  // mutable-globals policy.
   void set_import_options(const loom_cxx_import_options_t* options) {
     options_ = options;
+  }
+  bool skips_mutable_globals() const {
+    return options_ &&
+           (options_->flags & LOOM_CXX_IMPORT_FLAG_SKIP_MUTABLE_GLOBALS);
   }
   // Host launch facts of each kernel_ref root, one per specialization in
   // request order.

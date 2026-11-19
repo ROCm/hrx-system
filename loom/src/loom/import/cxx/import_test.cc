@@ -82,6 +82,13 @@ class ImportTest : public ::testing::Test {
                                      filename.size);
     auto source = diagnostic->source_location.source;
     self.diagnostic_source_.assign(source.data ? source.data : "", source.size);
+    self.diagnostic_text_.clear();
+    for (iree_host_size_t i = 0; i < diagnostic->param_count; ++i) {
+      const auto& param = diagnostic->params[i];
+      if (param.kind == LOOM_PARAM_STRING && param.string.data) {
+        self.diagnostic_text_.append(param.string.data, param.string.size);
+      }
+    }
     return loom_diagnostic_stderr_sink(nullptr, diagnostic);
   }
 
@@ -120,6 +127,8 @@ class ImportTest : public ::testing::Test {
   std::string diagnostic_filename_;
   // Copied source bytes retained after the frontend is destroyed.
   std::string diagnostic_source_;
+  // String parameters of the most recently delivered diagnostic.
+  std::string diagnostic_text_;
   // Provider-owned header text, independent of frontend storage.
   std::map<std::string, std::string> headers_;
   // Lookup counts witness per-invocation source reuse.
@@ -1079,6 +1088,101 @@ const offload::launch::info* host() {
   EXPECT_NE(printed.find("scalar.mulf"), std::string::npos) << printed;
   EXPECT_EQ(printed.find("printf"), std::string::npos) << printed;
   EXPECT_EQ(printed.find("@host"), std::string::npos) << printed;
+}
+
+TEST_F(KernelRefImportTest, SkipMutableGlobalsLeavesHostStorageOnTheHost) {
+  // A hosted unit is a host compile: mutable globals are host storage.
+  std::string source = std::string(kKernelRefSource) +
+                       "int host_counter = 0;\n"
+                       "void bump() { ++host_counter; }\n";
+  const auto view = iree_make_string_view(source.data(), source.size());
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_HOSTED;
+  options_.triple = IREE_SV("x86_64-linux-gnu");
+  IREE_ASSERT_OK(Import(view));
+  EXPECT_EQ(module_, nullptr);
+  EXPECT_GT(error_count_, 0);
+
+  error_count_ = 0;
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_SKIP_MUTABLE_GLOBALS;
+  IREE_ASSERT_OK(Import(view));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(error_count_, 0);
+  EXPECT_NE(Print().find("@_Z3runI4BodyEvT_"), std::string::npos);
+}
+
+TEST_F(KernelRefImportTest, KernelReferenceToSkippedGlobalIsRejectedByName) {
+  // Device code that names host storage is rejected as such, however it
+  // reaches the variable. A const global with a constant initializer is not
+  // host storage and imports by value.
+  constexpr char kPrelude[] = R"cxx(
+#include <loomcxx/kernel.h>
+namespace offload::launch {
+struct info;
+template <auto Kernel>
+[[loom::kernel_ref]] extern const info kernel_ref;
+}  // namespace offload::launch
+static loom::kernel::configuration launch_config(unsigned groups) {
+  return {{groups, 1, 1}, {64, 1, 1}};
+}
+template <class T>
+[[loom::kernel(launch_config)]]
+void run(T tag) { tag(); }
+extern "C" int rand(void);
+int host_counter = 3;
+float host_table[4] = {1, 2, 3, 4};
+const int seeded = rand();
+const int fixed_value = 5;
+struct Counters { static int count; };
+int Counters::count = 2;
+inline int read_counter() { return host_counter; }
+struct Body {
+  float* y;
+  [[loom::inline]] void operator()() const {
+)cxx";
+  constexpr char kSuffix[] = R"cxx(
+  }
+};
+const offload::launch::info* host() {
+  return &offload::launch::kernel_ref<&run<Body>>;
+}
+)cxx";
+  struct Case {
+    // Statement in the kernel body.
+    const char* body;
+    // Host variable the diagnostic names, or nullptr when the body imports.
+    const char* variable;
+  };
+  constexpr Case kCases[] = {
+      {"y[0] = static_cast<float>(host_counter);", "host_counter"},
+      {"host_counter = 7;", "host_counter"},
+      {"y[0] = static_cast<float>(read_counter());", "host_counter"},
+      {"y[0] = host_table[2];", "host_table"},
+      {"y[0] = static_cast<float>(seeded);", "seeded"},
+      {"y[0] = static_cast<float>(Counters::count);", "count"},
+      {"y[0] = static_cast<float>(fixed_value);", nullptr},
+  };
+  UseKernelRefs({kBodyReference});
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_SKIP_MUTABLE_GLOBALS;
+  for (const auto& test : kCases) {
+    SCOPED_TRACE(test.body);
+    std::string source = std::string(kPrelude) + test.body + kSuffix;
+    error_count_ = 0;
+    diagnostic_text_.clear();
+    IREE_ASSERT_OK(
+        ImportUnit(iree_make_string_view(source.data(), source.size())));
+    if (!test.variable) {
+      ASSERT_NE(module_, nullptr);
+      EXPECT_EQ(error_count_, 0);
+      continue;
+    }
+    EXPECT_EQ(module_, nullptr);
+    EXPECT_EQ(error_count_, 1);
+    EXPECT_NE(diagnostic_text_.find(std::string("host variable '") +
+                                    test.variable +
+                                    "' is not available in device code"),
+              std::string::npos)
+        << diagnostic_text_;
+  }
 }
 
 // A unit is parsed once and imported from its existing translation unit, as

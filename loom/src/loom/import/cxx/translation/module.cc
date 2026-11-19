@@ -1696,8 +1696,55 @@ class Translator final : private Initialization::Evaluation,
     return storage_.project(allocation.pointer, literal->type, literal);
   }
 
+  // With LOOM_CXX_IMPORT_FLAG_SKIP_MUTABLE_GLOBALS the unit is also a host
+  // compile, and its mutable namespace-scope variables and static data members
+  // are host storage that import skipped. Device code that names one is
+  // rejected by name here instead of by whichever projection fails first.
+  // |unbound| is set where no projection bound the name: a const variable
+  // without a constant value was skipped as well. Elsewhere only the type
+  // decides, since a const object may still be immutable storage.
+  void reject_host_storage(cxx::Symbol* symbol, cxx::AST* owner,
+                           bool unbound) {
+    if (!symbol || !functions_.skips_mutable_globals()) {
+      return;
+    }
+    auto traits = unit_.typeTraits();
+    const cxx::Type* type = nullptr;
+    bool constant = false;
+    if (auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(symbol)) {
+      auto* canonical = variable->canonical();
+      auto* parent = canonical->parent();
+      if (!cxx::symbol_cast<cxx::NamespaceSymbol>(parent) &&
+          !(variable->isStatic() && cxx::symbol_cast<cxx::ClassSymbol>(parent))) {
+        return;
+      }
+      auto* definition = canonical->definition();
+      type = definition ? definition->type() : variable->type();
+      constant = variable->isConstexpr() || variable->constValue() ||
+                 (definition &&
+                  (definition->isConstexpr() || definition->constValue()));
+    } else if (auto* field = cxx::symbol_cast<cxx::FieldSymbol>(symbol);
+               field && field->isStatic()) {
+      type = field->type();
+      // A const static member reaches this point only when nothing bound it.
+      constant = !unbound;
+    } else {
+      return;
+    }
+    // A reference is not itself assignable; it is host storage when it has no
+    // constant referent.
+    bool is_mutable = !traits.is_reference(type) &&
+                      (!traits.is_const(type) || traits.is_volatile(type));
+    if (is_mutable || (unbound && !constant)) {
+      fail(owner, "host variable '" + cxx::to_string(symbol->name()) +
+                      "' is not available in device code: only const "
+                      "variables with constant initializers are imported");
+    }
+  }
+
   StorageProjection immutable_object(cxx::VariableSymbol* variable,
                                      cxx::AST* owner) {
+    reject_host_storage(variable, owner, /*unbound=*/false);
     auto* canonical = variable->canonical();
     auto object = immutable_objects_.reference(canonical, owner);
     auto found = immutable_storage_.find(canonical);
@@ -2875,6 +2922,7 @@ class Translator final : private Initialization::Evaluation,
           return {expression->type, address(expression)};
         }
         if (access == LvalueAccess::Write) {
+          reject_host_storage(destination->binding, owner, /*unbound=*/true);
           fail(owner, "mutation requires an owned automatic source binding");
         }
       }
@@ -6379,10 +6427,12 @@ class Translator final : private Initialization::Evaluation,
           return name(objects_.load(*captured, ast->type, ast),
                       cxx::to_string(field->name()));
         }
+        reject_host_storage(field, ast, /*unbound=*/true);
         fail(ast,
              "member-dependent initialization requires source object "
              "initialization semantics");
       }
+      reject_host_storage(id->symbol, ast, /*unbound=*/true);
       fail(ast, "unbound source value: " +
                     cxx::to_string(id->symbol ? id->symbol->name() : nullptr));
     }
