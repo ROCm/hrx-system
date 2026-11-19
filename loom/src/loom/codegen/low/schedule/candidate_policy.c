@@ -22,12 +22,17 @@ iree_status_t loom_low_schedule_candidate_policy_initialize(
     return iree_ok_status();
   }
   out_policy->register_debt_word_count =
-      (state->target.descriptor_set->reg_class_count + 63) / 64;
-  return iree_arena_allocate_array(state->scratch_arena,
-                                   LOOM_LOW_SCHEDULE_READY_NOMINEE_CAPACITY *
-                                       out_policy->register_debt_word_count,
-                                   sizeof(*out_policy->nominee_register_debts),
-                                   (void**)&out_policy->nominee_register_debts);
+      (uint16_t)((state->target.descriptor_set->reg_class_count + 63) / 64);
+  out_policy->nominee_capacity =
+      iree_any_bit_set(state->options->flags,
+                       LOOM_LOW_SCHEDULE_FLAG_PREFER_SOURCE_ORDER)
+          ? 1
+          : LOOM_LOW_SCHEDULE_READY_NOMINEE_CAPACITY;
+  return iree_arena_allocate_array(
+      state->scratch_arena,
+      out_policy->nominee_capacity * out_policy->register_debt_word_count,
+      sizeof(*out_policy->nominee_register_debts),
+      (void**)&out_policy->nominee_register_debts);
 }
 
 static loom_low_schedule_register_debt_word_t*
@@ -1018,13 +1023,11 @@ void loom_low_schedule_candidate_policy_select(
       .rejected_node = LOOM_LOW_SCHEDULE_NODE_NONE,
       .ready_candidate_count = ready_candidate_count,
   };
-  const bool score_pressure =
-      loom_low_schedule_strategy_uses_pressure(state->options->strategy);
-  if (!score_pressure || ready_candidate_count == 1) {
+  if (policy->nominee_capacity <= 1 || ready_candidate_count == 1) {
     (void)loom_low_schedule_ready_frontier_copy_best(
         &ready_policy->frontier, LOOM_LOW_SCHEDULE_READY_VIEW_SOURCE,
         /*capacity=*/1, &out_selection->chosen_node);
-    if (score_pressure) {
+    if (policy->nominee_capacity != 0) {
       loom_low_schedule_pressure_score_candidate(
           state, pressure_state, ready_policy, indegrees,
           out_selection->chosen_node,

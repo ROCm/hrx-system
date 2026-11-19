@@ -42,8 +42,8 @@ TEST(ScheduleBlockTest, RetainsOwnedRowsWithShiftedNodeIndices) {
   previous_block.node_count = 4;
   previous_block.scheduled_node_start = 1;
   previous_block.scheduled_node_count = 4;
-  previous_block.candidate_decisions.start = 1;
-  previous_block.candidate_decisions.count = 1;
+  previous_blocks[0].candidate_decision_end = 1;
+  previous_block.candidate_decision_end = 2;
   loom_low_schedule_node_t previous_nodes[5] = {};
   const uint32_t descriptor_ordinals[] = {
       TEST_LOW_CORE_DESCRIPTOR_REF_TEST_LOAD_V4I32,
@@ -156,8 +156,7 @@ TEST(ScheduleBlockTest, RetainsOwnedRowsWithShiftedNodeIndices) {
   EXPECT_EQ(groups[1].issue_cycle, 8u);
   EXPECT_EQ(liveness_orders[1].ops, ordered_ops + 2);
   EXPECT_EQ(liveness_orders[1].op_count, 4u);
-  EXPECT_EQ(blocks[1].candidate_decisions.start, 1u);
-  EXPECT_EQ(blocks[1].candidate_decisions.count, 1u);
+  EXPECT_EQ(blocks[1].candidate_decision_end, 2u);
   EXPECT_EQ(decisions[1].chosen_node, 3u);
   EXPECT_EQ(decisions[1].rejected_node, 2u);
   EXPECT_EQ(steps[2].node_index, 3u);

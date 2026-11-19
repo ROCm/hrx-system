@@ -359,6 +359,8 @@ TEST(PressureTest, SourceCliffFloorRetainsReadWriteHighWater) {
         .blocks = &block_liveness,
         .block_count = 1,
     };
+    loom_low_schedule_block_t block = {};
+    uint32_t register_limit = 4;
     loom_low_schedule_build_state_t state = {
         .pressure_cliffs = &resources,
         .target = {.descriptor_set = &descriptors},
@@ -366,6 +368,8 @@ TEST(PressureTest, SourceCliffFloorRetainsReadWriteHighWater) {
         .liveness_dataflow = &liveness,
         .values = values,
     };
+    state.blocks = &block;
+    state.pressure_limits.by_reg_class = &register_limit;
     uint64_t live_units[] = {0};
     uint32_t packing_reserve[] = {0};
     uint32_t first_cliffs[] = {0};
@@ -392,6 +396,7 @@ TEST(PressureTest, SourceCliffFloorRetainsReadWriteHighWater) {
     if (test_case.late_read) {
       producer.flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_LATE_READS;
     }
+    loom_low_schedule_initialize_source_pressure_block(&state, &pressure, 0);
     loom_low_schedule_reverse_source_pressure_node(&state, &pressure,
                                                    &consumer);
     EXPECT_EQ(pressure.current_live_units, test_case.output_units);
@@ -401,6 +406,11 @@ TEST(PressureTest, SourceCliffFloorRetainsReadWriteHighWater) {
     EXPECT_EQ(live_units[0], test_case.input_units);
     EXPECT_EQ(values[0].live_unit_count, test_case.input_units);
     EXPECT_EQ(values[1].live_unit_count, 0u);
+    const uint32_t peak_units =
+        test_case.late_read
+            ? test_case.input_units + test_case.output_units
+            : iree_max(test_case.input_units, test_case.output_units);
+    EXPECT_EQ(block.source_registers_fit, peak_units <= register_limit);
     EXPECT_EQ(pressure.block_value_count, 2u);
     EXPECT_EQ(first_cliffs[0], test_case.first_cliff);
 
@@ -409,6 +419,7 @@ TEST(PressureTest, SourceCliffFloorRetainsReadWriteHighWater) {
     loom_low_schedule_initialize_source_pressure_block(&state, &pressure, 0);
     EXPECT_EQ(pressure.current_live_units, 0u);
     EXPECT_EQ(live_units[0], 0u);
+    EXPECT_TRUE(block.source_registers_fit);
     EXPECT_EQ(pressure.block_value_count, 0u);
     EXPECT_EQ(pressure.block_reg_class_count, 0u);
     EXPECT_EQ(block_class_touched[0], 0u);
@@ -420,6 +431,9 @@ TEST(PressureTest, SourceCliffFloorRetainsReadWriteHighWater) {
                                                    &consumer);
     EXPECT_EQ(first_cliffs[0], test_case.first_cliff);
     EXPECT_EQ(pressure.current_live_units, test_case.output_units);
+    state.pressure_limits.by_reg_class = nullptr;
+    loom_low_schedule_initialize_source_pressure_block(&state, &pressure, 0);
+    EXPECT_FALSE(block.source_registers_fit);
     loom_low_schedule_reset_source_pressure_sweep(&state, &pressure);
     EXPECT_EQ(pressure.current_live_units, 0u);
     EXPECT_EQ(first_cliffs[0], test_case.first_cliff);

@@ -407,6 +407,7 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
   };
   loom_amdgpu_storage_layout_segment_sizes_t segment_prefix = {0};
   const loom_low_emission_frame_spill_free_options_t spill_free_options = {
+      .flags = LOOM_LOW_SPILL_REPAIR_FLAG_TRY_SOURCE_ORDER,
       .materialization_options =
           {
               .has_supported_storage_spaces = true,

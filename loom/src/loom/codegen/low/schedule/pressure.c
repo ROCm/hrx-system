@@ -727,6 +727,11 @@ static void loom_low_schedule_add_source_pressure_value(
   loom_low_schedule_note_block_pressure_reg_class(pressure_state, reg_class_id);
   loom_low_schedule_adjust_live_register_class(
       state, pressure_state, reg_class_id, (int64_t)added_units);
+  if (state->pressure_limits.by_reg_class != NULL &&
+      pressure_state->current_live_units_by_reg_class[reg_class_id] >
+          state->pressure_limits.by_reg_class[reg_class_id]) {
+    state->blocks[block_index].source_registers_fit = false;
+  }
   loom_low_schedule_advance_source_pressure_cliff_floor(state, pressure_state,
                                                         reg_class_id);
   loom_low_schedule_note_resource_high_water(
@@ -799,6 +804,8 @@ void loom_low_schedule_initialize_source_pressure_block(
     loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state, uint32_t block_index) {
   loom_low_schedule_reset_source_pressure_block(state, pressure_state);
+  state->blocks[block_index].source_registers_fit =
+      state->pressure_limits.by_reg_class != NULL;
   const loom_liveness_block_relation_t* liveness =
       &state->liveness_dataflow->blocks[block_index];
   for (iree_host_size_t i = 0; i < liveness->live_out_count; ++i) {

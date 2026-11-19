@@ -198,6 +198,9 @@ enum loom_low_schedule_flag_bits_e {
   LOOM_LOW_SCHEDULE_FLAG_HAS_LOWERED_SPILL_TRAFFIC = 1u << 8,
   // Reconciles private setup ownership after required-register exhaustion.
   LOOM_LOW_SCHEDULE_FLAG_REPAIR_PRIVATE_SETUP = 1u << 9,
+  // Select the earliest dependency-ready instruction in rescheduled blocks,
+  // still scoring it for issue timing and physical resource demand.
+  LOOM_LOW_SCHEDULE_FLAG_PREFER_SOURCE_ORDER = 1u << 10,
 };
 typedef uint32_t loom_low_schedule_flags_t;
 
@@ -723,21 +726,21 @@ typedef struct loom_low_schedule_block_t {
   uint32_t issue_group_start;
   // Number of issue groups owned by this block.
   uint32_t issue_group_count;
-  // Original selection explanations owned by this block's schedule.
-  struct {
-    // First entry in the table candidate-decision array.
-    uint32_t start;
-    // Number of candidate decisions recorded for the block.
-    uint32_t count;
-  } candidate_decisions;
+  // Exclusive end of this block's rows in the block-ordered decision table.
+  uint32_t candidate_decision_end;
+  // The source-order pressure sweep observed every direct register class
+  // within its scheduling limit, including live-out values and late reads.
+  // False when that sweep or those limits were unavailable.
+  bool source_registers_fit;
 } loom_low_schedule_block_t;
 
 // Accepted resource-stall block schedules preserved by a scoped IR transform.
 //
 // The caller proves that unmarked blocks retain their operation identities,
 // source order, semantics, local dependencies, and entry execution state. CFG
-// topology, target contracts, and scheduling options remain unchanged; the
-// function has no structured scopes. Marked blocks are rescheduled; unmarked
+// topology, target contracts, and resource models remain unchanged. The
+// function has no structured scopes. Marked blocks may choose a different
+// dependency-ready order under the same issue model. Unmarked
 // blocks keep their accepted choices even when the new function's pressure
 // policy would choose differently. Allocation and final native profitability
 // checks remain the transaction owner's job.

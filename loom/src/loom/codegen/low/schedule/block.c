@@ -16,8 +16,6 @@ void loom_low_schedule_block_begin(loom_low_schedule_build_state_t* state,
   block->scheduled_node_count = 0;
   block->issue_group_start = (uint32_t)state->issue_group_count;
   block->issue_group_count = 0;
-  block->candidate_decisions.start = (uint32_t)state->candidate_decision_count;
-  block->candidate_decisions.count = 0;
   state->liveness_block_orders[block_index] = (loom_liveness_block_order_t){
       .block = block->block,
       .ops = block->node_count != 0
@@ -72,8 +70,7 @@ void loom_low_schedule_block_append(loom_low_schedule_build_state_t* state,
 
 void loom_low_schedule_block_finish(loom_low_schedule_build_state_t* state) {
   loom_low_schedule_block_t* block = &state->blocks[state->current_block_index];
-  block->candidate_decisions.count = (uint32_t)state->candidate_decision_count -
-                                     block->candidate_decisions.start;
+  block->candidate_decision_end = (uint32_t)state->candidate_decision_count;
 }
 
 iree_status_t loom_low_schedule_block_retain(
@@ -114,11 +111,15 @@ iree_status_t loom_low_schedule_block_retain(
   }
   if (iree_status_is_ok(status)) {
     if (state->candidate_decisions != NULL) {
-      for (uint32_t i = 0; i < previous_block->candidate_decisions.count; ++i) {
+      const uint32_t start =
+          block_index == 0
+              ? 0
+              : previous->blocks[block_index - 1].candidate_decision_end;
+      for (uint32_t i = start; i < previous_block->candidate_decision_end;
+           ++i) {
         loom_low_schedule_candidate_decision_t* decision =
             &state->candidate_decisions[state->candidate_decision_count++];
-        *decision = previous->candidate_decisions
-                        [previous_block->candidate_decisions.start + i];
+        *decision = previous->candidate_decisions[i];
         decision->chosen_node =
             block->node_start +
             (decision->chosen_node - previous_block->node_start);
