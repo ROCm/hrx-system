@@ -31,6 +31,11 @@ static const amdf_info_name_t amdf_info_xdna_scheduling[] = {
     {0, NULL},
 };
 
+static const amdf_info_name_t amdf_info_xdna_instruction_features[] = {
+    {AMDF_XDNA_INSTRUCTION_FEATURE_LOAD_PDI, "load_pdi"},
+    {0, NULL},
+};
+
 static const amdf_info_name_t amdf_info_xdna_encodings[] = {
     {AMDF_XDNA_BINARY_FORMAT_UNKNOWN, "unknown"},
     {AMDF_XDNA_BINARY_FORMAT_TRANSACTION, "transaction"},
@@ -88,6 +93,8 @@ void amdf_info_report_xdna_device(amdf_info_output_t* output,
                        info->context.column_count_granularity);
     amdf_info_json_end(output, '}');
     amdf_info_json_begin(output, "instruction", '{');
+    amdf_info_json_flags(output, "features", info->instruction.features,
+                         amdf_info_xdna_instruction_features);
     amdf_info_json_u64(output, "maximum_byte_length",
                        info->instruction.maximum_byte_length);
     amdf_info_json_u32(output, "address_alignment",
@@ -135,6 +142,12 @@ void amdf_info_report_xdna_device(amdf_info_output_t* output,
           output, "  Encoding    %s (%" PRIu32 "), version %" PRIu32 "\n",
           format ? format : "unknown", info->instruction.format.format,
           info->instruction.format.version);
+      if (info->instruction.features != 0) {
+        amdf_info_output_print(output, "  Operations  ");
+        amdf_info_output_flags(output, info->instruction.features,
+                               amdf_info_xdna_instruction_features);
+        amdf_info_output_print(output, "\n");
+      }
     }
   }
 }

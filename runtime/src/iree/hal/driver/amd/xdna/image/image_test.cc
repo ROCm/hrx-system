@@ -55,14 +55,12 @@ TEST(ImageTest, RetainsSourceAndIndexedRequirements) {
   const auto invocation =
       iree_hal_amd_xdna_image_tables_invocation(tables, entry.first_invocation);
   EXPECT_EQ(invocation.next_invocation, 1u);
-  const auto* directory = iree_hal_amd_xdna_image_directory(image);
-  const auto* load =
-      iree_hal_amd_xdna_image_directory_program_header(directory, 3);
-  std::vector<uint8_t> bytes(load->file_range.length);
-  IREE_EXPECT_OK(iree_hal_amd_xdna_image_directory_read_source_range(
-      directory, load->file_range,
-      iree_make_byte_span(bytes.data(), bytes.size())));
-  EXPECT_EQ(bytes, fixture.payloads[2]);
+  std::vector<uint8_t> bytes(fixture.allocations[1].byte_length, 0xCD);
+  IREE_EXPECT_OK(
+      iree_hal_amd_xdna_image_load_allocation(image, 1, bytes.data()));
+  std::vector<uint8_t> expected = fixture.payloads[2];
+  expected.resize(bytes.size(), 0);
+  EXPECT_EQ(bytes, expected);
   iree_hal_amd_xdna_image_free(image);
 }
 

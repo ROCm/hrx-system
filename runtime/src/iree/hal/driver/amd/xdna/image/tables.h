@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Indexed, immutable metadata retained in its compact wire representation.
+// Indexed execution metadata shared by the XDNA executable readers.
 
 #ifndef IREE_HAL_DRIVER_AMD_XDNA_IMAGE_TABLES_H_
 #define IREE_HAL_DRIVER_AMD_XDNA_IMAGE_TABLES_H_
@@ -15,94 +15,105 @@
 extern "C" {
 #endif
 
-// Metadata view whose row boundaries have been established at admission.
-// Rows remain little endian; queries load fixed fields without allocating or
-// reconstructing relations. The storage owner outlives this borrowed view.
+// Controller field containing a linear firmware address. This is an admitted
+// runtime relocation kind. The native .xdna wire ABI only defines SHIM_ADDRESS.
+enum { IREE_HAL_AMD_XDNA_RELOCATION_FIRMWARE_ADDRESS_64 = 2 };
+
+// A source range copied into an allocation when its backing is materialized.
+typedef struct iree_hal_amd_xdna_image_load_t {
+  // First byte in the retained executable.
+  uint32_t source_offset;
+  // First byte in the destination allocation.
+  uint32_t destination_offset;
+  // Number of source bytes copied.
+  uint32_t file_size;
+  // Extent initialized, including the zero-filled tail.
+  uint32_t memory_size;
+} iree_hal_amd_xdna_image_load_t;
+
+// Readers populate these rows once during admission. The executable owns one
+// aligned host allocation for the rows, payload ranges, and export names.
 typedef struct iree_hal_amd_xdna_image_tables_t {
-  // Complete metadata bytes, borrowed from the image.
-  iree_const_byte_span_t storage;
-  // Decoded target requirements and table cardinalities.
+  // Requirements and cardinalities established by the reader.
   iree_xdna_elf_header_record_t header;
-  // Byte offset of the allocation table.
-  uint32_t allocation_offset;
-  // Byte offset of the allocation use table.
-  uint32_t allocation_use_offset;
-  // Byte offset of the entry table.
-  uint32_t entry_offset;
-  // Byte offset of the binding table.
-  uint32_t binding_offset;
-  // Byte offset of the relocation table.
-  uint32_t relocation_offset;
-  // Byte offset of the invocation table.
-  uint32_t invocation_offset;
-  // Byte offset of the trailing name table.
-  uint32_t string_offset;
+  // Allocation requirements in image order.
+  iree_xdna_elf_allocation_record_t* allocations;
+  // Global allocation ordinal for each entry-relative use.
+  uint32_t* allocation_uses;
+  // Exported entries in reflection order.
+  iree_xdna_elf_entry_record_t* entries;
+  // External buffer contracts in entry-relative binding order.
+  iree_xdna_elf_binding_record_t* bindings;
+  // Address fields grouped by entry and binding time.
+  iree_xdna_elf_relocation_record_t* relocations;
+  // Native command ranges for each entry.
+  iree_xdna_elf_invocation_record_t* invocations;
+  // Initialization ranges addressed by each allocation's first_load.
+  iree_hal_amd_xdna_image_load_t* loads;
+  // Concatenated export names addressed by each entry's name_offset.
+  char* strings;
 } iree_hal_amd_xdna_image_tables_t;
 
-// Establishes all row boundaries from the untrusted header and exact extent.
-// Row relationships and target admission are validated by image_create.
+// Allocates zero-initialized rows and strings at checked offsets.
 iree_status_t iree_hal_amd_xdna_image_tables_initialize(
-    iree_const_byte_span_t storage,
-    iree_hal_amd_xdna_image_tables_t* out_tables);
+    const iree_xdna_elf_header_record_t* header, uint32_t load_count,
+    iree_allocator_t allocator, iree_hal_amd_xdna_image_tables_t* out_tables);
 
-// Returns the row at a valid allocation-table ordinal.
+// Decodes a native metadata segment into aligned host rows. Load ranges are
+// populated from the corresponding ELF program headers after validation.
+iree_status_t iree_hal_amd_xdna_image_tables_decode(
+    iree_const_byte_span_t storage, uint32_t load_count,
+    iree_allocator_t allocator, iree_hal_amd_xdna_image_tables_t* out_tables);
+
+// Releases storage allocated by either reader. Zero initialization is valid.
+void iree_hal_amd_xdna_image_tables_deinitialize(
+    iree_hal_amd_xdna_image_tables_t* tables, iree_allocator_t allocator);
+
+// Allocation requirements in image order.
 static inline iree_xdna_elf_allocation_record_t
 iree_hal_amd_xdna_image_tables_allocation(
     const iree_hal_amd_xdna_image_tables_t* tables, uint32_t ordinal) {
-  return iree_xdna_elf_decode_allocation(
-      tables->storage.data + tables->allocation_offset +
-      ordinal * IREE_XDNA_ELF_ALLOCATION_RECORD_SIZE);
+  return tables->allocations[ordinal];
 }
 
-// Returns the global allocation index at a valid use-table ordinal.
+// Global allocation ordinal for each entry-relative use.
 static inline uint32_t iree_hal_amd_xdna_image_tables_allocation_use(
     const iree_hal_amd_xdna_image_tables_t* tables, uint32_t ordinal) {
-  return iree_unaligned_load_le_u32(tables->storage.data +
-                                    tables->allocation_use_offset +
-                                    ordinal * sizeof(uint32_t));
+  return tables->allocation_uses[ordinal];
 }
 
-// Returns the row at a valid entry-table ordinal.
+// Exported entries in reflection order.
 static inline iree_xdna_elf_entry_record_t iree_hal_amd_xdna_image_tables_entry(
     const iree_hal_amd_xdna_image_tables_t* tables, uint32_t ordinal) {
-  return iree_xdna_elf_decode_entry(tables->storage.data +
-                                    tables->entry_offset +
-                                    ordinal * IREE_XDNA_ELF_ENTRY_RECORD_SIZE);
+  return tables->entries[ordinal];
 }
 
-// Returns the row at a valid binding-table ordinal.
+// External buffer contracts in entry-relative binding order.
 static inline iree_xdna_elf_binding_record_t
 iree_hal_amd_xdna_image_tables_binding(
     const iree_hal_amd_xdna_image_tables_t* tables, uint32_t ordinal) {
-  return iree_xdna_elf_decode_binding(
-      tables->storage.data + tables->binding_offset +
-      ordinal * IREE_XDNA_ELF_BINDING_RECORD_SIZE);
+  return tables->bindings[ordinal];
 }
 
-// Returns the row at a valid relocation-table ordinal.
+// Address fields grouped by entry and binding time.
 static inline iree_xdna_elf_relocation_record_t
 iree_hal_amd_xdna_image_tables_relocation(
     const iree_hal_amd_xdna_image_tables_t* tables, uint32_t ordinal) {
-  return iree_xdna_elf_decode_relocation(
-      tables->storage.data + tables->relocation_offset +
-      ordinal * IREE_XDNA_ELF_RELOCATION_RECORD_SIZE);
+  return tables->relocations[ordinal];
 }
 
-// Returns the row at a valid invocation-table ordinal.
+// Native command ranges for each entry.
 static inline iree_xdna_elf_invocation_record_t
 iree_hal_amd_xdna_image_tables_invocation(
     const iree_hal_amd_xdna_image_tables_t* tables, uint32_t ordinal) {
-  return iree_xdna_elf_decode_invocation(
-      tables->storage.data + tables->invocation_offset +
-      ordinal * IREE_XDNA_ELF_INVOCATION_RECORD_SIZE);
+  return tables->invocations[ordinal];
 }
 
 // Returns an admitted entry's name, borrowing the table storage.
 static inline iree_string_view_t iree_hal_amd_xdna_image_tables_entry_name(
     const iree_hal_amd_xdna_image_tables_t* tables,
     const iree_xdna_elf_entry_record_t* entry) {
-  return iree_make_string_view((const char*)tables->storage.data +
-                                   tables->string_offset + entry->name_offset,
+  return iree_make_string_view(tables->strings + entry->name_offset,
                                entry->name_length);
 }
 

@@ -6,8 +6,6 @@
 
 #include "iree/hal/driver/amd/xdna/executable_storage.h"
 
-#include <string.h>
-
 // Qualification has established the field and its binding. Instantiation checks
 // only the externally supplied address against the preserved ELF constraints.
 iree_status_t iree_hal_amd_xdna_executable_storage_validate_relocation(
@@ -32,8 +30,8 @@ iree_status_t iree_hal_amd_xdna_executable_storage_validate_relocation(
   return iree_ok_status();
 }
 
-static void iree_hal_amd_xdna_executable_write_address(uint8_t* target,
-                                                       uint64_t address) {
+static void iree_hal_amd_xdna_executable_write_shim_address(uint8_t* target,
+                                                            uint64_t address) {
   const uint32_t low = iree_unaligned_load_le_u32(target);
   const uint32_t high = iree_unaligned_load_le_u32(target + 4);
   iree_unaligned_store_le_u32(target, (low & 3u) | (uint32_t)address);
@@ -110,8 +108,6 @@ iree_status_t iree_hal_amd_xdna_executable_storage_load(
         iree_hal_amd_xdna_executable_storage_validate_relocation(
             &relocation, storage[relocation.source_ordinal].device_address));
   }
-  const iree_hal_amd_xdna_image_directory_t* directory =
-      iree_hal_amd_xdna_image_directory(image);
   for (uint32_t i = 0; i < entry.allocation_use_count; ++i) {
     if (iree_any_bit_set(storage[i].flags,
                          IREE_HAL_AMD_XDNA_EXECUTABLE_STORAGE_FLAG_SHARED)) {
@@ -119,20 +115,8 @@ iree_status_t iree_hal_amd_xdna_executable_storage_load(
     }
     const uint32_t ordinal = iree_hal_amd_xdna_image_tables_allocation_use(
         tables, entry.first_allocation_use + i);
-    const iree_xdna_elf_allocation_record_t allocation =
-        iree_hal_amd_xdna_image_tables_allocation(tables, ordinal);
-    for (uint32_t j = 0; j < allocation.load_count; ++j) {
-      const iree_hal_amd_xdna_image_program_header_t* load =
-          iree_hal_amd_xdna_image_directory_program_header(
-              directory, allocation.first_load + j);
-      uint8_t* destination = storage[i].mapping.data + load->virtual_address;
-      IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_image_directory_read_source_range(
-          directory, load->file_range,
-          iree_make_byte_span(destination,
-                              (iree_host_size_t)load->file_range.length)));
-      memset(destination + load->file_range.length, 0,
-             load->memory_size - (iree_host_size_t)load->file_range.length);
-    }
+    IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_image_load_allocation(
+        image, ordinal, storage[i].mapping.data));
   }
   for (uint32_t i = 0; i < entry.static_relocation_count; ++i) {
     const iree_xdna_elf_relocation_record_t relocation =
@@ -142,11 +126,15 @@ iree_status_t iree_hal_amd_xdna_executable_storage_load(
                          IREE_HAL_AMD_XDNA_EXECUTABLE_STORAGE_FLAG_SHARED)) {
       continue;
     }
-    iree_hal_amd_xdna_executable_write_address(
-        storage[relocation.destination_use].mapping.data +
-            relocation.byte_offset,
-        storage[relocation.source_ordinal].device_address +
-            (uint64_t)relocation.addend);
+    uint8_t* field = storage[relocation.destination_use].mapping.data +
+                     relocation.byte_offset;
+    const uint64_t address = storage[relocation.source_ordinal].device_address +
+                             (uint64_t)relocation.addend;
+    if (relocation.kind == IREE_HAL_AMD_XDNA_RELOCATION_FIRMWARE_ADDRESS_64) {
+      iree_unaligned_store_le_u64(field, address);
+    } else {
+      iree_hal_amd_xdna_executable_write_shim_address(field, address);
+    }
   }
   return iree_ok_status();
 }
@@ -163,7 +151,7 @@ void iree_hal_amd_xdna_executable_storage_patch(
     const iree_xdna_elf_relocation_record_t relocation =
         iree_hal_amd_xdna_image_tables_relocation(
             tables, entry.first_dynamic_relocation + i);
-    iree_hal_amd_xdna_executable_write_address(
+    iree_hal_amd_xdna_executable_write_shim_address(
         storage[relocation.destination_use].mapping.data +
             relocation.byte_offset,
         bindings[relocation.source_ordinal].device_address +

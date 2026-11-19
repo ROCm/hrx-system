@@ -40,6 +40,7 @@ build_tools/embed_data/testdata/crlf.bin binary -eol
 *.bc binary -eol
 *.dll binary -eol
 *.dylib binary -eol
+*.elf binary -eol
 *.gif binary -eol
 *.ico binary -eol
 *.jpg binary -eol

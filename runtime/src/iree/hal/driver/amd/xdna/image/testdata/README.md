@@ -1,5 +1,33 @@
 # XDNA execution fixtures
 
+## Standalone MLIR-AIE ELFs
+
+The hello-world files under `aie/` are complete MLIR-AIE compiler outputs. The named
+export `main:sequence` starts a worker that writes 42 and drains one 32-bit
+word into output binding zero. `full_elf_42.elf` is the default
+one-shot image. `full_elf_42_expanded.elf` uses `--expand-load-pdis` for
+repeated dispatch. Its command references two reset PDIs with identical bytes
+under distinct symbols. Their firmware addresses distinguish the two loads.
+Both files retain the ELF groups, symbols, and relocations used at load time.
+[Upstream program and host caller](https://github.com/Xilinx/mlir-aie/tree/86ca39d361d3b24bebfd2f699131fabb8fa47fc4/test/python/npu-xrt/full_elf_42)
+
+The 6,520-byte `vector_scalar_add.elf` is the NPU2 vector-add self-test used
+in AMD's FastFlow SDK, emitted as a standalone ELF with `--expand-load-pdis`.
+Its first binding contains 1,024 i32 inputs and the second receives each input
+plus one. FastFlow publishes the iota input, expected result, and digests.
+[FastFlow reference](https://github.com/ROCm/FastFlow-SDK/blob/d6c9cf2e887647eb91dfe9932c12ae4e05b6ac67/tools/fastflow/testdata/self-test/npu2-vector-scalar-add/manifest.json) · [Producer source](https://github.com/Xilinx/mlir-aie/blob/e5c705c7b04bb8470db7364287843ba96e487a6e/programming_examples/basic/vector_scalar_add/vector_scalar_add.py)
+
+The test-only Bazel targets embed the checked-in bytes. For fixture
+updates, configure `aiecc` from MLIR-AIE v1.4.5 on `PATH` with its pinned
+Peano backend (`22.0.0.2026102001+4f5df13d`) and run the following from the
+repository root. The input MLIR comes from the upstream IRON programs.
+
+```sh
+python3 runtime/src/iree/hal/driver/amd/xdna/image/testdata/aie/regenerate.py
+```
+
+## Native Loom images
+
 `mul_i32.loom` and `add_i32.loom` produce the native images used by the loader
 and execution CTS. Their exports multiply or add sixteen little-endian i32
 pairs, retaining each result's low 32 bits. Both have three buffer bindings:

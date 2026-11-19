@@ -72,7 +72,9 @@ TEST_P(XdnaImageCorpusTest,
     iree_hal_amd_xdna_aie2p_target_t target;
     IREE_ASSERT_OK(iree_hal_amd_xdna_aie2p_npu2_target_initialize(
         iree_make_cstring_view(targets[device]), 1, &target));
-    for (size_t segment_length : {1, 7, 31, 257}) {
+    std::vector<std::vector<uint8_t>> contiguous_allocations;
+    const size_t segment_lengths[] = {file->size, 1, 7, 31, 257};
+    for (size_t segment_length : segment_lengths) {
       SCOPED_TRACE(targets[device]);
       SCOPED_TRACE(segment_length);
       SegmentedSource source = {};
@@ -85,26 +87,26 @@ TEST_P(XdnaImageCorpusTest,
       iree_byte_sequence_release(&source.base);
       EXPECT_FALSE(source.destroyed);
       uint32_t ordinal = UINT32_MAX;
-      IREE_EXPECT_OK(iree_hal_amd_xdna_image_find_entry(
+      IREE_ASSERT_OK(iree_hal_amd_xdna_image_find_entry(
           image, iree_make_cstring_view(GetParam()), &ordinal));
       const auto* tables = iree_hal_amd_xdna_image_tables(image);
       const auto entry = iree_hal_amd_xdna_image_tables_entry(tables, ordinal);
       EXPECT_EQ(entry.binding_count, 3u);
-      const auto* directory = iree_hal_amd_xdna_image_directory(image);
+      std::vector<std::vector<uint8_t>> allocations(entry.allocation_use_count);
       for (uint32_t i = 0; i < entry.allocation_use_count; ++i) {
+        const uint32_t allocation_ordinal =
+            iree_hal_amd_xdna_image_tables_allocation_use(
+                tables, entry.first_allocation_use + i);
         const auto allocation = iree_hal_amd_xdna_image_tables_allocation(
-            tables, iree_hal_amd_xdna_image_tables_allocation_use(
-                        tables, entry.first_allocation_use + i));
-        for (uint32_t j = 0; j < allocation.load_count; ++j) {
-          const auto* load = iree_hal_amd_xdna_image_directory_program_header(
-              directory, allocation.first_load + j);
-          std::vector<uint8_t> bytes(load->file_range.length);
-          IREE_EXPECT_OK(iree_hal_amd_xdna_image_directory_read_source_range(
-              directory, load->file_range,
-              iree_make_byte_span(bytes.data(), bytes.size())));
-          EXPECT_TRUE(std::equal(bytes.begin(), bytes.end(),
-                                 source.bytes.data + load->file_range.offset));
-        }
+            tables, allocation_ordinal);
+        allocations[i].assign(allocation.byte_length, 0xCD);
+        IREE_ASSERT_OK(iree_hal_amd_xdna_image_load_allocation(
+            image, allocation_ordinal, allocations[i].data()));
+      }
+      if (segment_length == file->size) {
+        contiguous_allocations.swap(allocations);
+      } else {
+        EXPECT_EQ(allocations, contiguous_allocations);
       }
       iree_hal_amd_xdna_image_free(image);
       EXPECT_TRUE(source.destroyed);

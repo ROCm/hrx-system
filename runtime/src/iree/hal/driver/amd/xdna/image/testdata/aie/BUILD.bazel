@@ -1,0 +1,35 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_c_embed_data(
+    name = "full_elf_42",
+    testonly = True,
+    srcs = [
+        "full_elf_42.elf",
+        "full_elf_42_expanded.elf",
+    ],
+    c_file_output = "full_elf_42.c",
+    flatten = True,
+    h_file_output = "full_elf_42.h",
+    identifier = "iree_hal_amd_xdna_test_full_elf_42",
+)
+
+iree_c_embed_data(
+    name = "vector_scalar_add",
+    testonly = True,
+    srcs = ["vector_scalar_add.elf"],
+    c_file_output = "vector_scalar_add.c",
+    flatten = True,
+    h_file_output = "vector_scalar_add.h",
+    identifier = "iree_hal_amd_xdna_test_vector_scalar_add",
+)

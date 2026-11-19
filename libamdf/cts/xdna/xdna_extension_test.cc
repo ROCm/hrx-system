@@ -565,11 +565,27 @@ TEST_F(XdnaEndpointTest, MaterializesDeviceAndProgramIndependentContext) {
   if (info.instruction.format.format == AMDF_XDNA_BINARY_FORMAT_UNKNOWN) {
     EXPECT_EQ(info.instruction.maximum_byte_length, 0u);
     EXPECT_EQ(info.instruction.format.version, 0u);
+    EXPECT_EQ(info.instruction.features, 0u);
   } else {
     EXPECT_GT(info.instruction.maximum_byte_length, 0u);
     EXPECT_GT(info.instruction.address_alignment, 0u);
     EXPECT_GT(info.instruction.byte_length_granularity, 0u);
   }
+
+  // A client compiled with the original layout can place its next object
+  // immediately after the format. The size in the header is its write bound.
+  amdf_xdna_device_info_t prefix_info = {
+      .type = AMDF_STRUCTURE_TYPE_XDNA_DEVICE_INFO,
+      .structure_size = offsetof(amdf_xdna_device_info_t, instruction.features),
+  };
+  prefix_info.instruction.features = UINT32_MAX;
+  ASSERT_EQ(xdna_api_->device_query_info(device_, &prefix_info),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(prefix_info.instruction.features, UINT32_MAX);
+  EXPECT_EQ(prefix_info.structure_size,
+            offsetof(amdf_xdna_device_info_t, instruction.features));
+  EXPECT_EQ(prefix_info.instruction.format.format,
+            info.instruction.format.format);
 
   amdf_xdna_device_info_t second_info = {
       .type = AMDF_STRUCTURE_TYPE_XDNA_DEVICE_INFO,

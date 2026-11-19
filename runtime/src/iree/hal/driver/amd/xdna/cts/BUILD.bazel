@@ -60,6 +60,8 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/driver/amd/xdna/image/testdata:add_i32_npu4",
         "//runtime/src/iree/hal/driver/amd/xdna/image/testdata:mul_i32",
         "//runtime/src/iree/hal/driver/amd/xdna/image/testdata:mul_i32_npu4",
+        "//runtime/src/iree/hal/driver/amd/xdna/image/testdata/aie:full_elf_42",
+        "//runtime/src/iree/hal/driver/amd/xdna/image/testdata/aie:vector_scalar_add",
         "//runtime/src/iree/hal/utils:files",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/testing:gtest",

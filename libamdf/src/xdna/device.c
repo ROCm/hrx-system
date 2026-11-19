@@ -7,6 +7,7 @@
 #include "libamdf/src/xdna/device.h"
 
 #include <stddef.h>
+#include <string.h>
 
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/device.h"
@@ -135,9 +136,10 @@ amdf_xdna_device_create(amdf_endpoint_t* endpoint,
     device->info.id = result.id;
     device->info.reset_epoch = result.reset_epoch;
     device->info.placement_modes = result.placement_modes;
-    device->info.context.scheduling_modes =
-        amdf_xdna_umd_query_context_capabilities(&device->profile)
-            .scheduling_modes;
+    const amdf_xdna_umd_context_capabilities_t capabilities =
+        amdf_xdna_umd_query_context_capabilities(&device->profile);
+    device->info.context.scheduling_modes = capabilities.scheduling_modes;
+    device->info.instruction.features = capabilities.instruction_features;
     *out_device = &device->base;
   } else {
     if (device->base.endpoint != NULL) {
@@ -155,9 +157,10 @@ amdf_status_t AMDF_CALL amdf_xdna_device_query_info(
                ? amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT)
                : amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
+  const uint32_t original_size =
+      (uint32_t)offsetof(amdf_xdna_device_info_t, instruction.features);
   const amdf_status_t status = amdf_structure_validate_output(
-      out_info, AMDF_STRUCTURE_TYPE_XDNA_DEVICE_INFO,
-      (uint32_t)sizeof(amdf_xdna_device_info_t));
+      out_info, AMDF_STRUCTURE_TYPE_XDNA_DEVICE_INFO, original_size);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -165,7 +168,9 @@ amdf_status_t AMDF_CALL amdf_xdna_device_query_info(
   const amdf_xdna_device_t* xdna_device = (const amdf_xdna_device_t*)device;
   const uint32_t structure_size = out_info->structure_size;
   void* const next = out_info->next;
-  *out_info = xdna_device->info;
+  const size_t copy_size =
+      structure_size >= sizeof(*out_info) ? sizeof(*out_info) : original_size;
+  memcpy(out_info, &xdna_device->info, copy_size);
   out_info->structure_size = structure_size;
   out_info->next = next;
   return AMDF_STATUS_OK;
