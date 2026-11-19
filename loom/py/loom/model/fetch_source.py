@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote, urljoin, urlsplit
 
-from .lock import FileIdentity, ModelLock
+from .lock import FileIdentity, ModelLock, require_supported_revision
 from .manifest import ManifestError, _url, operation_fields, project_fields
 
 
@@ -225,13 +225,7 @@ class SourceResolver:
         overridden: bool,
         destination: str,
     ) -> str:
-        if locked:
-            unknown = operation_fields(locked).keys() - {"revision"}
-            if unknown:
-                raise ManifestError(
-                    f"{destination}: unsupported Hugging Face resolution options: "
-                    + ", ".join(sorted(unknown))
-                )
+        require_supported_revision(locked, destination)
         authored = requested.get("revision", "main")
         if re.fullmatch(r"[0-9a-f]{40}", authored):
             if locked is not None and locked["revision"] != authored:
@@ -315,20 +309,11 @@ class SourceResolver:
             overridden = name in self.overrides
             if name not in self.origins:
                 _require_origin_support(requested, destination, root=True)
-                locked = self.lock.origins.get(name) if self.lock else None
-                if locked and operation_fields(locked["requested"]) != operation_fields(
-                    requested
-                ):
-                    locked = None
-                record = {
-                    **project_fields(locked or {}),
-                    "requested": project_fields(locked["requested"] if locked else {})
-                    | copy.deepcopy(requested),
-                }
+                record = {"requested": copy.deepcopy(requested)}
+                locked = self.lock.matching_root(name, requested) if self.lock else None
                 if requested["kind"] == "hf" and (not overridden or self.pin_revisions):
                     resolution = locked.get("resolved") if locked else None
                     record["resolved"] = {
-                        **project_fields(resolution or {}),
                         "revision": self._revision(
                             operation_fields(requested),
                             resolution,
@@ -336,7 +321,9 @@ class SourceResolver:
                             destination=destination,
                         ),
                     }
-                self.origins[name] = record
+                self.origins[name] = (
+                    self.lock.project_root(name, record) if locked else record
+                )
             effective = copy.deepcopy(self.overrides.get(name, requested))
             if effective["kind"] == "hf":
                 effective["revision"] = self.origins[name]["resolved"]["revision"]

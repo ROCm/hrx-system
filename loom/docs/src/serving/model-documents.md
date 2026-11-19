@@ -263,6 +263,10 @@ if the user selects it. A new document major version requires a reader that
 understands it. Within a supported version, misspelled structural fields
 still produce an error.
 
+SDKs released before this convention can reject a whole card when they see
+an unfamiliar field or transform. Publishers supporting those clients can
+keep their original card available alongside the extended publication.
+
 The same rule lets a publication reference a new download transport with a
 typed `origin`. A fetcher can list its models or install a preset that uses
 ordinary files. Selecting a file that needs the new transport reports the

@@ -13,6 +13,8 @@ import lzma
 import os
 import threading
 from contextlib import ExitStack, contextmanager
+from functools import partial
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -346,6 +348,10 @@ def test_future_transports_do_not_prevent_installing_another_program(tmp_path, c
         "requested": card["origins"]["store"],
         "resolved": {"generation": [1, 7]},
     }
+    repository = {"kind": "hf", "repository": "org/repo", "revision": "a" * 40}
+    opaque_pin = {"revision": "a" * 40, "tree_ordinal": 17}
+    card["origins"]["repository"] = repository
+    lock["origins"]["repository"] = {"requested": repository, "resolved": opaque_pin}
     origins = [
         (
             "direct",
@@ -366,10 +372,11 @@ def test_future_transports_do_not_prevent_installing_another_program(tmp_path, c
         ),
         (
             "resolution",
-            {"kind": "hf", "repository": "org/repo", "path": "file"},
-            {"revision": "a" * 40, "tree_ordinal": 17},
+            repository | {"path": "file"},
+            opaque_pin,
             "tree_ordinal",
         ),
+        ("root-resolution", "@repository/file", None, "tree_ordinal"),
     ]
     for name, origin, resolved, _ in origins:
         path = name + ".loom"
@@ -404,6 +411,28 @@ def test_future_transports_do_not_prevent_installing_another_program(tmp_path, c
             == 1
         )
         assert "example.store" in capsys.readouterr().err
+        author_lock = tmp_path / "author.lock"
+        author_lock.write_bytes(resources["/model.json.lock"])
+        for program in ("resolution", "root-resolution"):
+            assert (
+                main(
+                    [
+                        *args,
+                        "--programs",
+                        program,
+                        "--preset=check",
+                        "--update-lock",
+                        "--lock-scope=all",
+                        "--lockfile",
+                        str(author_lock),
+                        "--dry-run",
+                    ]
+                )
+                == 1
+            )
+            error = capsys.readouterr().err
+            assert "tree_ordinal" in error, error
+        assert author_lock.read_bytes() == resources["/model.json.lock"]
         assert set(requests) <= {"/model.json", "/model.json.lock"}
         assert (
             main([*args, "--preset=check", "--output", str(tmp_path / "working")]) == 0
@@ -717,6 +746,87 @@ def test_publication_lock_unions_sources_without_merging_destinations(tmp_path):
         assert "/alternate.data" not in requests
         assert (tmp_path / "installed/weights.data").read_bytes() == b"weights"
         assert not (tmp_path / "installed/renamed.loom").exists()
+
+
+@pytest.mark.parametrize("all_variants", [False, True])
+def test_author_update_leaves_a_newer_lock_intact_if_it_arrives_after_planning(
+    tmp_path, all_variants
+):
+    card = ModelCard(_card())
+    files = {"code.loom": b"code", "weights.data": b"one", "large.data": b"two"}
+    with _server(card.document, files) as (base, requests, _):
+        cache = ContentCache(tmp_path / "cache")
+        document = cache.read_document(base + "/model.json", offline=False)
+        path = tmp_path / "published.lock"
+        options = {"lock_location": str(path), "lock_scope": "all"}
+        if all_variants:
+            plan = plan_lock(document, card, cache, **options)
+            publish = partial(update_lock, plan, cache)
+        else:
+            plan = plan_fetch(
+                document, card.select(), cache, update_lock=True, **options
+            )
+            publish = partial(install, plan, cache, tmp_path / "installed")
+        newer = '{"schema_version":23,"future":{"entries":[]}}'
+        path.write_text(newer)
+        with pytest.raises(ManifestError, match="unsupported lock version"):
+            publish()
+        assert path.read_text() == newer
+        assert not (tmp_path / "installed/model.json").exists()
+        assert requests == ["/model.json"]
+
+
+def test_refresh_carries_file_and_root_annotations_to_relocated_installed_lock(
+    tmp_path,
+):
+    doc = _card()
+    doc["origins"] = {"assets": {"kind": "local", "path": "."}}
+    files = doc["variants"]["v"]["services"]["text"]["parameters"]["scope"]
+    files["origin"] = "@assets/"
+    origin = {"kind": "local", "path": "code.loom"}
+    doc["programs"]["p"]["inputs"] = [{"path": "code.loom", "origin": origin}]
+    card = ModelCard(doc)
+    document = Document(str(tmp_path / "model.json"), json.dumps(doc))
+    old_digest = hashlib.sha256(b"old").hexdigest()
+    old = ModelLock.snapshot(
+        {
+            "assets": {
+                "requested": doc["origins"]["assets"] | {"x-store": "local"},
+                "x-owner": "alice",
+            }
+        },
+        [
+            FileIdentity(
+                origin | {"x-input": "authored"},
+                3,
+                old_digest,
+                extensions={"x-source": "test"},
+            ),
+            FileIdentity("@assets/weights.data", 3, old_digest),
+        ],
+    )
+    author_lock = tmp_path / "model.json.lock"
+    author_lock.write_text(json.dumps(old))
+    for name in ("code.loom", "weights.data"):
+        (tmp_path / name).write_bytes(b"new")
+    cache = ContentCache(tmp_path / "cache")
+    output = tmp_path / "model"
+    plan = plan_fetch(
+        document, card.select(), cache, update_lock=True, lock_scope="all"
+    )
+    install(plan, cache, output)
+    for path in (author_lock, output / "model.json.lock"):
+        lock = ModelLock.parse(path.read_text())
+        assert lock.origins["assets"]["x-owner"] == "alice"
+        assert lock.origins["assets"]["requested"]["x-store"] == "local"
+        code = next(
+            file for file in lock.files.values() if isinstance(file.origin, dict)
+        )
+        assert code.origin["x-input"] == "authored"
+        assert code.extensions["x-source"] == "test"
+        assert code.sha256 == hashlib.sha256(b"new").hexdigest()
+        assert Path(code.origin["path"]).is_absolute() == (path != author_lock)
+    install(plan_fetch(document, card.select(), cache), cache, output)
 
 
 def test_publication_lock_failure_preserves_the_previous_snapshot(tmp_path):

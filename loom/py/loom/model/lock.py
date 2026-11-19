@@ -99,6 +99,24 @@ def _check_resolution(record: dict, origin: str | dict, path: str) -> None:
         _mapping(record["resolved"], path + ".resolved", empty=True)
 
 
+def require_supported_revision(resolution: dict | None, destination: str) -> None:
+    if resolution:
+        unknown = operation_fields(resolution).keys() - {"revision"}
+        if unknown:
+            raise ManifestError(
+                f"{destination}: unsupported Hugging Face resolution options: "
+                + ", ".join(sorted(unknown))
+            )
+
+
+def _annotated_record(record: dict, prior: dict, descriptors: tuple[str, ...]) -> dict:
+    result = copy.deepcopy(project_fields(prior)) | record
+    for name in descriptors:
+        if isinstance(record.get(name), dict) and isinstance(prior.get(name), dict):
+            result[name] = copy.deepcopy(project_fields(prior[name])) | record[name]
+    return result
+
+
 @dataclass(frozen=True)
 class FileIdentity:
     # Logical authored origin, independent of destination and effective mirror.
@@ -217,6 +235,22 @@ class ModelLock:
         except FileNotFoundError:
             return None
 
+    def matching_root(self, name: str, requested: dict) -> dict | None:
+        record = self.origins.get(name)
+        if record and operation_fields(record["requested"]) == operation_fields(
+            requested
+        ):
+            return record
+        return None
+
+    def project_root(self, name: str, record: dict) -> dict:
+        prior = self.matching_root(name, record["requested"])
+        return (
+            _annotated_record(record, prior, ("requested", "resolved"))
+            if prior
+            else record
+        )
+
     def cover(
         self, selection: Selection, *, assets_only: bool = False
     ) -> dict[str, FileIdentity]:
@@ -230,9 +264,7 @@ class ModelLock:
         ).items():
             if isinstance(file.origin, str) and file.origin.startswith("@"):
                 alias = file.origin[1:].split("/", 1)[0]
-                if alias not in self.origins or operation_fields(
-                    self.origins[alias]["requested"]
-                ) != operation_fields(roots[alias]):
+                if not self.matching_root(alias, roots[alias]):
                     raise ManifestError(
                         f"lock does not match origin {alias!r}; "
                         "use --update-lock or --no-lock"
@@ -252,6 +284,7 @@ class ModelLock:
         *,
         scope: str = "all",
         previous: ModelLock | None = None,
+        relocated: dict[str, str | dict] | None = None,
     ) -> dict:
         """Writes exactly this verified set, with no historical accumulation."""
         if scope not in ("assets", "all"):
@@ -260,54 +293,45 @@ class ModelLock:
         used_origins = set()
         for identity in identities:
             key = file_key(identity.origin, identity.transform)
-            other = files.get(key)
-            if other and (
-                other.size != identity.size
-                or other.sha256 != identity.sha256
-                or operation_fields(other.resolved)
-                != operation_fields(identity.resolved)
-            ):
-                raise ManifestError(
-                    "selected sources have conflicting content identities"
-                )
-            files[key] = identity
-            if isinstance(identity.origin, str) and identity.origin.startswith("@"):
-                used_origins.add(identity.origin[1:].split("/", 1)[0])
-
-        def annotated(record, prior, descriptors):
-            result = copy.deepcopy(project_fields(prior)) | record
-            for name in descriptors:
-                if isinstance(record.get(name), dict) and isinstance(
-                    prior.get(name), dict
-                ):
-                    result[name] = (
-                        copy.deepcopy(project_fields(prior[name])) | record[name]
-                    )
-            return result
-
-        named_roots = {}
-        for name in sorted(used_origins):
-            record = copy.deepcopy(origins[name])
-            prior = previous.origins.get(name) if previous else None
-            if prior and operation_fields(prior["requested"]) == operation_fields(
-                record["requested"]
-            ):
-                record = annotated(record, prior, ("requested", "resolved"))
-            named_roots[name] = record
-        records = []
-        for key, identity in sorted(files.items()):
             record = identity.document()
             if previous and key in previous.files:
-                record = annotated(
+                record = _annotated_record(
                     record,
                     previous.files[key].document(),
                     ("origin", "transform", "resolved"),
                 )
-            records.append(record)
+            # An installation rewrites source coordinates. Match the publisher's
+            # annotations before relocation, and deduplicate the installed coordinates.
+            if relocated is not None:
+                origin = copy.deepcopy(relocated[key])
+                if isinstance(origin, dict) and isinstance(record["origin"], dict):
+                    origin.update(project_fields(record["origin"]))
+                record["origin"] = origin
+                key = file_key(origin, identity.transform)
+            other = files.get(key)
+            if other and (
+                other["size"] != record["size"]
+                or other["sha256"] != record["sha256"]
+                or operation_fields(other.get("resolved"))
+                != operation_fields(record.get("resolved"))
+            ):
+                raise ManifestError(
+                    "selected sources have conflicting content identities"
+                )
+            files[key] = record
+            origin = record["origin"]
+            if isinstance(origin, str) and origin.startswith("@"):
+                used_origins.add(origin[1:].split("/", 1)[0])
+        named_roots = {}
+        for name in sorted(used_origins):
+            record = copy.deepcopy(origins[name])
+            named_roots[name] = (
+                previous.project_root(name, record) if previous else record
+            )
         return {
             **copy.deepcopy(previous.extensions if previous else {}),
             "schema_version": 2,
             "scope": scope,
             "origins": named_roots,
-            "files": records,
+            "files": [files[key] for key in sorted(files)],
         }

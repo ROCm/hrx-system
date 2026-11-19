@@ -46,6 +46,11 @@ roots with a caller-supplied mirror. Known repository revisions remain pinned
 to immutable commits. A local or HTTP origin cannot claim a repository
 revision. Source locator strings keep their existing syntax.
 
+A lock update reads the current publication under its directory lock before
+transferring payloads. An unsupported lock version or an unfamiliar resolution
+option on a retained repository pin leaves the publication intact. An explicit
+new `--lockfile` can be used to generate a separate lock from the current card.
+
 Provider-set names have no encoding semantics. A set named `source` may include
 bytecode libraries. `inputs` and `libraries` are arrays of path strings or
 objects with `path`, optional `format`, importer `options`, and auxiliary `data`.
