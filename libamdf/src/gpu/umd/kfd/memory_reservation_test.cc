@@ -491,7 +491,7 @@ TEST_P(KfdReservationFragmentTest, PreservesExactRangesAndOnePublication) {
   const uint64_t fragment = GetParam();
   const uint64_t page = device_.page_size;
   device_.topology.virtual_address.fragment_size = fragment;
-  ASSERT_NO_FATAL_FAILURE(Create(4 * fragment, fragment));
+  ASSERT_NO_FATAL_FAILURE(Create(4 * fragment, 2 * fragment));
   ASSERT_NO_FATAL_FAILURE(CreateSource(4 * fragment));
   ASSERT_NO_FATAL_FAILURE(CreateSource(4 * fragment));
   struct Range {
@@ -504,14 +504,17 @@ TEST_P(KfdReservationFragmentTest, PreservesExactRangesAndOnePublication) {
   };
   const Range ranges[] = {
       {0, fragment, 0},
-      {0, 2 * fragment - page, 0},
-      {0, 2 * fragment, fragment},
-      {0, 2 * fragment + page, fragment},
-      {0, 3 * fragment, fragment},
+      {0, 2 * fragment, 0},
+      {0, 3 * fragment + page, 0},
+      {fragment, 2 * fragment - page, 0},
+      {fragment, 2 * fragment, fragment},
+      {fragment, 2 * fragment + page, fragment},
+      {fragment, 3 * fragment, fragment},
       {page, fragment - page, 0},
       {page, fragment, 0},
       {page, 2 * fragment - page, fragment - page},
       {page, 2 * fragment + page, fragment - page},
+      {fragment + page, 2 * fragment - page, fragment - page},
   };
   for (const auto& range : ranges) {
     SCOPED_TRACE(range.length);

@@ -519,11 +519,12 @@ amdf_status_t amdf_gpu_umd_memory_reservation_update(
           target->device->topology.virtual_address.fragment_size;
       const uint64_t prefix =
           fragment_size - (update.va_address & (fragment_size - 1));
-      if (entry->memory != NULL && update.map_size >= prefix + fragment_size) {
-        // Start the next full fragment with a fresh page-table walk. Even an
-        // aligned head can require leaf entries. Walking from those leaves
-        // into a large parent entry can allocate and immediately retire an
-        // unused child table, triggering a TLB invalidation.
+      // Restarting the walk after a leading leaf can avoid an unused child
+      // table and its TLB invalidation. Keep a naturally aligned pair whole
+      // so the GPU can cache both fragments in a single translation.
+      if (entry->memory != NULL &&
+          (update.va_address & (2 * fragment_size - 1)) != 0 &&
+          update.map_size >= prefix + fragment_size) {
         update.map_size = prefix;
         status = amdf_gpu_kfd_reservation_ioctl(target, DRM_IOCTL_AMDGPU_GEM_VA,
                                                 &update);
