@@ -177,11 +177,17 @@ the built card with `--update-lock`, then serve the installed `model.json`
 directly. Public releases supply the corresponding lock. Compiler source inputs
 are not needed to run a normalized package.
 
-The optional `lockfile` attribute declares the authored acquisition lock as a
-test dependency. The original card and lock are carried in runfiles, alongside
-the built package, so edits to either invalidate dependent tests. The lock does
-not enter the linker action or the `model_files` publication output group: a
-normalized publication needs a lock describing its own output bytes.
+To stage a directory for distribution, build the `loom_model` target with
+`--output_groups=model_release`. The resulting `<target>.release/` contains
+the selected card, one `.xz` download per bytecode provider, the other program
+files, and a lock generated from the installed bytes. The rule takes the
+identities of external runtime assets from the authored `lockfile`. Those
+assets stay at their pinned origins. See [Compressed program downloads](#compressed-program-downloads).
+
+The original card and optional `lockfile` are also carried in test runfiles,
+alongside the built package, so edits to either invalidate dependent tests.
+The linker action and the `model_files` output group use the built providers
+independently of the acquisition lock.
 
 Model regression tests use current built providers and independently provisioned
 parameters and tokenizers. The test-only

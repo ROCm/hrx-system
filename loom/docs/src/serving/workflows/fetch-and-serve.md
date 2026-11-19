@@ -109,6 +109,12 @@ does not select a file format.
 loom-fetch "$model_url/model.json" --preset=streaming --output=./moonshine
 ```
 
+Some model cards publish compiled programs as `.loombc.xz`. The same fetch
+command unpacks them with Python's standard library. For publications with a
+complete lock, it verifies the size and SHA-256 of the installed bytecode.
+Serving reads that bytecode directly. Once the selected files are cached,
+`loom-fetch --offline` can install them again. [Publishing compressed bytecode](../sharing/hugging-face.md#publish-bytecode-as-xz)
+
 Fetch reports its current phase, file counts, and available byte counts on
 stderr. Known byte totals include a compact bar, percentage, and estimated time
 remaining once progress establishes a rate. These updates also appear in

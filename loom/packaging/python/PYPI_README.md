@@ -48,6 +48,8 @@ loom-fetch
 The release's compatible model catalog supplies the list and terminal picker.
 A development SDK without an associated catalog requires `--catalog` or a model
 card path or URL. Cards describe the exact files, variants, and runnable presets.
+When a card publishes programs as `.loombc.xz`, `loom-fetch` unpacks and
+verifies them during installation using Python's standard library.
 For example, install the library's Moonshine Streaming Tiny model on an AMD GPU:
 
 ```sh
