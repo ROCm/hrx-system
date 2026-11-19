@@ -349,8 +349,9 @@ iree_status_t loom_aie2p_native_route_input(
                   plan->transfer->request.source.end_byte_offset.facts.range_hi
             : (uint64_t)plan->source_byte_stride * (plan->period - 1) +
                   plan->transfer->request.source.static_byte_length;
-    const loom_value_t* root = loom_module_value(
-        context->code.module, plan->transfer->request.source.root_value_id);
+    const loom_value_t* root =
+        loom_module_value(context->code.module,
+                          plan->transfer->request.source.byte_origin_value_id);
     const loom_block_t* entry =
         loom_region_entry_block(loom_func_like_body(realization->function));
     if (!loom_value_is_block_arg(root) || loom_value_def_block(root) != entry) {

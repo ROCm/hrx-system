@@ -72,9 +72,8 @@ static bool loom_spirv_workgroup_view_reference(
           loom_value_fact_table_lookup(fact_table, value_id), out_reference)) {
     return false;
   }
-  out_reference->root_value_id =
-      loom_value_fact_view_reference_resolve_root_value(*out_reference,
-                                                        value_id);
+  out_reference->byte_origin_value_id = loom_value_fact_reference_resolve(
+      out_reference->byte_origin_value_id, value_id);
   return out_reference->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP;
 }
 
@@ -100,7 +99,7 @@ static iree_status_t loom_spirv_workgroup_view_plan_from_facts(
         IREE_STATUS_INTERNAL,
         "selected SPIR-V Workgroup view has no Workgroup reference");
   }
-  out_plan->root_value_id = reference.root_value_id;
+  out_plan->root_value_id = reference.byte_origin_value_id;
   loom_type_t array_pointer_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_low_lower_make_register_type(
       context, array_pointer_reg_class_id, 1, &array_pointer_type));
@@ -213,10 +212,8 @@ static iree_status_t loom_spirv_select_workgroup_compare(
       continue;
     }
     has_workgroup = true;
-    // Exact origin identity is stronger than sharing an allocation. It cannot
-    // substitute an unrelated byte origin introduced by same_root assertions.
-    const loom_value_id_t root =
-        loom_value_fact_table_query_identity(facts, values[i]);
+    const loom_value_id_t root = loom_value_fact_reference_resolve(
+        reference.byte_origin_value_id, values[i]);
     const loom_value_t* value = loom_module_value(module, root);
     if (loom_value_is_block_arg(value) ||
         !loom_buffer_alloca_isa(loom_value_def_op(value))) {

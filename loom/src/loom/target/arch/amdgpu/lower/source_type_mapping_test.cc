@@ -606,8 +606,9 @@ TEST_P(AmdgpuBufferMappingTest, VaryingBufferRetainsMemorySpaceContract) {
   loom_value_fact_buffer_reference_t reference = {
       .maximum_byte_extent = loom_value_facts_unknown(),
       .minimum_alignment = 1,
-      .memory_space = GetParam().memory_space,
+      .memory_space = static_cast<uint8_t>(GetParam().memory_space),
       .root_value_id = value_,
+      .byte_origin_value_id = value_,
       .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
   };
   if (GetParam().entry_origin) {

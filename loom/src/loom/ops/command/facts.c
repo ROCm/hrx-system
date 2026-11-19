@@ -31,15 +31,18 @@ iree_status_t loom_command_parameter_base_facts(
       .minimum_alignment = 1,
       .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN,
       .root_value_id = loom_command_parameter_base_result(op),
+      .byte_origin_value_id = loom_command_parameter_base_result(op),
       .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
       .nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN,
   };
   loom_value_fact_view_reference_t view = {0};
   if (loom_value_facts_query_view_reference(context, operand_facts[0], &view)) {
-    buffer.minimum_alignment = view.root_minimum_alignment;
+    buffer.minimum_alignment = loom_value_fact_view_root_alignment(&view);
     buffer.memory_space = view.memory_space;
     buffer.root_value_id = loom_value_fact_view_reference_resolve_root_value(
         view, loom_command_parameter_base_source(op));
+    buffer.byte_origin_value_id = loom_value_fact_reference_resolve(
+        view.byte_origin_value_id, loom_command_parameter_base_source(op));
     buffer.alias_scope_id = view.alias_scope_id;
     buffer.restrict_access = view.restrict_access;
     buffer.nullability = view.nullability;

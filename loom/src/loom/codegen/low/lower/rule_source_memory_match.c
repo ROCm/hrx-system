@@ -171,10 +171,10 @@ static bool loom_low_lower_rule_source_memory_root_matches(
       return true;
     case LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_BLOCK_ARGUMENT:
       return loom_low_source_memory_value_is_block_argument(
-          module, access->root_value_id);
+          module, access->byte_origin_value_id);
     case LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_ALLOCA: {
       const loom_value_t* root =
-          loom_module_value(module, access->root_value_id);
+          loom_module_value(module, access->byte_origin_value_id);
       return !loom_value_is_block_arg(root) &&
              loom_op_vtable_result_is_frame_owned(
                  loom_op_vtable(module, loom_value_def_op(root)),
@@ -495,7 +495,7 @@ loom_low_lower_rule_source_memory_rejection_reason(
   if (access->operation_kind != source_memory->operation_kind) {
     return LOOM_LOW_SOURCE_MEMORY_REJECTION_REASON_OPERATION_KIND;
   }
-  if (access->root_value_id == LOOM_VALUE_ID_INVALID) {
+  if (access->byte_origin_value_id == LOOM_VALUE_ID_INVALID) {
     return LOOM_LOW_SOURCE_MEMORY_REJECTION_REASON_ROOT_VALUE;
   }
   if (!loom_low_lower_rule_source_memory_root_matches(match_context->module,

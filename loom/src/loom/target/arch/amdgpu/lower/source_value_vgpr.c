@@ -95,7 +95,8 @@ static bool loom_amdgpu_source_memory_access_prefers_vgpr(
       loom_amdgpu_source_memory_terms_prefer_vgpr(
           module, fact_table, view_regions, analysis, &plan) ||
       loom_amdgpu_analyzed_source_value_prefers_vgpr(
-          module, fact_table, view_regions, analysis, plan.root_value_id)) {
+          module, fact_table, view_regions, analysis,
+          plan.byte_origin_value_id)) {
     return true;
   }
   return false;

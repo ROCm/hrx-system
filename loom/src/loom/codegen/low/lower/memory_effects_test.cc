@@ -41,6 +41,7 @@ TEST_F(LowLowerMemoryEffectsTest, RetainedOriginSurvivesAnalysisRetirement) {
 
   loom_low_source_memory_access_plan_t source = {
       .root_value_id = 7,
+      .byte_origin_value_id = 9,
       .root_uniform_scope = LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP,
       .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
       .element_byte_count = 4,
@@ -73,6 +74,7 @@ TEST_F(LowLowerMemoryEffectsTest, RetainedOriginSurvivesAnalysisRetirement) {
   ASSERT_EQ(left.origin.term_count, 1);
   EXPECT_EQ(left.origin.terms[0].value_id, uniform);
   EXPECT_EQ(left.origin.terms[0].coefficient, 16);
+  EXPECT_EQ(left.storage_id, source.byte_origin_value_id);
   EXPECT_EQ(left.lower, 32);
   EXPECT_EQ(left.upper, 56);
 
@@ -99,6 +101,7 @@ TEST_F(LowLowerMemoryEffectsTest, RetainedOriginSurvivesAnalysisRetirement) {
 TEST_F(LowLowerMemoryEffectsTest, StaticGeometryNeedsNoDynamicProof) {
   loom_low_source_memory_access_plan_t source = {
       .root_value_id = 7,
+      .byte_origin_value_id = 7,
       .root_uniform_scope = LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP,
       .element_byte_count = 4,
       .vector_lane_count = 2,
@@ -134,11 +137,13 @@ TEST_F(LowLowerMemoryEffectsTest, CarrierCoordinatesAreNotStorageIntervals) {
   const loom_view_region_t region = {
       .base_view_value_id = 8,
       .root_value_id = 7,
+      .byte_origin_value_id = 7,
   };
   const loom_low_source_memory_access_plan_t source = {
       .base_view_value_id = region.base_view_value_id,
       .materialized_base_region = &region,
       .root_value_id = region.root_value_id,
+      .byte_origin_value_id = region.byte_origin_value_id,
       .root_uniform_scope = LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP,
       .element_byte_count = 4,
       .vector_lane_count = 2,

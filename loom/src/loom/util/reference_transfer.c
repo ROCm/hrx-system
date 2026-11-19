@@ -6,7 +6,6 @@
 
 #include "loom/util/reference_transfer.h"
 
-#include "iree/base/internal/math.h"
 #include "loom/ir/module.h"
 
 loom_value_fact_reference_origin_t loom_value_facts_reference_origin(
@@ -52,7 +51,7 @@ iree_status_t loom_value_facts_rebase_reference(
   loom_value_fact_buffer_reference_t buffer;
   if (loom_value_facts_query_buffer_reference(context, *inout_facts, &buffer)) {
     buffer.root_value_id = receiving_value;
-    buffer.root_is_byte_origin = true;
+    buffer.byte_origin_value_id = receiving_value;
     buffer.alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
     buffer.restrict_access = (loom_value_fact_restrict_access_t){0};
     buffer.origin = receiving_origin;
@@ -63,15 +62,8 @@ iree_status_t loom_value_facts_rebase_reference(
     if (!loom_value_facts_query_view_reference(context, *inout_facts, &view)) {
       return iree_ok_status();
     }
-    if (!loom_value_facts_is_exact(view.base_byte_offset) ||
-        view.base_byte_offset.range_lo != 0) {
-      view.root_minimum_alignment = iree_math_gcd_u64(
-          view.root_minimum_alignment, view.minimum_alignment);
-    }
-    view.base_byte_offset = loom_value_facts_exact_i64(0);
-    view.minimum_alignment = 1;
+    loom_value_fact_view_rebase_byte_origin(&view, receiving_value);
     view.root_value_id = receiving_value;
-    view.buffer_value_id = LOOM_VALUE_ID_INVALID;
     view.alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
     view.restrict_access = (loom_value_fact_restrict_access_t){0};
     view.origin = receiving_origin;

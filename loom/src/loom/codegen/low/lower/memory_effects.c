@@ -24,7 +24,7 @@ iree_status_t loom_low_lower_memory_origin_plan(
   *out_origin = NULL;
   if (source_plan->materialized_base_region != NULL ||
       source_plan->dynamic_term_count == 0 ||
-      source_plan->root_value_id == LOOM_VALUE_ID_INVALID ||
+      source_plan->byte_origin_value_id == LOOM_VALUE_ID_INVALID ||
       source_plan->root_uniform_scope <
           LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP ||
       source_plan->vector_offset_kind ==
@@ -72,7 +72,7 @@ bool loom_low_lower_memory_packet_interval(
   *out_interval = (loom_low_memory_relative_interval_t){0};
   *out_lane_byte_count = 0;
   if (source_plan->materialized_base_region != NULL ||
-      source_plan->root_value_id == LOOM_VALUE_ID_INVALID ||
+      source_plan->byte_origin_value_id == LOOM_VALUE_ID_INVALID ||
       source_plan->root_uniform_scope <
           LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP ||
       source_plan->vector_offset_kind ==
@@ -104,7 +104,7 @@ bool loom_low_lower_memory_packet_interval(
     return false;
   }
   loom_low_memory_relative_interval_t relative = {
-      .storage_id = source_plan->root_value_id,
+      .storage_id = source_plan->byte_origin_value_id,
       .disjoint_storage_ordinal =
           source_plan->alias_scope_id != LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE
               ? source_plan->alias_scope_id + 1u

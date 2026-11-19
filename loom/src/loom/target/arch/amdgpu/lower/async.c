@@ -317,7 +317,7 @@ static bool loom_amdgpu_async_gather_select_dest(
   uint64_t lds_root_byte_offset = 0;
   if (!loom_amdgpu_source_alloca_layout_lookup_byte_offset(
           alloca_layout, LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
-          selection->dest.root_value_id, &lds_root_byte_offset)) {
+          selection->dest.byte_origin_value_id, &lds_root_byte_offset)) {
     diagnostic->rejection_bits |=
         LOOM_AMDGPU_ASYNC_GATHER_REJECTION_DEST_SLOT_BASE;
     return false;
@@ -825,12 +825,13 @@ static iree_status_t loom_amdgpu_plan_tensor_memory_effect(
     loom_low_lower_context_t* context, const loom_view_region_t* region,
     const loom_low_memory_relative_interval_t** out_interval) {
   *out_interval = NULL;
-  if (region == NULL || region->root_value_id == LOOM_VALUE_ID_INVALID) {
+  if (region == NULL || region->byte_origin_value_id == LOOM_VALUE_ID_INVALID) {
     return iree_ok_status();
   }
   const loom_value_facts_t root_facts = loom_value_fact_table_lookup(
-      loom_low_lower_context_fact_table(context), region->root_value_id);
+      loom_low_lower_context_fact_table(context), region->byte_origin_value_id);
   const bool workgroup_allocation =
+      region->root_value_id == region->byte_origin_value_id &&
       region->origin.kind == LOOM_VALUE_FACT_REFERENCE_ORIGIN_ALLOCATION &&
       region->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP;
   if (!workgroup_allocation &&
@@ -839,7 +840,7 @@ static iree_status_t loom_amdgpu_plan_tensor_memory_effect(
   }
   loom_low_memory_relative_interval_t relative = {
       .scope = loom_low_lower_context_source_function(context).op,
-      .storage_id = region->root_value_id,
+      .storage_id = region->byte_origin_value_id,
       .disjoint_storage_ordinal =
           region->alias_scope_id != LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE
               ? region->alias_scope_id + 1u
@@ -1198,7 +1199,7 @@ iree_status_t loom_amdgpu_lower_kernel_async_gather(
                                     LOOM_VALUE_ID_INVALID, &low_vaddr));
 
   loom_value_id_t low_resource =
-      loom_low_lower_lookup_value(context, plan->source.root_value_id);
+      loom_low_lower_lookup_value(context, plan->source.byte_origin_value_id);
   loom_value_id_t low_saddr = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_memory_saddr(
       context, source_op, &access, &sequence, low_resource, &low_saddr));
@@ -1266,7 +1267,7 @@ iree_status_t loom_amdgpu_lower_kernel_async_cluster_gather(
       LOOM_VALUE_ID_INVALID, &low_source_addr));
 
   loom_value_id_t low_resource = loom_low_lower_lookup_value(
-      context, plan->source_address.source->root_value_id);
+      context, plan->source_address.source->byte_origin_value_id);
   loom_value_id_t low_saddr = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_memory_saddr(
       context, source_op, &plan->source_address, &source_sequence, low_resource,

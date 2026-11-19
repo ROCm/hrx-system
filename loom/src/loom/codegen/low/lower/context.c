@@ -329,8 +329,8 @@ uint16_t loom_low_lower_source_memory_root_argument_index(
     const loom_low_lower_context_t* context,
     const loom_low_source_memory_access_plan_t* source_plan) {
   if (context == NULL || source_plan == NULL ||
-      source_plan->root_value_id == LOOM_VALUE_ID_INVALID ||
-      source_plan->root_value_id >= context->module->values.count ||
+      source_plan->byte_origin_value_id == LOOM_VALUE_ID_INVALID ||
+      source_plan->byte_origin_value_id >= context->module->values.count ||
       !loom_func_like_isa(context->source_function)) {
     return UINT16_MAX;
   }
@@ -339,7 +339,7 @@ uint16_t loom_low_lower_source_memory_root_argument_index(
     return UINT16_MAX;
   }
   const loom_value_t* root_value =
-      loom_module_value(context->module, source_plan->root_value_id);
+      loom_module_value(context->module, source_plan->byte_origin_value_id);
   if (!loom_value_is_block_arg(root_value) ||
       loom_value_def_block(root_value) != loom_region_const_entry_block(body)) {
     return UINT16_MAX;

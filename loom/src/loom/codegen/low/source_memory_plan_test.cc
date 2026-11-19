@@ -231,8 +231,9 @@ TEST_F(SourceMemoryPlanTest, MaterializedCarrierKeepsStorageProvenance) {
       .base_byte_offset = loom_value_facts_make(0, 8192, 64),
       .footprint_byte_length = loom_value_facts_exact_i64(128),
       .minimum_alignment = 64,
-      .root_minimum_alignment = 64,
+      .root_minimum_alignment_log2 = 6,
       .root_value_id = root,
+      .byte_origin_value_id = root,
       .buffer_value_id = LOOM_VALUE_ID_INVALID,
       .alias_scope_id = 7,
       .restrict_access =
@@ -1157,6 +1158,10 @@ TEST_F(SourceMemoryPlanTest, RootBoundsFollowTheAddressedAllocation) {
   const struct {
     // Handle whose address supplies the view base.
     loom_value_id_t buffer;
+    // Allocation identity retained for memory effects.
+    loom_value_id_t root;
+    // Physical handle from which the load addresses bytes.
+    loom_value_id_t origin;
     // Source promises attached to this load.
     loom_memory_access_flags_t flags;
     // Inclusive lower bound on the signed byte displacement.
@@ -1164,10 +1169,12 @@ TEST_F(SourceMemoryPlanTest, RootBoundsFollowTheAddressedAllocation) {
     // Inclusive upper bound on the signed byte displacement.
     int64_t maximum;
   } cases[] = {
-      {selected, LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS, 0, 39},
-      {selected, 0, INT64_MIN, INT64_MAX},
-      {external, LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS, INT64_MIN, INT64_MAX},
-      {loom_buffer_assume_same_root_result(alias),
+      {selected, selected, selected, LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS, 0,
+       39},
+      {selected, selected, selected, 0, INT64_MIN, INT64_MAX},
+      {external, external, external, LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS,
+       INT64_MIN, INT64_MAX},
+      {loom_buffer_assume_same_root_result(alias), selected, external,
        LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS, INT64_MIN, INT64_MAX},
   };
   const auto view_type = ViewType1D(LOOM_SCALAR_TYPE_I8, 1, BuildDenseLayout());
@@ -1191,6 +1198,9 @@ TEST_F(SourceMemoryPlanTest, RootBoundsFollowTheAddressedAllocation) {
     loom_low_source_memory_access_plan_t plan = {};
     loom_low_source_memory_access_diagnostic_t diagnostic = {};
     ASSERT_TRUE(BuildPlan(&facts, loads[i], &plan, &diagnostic));
+    EXPECT_EQ(plan.root_value_id, cases[i].root);
+    EXPECT_EQ(loom_low_source_memory_access_address_value_id(&plan),
+              cases[i].origin);
     const auto offset = loom_low_source_memory_dynamic_offset_facts(
         &plan, plan.static_byte_offset);
     EXPECT_EQ(offset.range_lo, cases[i].minimum);

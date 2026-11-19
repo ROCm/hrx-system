@@ -488,8 +488,8 @@ static iree_status_t loom_cmd_transient_append_result_range(
                                             &view_reference)) {
     const loom_cmd_transient_allocation_t* allocation =
         loom_cmd_transient_find_allocation(
-            build, loom_value_fact_view_reference_resolve_root_value(
-                       view_reference, result));
+            build, loom_value_fact_reference_resolve(
+                       view_reference.byte_origin_value_id, result));
     if (!allocation) {
       return iree_ok_status();
     }
@@ -522,9 +522,8 @@ static iree_status_t loom_cmd_transient_append_result_range(
                                                facts, &buffer_reference)) {
     return iree_ok_status();
   }
-  const loom_value_id_t root_value =
-      loom_value_fact_buffer_reference_resolve_root_value(buffer_reference,
-                                                          result);
+  const loom_value_id_t root_value = loom_value_fact_reference_resolve(
+      buffer_reference.byte_origin_value_id, result);
   const loom_cmd_transient_allocation_t* allocation =
       loom_cmd_transient_find_allocation(build, root_value);
   if (!allocation) {

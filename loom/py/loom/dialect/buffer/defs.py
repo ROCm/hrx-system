@@ -681,8 +681,9 @@ buffer_assume_same_root = Op(
         "Refine an existing buffer root to share another buffer's storage root. "
         "This is a dominance-scoped assertion for internally specialized "
         "dispatches that know two incoming handles refer to the same allocation. "
-        "The result keeps the first operand's value while inheriting the second "
-        "operand's root identity and comparable alias scope."
+        "The handles may start at different bytes. The result preserves the first "
+        "operand's address, extent, and alignment. The second operand supplies "
+        "the allocation identity and comparable alias scope."
     ),
     operands=[
         Operand("buffer", BUFFER, doc="Buffer value to refine."),

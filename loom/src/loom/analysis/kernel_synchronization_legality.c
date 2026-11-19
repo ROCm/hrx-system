@@ -707,6 +707,7 @@ loom_kernel_synchronization_legality_resolve_reference_region(
       loom_type_is_buffer(loom_module_value_type(state->module, value_id))) {
     loom_value_fact_buffer_reference_t reference = {
         .root_value_id = value_id,
+        .byte_origin_value_id = value_id,
         .maximum_byte_extent = loom_value_facts_make(0, INT64_MAX, 1),
     };
     (void)loom_value_facts_query_buffer_reference(
@@ -715,6 +716,8 @@ loom_kernel_synchronization_legality_resolve_reference_region(
     buffer_region->root_value_id =
         loom_value_fact_buffer_reference_resolve_root_value(reference,
                                                             value_id);
+    buffer_region->byte_origin_value_id = loom_value_fact_reference_resolve(
+        reference.byte_origin_value_id, value_id);
     buffer_region->alias_scope_id = reference.alias_scope_id;
     buffer_region->restrict_access = reference.restrict_access;
     buffer_region->memory_space = reference.memory_space;
@@ -817,6 +820,7 @@ static iree_status_t loom_kernel_synchronization_legality_check_call(
       // disjointness without inventing a bounded interval for those accesses.
       root_region = (loom_view_region_t){
           .root_value_id = argument_region->root_value_id,
+          .byte_origin_value_id = argument_region->byte_origin_value_id,
           .alias_scope_id = argument_region->alias_scope_id,
           .restrict_access = argument_region->restrict_access,
           .nullability = argument_region->nullability,

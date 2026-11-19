@@ -458,6 +458,64 @@ TEST_F(ViewRegionsTest, ClassifiesOpaqueBufferObservations) {
             LOOM_VIEW_ROOT_USE_MEMORY_SPACE | LOOM_VIEW_ROOT_USE_OPAQUE);
 }
 
+TEST_F(ViewRegionsTest, AllocationAliasesHaveIndependentByteOrigins) {
+  const auto whole = DefineBufferArg();
+  const auto interior = DefineBufferArg();
+  const auto condition = DefineScalarArg(LOOM_SCALAR_TYPE_I1);
+  const auto buffer_type = loom_type_buffer();
+  loom_op_t* aligned = nullptr;
+  IREE_ASSERT_OK(
+      loom_buffer_assume_alignment_build(&builder_, &whole, 1, 64, &buffer_type,
+                                         1, LOOM_LOCATION_UNKNOWN, &aligned));
+  loom_op_t* alias = nullptr;
+  IREE_ASSERT_OK(loom_buffer_assume_same_root_build(
+      &builder_, interior,
+      loom_buffer_assume_alignment_results(aligned).values[0], buffer_type,
+      LOOM_LOCATION_UNKNOWN, &alias));
+  const auto type = ViewType1D(1, BuildDenseLayout());
+  const auto make_view = [&](loom_value_id_t handle, int64_t offset) {
+    const auto start = loom_index_constant_result(BuildOffsetConstant(offset));
+    loom_op_t* view = nullptr;
+    IREE_CHECK_OK(loom_buffer_view_build(&builder_, handle, start, type,
+                                         LOOM_LOCATION_UNKNOWN, &view));
+    return loom_buffer_view_result(view);
+  };
+  const auto first = make_view(loom_buffer_assume_same_root_result(alias), 0);
+  const auto next = make_view(interior, 4);
+  const auto other =
+      make_view(loom_buffer_assume_alignment_results(aligned).values[0], 4);
+  loom_op_t* select = nullptr;
+  IREE_ASSERT_OK(loom_scf_select_build(&builder_, condition, first, other, type,
+                                       LOOM_LOCATION_UNKNOWN, &select));
+
+  loom_value_fact_table_t facts = {};
+  ComputeFacts(&facts);
+  loom_view_region_table_t table = {};
+  Analyze(&facts, &table);
+  const auto region = [&](loom_value_id_t value) {
+    const loom_view_region_t* result = nullptr;
+    IREE_CHECK_OK(loom_view_region_table_get(&table, value, &result));
+    return result;
+  };
+  const auto* window = region(first);
+  EXPECT_EQ(window->root_value_id, whole);
+  EXPECT_EQ(window->byte_origin_value_id, interior);
+  EXPECT_EQ(window->root_minimum_alignment, 1u);
+  EXPECT_EQ(region(other)->root_minimum_alignment, 64u);
+  bool disjoint = false;
+  IREE_ASSERT_OK(loom_view_regions_prove_no_overlap(&table, window,
+                                                    region(next), &disjoint));
+  EXPECT_TRUE(disjoint);  // Different elements measured from interior.
+  IREE_ASSERT_OK(loom_view_regions_prove_no_overlap(&table, window,
+                                                    region(other), &disjoint));
+  EXPECT_FALSE(disjoint);  // interior may point at whole + 4.
+  const auto* selected = region(loom_scf_select_result(select));
+  EXPECT_EQ(selected->root_value_id, whole);
+  EXPECT_EQ(selected->byte_origin_value_id, loom_scf_select_result(select));
+  EXPECT_TRUE(loom_symbolic_expr_is_constant(&selected->begin_byte_offset));
+  EXPECT_EQ(selected->begin_byte_offset.constant, 0);
+}
+
 TEST_F(ViewRegionsTest, SelectedViewRetainsUnknownRootRelativeOffset) {
   loom_value_id_t buffer = DefineBufferArg();
   loom_value_id_t condition = LOOM_VALUE_ID_INVALID;

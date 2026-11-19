@@ -49,6 +49,7 @@ class ReferenceTransferTest : public ::testing::Test {
         .maximum_byte_extent = loom_value_facts_exact_i64(256),
         .minimum_alignment = 64,
         .root_value_id = value,
+        .byte_origin_value_id = value,
         .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
         .origin = origin,
     };
@@ -191,9 +192,10 @@ TEST_F(ReferenceTransferTest, ViewOriginsPreserveCoordinatesAcrossTables) {
       .base_byte_offset = loom_value_facts_exact_i64(16),
       .footprint_byte_length = loom_value_facts_exact_i64(32),
       .minimum_alignment = 16,
-      .root_minimum_alignment = 64,
+      .root_minimum_alignment_log2 = 6,
       .origin = {1, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY, buffer},
       .root_value_id = buffer,
+      .byte_origin_value_id = buffer,
       .buffer_value_id = buffer,
       .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
       .static_element_byte_count = 4,
@@ -219,7 +221,7 @@ TEST_F(ReferenceTransferTest, ViewOriginsPreserveCoordinatesAcrossTables) {
   EXPECT_EQ(reference.base_byte_offset.range_lo, 16);
   EXPECT_EQ(reference.footprint_byte_length.range_hi, 32);
   EXPECT_EQ(reference.minimum_alignment, 16);
-  EXPECT_EQ(reference.root_minimum_alignment, 64);
+  EXPECT_EQ(loom_value_fact_view_root_alignment(&reference), 64);
   EXPECT_EQ(reference.static_element_byte_count, 4);
   EXPECT_EQ(reference.memory_space, LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL);
   EXPECT_TRUE(
@@ -245,9 +247,10 @@ TEST_F(ReferenceTransferTest, CallArgumentRebasesPassedViewAddress) {
       .base_byte_offset = loom_value_facts_exact_i64(16),
       .footprint_byte_length = loom_value_facts_exact_i64(32),
       .minimum_alignment = 16,
-      .root_minimum_alignment = 64,
+      .root_minimum_alignment_log2 = 6,
       .origin = {1, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY, caller_buffer},
       .root_value_id = caller_buffer,
+      .byte_origin_value_id = caller_buffer,
       .buffer_value_id = caller_buffer,
       .alias_scope_id = caller_buffer,
       .static_element_byte_count = 1,
@@ -269,7 +272,7 @@ TEST_F(ReferenceTransferTest, CallArgumentRebasesPassedViewAddress) {
   EXPECT_EQ(reference.base_byte_offset.range_lo, 0);
   EXPECT_EQ(reference.footprint_byte_length.range_hi, 32);
   EXPECT_EQ(reference.minimum_alignment, 1);
-  EXPECT_EQ(reference.root_minimum_alignment, 16);
+  EXPECT_EQ(loom_value_fact_view_root_alignment(&reference), 16);
   EXPECT_EQ(reference.root_value_id, callee_argument);
   EXPECT_EQ(reference.buffer_value_id, LOOM_VALUE_ID_INVALID);
   EXPECT_EQ(reference.alias_scope_id, LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE);
@@ -287,6 +290,7 @@ TEST_F(ReferenceTransferTest, CallArgumentRebasesBufferIdentity) {
       .minimum_alignment = 64,
       .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
       .root_value_id = caller_buffer,
+      .byte_origin_value_id = caller_buffer,
       .alias_scope_id = caller_buffer,
       .nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL,
       .origin = {1, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY, caller_buffer},
@@ -321,6 +325,7 @@ TEST_F(ReferenceTransferTest, CallResultRetainsStorageWithoutCalleeIdentity) {
       .minimum_alignment = 64,
       .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE,
       .root_value_id = callee_buffer,
+      .byte_origin_value_id = callee_buffer,
       .alias_scope_id = callee_buffer,
       .nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL,
       .origin = {2, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY, callee_buffer},

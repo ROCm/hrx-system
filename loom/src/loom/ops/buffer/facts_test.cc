@@ -38,8 +38,8 @@ class BufferFactsTest : public ::testing::Test {
         .minimum_alignment = 1,
         .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN,
         .root_value_id = LOOM_VALUE_ID_INVALID,
+        .byte_origin_value_id = LOOM_VALUE_ID_INVALID,
         .root_symbol = loom_symbol_ref_null(),
-        .has_root_symbol = false,
         .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
         .nullability = nullability,
     };

@@ -479,7 +479,7 @@ static uint32_t loom_aie2p_native_ingress_records(
     const int64_t offset =
         first->begin_byte_offset.facts.range_lo + (int64_t)copy_byte_offset;
     if (copies == count ||
-        request->source.root_value_id != first->root_value_id ||
+        request->source.byte_origin_value_id != first->byte_origin_value_id ||
         request->transferred_byte_count != channel->record_byte_length ||
         request->source.begin_byte_offset.facts.range_lo != offset ||
         request->source.end_byte_offset.facts.range_hi !=
@@ -690,7 +690,7 @@ static iree_status_t loom_aie2p_native_form_worker_transfers(
                                                     payload_record.value_id))
               ->advances;
       const loom_value_t* root =
-          loom_module_value(module, external->root_value_id);
+          loom_module_value(module, external->byte_origin_value_id);
       if (!local_channel || !loom_value_is_block_arg(root) ||
           loom_value_def_block(root) != entry ||
           !loom_symbolic_expr_is_linear(&external_view->begin_byte_offset) ||

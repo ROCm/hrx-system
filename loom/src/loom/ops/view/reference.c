@@ -24,30 +24,15 @@ static bool loom_view_query_references(
                                                out_rhs);
 }
 
-// Rebase distinct incoming roots onto the joined value's dynamic base. Offset
-// facts are comparable only when both alternatives identify the same root.
-static loom_value_fact_view_reference_t loom_view_reference_rebase(
-    loom_value_fact_view_reference_t reference) {
-  if (!loom_value_facts_is_exact(reference.base_byte_offset) ||
-      reference.base_byte_offset.range_lo != 0) {
-    reference.root_minimum_alignment = iree_math_gcd_u64(
-        reference.root_minimum_alignment, reference.minimum_alignment);
-  }
-  reference.root_value_id = LOOM_VALUE_ID_INVALID;
-  reference.buffer_value_id = LOOM_VALUE_ID_INVALID;
-  reference.alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
-  reference.base_byte_offset = loom_value_facts_exact_i64(0);
-  reference.minimum_alignment = 1;
-  return reference;
-}
-
 static loom_value_fact_view_reference_t loom_view_join_reference_fields(
     loom_value_fact_view_reference_t lhs,
     loom_value_fact_view_reference_t rhs) {
-  if (lhs.root_value_id == LOOM_VALUE_ID_INVALID ||
-      lhs.root_value_id != rhs.root_value_id) {
-    lhs = loom_view_reference_rebase(lhs);
-    rhs = loom_view_reference_rebase(rhs);
+  if (lhs.byte_origin_value_id == LOOM_VALUE_ID_INVALID ||
+      lhs.byte_origin_value_id != rhs.byte_origin_value_id) {
+    // The selected address becomes byte zero. Allocation and alias scope may
+    // still agree across the two incoming views.
+    loom_value_fact_view_rebase_byte_origin(&lhs, LOOM_VALUE_ID_INVALID);
+    loom_value_fact_view_rebase_byte_origin(&rhs, LOOM_VALUE_ID_INVALID);
   }
   loom_value_fact_view_reference_t reference = {
       .minimum_alignment =
@@ -57,13 +42,16 @@ static loom_value_fact_view_reference_t loom_view_join_reference_fields(
       : loom_value_facts_is_zero(rhs.base_byte_offset)
           ? lhs.minimum_alignment
           : iree_math_gcd_u64(lhs.minimum_alignment, rhs.minimum_alignment),
-      .root_minimum_alignment = iree_math_gcd_u64(lhs.root_minimum_alignment,
-                                                  rhs.root_minimum_alignment),
+      .root_minimum_alignment_log2 = iree_min(lhs.root_minimum_alignment_log2,
+                                              rhs.root_minimum_alignment_log2),
       .static_element_byte_count = lhs.static_element_byte_count,
       .memory_space = lhs.memory_space == rhs.memory_space
                           ? lhs.memory_space
                           : LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN,
-      .root_value_id = lhs.root_value_id,
+      .root_value_id = lhs.root_value_id == rhs.root_value_id
+                           ? lhs.root_value_id
+                           : LOOM_VALUE_ID_INVALID,
+      .byte_origin_value_id = lhs.byte_origin_value_id,
       .buffer_value_id = lhs.buffer_value_id == rhs.buffer_value_id
                              ? lhs.buffer_value_id
                              : LOOM_VALUE_ID_INVALID,
@@ -153,7 +141,7 @@ static iree_status_t loom_view_widen_reference_extension(
   }
   loom_value_fact_view_reference_t reference =
       loom_view_join_reference_fields(previous_reference, next_reference);
-  if (reference.root_value_id != LOOM_VALUE_ID_INVALID) {
+  if (reference.byte_origin_value_id != LOOM_VALUE_ID_INVALID) {
     reference.base_byte_offset = loom_view_widen_reference_range(
         previous_reference.base_byte_offset, next_reference.base_byte_offset);
   }
@@ -181,16 +169,17 @@ static iree_status_t loom_view_narrow_reference_extension(
   loom_view_query_references(previous_table, previous, next_table, next,
                              &reference, &incoming);
   // Offset intervals are comparable only in the same retained coordinate.
-  if (reference.root_value_id != LOOM_VALUE_ID_INVALID &&
-      reference.root_value_id == incoming.root_value_id) {
+  if (reference.byte_origin_value_id != LOOM_VALUE_ID_INVALID &&
+      reference.byte_origin_value_id == incoming.byte_origin_value_id) {
     reference.base_byte_offset = loom_value_facts_narrow(
         LOOM_SCALAR_TYPE_I64, reference.base_byte_offset,
         incoming.base_byte_offset);
     if (reference.minimum_alignment == 1) {
       reference.minimum_alignment = incoming.minimum_alignment;
     }
-    if (reference.root_minimum_alignment == 1) {
-      reference.root_minimum_alignment = incoming.root_minimum_alignment;
+    if (reference.root_minimum_alignment_log2 == 0) {
+      reference.root_minimum_alignment_log2 =
+          incoming.root_minimum_alignment_log2;
     }
   }
   reference.footprint_byte_length = loom_value_facts_narrow(
@@ -578,6 +567,7 @@ static loom_value_fact_buffer_reference_t loom_view_default_buffer_reference(
       .minimum_alignment = 1,
       .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN,
       .root_value_id = buffer_value_id,
+      .byte_origin_value_id = buffer_value_id,
       .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
       .nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN,
   };
@@ -590,15 +580,32 @@ static loom_value_fact_view_reference_t loom_view_default_view_reference(
       .base_byte_offset = loom_value_facts_exact_i64(0),
       .footprint_byte_length = loom_view_nonnegative_unknown_facts(),
       .minimum_alignment = 1,
-      .root_minimum_alignment = 1,
+      .root_minimum_alignment_log2 = 0,
       .static_element_byte_count =
           loom_view_static_element_byte_count(context, source_type),
       .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN,
       .root_value_id = source_value_id,
+      .byte_origin_value_id = source_value_id,
       .buffer_value_id = LOOM_VALUE_ID_INVALID,
       .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
       .nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN,
   };
+}
+
+// Resolve implicit self identities while the source SSA value is still known.
+// Every projection forwards these identities before changing its byte range.
+static loom_value_fact_view_reference_t loom_view_source_reference(
+    const loom_fact_context_t* context, loom_value_id_t source_value_id,
+    loom_value_facts_t source_facts, loom_type_t source_type) {
+  loom_value_fact_view_reference_t reference =
+      loom_view_default_view_reference(context, source_value_id, source_type);
+  (void)loom_value_facts_query_view_reference(context, source_facts,
+                                              &reference);
+  reference.root_value_id = loom_value_fact_view_reference_resolve_root_value(
+      reference, source_value_id);
+  reference.byte_origin_value_id = loom_value_fact_reference_resolve(
+      reference.byte_origin_value_id, source_value_id);
+  return reference;
 }
 
 iree_status_t loom_view_reference_refine_restrict_access(
@@ -606,12 +613,8 @@ iree_status_t loom_view_reference_refine_restrict_access(
     loom_value_facts_t source_facts, loom_type_t source_type,
     loom_value_fact_restrict_access_t restrict_access,
     loom_value_facts_t* out) {
-  loom_value_fact_view_reference_t reference =
-      loom_view_default_view_reference(context, source_value_id, source_type);
-  (void)loom_value_facts_query_view_reference(context, source_facts,
-                                              &reference);
-  reference.root_value_id = loom_value_fact_view_reference_resolve_root_value(
-      reference, source_value_id);
+  loom_value_fact_view_reference_t reference = loom_view_source_reference(
+      context, source_value_id, source_facts, source_type);
   reference.restrict_access = restrict_access;
   return loom_value_facts_make_view_reference(context, reference, out);
 }
@@ -626,7 +629,8 @@ iree_status_t loom_view_reference_make_allocation(
       context, module, result_type, reference.static_element_byte_count,
       /*address_layout=*/NULL);
   reference.minimum_alignment = minimum_alignment;
-  reference.root_minimum_alignment = minimum_alignment;
+  reference.root_minimum_alignment_log2 =
+      (uint8_t)iree_math_count_trailing_zeros_u64(minimum_alignment);
   reference.memory_space = memory_space;
   reference.alias_scope_id = result;
   reference.nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL;
@@ -650,12 +654,8 @@ iree_status_t loom_view_reference_make_record(loom_fact_context_t* context,
                                               loom_value_facts_t storage_facts,
                                               loom_type_t storage_type,
                                               loom_value_facts_t* out) {
-  loom_value_fact_view_reference_t reference =
-      loom_view_default_view_reference(context, storage_value_id, storage_type);
-  (void)loom_value_facts_query_view_reference(context, storage_facts,
-                                              &reference);
-  reference.root_value_id = loom_value_fact_view_reference_resolve_root_value(
-      reference, storage_value_id);
+  loom_value_fact_view_reference_t reference = loom_view_source_reference(
+      context, storage_value_id, storage_facts, storage_type);
   const loom_value_facts_t last_slot = loom_view_extent_max_index_facts(
       loom_view_dim_facts(context, storage_type, 0));
   const loom_value_facts_t slot =
@@ -701,9 +701,13 @@ iree_status_t loom_view_reference_make_buffer_view(
       /*address_layout=*/NULL);
   view_reference.minimum_alignment =
       loom_view_alignment_from_offset_facts(view_reference.base_byte_offset);
-  view_reference.root_minimum_alignment = buffer_reference.minimum_alignment;
+  view_reference.root_minimum_alignment_log2 =
+      (uint8_t)iree_math_count_trailing_zeros_u64(
+          buffer_reference.minimum_alignment);
   view_reference.memory_space = buffer_reference.memory_space;
   view_reference.root_value_id = buffer_reference.root_value_id;
+  view_reference.byte_origin_value_id = loom_value_fact_reference_resolve(
+      buffer_reference.byte_origin_value_id, buffer_value_id);
   view_reference.buffer_value_id = buffer_value_id;
   view_reference.alias_scope_id = buffer_reference.alias_scope_id;
   view_reference.restrict_access = buffer_reference.restrict_access;
@@ -740,12 +744,8 @@ iree_status_t loom_view_reference_make_subview(
     loom_type_t source_type, loom_type_t result_type,
     const loom_value_fact_address_layout_t* result_address_layout,
     loom_value_facts_t* out) {
-  loom_value_fact_view_reference_t source_reference =
-      loom_view_default_view_reference(context, source_value_id, source_type);
-  (void)loom_value_facts_query_view_reference(context, source_facts,
-                                              &source_reference);
-
-  loom_value_fact_view_reference_t view_reference = {0};
+  loom_value_fact_view_reference_t view_reference = loom_view_source_reference(
+      context, source_value_id, source_facts, source_type);
   view_reference.static_element_byte_count =
       loom_view_static_element_byte_count(context, result_type);
   loom_value_facts_t additional_byte_offset = loom_value_facts_unknown();
@@ -754,7 +754,7 @@ iree_status_t loom_view_reference_make_subview(
           view_reference.static_element_byte_count, &additional_byte_offset)) {
     additional_byte_offset = loom_value_facts_unknown();
   }
-  loom_value_facts_addi(&source_reference.base_byte_offset,
+  loom_value_facts_addi(&view_reference.base_byte_offset,
                         &additional_byte_offset,
                         &view_reference.base_byte_offset);
   view_reference.footprint_byte_length = loom_view_footprint_facts(
@@ -762,17 +762,6 @@ iree_status_t loom_view_reference_make_subview(
       result_address_layout);
   view_reference.minimum_alignment =
       loom_view_alignment_from_offset_facts(view_reference.base_byte_offset);
-  view_reference.root_minimum_alignment =
-      source_reference.root_minimum_alignment;
-  view_reference.memory_space = source_reference.memory_space;
-  view_reference.root_value_id =
-      loom_value_fact_view_reference_resolve_root_value(source_reference,
-                                                        source_value_id);
-  view_reference.buffer_value_id = source_reference.buffer_value_id;
-  view_reference.alias_scope_id = source_reference.alias_scope_id;
-  view_reference.restrict_access = source_reference.restrict_access;
-  view_reference.nullability = source_reference.nullability;
-  view_reference.origin = source_reference.origin;
   return loom_value_facts_make_view_reference(context, view_reference, out);
 }
 
@@ -780,15 +769,8 @@ iree_status_t loom_view_reference_make_reinterpret(
     loom_fact_context_t* context, const loom_module_t* module,
     loom_value_id_t source_value_id, loom_value_facts_t source_facts,
     loom_type_t source_type, loom_type_t result_type, loom_value_facts_t* out) {
-  loom_value_fact_view_reference_t source_reference =
-      loom_view_default_view_reference(context, source_value_id, source_type);
-  (void)loom_value_facts_query_view_reference(context, source_facts,
-                                              &source_reference);
-
-  loom_value_fact_view_reference_t view_reference = source_reference;
-  view_reference.root_value_id =
-      loom_value_fact_view_reference_resolve_root_value(source_reference,
-                                                        source_value_id);
+  loom_value_fact_view_reference_t view_reference = loom_view_source_reference(
+      context, source_value_id, source_facts, source_type);
   view_reference.static_element_byte_count =
       loom_view_static_element_byte_count(context, result_type);
   view_reference.footprint_byte_length = loom_view_footprint_facts(

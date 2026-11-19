@@ -232,14 +232,16 @@ typedef struct loom_low_source_memory_access_plan_t {
   // Optional caller-owned strides for all view axes, retained independently of
   // the indexed origin. Fragment consumers require these even at zero origin.
   const loom_low_source_memory_axis_byte_stride_t* axis_byte_strides;
-  // Source SSA value that represents the storage root.
+  // Backing allocation identity for memory effects.
   loom_value_id_t root_value_id;
-  // Producer-retained symbol that materializes the root, or null if unknown.
+  // Source address supplying byte zero for this plan's offsets.
+  loom_value_id_t byte_origin_value_id;
+  // Producer-retained symbol that materializes the byte origin, or null.
   loom_symbol_ref_t root_symbol;
-  // Participant domain in which the storage base denotes the same address.
+  // Participant domain in which the byte origin denotes the same address.
   loom_value_fact_uniform_scope_t root_uniform_scope;
-  // Minimum provable power-of-two byte alignment of the storage root base
-  // address, capped at the largest power of two representable in uint32_t.
+  // Minimum power-of-two alignment of the byte origin, capped at the largest
+  // power of two representable in uint32_t.
   uint32_t root_minimum_alignment;
   // Comparable alias scope for disjointness proofs, or NONE.
   loom_value_fact_alias_scope_id_t alias_scope_id;
@@ -371,12 +373,12 @@ static inline loom_value_id_t loom_low_source_memory_access_base_view_value_id(
 }
 
 // Materialized address consumed with the plan's canonical byte offsets. This
-// may be an advancing view carrier while root_value_id retains storage
-// identity.
+// may be an advancing view carrier while byte_origin_value_id retains the
+// original address.
 static inline loom_value_id_t loom_low_source_memory_access_address_value_id(
     const loom_low_source_memory_access_plan_t* plan) {
   return plan->materialized_base_region != NULL ? plan->base_view_value_id
-                                                : plan->root_value_id;
+                                                : plan->byte_origin_value_id;
 }
 
 static inline const loom_low_source_memory_dynamic_term_t*

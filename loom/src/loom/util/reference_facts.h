@@ -69,9 +69,8 @@ typedef uint32_t loom_value_fact_reference_nullability_t;
 #define LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL \
   ((loom_value_fact_reference_nullability_t)2)
 
-// Comparable alias scope for storage-like values. NONE means root_value_id is
-// only provenance for addressing and same-root propagation; consumers must not
-// use it to prove disjointness against another root.
+// Comparable alias scope for storage-like values. Without a scope, distinct
+// allocation identities alone cannot prove two storage ranges disjoint.
 typedef loom_value_id_t loom_value_fact_alias_scope_id_t;
 #define LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE \
   ((loom_value_fact_alias_scope_id_t)LOOM_VALUE_ID_INVALID)
@@ -103,31 +102,37 @@ bool loom_value_fact_restrict_accesses_are_independent(
     loom_value_fact_restrict_access_t lhs,
     loom_value_fact_restrict_access_t rhs);
 
-// Buffer value is an opaque storage root.
+// A join of distinct identities uses the result itself as its new identity.
+static inline loom_value_id_t loom_value_fact_reference_resolve(
+    loom_value_id_t retained_id, loom_value_id_t value_id) {
+  return retained_id == LOOM_VALUE_ID_INVALID ? value_id : retained_id;
+}
+
+// Buffer value is an opaque handle into a storage allocation.
 typedef struct loom_value_fact_buffer_reference_t {
-  // Conservative byte extent facts for the root storage allocation.
+  // Conservative byte extent of the storage exposed by this handle.
   loom_value_facts_t maximum_byte_extent;
 
-  // Minimum provable byte alignment of the root storage base. One means
+  // Minimum provable byte alignment of the handle. One means
   // unknown beyond byte alignment.
   uint64_t minimum_alignment;
 
   // Target-independent memory space for the storage root.
-  loom_value_fact_memory_space_t memory_space;
+  uint8_t memory_space;
+
+  // Whether root_symbol names the byte origin.
+  bool has_root_symbol;
 
   // SSA value that represents the root storage identity. INVALID means the
   // value carrying these facts is itself the dynamic storage root.
   loom_value_id_t root_value_id;
 
-  // Producer-retained module symbol that materializes the storage root.
+  // SSA address of byte zero of the handle. INVALID denotes the value itself.
+  // Two handles into one allocation can have different byte origins.
+  loom_value_id_t byte_origin_value_id;
+
+  // Producer-retained module symbol that materializes the byte origin.
   loom_symbol_ref_t root_symbol;
-
-  // Whether root_symbol names the storage root.
-  bool has_root_symbol;
-
-  // The retained root has the same byte origin, not merely the same backing
-  // allocation. False when an allocation-only alias promise supplies the root.
-  bool root_is_byte_origin;
 
   // Comparable alias scope for disjointness proofs, or NONE.
   loom_value_fact_alias_scope_id_t alias_scope_id;
@@ -135,7 +140,7 @@ typedef struct loom_value_fact_buffer_reference_t {
   // Active source restrict domain and access-path association.
   loom_value_fact_restrict_access_t restrict_access;
 
-  // Known nullability for the storage root.
+  // Known nullability for the storage handle.
   loom_value_fact_reference_nullability_t nullability;
 
   // Intrinsic storage origin relative to a projected function entry.
@@ -151,35 +156,39 @@ static inline loom_value_id_t
 loom_value_fact_buffer_reference_resolve_root_value(
     loom_value_fact_buffer_reference_t reference,
     loom_value_id_t reference_value_id) {
-  return reference.root_value_id == LOOM_VALUE_ID_INVALID
-             ? reference_value_id
-             : reference.root_value_id;
+  return loom_value_fact_reference_resolve(reference.root_value_id,
+                                           reference_value_id);
 }
 
 // View value is a typed projection over a storage root.
 typedef struct loom_value_fact_view_reference_t {
-  // Byte offset facts for the view base relative to root_value_id.
+  // Byte offset facts for the view base relative to byte_origin_value_id.
   loom_value_facts_t base_byte_offset;
 
   // Conservative byte length facts for the whole-view footprint envelope.
   loom_value_facts_t footprint_byte_length;
 
-  // Minimum provable alignment of base_byte_offset relative to root_value_id.
-  // The root's own absolute pointer alignment is tracked separately.
+  // Minimum provable alignment of base_byte_offset relative to
+  // byte_origin_value_id. The byte origin's absolute alignment is tracked
+  // separately.
   uint64_t minimum_alignment;
 
-  // Minimum provable byte alignment of the root storage base. One means
-  // unknown beyond byte alignment.
-  uint64_t root_minimum_alignment;
+  // Base-two logarithm of the byte origin's guaranteed alignment. Zero means
+  // byte alignment. All representable power-of-two alignments fit in one byte.
+  uint8_t root_minimum_alignment_log2;
 
   // Intrinsic storage origin relative to a projected function entry.
   loom_value_fact_reference_origin_t origin;
 
   // SSA value that represents the root storage identity. INVALID means the
-  // value carrying these facts is its own dynamic root with base offset zero.
+  // value carrying these facts is its own dynamic allocation identity.
   loom_value_id_t root_value_id;
 
-  // Buffer SSA value that materializes the root, including its authored
+  // SSA address against which base_byte_offset is measured. INVALID denotes
+  // the joined view itself at offset zero.
+  loom_value_id_t byte_origin_value_id;
+
+  // Buffer SSA value that materializes the byte origin, including its authored
   // alignment and alias assumptions. INVALID when no single buffer is shared
   // by every incoming view. Availability at a use is a dominance question.
   loom_value_id_t buffer_value_id;
@@ -203,13 +212,23 @@ typedef struct loom_value_fact_view_reference_t {
 static_assert(sizeof(loom_value_fact_view_reference_t) == 112,
               "view reference facts must remain compact");
 
+// Minimum byte alignment guaranteed for the address supplying byte zero.
+static inline uint64_t loom_value_fact_view_root_alignment(
+    const loom_value_fact_view_reference_t* reference) {
+  return UINT64_C(1) << reference->root_minimum_alignment_log2;
+}
+
+// Makes the view itself byte zero, retaining the alignment of its address.
+// A control join uses INVALID until its result ID is available.
+void loom_value_fact_view_rebase_byte_origin(
+    loom_value_fact_view_reference_t* reference, loom_value_id_t byte_origin);
+
 // Resolves the storage root of a view, including joins of distinct roots.
 static inline loom_value_id_t loom_value_fact_view_reference_resolve_root_value(
     loom_value_fact_view_reference_t reference,
     loom_value_id_t reference_value_id) {
-  return reference.root_value_id == LOOM_VALUE_ID_INVALID
-             ? reference_value_id
-             : reference.root_value_id;
+  return loom_value_fact_reference_resolve(reference.root_value_id,
+                                           reference_value_id);
 }
 
 #ifdef __cplusplus

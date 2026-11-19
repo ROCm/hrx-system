@@ -151,6 +151,9 @@ typedef struct loom_movement_endpoint_t {
   // SSA value naming this endpoint.
   loom_value_id_t value_id;
 
+  // SSA address against which the byte interval is measured.
+  loom_value_id_t byte_origin_value_id;
+
   // Type of value_id.
   loom_type_t type;
 
@@ -172,7 +175,7 @@ typedef struct loom_movement_endpoint_t {
   // Intrinsic storage origin retained from the source reference.
   loom_value_fact_reference_origin_t origin;
 
-  // Symbolic begin byte offset relative to root_value_id.
+  // Symbolic begin byte offset relative to byte_origin_value_id.
   loom_symbolic_expr_t begin_byte_offset;
 
   // Symbolic byte footprint length for this endpoint.
@@ -181,10 +184,11 @@ typedef struct loom_movement_endpoint_t {
   // Symbolic byte offset one past the endpoint footprint.
   loom_symbolic_expr_t end_byte_offset;
 
-  // Minimum provable alignment of begin_byte_offset relative to root_value_id.
+  // Minimum provable alignment of begin_byte_offset relative to
+  // byte_origin_value_id.
   uint64_t minimum_alignment;
 
-  // Minimum provable byte alignment of the root storage base.
+  // Minimum provable alignment of the address supplying byte zero.
   uint64_t root_minimum_alignment;
 
   // Exact begin byte offset when LOOM_MOVEMENT_ENDPOINT_STATIC_BEGIN is set.

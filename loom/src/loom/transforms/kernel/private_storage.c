@@ -1109,6 +1109,12 @@ static iree_status_t loom_private_storage_analyze(
     const loom_view_region_t* region = &builder.regions.regions[i];
     loom_private_storage_allocation_t* allocation =
         loom_private_storage_allocation(&builder, region->root_value_id);
+    if (allocation && region->byte_origin_value_id != region->root_value_id) {
+      // Accesses through an interior handle cannot be assigned byte cells of
+      // the allocation without knowing the displacement between the handles.
+      allocation->selected = false;
+      allocation->write_only = false;
+    }
     builder.allocations[loom_local_value_domain_ordinal(
         &plan->domain, region->view_value_id)] = allocation;
   }

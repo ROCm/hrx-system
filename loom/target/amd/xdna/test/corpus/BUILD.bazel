@@ -68,6 +68,7 @@ loom_corpus_test(
             "memory/address/origins.loom:@signed_origin_values": "XDNA/051",
             "memory/buffer/null.loom:@nullable_buffer_values": "XDNA/051",
             "memory/buffer/positions.loom:@buffer_position_equality": "XDNA/051",
+            "memory/buffer/positions.loom:@shared_allocation_byte_origins": "XDNA/051",
             "memory/buffer/positions.loom:@storage_domain_equality": "XDNA/051",
             "memory/buffer/positions.loom:@wide_position_equality": "XDNA/051",
             "memory/packed/transport.loom:@packed_byte_transport_all_bits": "XDNA/051",

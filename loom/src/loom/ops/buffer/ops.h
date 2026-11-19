@@ -150,7 +150,7 @@ iree_status_t loom_buffer_assume_noalias_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_BUFFER_ASSUME_SAME_ROOT: Refine an existing buffer root to share another buffer's storage root. This is a dominance-scoped assertion for internally specialized dispatches that know two incoming handles refer to the same allocation. The result keeps the first operand's value while inheriting the second operand's root identity and comparable alias scope.
+// LOOM_OP_BUFFER_ASSUME_SAME_ROOT: Refine an existing buffer root to share another buffer's storage root. This is a dominance-scoped assertion for internally specialized dispatches that know two incoming handles refer to the same allocation. The handles may start at different bytes. The result preserves the first operand's address, extent, and alignment. The second operand supplies the allocation identity and comparable alias scope.
 // %same = buffer.assume.same_root %buffer, %root : buffer
 LOOM_DEFINE_ISA(loom_buffer_assume_same_root_isa, LOOM_OP_BUFFER_ASSUME_SAME_ROOT)
 LOOM_DEFINE_OPERAND(loom_buffer_assume_same_root_buffer, 0)
