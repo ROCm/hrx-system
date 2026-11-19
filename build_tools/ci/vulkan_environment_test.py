@@ -69,7 +69,7 @@ class VulkanEnvironmentTest(unittest.TestCase):
         number = node_path.stat().st_rdev
         (entry / "dev").write_text(f"{os.major(number)}:{os.minor(number)}")
         return vulkan_environment.RenderDevice(
-            node_path, address, device_id, Path(node_source).stat().st_rdev
+            node_path, address, vendor_id, device_id, number
         )
 
     def profile(self, device: vulkan_environment.RenderDevice) -> dict:
@@ -78,9 +78,9 @@ class VulkanEnvironmentTest(unittest.TestCase):
                 "device": {
                     "properties": {
                         "VkPhysicalDeviceProperties": {
-                            "deviceName": "AMD test device",
+                            "deviceName": "test GPU",
                             "deviceType": "VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU",
-                            "vendorID": 0x1002,
+                            "vendorID": device.vendor_id,
                             "deviceID": device.device_id,
                             "apiVersion": (1 << 22) | (3 << 12),
                         },
@@ -158,6 +158,54 @@ class VulkanEnvironmentTest(unittest.TestCase):
             f"AMDF_CTS_GPU_NATIVE_IDENTITY={gpu_assignment.native_identity(discrete.device_number)}\n",
         )
 
+    def test_non_amd_selection_from_child_grant_or_pci_vendor(self):
+        integrated = self.add_device()
+        discrete = self.add_device(
+            "renderD129", "0000:02:00.0", vendor_id=0x10DE, node_source="/dev/zero"
+        )
+        os.environ["PARENT_GPU_DEVICES"] = f"{integrated.path},{discrete.path}"
+        environment_file = self.root / "github_env"
+        os.environ["GITHUB_ENV"] = str(environment_file)
+
+        def run_vulkaninfo(command, *, env, check):
+            self.assertEqual(env["DRI_PRIME"], discrete.dri_prime)
+            Path(command[3]).write_text(json.dumps(self.profile(discrete)))
+
+        for child_grant, pci_vendor in (
+            ({"CHILD_GPU_DEVICES": str(discrete.path)}, None),
+            ({}, discrete.vendor_id),
+        ):
+            with self.subTest(child_grant=child_grant, pci_vendor=pci_vendor):
+                environment_file.write_text("")
+                with (
+                    mock.patch.dict(os.environ, child_grant),
+                    mock.patch.object(
+                        subprocess, "run", side_effect=run_vulkaninfo
+                    ) as probe,
+                ):
+                    vulkan_environment.check_environment(pci_vendor=pci_vendor)
+                probe.assert_called_once()
+                self.assertEqual(
+                    environment_file.read_text(), f"DRI_PRIME={discrete.dri_prime}\n"
+                )
+
+    def test_vendor_requirement_cannot_select_an_unassigned_sibling(self):
+        self.add_device()
+        assigned = self.add_device(
+            "renderD129", "0000:02:00.0", vendor_id=0x10DE, node_source="/dev/zero"
+        )
+        os.environ["CHILD_GPU_DEVICES"] = str(assigned.path)
+        with (
+            mock.patch.object(os, "open") as opened,
+            mock.patch.object(subprocess, "run") as probe,
+        ):
+            with self.assertRaisesRegex(
+                ValueError, "No assigned render node matches PCI vendor"
+            ):
+                vulkan_environment.check_environment(pci_vendor=0x1002)
+            opened.assert_not_called()
+            probe.assert_not_called()
+
     def test_legacy_allocation_selects_integrated_sibling_on_same_host(self):
         self.add_device("renderD3", device_id=0x7550)
         integrated = self.add_device(
@@ -205,13 +253,13 @@ class VulkanEnvironmentTest(unittest.TestCase):
                 "VkPhysicalDeviceProperties",
                 "deviceID",
                 0x7551,
-                "selected AMD PCI device",
+                "selected PCI device",
             ),
             (
                 "VkPhysicalDeviceProperties",
                 "vendorID",
                 0x8086,
-                "selected AMD PCI device",
+                "selected PCI device",
             ),
             (
                 "VkPhysicalDeviceDrmPropertiesEXT",

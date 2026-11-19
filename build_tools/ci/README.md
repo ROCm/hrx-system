@@ -132,9 +132,12 @@ An empty or conflicting assignment stops the job before device activation.
 Native jobs build the checkout's `amdf-info` with their test configuration.
 The tool opens and releases the first compatible assigned GPU by its exact
 URI under the hardware watchdog. Vulkan jobs select the assigned PCI device
-with Mesa's `DRI_PRIME` and verify the render major and minor reported by
-`vulkaninfo`. After a successful check, the HAL and standalone CTS receive
-the same physical identity.
+with Mesa's `DRI_PRIME`. The preflight verifies that Vulkan device zero
+reports a hardware GPU with the assigned PCI vendor, product, and DRM render
+major and minor. A job targeting a particular vendor can pass `--pci-vendor`
+to restrict the eligible devices within its grant. Vulkan tests inherit the
+verified `DRI_PRIME` selection. For an AMD GPU the HAL and standalone CTS
+also receive the same physical identity.
 
 ```sh
 HAL_AMD_GPU_ASSIGNMENT=linux_device:226:144
