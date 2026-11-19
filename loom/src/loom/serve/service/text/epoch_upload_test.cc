@@ -62,12 +62,17 @@ TEST_F(SourceEpochUploadTest, LivePacketsPreserveUnusedHostAndDeviceCapacity) {
     uint64_t completion = 0;
     for (size_t slot = 0; slot < host.size(); ++slot) {
       std::memset(host[slot].data, host_canary_, host[slot].data_length);
+      const iree_hal_fill_region_t fill_region = {
+          .row_length = host[slot].data_length,
+          .row_count = 1,
+          .slice_count = 1,
+      };
       const iree_hal_transfer_operation_t fill = {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
           .fill =
               {
                   .target_buffer = device[slot],
-                  .length = host[slot].data_length,
+                  .region = &fill_region,
                   .pattern = &device_canary_,
                   .pattern_length = sizeof(device_canary_),
               },
@@ -100,13 +105,18 @@ TEST_F(SourceEpochUploadTest, LivePacketsPreserveUnusedHostAndDeviceCapacity) {
     }
     for (size_t slot = 0; slot < host.size(); ++slot) {
       downloaded_[slot].resize(host[slot].data_length);
+      const iree_hal_transfer_region_t download_region = {
+          .row_length = downloaded_[slot].size(),
+          .row_count = 1,
+          .slice_count = 1,
+      };
       const iree_hal_transfer_operation_t download = {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
           .download =
               {
                   .source_buffer = device[slot],
                   .target = downloaded_[slot].data(),
-                  .length = downloaded_[slot].size(),
+                  .region = &download_region,
               },
       };
       IREE_ASSERT_OK(loom_runtime_execution_transfer(model_->execution, 1,
@@ -147,12 +157,17 @@ class EpochUploadTest : public SourceTextServiceTest {
           iree_hal_make_pool_reservation_request(kCapacity, 256);
       IREE_ASSERT_OK(loom_runtime_execution_alloca(execution_, 1, &request,
                                                    &targets_[slot]));
+      const iree_hal_fill_region_t fill_region = {
+          .row_length = kCapacity,
+          .row_count = 1,
+          .slice_count = 1,
+      };
       const iree_hal_transfer_operation_t fill = {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
           .fill =
               {
                   .target_buffer = targets_[slot],
-                  .length = kCapacity,
+                  .region = &fill_region,
                   .pattern = &canary_,
                   .pattern_length = sizeof(canary_),
               },
@@ -201,14 +216,20 @@ class EpochUploadTest : public SourceTextServiceTest {
 
   void Download() {
     iree_hal_transfer_operation_t operations[2];
+    iree_hal_transfer_region_t operations_regions[IREE_ARRAYSIZE(operations)];
     for (size_t slot = 0; slot < targets_.size(); ++slot) {
+      operations_regions[slot] = iree_hal_transfer_region_t{
+          .row_length = result_[slot].size(),
+          .row_count = 1,
+          .slice_count = 1,
+      };
       operations[slot] = {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
           .download =
               {
                   .source_buffer = targets_[slot],
                   .target = result_[slot].data(),
-                  .length = result_[slot].size(),
+                  .region = &operations_regions[slot],
               },
       };
     }

@@ -132,9 +132,9 @@ TEST_P(TransferStorageTest, GrowthPreservesLaunchStorageAndOutput) {
         }
         std::fill(observed.begin(), observed.end(), 0xDEADBEEFu);
         uint64_t next = submitted + 1;
-        IREE_ASSERT_OK(iree_hal_queue_upload(queue, {}, {1, &semaphore, &next},
-                                             source.data(), buffer, 0,
-                                             byte_length, nullptr));
+        IREE_ASSERT_OK(iree_hal_queue_upload_linear(
+            queue, {}, {1, &semaphore, &next}, source.data(), buffer, 0,
+            byte_length, nullptr));
         submitted = next++;
         const uint32_t constants[] = {static_cast<uint32_t>(word_count),
                                       11 + round};
@@ -147,7 +147,7 @@ TEST_P(TransferStorageTest, GrowthPreservesLaunchStorageAndOutput) {
             iree_make_const_byte_span(constants, sizeof(constants)),
             {2, bindings}, nullptr, IREE_HAL_DISPATCH_FLAG_NONE));
         submitted = next++;
-        IREE_ASSERT_OK(iree_hal_queue_download(
+        IREE_ASSERT_OK(iree_hal_queue_download_linear(
             queue, {1, &semaphore, &submitted}, {1, &semaphore, &next}, buffer,
             0, observed.data() + 1, byte_length, nullptr));
         submitted = next;

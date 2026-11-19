@@ -4,126 +4,161 @@
 ; See https://llvm.org/LICENSE.txt for license information.
 ; SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 ;
-; SPIR-V
-; Version: 1.0
-; Generator: Khronos SPIR-V Tools Assembler; 0
-; Bound: 114
-; Schema: 0
-               OpCapability Shader
-          %1 = OpExtInstImport "GLSL.std.450"
-               OpMemoryModel Logical GLSL450
-               OpEntryPoint GLCompute %main "main"
-               OpExecutionMode %main LocalSize 1 1 1
-               OpSource GLSL 450
-               OpName %main "main"
-               OpName %PushConstants "PushConstants"
-               OpMemberName %PushConstants 0 "fill_pattern"
-               OpMemberName %PushConstants 1 "fill_pattern_width"
-               OpMemberName %PushConstants 2 "target_word_index"
-               OpMemberName %PushConstants 3 "target_word_byte_offset"
-               OpMemberName %PushConstants 4 "pattern_byte_offset"
-               OpMemberName %PushConstants 5 "fill_length_bytes"
-               OpName %pc "pc"
-               OpName %Target "Target"
-               OpMemberName %Target 0 "words"
-               OpName %target "target"
-               OpDecorate %PushConstants Block
-               OpMemberDecorate %PushConstants 0 Offset 0
-               OpMemberDecorate %PushConstants 1 Offset 4
-               OpMemberDecorate %PushConstants 2 Offset 8
-               OpMemberDecorate %PushConstants 3 Offset 12
-               OpMemberDecorate %PushConstants 4 Offset 16
-               OpMemberDecorate %PushConstants 5 Offset 20
-               OpDecorate %_runtimearr_uint ArrayStride 4
-               OpDecorate %Target BufferBlock
-               OpMemberDecorate %Target 0 Offset 0
-               OpDecorate %target Binding 0
-               OpDecorate %target DescriptorSet 0
-               OpDecorate %gl_WorkGroupSize BuiltIn WorkgroupSize
-       %void = OpTypeVoid
-         %19 = OpTypeFunction %void
-       %uint = OpTypeInt 32 0
-     %uint_0 = OpConstant %uint 0
-%PushConstants = OpTypeStruct %uint %uint %uint %uint %uint %uint
-%_ptr_PushConstant_PushConstants = OpTypePointer PushConstant %PushConstants
-         %pc = OpVariable %_ptr_PushConstant_PushConstants PushConstant
-        %int = OpTypeInt 32 1
-      %int_5 = OpConstant %int 5
-%_ptr_PushConstant_uint = OpTypePointer PushConstant %uint
-       %bool = OpTypeBool
-     %uint_8 = OpConstant %uint 8
-      %int_3 = OpConstant %int 3
-      %int_4 = OpConstant %int 4
-      %int_1 = OpConstant %int 1
-      %int_0 = OpConstant %int 0
-   %uint_255 = OpConstant %uint 255
-    %int_255 = OpConstant %int 255
-%_runtimearr_uint = OpTypeRuntimeArray %uint
-     %Target = OpTypeStruct %_runtimearr_uint
-%_ptr_Uniform_Target = OpTypePointer Uniform %Target
-     %target = OpVariable %_ptr_Uniform_Target Uniform
-      %int_2 = OpConstant %int 2
-%_ptr_Uniform_uint = OpTypePointer Uniform %uint
-     %uint_1 = OpConstant %uint 1
-     %v3uint = OpTypeVector %uint 3
-%gl_WorkGroupSize = OpConstantComposite %v3uint %uint_1 %uint_1 %uint_1
-       %main = OpFunction %void None %19
-         %41 = OpLabel
-               OpBranch %42
-         %42 = OpLabel
-        %113 = OpPhi %uint %uint_0 %41 %78 %50
-        %111 = OpPhi %uint %uint_0 %41 %73 %50
-        %108 = OpPhi %uint %uint_0 %41 %80 %50
-         %47 = OpAccessChain %_ptr_PushConstant_uint %pc %int_5
-         %48 = OpLoad %uint %47
-         %49 = OpULessThan %bool %108 %48
-               OpLoopMerge %43 %50 None
-               OpBranchConditional %49 %50 %43
-         %50 = OpLabel
-         %51 = OpAccessChain %_ptr_PushConstant_uint %pc %int_3
-         %52 = OpLoad %uint %51
-         %54 = OpIAdd %uint %52 %108
-         %55 = OpIMul %uint %uint_8 %54
-         %56 = OpAccessChain %_ptr_PushConstant_uint %pc %int_4
-         %57 = OpLoad %uint %56
-         %59 = OpIAdd %uint %57 %108
-         %60 = OpAccessChain %_ptr_PushConstant_uint %pc %int_1
-         %61 = OpLoad %uint %60
-         %62 = OpUMod %uint %59 %61
-         %63 = OpAccessChain %_ptr_PushConstant_uint %pc %int_0
-         %64 = OpLoad %uint %63
-         %66 = OpIMul %uint %uint_8 %62
-         %67 = OpShiftRightLogical %uint %64 %66
-         %68 = OpBitwiseAnd %uint %67 %uint_255
-         %70 = OpShiftLeftLogical %int %int_255 %55
-         %71 = OpBitcast %uint %70
-         %73 = OpBitwiseOr %uint %111 %71
-         %76 = OpShiftLeftLogical %uint %68 %55
-         %78 = OpBitwiseOr %uint %113 %76
-         %80 = OpIAdd %uint %108 %int_1
-               OpBranch %42
-         %43 = OpLabel
-         %81 = OpAccessChain %_ptr_PushConstant_uint %pc %int_2
-         %82 = OpLoad %uint %81
-         %83 = OpAccessChain %_ptr_Uniform_uint %target %int_0 %82
-         %84 = OpAtomicIAdd %uint %83 %uint_1 %uint_0 %uint_0
-               OpBranch %85
-         %85 = OpLabel
-        %109 = OpPhi %uint %84 %43 %101 %87
-               OpLoopMerge %106 %87 None
-               OpBranch %89
-         %89 = OpLabel
-         %92 = OpNot %uint %111
-         %93 = OpBitwiseAnd %uint %109 %92
-         %95 = OpBitwiseOr %uint %93 %113
-        %101 = OpAtomicCompareExchange %uint %83 %uint_1 %uint_0 %uint_0 %95 %109
-        %104 = OpIEqual %bool %101 %109
-               OpSelectionMerge %105 None
-               OpBranchConditional %104 %106 %105
-        %106 = OpLabel
-               OpReturn
-        %105 = OpLabel
-               OpBranch %87
-         %87 = OpLabel
-               OpBranch %85
-               OpFunctionEnd
+; One body handles linear edge patches and rectangular fills. Y/Z select a
+; row/slice; X strides over its dwords. Partial dwords use compare/exchange so
+; disjoint rows sharing a dword preserve each other's useful bytes.
+OpCapability Shader
+%glsl = OpExtInstImport "GLSL.std.450"
+OpMemoryModel Logical GLSL450
+OpEntryPoint GLCompute %main "main" %global_id %num_groups
+OpExecutionMode %main LocalSize 64 1 1
+OpDecorate %global_id BuiltIn GlobalInvocationId
+OpDecorate %num_groups BuiltIn NumWorkgroups
+OpDecorate %PushConstants Block
+OpMemberDecorate %PushConstants 0 Offset 0
+OpMemberDecorate %PushConstants 1 Offset 4
+OpMemberDecorate %PushConstants 2 Offset 8
+OpMemberDecorate %PushConstants 3 Offset 12
+OpMemberDecorate %PushConstants 4 Offset 16
+OpMemberDecorate %PushConstants 5 Offset 20
+OpMemberDecorate %PushConstants 6 Offset 24
+OpMemberDecorate %PushConstants 7 Offset 28
+OpDecorate %words ArrayStride 4
+OpDecorate %Target BufferBlock
+OpMemberDecorate %Target 0 Offset 0
+OpDecorate %target DescriptorSet 0
+OpDecorate %target Binding 0
+%void = OpTypeVoid
+%fn = OpTypeFunction %void
+%uint = OpTypeInt 32 0
+%bool = OpTypeBool
+%v3uint = OpTypeVector %uint 3
+%ptr_input = OpTypePointer Input %v3uint
+%global_id = OpVariable %ptr_input Input
+%num_groups = OpVariable %ptr_input Input
+%u0 = OpConstant %uint 0
+%u1 = OpConstant %uint 1
+%u2 = OpConstant %uint 2
+%u3 = OpConstant %uint 3
+%u4 = OpConstant %uint 4
+%u6 = OpConstant %uint 6
+%u7 = OpConstant %uint 7
+%u8 = OpConstant %uint 8
+%u31 = OpConstant %uint 31
+%u32 = OpConstant %uint 32
+%u256 = OpConstant %uint 256
+%all = OpConstant %uint 4294967295
+%PushConstants = OpTypeStruct %uint %uint %uint %uint %uint %uint %uint %uint
+%ptr_pc = OpTypePointer PushConstant %PushConstants
+%pc = OpVariable %ptr_pc PushConstant
+%ptr_pc_uint = OpTypePointer PushConstant %uint
+%words = OpTypeRuntimeArray %uint
+%Target = OpTypeStruct %words
+%ptr_target = OpTypePointer Uniform %Target
+%ptr_word = OpTypePointer Uniform %uint
+%target = OpVariable %ptr_target Uniform
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%gid = OpLoad %v3uint %global_id
+%groups = OpLoad %v3uint %num_groups
+%x = OpCompositeExtract %uint %gid 0
+%y = OpCompositeExtract %uint %gid 1
+%z = OpCompositeExtract %uint %gid 2
+%groups_x = OpCompositeExtract %uint %groups 0
+%step = OpIMul %uint %groups_x %u256
+%pattern_ptr = OpAccessChain %ptr_pc_uint %pc %u0
+%pattern = OpLoad %uint %pattern_ptr
+%offset_ptr = OpAccessChain %ptr_pc_uint %pc %u1
+%offset = OpLoad %uint %offset_ptr
+%phase_ptr = OpAccessChain %ptr_pc_uint %pc %u2
+%phase = OpLoad %uint %phase_ptr
+%length_ptr = OpAccessChain %ptr_pc_uint %pc %u3
+%length = OpLoad %uint %length_ptr
+%row_stride_ptr = OpAccessChain %ptr_pc_uint %pc %u6
+%row_stride = OpLoad %uint %row_stride_ptr
+%slice_stride_ptr = OpAccessChain %ptr_pc_uint %pc %u7
+%slice_stride = OpLoad %uint %slice_stride_ptr
+%row_offset = OpIMul %uint %y %row_stride
+%slice_offset = OpIMul %uint %z %slice_stride
+%row_base = OpIAdd %uint %offset %row_offset
+%start = OpIAdd %uint %row_base %slice_offset
+%end = OpIAdd %uint %start %length
+%start_byte = OpBitwiseAnd %uint %start %u3
+%word_extent = OpIAdd %uint %length %start_byte
+%word_extent_rounded = OpIAdd %uint %word_extent %u3
+%word_count = OpShiftRightLogical %uint %word_extent_rounded %u2
+%active = OpULessThan %bool %x %word_count
+OpSelectionMerge %exit None
+OpBranchConditional %active %active_entry %exit
+%active_entry = OpLabel
+%start_word = OpShiftRightLogical %uint %start %u2
+%thread_word = OpIAdd %uint %start_word %x
+%first = OpShiftLeftLogical %uint %thread_word %u2
+OpBranch %word_loop
+%word_loop = OpLabel
+%position = OpPhi %uint %first %active_entry %next_position %word_continue
+%in_range = OpULessThan %bool %position %end
+OpLoopMerge %done %word_continue None
+OpBranchConditional %in_range %body %done
+%body = OpLabel
+%word_end = OpIAdd %uint %position %u4
+%lo = OpExtInst %uint %glsl UMax %position %start
+%hi = OpExtInst %uint %glsl UMin %word_end %end
+%relative = OpISub %uint %position %start
+%pattern_byte = OpIAdd %uint %relative %phase
+%pattern_low = OpBitwiseAnd %uint %pattern_byte %u3
+%shift = OpIMul %uint %pattern_low %u8
+%inverse = OpISub %uint %u32 %shift
+%inverse_masked = OpBitwiseAnd %uint %inverse %u31
+%right = OpShiftRightLogical %uint %pattern %shift
+%left = OpShiftLeftLogical %uint %pattern %inverse_masked
+%value = OpBitwiseOr %uint %right %left
+%word_index = OpShiftRightLogical %uint %position %u2
+%word = OpAccessChain %ptr_word %target %u0 %word_index
+%first_full = OpIEqual %bool %lo %position
+%last_full = OpIEqual %bool %hi %word_end
+%full = OpLogicalAnd %bool %first_full %last_full
+OpSelectionMerge %word_merge None
+OpBranchConditional %full %store %patch
+%store = OpLabel
+OpStore %word %value
+OpBranch %word_merge
+%patch = OpLabel
+%leading = OpISub %uint %lo %position
+%trailing = OpISub %uint %word_end %hi
+%leading_bits = OpIMul %uint %leading %u8
+%trailing_bits = OpIMul %uint %trailing %u8
+%low_mask = OpShiftLeftLogical %uint %all %leading_bits
+%high_mask = OpShiftRightLogical %uint %all %trailing_bits
+%mask = OpBitwiseAnd %uint %low_mask %high_mask
+%keep = OpNot %uint %mask
+%replacement = OpBitwiseAnd %uint %value %mask
+%initial = OpAtomicLoad %uint %word %u1 %u0
+OpBranch %patch_loop
+%patch_loop = OpLabel
+%previous = OpPhi %uint %initial %patch %observed %patch_continue
+OpLoopMerge %patch_done %patch_continue None
+OpBranch %patch_body
+%patch_body = OpLabel
+%preserved = OpBitwiseAnd %uint %previous %keep
+%desired = OpBitwiseOr %uint %preserved %replacement
+%observed = OpAtomicCompareExchange %uint %word %u1 %u0 %u0 %desired %previous
+%success = OpIEqual %bool %previous %observed
+OpBranchConditional %success %patch_done %patch_continue
+%patch_continue = OpLabel
+OpBranch %patch_loop
+%patch_done = OpLabel
+OpBranch %word_merge
+%word_merge = OpLabel
+OpBranch %word_continue
+%word_continue = OpLabel
+%remaining = OpISub %uint %end %position
+%has_next = OpUGreaterThan %bool %remaining %step
+%next_candidate = OpIAdd %uint %position %step
+%next_position = OpSelect %uint %has_next %next_candidate %end
+OpBranch %word_loop
+%done = OpLabel
+OpBranch %exit
+%exit = OpLabel
+OpReturn
+OpFunctionEnd

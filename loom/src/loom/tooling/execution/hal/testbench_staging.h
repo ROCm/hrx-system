@@ -27,6 +27,8 @@ typedef struct loom_run_hal_testbench_staging_t {
     void* storage;
     // Canonical copies from fixture allocation roots to device buffers.
     iree_hal_transfer_operation_t* transfers;
+    // Dense geometry shared by each fixture copy and its queue descriptor.
+    iree_hal_transfer_region_t* regions;
     // Reusable queue transfer descriptors.
     iree_hal_transfer_operation_t* operations;
     // Reusable scoped mappings of fixture allocations.

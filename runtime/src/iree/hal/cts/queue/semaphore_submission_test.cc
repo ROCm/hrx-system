@@ -138,7 +138,7 @@ TEST_P(SemaphoreSubmissionTest,
         IREE_HAL_COMMAND_CATEGORY_TRANSFER, /*binding_capacity=*/0,
         command_buffer.out()));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
-    IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
         command_buffer, update_data, /*source_offset=*/0,
         iree_hal_make_buffer_ref(source_buffer, kSourceOffset,
                                  IREE_ARRAYSIZE(update_data)),
@@ -159,14 +159,14 @@ TEST_P(SemaphoreSubmissionTest,
     };
     IREE_ASSERT_OK(
         iree_hal_command_buffer_barrier(command_buffer, &execution_barrier));
-    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
         command_buffer,
         iree_hal_make_buffer_ref(source_buffer, kSourceOffset,
                                  IREE_ARRAYSIZE(update_data)),
         iree_hal_make_buffer_ref(target_buffer, kCopyTargetOffset,
                                  IREE_ARRAYSIZE(update_data)),
         IREE_HAL_COPY_FLAG_NONE));
-    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
         command_buffer,
         iree_hal_make_buffer_ref(fill_target, /*offset=*/0, kFillLength),
         fill_pattern, IREE_ARRAYSIZE(fill_pattern), IREE_HAL_FILL_FLAG_NONE));
@@ -183,18 +183,18 @@ TEST_P(SemaphoreSubmissionTest,
       ASSERT_NE(nullptr, queue);
       const uint8_t poison_pattern = 0xA5;
       SemaphoreList poison_done(device_, {0}, {1});
-      IREE_ASSERT_OK(iree_hal_queue_fill(
+      IREE_ASSERT_OK(iree_hal_queue_fill_linear(
           queue, iree_hal_semaphore_list_empty(), poison_done, source_buffer,
           /*target_offset=*/0, kBufferSize, &poison_pattern,
           sizeof(poison_pattern), /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));
       const uint8_t zero_pattern = 0;
       SemaphoreList reset_done(device_, {0}, {1});
-      IREE_ASSERT_OK(iree_hal_queue_fill(
+      IREE_ASSERT_OK(iree_hal_queue_fill_linear(
           queue, poison_done, reset_done, target_buffer,
           /*target_offset=*/0, kBufferSize, &zero_pattern, sizeof(zero_pattern),
           /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));
       SemaphoreList direct_fill_done(device_, {0}, {1});
-      IREE_ASSERT_OK(iree_hal_queue_fill(
+      IREE_ASSERT_OK(iree_hal_queue_fill_linear(
           queue, reset_done, direct_fill_done, direct_fill_target,
           /*target_offset=*/0, kDirectFillLength, direct_fill_pattern,
           IREE_ARRAYSIZE(direct_fill_pattern), /*barriers=*/NULL,
@@ -206,10 +206,10 @@ TEST_P(SemaphoreSubmissionTest,
           IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
       std::vector<uint8_t> actual(kBufferSize, 0);
       SemaphoreList download_done(device_, {0}, {1});
-      IREE_ASSERT_OK(iree_hal_queue_download(queue, execute_done, download_done,
-                                             target_buffer,
-                                             /*source_offset=*/0, actual.data(),
-                                             actual.size(), /*barriers=*/NULL));
+      IREE_ASSERT_OK(iree_hal_queue_download_linear(
+          queue, execute_done, download_done, target_buffer,
+          /*source_offset=*/0, actual.data(), actual.size(),
+          /*barriers=*/NULL));
       IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
           download_done, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
       EXPECT_EQ(expected, actual);
@@ -346,7 +346,7 @@ TEST_P(SemaphoreSubmissionTest,
                                      IREE_HAL_COMMAND_CATEGORY_TRANSFER,
                                      /*binding_capacity=*/2, &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
-  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
       command_buffer,
       iree_hal_make_indirect_buffer_ref(/*binding=*/0, /*offset=*/0,
                                         kBufferSize),

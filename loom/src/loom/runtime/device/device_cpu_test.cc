@@ -116,12 +116,17 @@ TEST_P(CpuDeviceTest, GroupProgressRetiresIndependentElasticPools) {
     IREE_ASSERT_OK(loom_runtime_execution_alloca(work.execution, 1, &request,
                                                  &work.buffer));
     const uint32_t pattern = 0x12340000u + i;
+    const iree_hal_fill_region_t fill_region = {
+        .row_length = sizeof(work.output),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t fill = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
         .fill =
             {
                 .target_buffer = work.buffer,
-                .length = sizeof(work.output),
+                .region = &fill_region,
                 .pattern = &pattern,
                 .pattern_length = sizeof(pattern),
             },
@@ -129,13 +134,18 @@ TEST_P(CpuDeviceTest, GroupProgressRetiresIndependentElasticPools) {
     uint64_t value = 0;
     IREE_ASSERT_OK(
         loom_runtime_execution_transfer(work.execution, 1, &fill, &value));
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = sizeof(work.output),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
             {
                 .source_buffer = work.buffer,
                 .target = work.output.data(),
-                .length = sizeof(work.output),
+                .region = &download_region,
             },
     };
     IREE_ASSERT_OK(

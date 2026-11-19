@@ -561,13 +561,18 @@ TEST(AqlTransferSubmissionTest, RejectedSuffixWaitsForAcceptedHostWrites) {
   iree_hal_memory_contract_t contract = {.scopes = scopes.data()};
   buffer.base.memory.contract = &contract;
   std::array<uint8_t, 8> target = {};
+  const iree_hal_transfer_region_t operation_region = {
+      .row_length = target.size(),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
           {
               .source_buffer = &buffer.base,
               .target = target.data(),
-              .length = target.size(),
+              .region = &operation_region,
           },
   };
   uint64_t value = 1;
@@ -669,17 +674,20 @@ TEST_P(AqlSubmissionTest, FileCopiesJoinFailureAndRetirement) {
   constexpr uint32_t kPacketCapacity =
       IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_PACKETS;
   for (iree_host_size_t first = 0; first < count; first += kPacketCapacity) {
-    std::array<uint64_t, 4 * kPacketCapacity> arguments;
+    std::array<iree_hal_amd_gpu_blit_arguments_t, kPacketCapacity> arguments;
     iree_hal_amd_gpu_aql_transfer_chunk_t chunk;
     IREE_ASSERT_OK(iree_hal_amd_gpu_aql_transfer_prepare_chunk(
         &submission->transfer.capture, 0x2000, kPacketCapacity,
         iree_make_byte_span(arguments.data(), sizeof(arguments)), 0x3000, false,
         iree_byte_span_empty(), 0, &chunk));
     for (iree_host_size_t i = 0; i < kPacketCapacity; ++i) {
-      EXPECT_EQ(arguments[i * 4 + 0], 0x123456789u);
-      EXPECT_EQ(arguments[i * 4 + 1], 0x987654321u);
-      EXPECT_EQ(arguments[i * 4 + 2], 2u * 1024 * 1024);
-      EXPECT_EQ(arguments[i * 4 + 3], 0u);
+      EXPECT_EQ(arguments[i].source, 0x123456789u);
+      EXPECT_EQ(arguments[i].target, 0x987654321u);
+      EXPECT_EQ(arguments[i].length, 2u * 1024 * 1024);
+      EXPECT_EQ(arguments[i].pattern, 0u);
+      EXPECT_EQ(arguments[i].fill, 0u);
+      EXPECT_EQ(arguments[i].row_count, 1u);
+      EXPECT_EQ(arguments[i].slice_count, 1u);
     }
     EXPECT_EQ(chunk.packet_count, kPacketCapacity);
     EXPECT_EQ(chunk.argument_length, sizeof(arguments));

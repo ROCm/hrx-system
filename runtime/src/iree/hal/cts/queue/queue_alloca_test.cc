@@ -165,7 +165,7 @@ class QueueAllocaTest : public CtsTestBase<> {
                    uint32_t pattern) {
     SemaphoreList empty_wait;
     SemaphoreList fill_signal(device_, {0}, {1});
-    IREE_ASSERT_OK(iree_hal_queue_fill(
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
         queue, empty_wait, fill_signal, buffer, /*target_offset=*/0,
         iree_hal_buffer_byte_length(buffer), &pattern, sizeof(pattern),
         /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));

@@ -13,118 +13,125 @@
 // WGSL shader source
 //===----------------------------------------------------------------------===//
 
-// Fills a byte range [offset, offset+length) with a repeating 4-byte pattern.
-// Each thread handles one u32 word that overlaps the fill range.
-//
-// Interior words (fully covered) use a direct write with a pre-rotated pattern
-// that accounts for the fill offset's misalignment. This makes the fast path
-// work regardless of whether the fill starts at a 4-byte boundary.
-//
-// Edge words (first/last, partially covered) do read-modify-write with per-byte
-// pattern extraction.
-//
-// Params (uniform, 16 bytes):
-//   offset: u32  — byte offset in buffer where fill begins
-//   length: u32  — number of bytes to fill
-//   pattern: u32 — 4-byte replicated fill pattern
-//   _pad: u32
-//
-// Dispatch: ceil(word_count / 256) workgroups where
-//   word_count = ceil((offset + length - align_down(offset, 4)) / 4)
+// Linear and rectangular transfers share each pipeline body. Descriptor-sized
+// tiles keep WGSL address arithmetic in u32 while host offsets remain u64.
+// Edge dwords are updated atomically: distinct rows may occupy the same word.
 static const char iree_hal_webgpu_builtin_fill_wgsl[] =
-    "struct Params { offset: u32, length: u32, pattern: u32, _pad: u32, };\n"
-    "@group(0) @binding(0) var<storage, read_write> buffer: array<u32>;\n"
+    "struct Params {\n"
+    "  source_offset: u32, target_offset: u32, row_length: u32, flags: u32,\n"
+    "  source_row_stride: u32, target_row_stride: u32,\n"
+    "  source_slice_stride: u32, target_slice_stride: u32,\n"
+    "  row_count: u32, slice_count: u32, pattern: u32, padding: u32,\n"
+    "};\n"
+    "@group(0) @binding(0) var<storage, read_write> target: "
+    "array<atomic<u32>>;\n"
     "@group(0) @binding(1) var<uniform> params: Params;\n"
+    "fn store_word(index: u32, value: u32, mask: u32) {\n"
+    "  if (mask == 0xffffffffu) { atomicStore(&target[index], value); return; "
+    "}\n"
+    "  var previous = atomicLoad(&target[index]);\n"
+    "  loop {\n"
+    "    let result = atomicCompareExchangeWeak(&target[index], previous,\n"
+    "        (previous & ~mask) | (value & mask));\n"
+    "    if (result.exchanged) { break; }\n"
+    "    previous = result.old_value;\n"
+    "  }\n"
+    "}\n"
     "@compute @workgroup_size(256)\n"
-    "fn main(@builtin(global_invocation_id) gid: vec3<u32>) {\n"
-    "  let fill_end = params.offset + params.length;\n"
-    "  let wi = (params.offset >> 2u) + gid.x;\n"
-    "  let wb = wi << 2u;\n"
-    "  if (wb >= fill_end) { return; }\n"
-    "  let lo = max(wb, params.offset);\n"
-    "  let hi = min(wb + 4u, fill_end);\n"
-    // Pre-rotate pattern to account for fill offset misalignment. When the
-    // fill starts at byte offset N (not a multiple of 4), each interior word
-    // needs the pattern rotated right by (N & 3) bytes. This is computed once
-    // and reused for all interior words.
-    "  let sh = (params.offset & 3u) * 8u;\n"
-    "  let rp = select((params.pattern >> sh) | (params.pattern << (32u - sh))"
-    ", params.pattern, sh == 0u);\n"
-    "  if (lo == wb && hi == wb + 4u) {\n"
-    "    buffer[wi] = rp;\n"
-    "    return;\n"
+    "fn main(@builtin(global_invocation_id) id: vec3<u32>,\n"
+    "        @builtin(num_workgroups) groups: vec3<u32>) {\n"
+    "  let target_start = params.target_offset + id.y * "
+    "params.target_row_stride +\n"
+    "      id.z * params.target_slice_stride;\n"
+    "  let source_start = params.source_offset + id.y * "
+    "params.source_row_stride +\n"
+    "      id.z * params.source_slice_stride;\n"
+    "  let end = target_start + params.row_length;\n"
+    "  let word_count = (params.row_length + (target_start & 3u) + 3u) / 4u;\n"
+    "  var ordinal = id.x;\n"
+    "  loop {\n"
+    "    if (ordinal >= word_count) { break; }\n"
+    "    let word = (target_start >> 2u) + ordinal;\n"
+    "    let position = word << 2u;\n"
+    "    let lo = max(position, target_start);\n"
+    "    let hi = min(position + 4u, end);\n"
+    "    let mask = (0xffffffffu << ((lo - position) * 8u)) &\n"
+    "        (0xffffffffu >> ((position + 4u - hi) * 8u));\n"
+    "    let shift = ((position - target_start) & 3u) * 8u;\n"
+    "    let value = (params.pattern >> shift) |\n"
+    "        (params.pattern << ((32u - shift) & 31u));\n"
+    "    store_word(word, value, mask);\n"
+    "    ordinal += groups.x * 256u;\n"
     "  }\n"
-    // Edge word: read-modify-write with per-byte pattern extraction.
-    "  var v: u32 = buffer[wi];\n"
-    "  for (var i = lo; i < hi; i++) {\n"
-    "    let pb = (params.pattern >> (((i - params.offset) & 3u) * 8u))"
-    " & 0xffu;\n"
-    "    let s = (i & 3u) * 8u;\n"
-    "    v = (v & ~(0xffu << s)) | (pb << s);\n"
-    "  }\n"
-    "  buffer[wi] = v;\n"
     "}\n";
 
-// Copies [src_offset, src_offset+length) to [dst_offset, dst_offset+length)
-// with arbitrary byte alignment. Each thread handles one u32 word in the
-// destination.
-//
-// Interior words (fully covered) use a barrel-shift reassembly: two adjacent
-// source words are read and shifted to produce the correctly-aligned output
-// word. When source and destination have the same alignment, this reduces to
-// a single-word copy. This gives the fast path for ANY alignment combination,
-// not just when both sides are 4-byte aligned.
-//
-// Edge words (first/last, partially covered) do read-modify-write with
-// per-byte extraction.
-//
-// Params (uniform, 16 bytes):
-//   src_offset: u32 — byte offset in source buffer
-//   dst_offset: u32 — byte offset in destination buffer
-//   length: u32     — number of bytes to copy
-//   _pad: u32
-//
-// Dispatch: ceil(word_count / 256) workgroups
 static const char iree_hal_webgpu_builtin_copy_wgsl[] =
-    "struct Params { src_offset: u32, dst_offset: u32, length: u32,"
-    " _pad: u32, };\n"
-    "@group(0) @binding(0) var<storage> src: array<u32>;\n"
-    "@group(0) @binding(1) var<storage, read_write> dst: array<u32>;\n"
+    "struct Params {\n"
+    "  source_offset: u32, target_offset: u32, row_length: u32, flags: u32,\n"
+    "  source_row_stride: u32, target_row_stride: u32,\n"
+    "  source_slice_stride: u32, target_slice_stride: u32,\n"
+    "  row_count: u32, slice_count: u32, pattern: u32, padding: u32,\n"
+    "};\n"
+    "@group(0) @binding(0) var<storage> source: array<u32>;\n"
+    "@group(0) @binding(1) var<storage, read_write> target: "
+    "array<atomic<u32>>;\n"
     "@group(0) @binding(2) var<uniform> params: Params;\n"
+    "fn load_word(index: u32) -> u32 {\n"
+    "  if ((params.flags & 1u) != 0u) { return atomicLoad(&target[index]); }\n"
+    "  return source[index];\n"
+    "}\n"
+    "fn store_word(index: u32, value: u32, mask: u32) {\n"
+    "  if (mask == 0xffffffffu) { atomicStore(&target[index], value); return; "
+    "}\n"
+    "  var previous = atomicLoad(&target[index]);\n"
+    "  loop {\n"
+    "    let result = atomicCompareExchangeWeak(&target[index], previous,\n"
+    "        (previous & ~mask) | (value & mask));\n"
+    "    if (result.exchanged) { break; }\n"
+    "    previous = result.old_value;\n"
+    "  }\n"
+    "}\n"
     "@compute @workgroup_size(256)\n"
-    "fn main(@builtin(global_invocation_id) gid: vec3<u32>) {\n"
-    "  let dst_end = params.dst_offset + params.length;\n"
-    "  let wi = (params.dst_offset >> 2u) + gid.x;\n"
-    "  let wb = wi << 2u;\n"
-    "  if (wb >= dst_end) { return; }\n"
-    "  let lo = max(wb, params.dst_offset);\n"
-    "  let hi = min(wb + 4u, dst_end);\n"
-    // Interior word: barrel-shift reassembly from two adjacent source words.
-    // The 4 source bytes for this destination word always span at most 2
-    // source words. When source is word-aligned (sh == 0), one read suffices.
-    // Otherwise, read both words and shift/OR to produce the output.
-    //
-    // Bounds safety: for interior words, all 4 source bytes are within the
-    // copy range (src_offset + length), so src[sw] and src[sw + 1] are both
-    // within the source buffer allocation.
-    "  if (lo == wb && hi == wb + 4u) {\n"
-    "    let sb = params.src_offset + (wb - params.dst_offset);\n"
-    "    let sw = sb >> 2u;\n"
-    "    let sh = (sb & 3u) * 8u;\n"
-    "    dst[wi] = select("
-    "(src[sw] >> sh) | (src[sw + 1u] << (32u - sh))"
-    ", src[sw], sh == 0u);\n"
-    "    return;\n"
+    "fn main(@builtin(global_invocation_id) id: vec3<u32>,\n"
+    "        @builtin(num_workgroups) groups: vec3<u32>) {\n"
+    "  let target_start = params.target_offset + id.y * "
+    "params.target_row_stride +\n"
+    "      id.z * params.target_slice_stride;\n"
+    "  let source_start = params.source_offset + id.y * "
+    "params.source_row_stride +\n"
+    "      id.z * params.source_slice_stride;\n"
+    "  let end = target_start + params.row_length;\n"
+    "  let word_count = (params.row_length + (target_start & 3u) + 3u) / 4u;\n"
+    "  var ordinal = id.x;\n"
+    "  loop {\n"
+    "    if (ordinal >= word_count) { break; }\n"
+    "    let word = (target_start >> 2u) + ordinal;\n"
+    "    let position = word << 2u;\n"
+    "    let lo = max(position, target_start);\n"
+    "    let hi = min(position + 4u, end);\n"
+    "    let mask = (0xffffffffu << ((lo - position) * 8u)) &\n"
+    "        (0xffffffffu >> ((position + 4u - hi) * 8u));\n"
+    "    var value = 0u;\n"
+    "    if (mask == 0xffffffffu) {\n"
+    "      let source_position = source_start + (position - target_start);\n"
+    "      let source_word = source_position >> 2u;\n"
+    "      let shift = (source_position & 3u) * 8u;\n"
+    "      value = load_word(source_word);\n"
+    "      if (shift != 0u) {\n"
+    "        value = (value >> shift) | (load_word(source_word + 1u) << (32u - "
+    "shift));\n"
+    "      }\n"
+    "    } else {\n"
+    "      for (var byte = lo; byte < hi; byte++) {\n"
+    "        let source_position = source_start + (byte - target_start);\n"
+    "        let source_byte = (load_word(source_position >> 2u) >>\n"
+    "            ((source_position & 3u) * 8u)) & 0xffu;\n"
+    "        value |= source_byte << ((byte & 3u) * 8u);\n"
+    "      }\n"
+    "    }\n"
+    "    store_word(word, value, mask);\n"
+    "    ordinal += groups.x * 256u;\n"
     "  }\n"
-    // Edge word: read-modify-write with per-byte extraction.
-    "  var v: u32 = dst[wi];\n"
-    "  for (var i = lo; i < hi; i++) {\n"
-    "    let so = params.src_offset + (i - params.dst_offset);\n"
-    "    let sb = (src[so >> 2u] >> ((so & 3u) * 8u)) & 0xffu;\n"
-    "    let s = (i & 3u) * 8u;\n"
-    "    v = (v & ~(0xffu << s)) | (sb << s);\n"
-    "  }\n"
-    "  dst[wi] = v;\n"
     "}\n";
 
 //===----------------------------------------------------------------------===//
@@ -208,12 +215,12 @@ iree_status_t iree_hal_webgpu_builtins_initialize(
   IREE_TRACE_ZONE_BEGIN(z0);
   memset(out_builtins, 0, sizeof(*out_builtins));
 
-  // Fill shader: binding 0 = storage(rw), binding 1 = uniform(16 bytes).
+  // Fill shader: binding 0 = storage(rw), binding 1 = uniform(48 bytes).
   iree_hal_webgpu_bind_group_layout_entry_t fill_entries[2] = {
       {0, IREE_HAL_WEBGPU_SHADER_STAGE_COMPUTE,
        IREE_HAL_WEBGPU_BUFFER_BINDING_TYPE_STORAGE, 0, 0, 0},
       {1, IREE_HAL_WEBGPU_SHADER_STAGE_COMPUTE,
-       IREE_HAL_WEBGPU_BUFFER_BINDING_TYPE_UNIFORM, 0, 16, 0},
+       IREE_HAL_WEBGPU_BUFFER_BINDING_TYPE_UNIFORM, 0, 48, 0},
   };
   iree_status_t status = iree_hal_webgpu_builtins_create_pipeline(
       device_handle, iree_hal_webgpu_builtin_fill_wgsl,
@@ -222,7 +229,7 @@ iree_status_t iree_hal_webgpu_builtins_initialize(
       &out_builtins->fill_bind_group_layout);
 
   // Copy shader: binding 0 = storage(ro), binding 1 = storage(rw),
-  //              binding 2 = uniform(16 bytes).
+  //              binding 2 = uniform(48 bytes).
   if (iree_status_is_ok(status)) {
     iree_hal_webgpu_bind_group_layout_entry_t copy_entries[3] = {
         {0, IREE_HAL_WEBGPU_SHADER_STAGE_COMPUTE,
@@ -230,7 +237,7 @@ iree_status_t iree_hal_webgpu_builtins_initialize(
         {1, IREE_HAL_WEBGPU_SHADER_STAGE_COMPUTE,
          IREE_HAL_WEBGPU_BUFFER_BINDING_TYPE_STORAGE, 0, 0, 0},
         {2, IREE_HAL_WEBGPU_SHADER_STAGE_COMPUTE,
-         IREE_HAL_WEBGPU_BUFFER_BINDING_TYPE_UNIFORM, 0, 16, 0},
+         IREE_HAL_WEBGPU_BUFFER_BINDING_TYPE_UNIFORM, 0, 48, 0},
     };
     status = iree_hal_webgpu_builtins_create_pipeline(
         device_handle, iree_hal_webgpu_builtin_copy_wgsl,

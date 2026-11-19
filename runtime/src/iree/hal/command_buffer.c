@@ -524,9 +524,13 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_advise_buffer(
 IREE_API_EXPORT iree_status_t iree_hal_command_buffer_fill_buffer(
     iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_ref_t target_ref,
     const void* pattern, iree_host_size_t pattern_length,
-    iree_hal_fill_flags_t flags) {
+    const iree_hal_fill_region_t* region, iree_hal_fill_flags_t flags) {
   IREE_ASSERT_ARGUMENT(command_buffer);
-  if (target_ref.length == 0) {
+  if (!region) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "transfer region is null");
+  }
+  if (!region->row_length || !region->row_count || !region->slice_count) {
     // No-op fill. All other validation is skipped.
     return iree_ok_status();
   }
@@ -535,21 +539,49 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_fill_buffer(
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_hal_command_buffer_fill_buffer_validation(
                 command_buffer, VALIDATION_STATE(command_buffer), target_ref,
-                pattern, pattern_length, flags));
+                pattern, pattern_length, region, flags));
   });
+  iree_hal_fill_region_t resolved_region;
+  if (region->row_length == IREE_HAL_WHOLE_BUFFER &&
+      target_ref.length != IREE_HAL_WHOLE_BUFFER) {
+    resolved_region = *region;
+    resolved_region.row_length = target_ref.length;
+    region = &resolved_region;
+  }
+  if (region->row_length != IREE_HAL_WHOLE_BUFFER) {
+    target_ref.length = iree_hal_transfer_range_length(
+        region->row_length, region->row_count, region->slice_count,
+        &region->target_strides);
+  }
   iree_status_t status = _VTABLE_DISPATCH(command_buffer, fill_buffer)(
-      command_buffer, target_ref, pattern, pattern_length, flags);
+      command_buffer, target_ref, pattern, pattern_length, region, flags);
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_fill_buffer_linear(
+    iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_ref_t target_ref,
+    const void* pattern, iree_host_size_t pattern_length,
+    iree_hal_fill_flags_t flags) {
+  const iree_hal_fill_region_t region = {
+      .row_length = target_ref.length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  return iree_hal_command_buffer_fill_buffer(
+      command_buffer, target_ref, pattern, pattern_length, &region, flags);
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_command_buffer_update_buffer(
     iree_hal_command_buffer_t* command_buffer, const void* source_buffer,
     iree_host_size_t source_offset, iree_hal_buffer_ref_t target_ref,
-    iree_hal_update_flags_t flags) {
+    const iree_hal_transfer_region_t* region, iree_hal_update_flags_t flags) {
   IREE_ASSERT_ARGUMENT(command_buffer);
-  IREE_ASSERT_ARGUMENT(source_buffer);
-  if (target_ref.length == 0) {
+  if (!region) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "transfer region is null");
+  }
+  if (!region->row_length || !region->row_count || !region->slice_count) {
     // No-op update. All other validation is skipped.
     return iree_ok_status();
   }
@@ -558,19 +590,42 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_update_buffer(
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_hal_command_buffer_update_buffer_validation(
                 command_buffer, VALIDATION_STATE(command_buffer), source_buffer,
-                source_offset, target_ref, flags));
+                source_offset, target_ref, region, flags));
   });
+  if (region->row_length != IREE_HAL_WHOLE_BUFFER) {
+    target_ref.length = iree_hal_transfer_range_length(
+        region->row_length, region->row_count, region->slice_count,
+        &region->target_strides);
+  }
   iree_status_t status = _VTABLE_DISPATCH(command_buffer, update_buffer)(
-      command_buffer, source_buffer, source_offset, target_ref, flags);
+      command_buffer, source_buffer, source_offset, target_ref, region, flags);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_update_buffer_linear(
+    iree_hal_command_buffer_t* command_buffer, const void* source_buffer,
+    iree_host_size_t source_offset, iree_hal_buffer_ref_t target_ref,
+    iree_hal_update_flags_t flags) {
+  const iree_hal_transfer_region_t region = {
+      .row_length = target_ref.length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  return iree_hal_command_buffer_update_buffer(
+      command_buffer, source_buffer, source_offset, target_ref, &region, flags);
+}
+
 IREE_API_EXPORT iree_status_t iree_hal_command_buffer_copy_buffer(
     iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_ref_t source_ref,
-    iree_hal_buffer_ref_t target_ref, iree_hal_copy_flags_t flags) {
+    iree_hal_buffer_ref_t target_ref, const iree_hal_transfer_region_t* region,
+    iree_hal_copy_flags_t flags) {
   IREE_ASSERT_ARGUMENT(command_buffer);
-  if (target_ref.length == 0) {
+  if (!region) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "transfer region is null");
+  }
+  if (!region->row_length || !region->row_count || !region->slice_count) {
     // No-op copy. All other validation is skipped.
     return iree_ok_status();
   }
@@ -579,12 +634,45 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_copy_buffer(
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_hal_command_buffer_copy_buffer_validation(
                 command_buffer, VALIDATION_STATE(command_buffer), source_ref,
-                target_ref, flags));
+                target_ref, region, flags));
   });
+  iree_hal_transfer_region_t resolved_region;
+  if (region->row_length == IREE_HAL_WHOLE_BUFFER &&
+      target_ref.length != IREE_HAL_WHOLE_BUFFER) {
+    resolved_region = *region;
+    resolved_region.row_length = target_ref.length;
+    region = &resolved_region;
+  }
+  if (region->row_length != IREE_HAL_WHOLE_BUFFER) {
+    target_ref.length = iree_hal_transfer_range_length(
+        region->row_length, region->row_count, region->slice_count,
+        &region->target_strides);
+    source_ref.length = iree_hal_transfer_range_length(
+        region->row_length, region->row_count, region->slice_count,
+        &region->source_strides);
+  }
   iree_status_t status = _VTABLE_DISPATCH(command_buffer, copy_buffer)(
-      command_buffer, source_ref, target_ref, flags);
+      command_buffer, source_ref, target_ref, region, flags);
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_copy_buffer_linear(
+    iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_ref_t source_ref,
+    iree_hal_buffer_ref_t target_ref, iree_hal_copy_flags_t flags) {
+  IF_VALIDATING(command_buffer, {
+    if (source_ref.length != target_ref.length) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "linear copy binding lengths must match");
+    }
+  });
+  const iree_hal_transfer_region_t region = {
+      .row_length = target_ref.length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  return iree_hal_command_buffer_copy_buffer(command_buffer, source_ref,
+                                             target_ref, &region, flags);
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_command_buffer_dispatch(

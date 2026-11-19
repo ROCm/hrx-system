@@ -101,10 +101,9 @@ uint32_t* iree_hal_amd_gpu_pm4_fixup_emit(
 
 uint32_t* iree_hal_amd_gpu_pm4_blit_emit(
     uint32_t* words, const iree_hal_amd_gpu_pm4_launch_t* launch,
-    uint64_t argument_address, uint32_t workgroup_count) {
+    uint64_t argument_address, const uint32_t groups[3]) {
   const uint32_t size[3] = {64, 1, 1};
   const uint32_t partial[3] = {0, 0, 0};
-  const uint32_t groups[3] = {workgroup_count, 1, 1};
   const iree_hal_amd_gpu_pm4_launch_inputs_t inputs = {
       .kernarg_pointer = argument_address,
   };
@@ -237,12 +236,18 @@ uint32_t* iree_hal_amd_gpu_pm4_program_emit(
           .source = source.address,
           .target = instance->address,
           .length = length,
+          .row_count = 1,
+          .slice_count = 1,
+          .groups_y = 1,
+          .groups_z = 1,
       };
+      const uint32_t groups[3] = {iree_hal_amd_gpu_blit_workgroup_count(length),
+                                  1, 1};
       words = iree_hal_amd_gpu_pm4_blit_emit(
           words, &pool->blit,
           argument_address +
               offsetof(iree_hal_amd_gpu_pm4_program_arguments_t, copy),
-          iree_hal_amd_gpu_blit_workgroup_count(length));
+          groups);
       words = iree_hal_amd_gpu_pm4_emit_compute_flush(words);
       // A shader-produced clone must reach bypassing CP clients before either
       // packet fixups overwrite it or command fetch reads the unpatched body.

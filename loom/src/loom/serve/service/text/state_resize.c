@@ -111,7 +111,9 @@ static iree_status_t loom_serve_text_state_resize_directories(
         state->storage.blocks_per_row * sizeof(*state->cache.maps),
         (void**)&state->cache.maps));
     IREE_RETURN_IF_ERROR(loom_serve_text_resize_directory(
-        state->host_allocator, 0, row_count, 2 * sizeof(*state->cache.uploads),
+        state->host_allocator, 0, row_count,
+        2 * (sizeof(*state->cache.uploads) +
+             sizeof(iree_hal_transfer_region_t)),
         (void**)&state->cache.uploads));
   }
   IREE_RETURN_IF_ERROR(loom_serve_text_resize_directory(
@@ -209,6 +211,7 @@ iree_status_t loom_serve_text_state_resize(loom_serve_text_state_t* state,
 
   iree_hal_transfer_operation_t
       transfers[2 * LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT + 4];
+  iree_hal_transfer_region_t transfers_regions[IREE_ARRAYSIZE(transfers)];
   iree_host_size_t transfer_count = 0;
   iree_hal_buffer_t* previous[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT] = {0};
   iree_status_t status = iree_ok_status();
@@ -262,27 +265,40 @@ iree_status_t loom_serve_text_state_resize(loom_serve_text_state_t* state,
         // Endpoint carry follows the resident bank, so only that small tail
         // changes offset. The large recurrent arena remains append-only.
         const uint64_t offset = previous_count * state->storage.carry_stride;
-        transfers[transfer_count++] = (iree_hal_transfer_operation_t){
+        transfers_regions[transfer_count] = (iree_hal_transfer_region_t){
+            .row_length = offset, .row_count = 1, .slice_count = 1};
+        transfers[transfer_count] = (iree_hal_transfer_operation_t){
             .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
             .copy = {.source_buffer = previous[i],
                      .target_buffer = *root,
-                     .length = offset}};
+                     .region = &transfers_regions[transfer_count]}};
+        ++transfer_count;
         if (state->checkpoints.capacity) {
-          transfers[transfer_count++] = (iree_hal_transfer_operation_t){
+          transfers_regions[transfer_count] = (iree_hal_transfer_region_t){
+              .row_length =
+                  state->checkpoints.capacity * state->storage.carry_stride,
+              .row_count = 1,
+              .slice_count = 1};
+          transfers[transfer_count] = (iree_hal_transfer_operation_t){
               .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
               .copy = {.source_buffer = previous[i],
                        .source_offset = offset,
                        .target_buffer = *root,
                        .target_offset = row_count * state->storage.carry_stride,
-                       .length = state->checkpoints.capacity *
-                                 state->storage.carry_stride}};
+                       .region = &transfers_regions[transfer_count]}};
+          ++transfer_count;
         }
       } else if (!state->memory.buffers[i] && i != 3 && i != 10) {
-        transfers[transfer_count++] = (iree_hal_transfer_operation_t){
+        transfers_regions[transfer_count] = (iree_hal_transfer_region_t){
+            .row_length = iree_hal_buffer_byte_length(previous[i]),
+            .row_count = 1,
+            .slice_count = 1};
+        transfers[transfer_count] = (iree_hal_transfer_operation_t){
             .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
             .copy = {.source_buffer = previous[i],
                      .target_buffer = *root,
-                     .length = iree_hal_buffer_byte_length(previous[i])}};
+                     .region = &transfers_regions[transfer_count]}};
+        ++transfer_count;
       }
     }
     iree_hal_buffer_release(replacement);
@@ -295,21 +311,30 @@ iree_status_t loom_serve_text_state_resize(loom_serve_text_state_t* state,
       const iree_const_byte_span_t origins =
           state->storage.bytes[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS + i];
       if (table && origins.data_length) {
-        transfers[transfer_count++] = (iree_hal_transfer_operation_t){
+        transfers_regions[transfer_count] =
+            (iree_hal_transfer_region_t){.row_length = origins.data_length,
+                                         .row_count = 1,
+                                         .slice_count = 1};
+        transfers[transfer_count] = (iree_hal_transfer_operation_t){
             .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
             .upload = {.source = origins.data,
                        .target_buffer = table,
-                       .length = origins.data_length}};
+                       .region = &transfers_regions[transfer_count]}};
+        ++transfer_count;
       }
       if (table && state->cache.capacity) {
-        transfers[transfer_count++] = (iree_hal_transfer_operation_t){
+        transfers_regions[transfer_count] = (iree_hal_transfer_region_t){
+            .row_length = previous_count * state->storage.blocks_per_row *
+                          sizeof(*state->cache.maps),
+            .row_count = 1,
+            .slice_count = 1};
+        transfers[transfer_count] = (iree_hal_transfer_operation_t){
             .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
             .upload = {.source = state->cache.maps,
                        .target_buffer = table,
                        .target_offset = state->storage.map_origin,
-                       .length = previous_count *
-                                 state->storage.blocks_per_row *
-                                 sizeof(*state->cache.maps)}};
+                       .region = &transfers_regions[transfer_count]}};
+        ++transfer_count;
       }
     }
     uint64_t completion = 0;

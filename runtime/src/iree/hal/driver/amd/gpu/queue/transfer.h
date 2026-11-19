@@ -26,16 +26,39 @@ typedef union iree_hal_amd_gpu_transfer_address_t {
 // One nonempty admitted transfer. A 64-bit host needs one cache line per entry.
 typedef struct iree_hal_amd_gpu_transfer_operation_t {
   // Active public operation family; zero-length operations are omitted.
-  iree_hal_transfer_operation_type_t type;
+  uint32_t type : 8;
+  // Geometry is stored in the same capture instead of a linear byte length.
+  uint32_t rectangular : 1;
   // Fill pattern expanded to four repeating bytes, zero for other operations.
   uint32_t pattern;
   // Device source for copy/download, host source for update/upload.
   iree_hal_amd_gpu_transfer_address_t source;
   // Device target except for a borrowed host download target.
   iree_hal_amd_gpu_transfer_address_t target;
-  // Complete logical transfer extent in bytes.
-  iree_device_size_t length;
+  union {
+    // Complete useful extent for a linear operation.
+    iree_device_size_t length;
+    // Immutable geometry owned by the enclosing capture for a rectangle.
+    const iree_hal_transfer_region_t* region;
+  };
 } iree_hal_amd_gpu_transfer_operation_t;
+
+// Useful byte count established by public admission and retained at capture.
+static inline uint64_t iree_hal_amd_gpu_transfer_operation_length(
+    const iree_hal_amd_gpu_transfer_operation_t* operation) {
+  return operation->rectangular
+             ? operation->region->row_length * operation->region->row_count *
+                   operation->region->slice_count
+             : operation->length;
+}
+
+// Copies useful bytes between an operation's host endpoint and packed staging.
+// DOWNLOAD scatters into the host destination; UPDATE/UPLOAD gather from the
+// host source. Offsets address useful bytes, and padding is never accessed.
+// All ranges and lifetimes have already been admitted; this does not allocate.
+void iree_hal_amd_gpu_transfer_copy_host(
+    const iree_hal_amd_gpu_transfer_operation_t* operation, uint64_t offset,
+    iree_host_size_t length, void* staging);
 
 // Protocol-specific bounds for the reusable host transport storage.
 typedef struct iree_hal_amd_gpu_transfer_staging_limits_t {
@@ -49,7 +72,9 @@ typedef struct iree_hal_amd_gpu_transfer_staging_limits_t {
 typedef struct iree_hal_amd_gpu_transfer_layout_t {
   // Number of nonempty operation descriptors.
   iree_host_size_t count;
-  // Descriptor and captured update-byte extent, in bytes.
+  // Number of captured rectangular geometries; linear entries need none.
+  iree_host_size_t region_count;
+  // Descriptor, geometry, and captured update-byte extent, in bytes.
   iree_host_size_t byte_length;
 } iree_hal_amd_gpu_transfer_layout_t;
 
@@ -65,7 +90,7 @@ typedef struct iree_hal_amd_gpu_transfer_cursor_t {
 typedef struct iree_hal_amd_gpu_transfer_t {
   // Initialized descriptors whose retained buffers belong to this capture.
   iree_host_size_t count;
-  // Inline immutable descriptors followed by captured update bytes.
+  // Inline immutable descriptors followed by geometry and captured updates.
   iree_hal_amd_gpu_transfer_operation_t* operations;
   // Unpublished suffix, advanced only after a successful native publication.
   iree_hal_amd_gpu_transfer_cursor_t cursor;

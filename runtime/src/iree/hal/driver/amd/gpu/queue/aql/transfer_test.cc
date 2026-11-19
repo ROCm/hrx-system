@@ -35,8 +35,10 @@ TEST(AqlTransferPacketTest, BoundedGridTraversesTheCompleteByteRange) {
   };
   for (auto [length, grid] : cases) {
     SCOPED_TRACE(length);
+    const uint32_t workgroup_count[3] = {
+        iree_hal_amd_gpu_blit_workgroup_count(length), 1, 1};
     const auto packet = iree_hal_amd_gpu_aql_transfer_packet(
-        0x123456789000, 0xABCDEF010020, length,
+        0x123456789000, 0xABCDEF010020, workgroup_count,
         IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
             IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM);
     const std::array<uint32_t, 16> expected = {
@@ -181,11 +183,11 @@ TEST_F(AqlTransferTest, StreamingBlitAbiPreservesPayloadAndAdjacentStorage) {
       .count = 1,
       .operations = &operation,
   };
-  std::array<uint32_t, 10> words;
+  std::array<uint32_t, 22> words;
   words.fill(0xa5a5a5a5);
   iree_hal_amd_gpu_aql_transfer_chunk_t chunk;
   IREE_ASSERT_OK(iree_hal_amd_gpu_aql_transfer_prepare_chunk(
-      &transfer, 0x1000, 1, iree_make_byte_span(words.data() + 1, 32), 0x2000,
+      &transfer, 0x1000, 1, iree_make_byte_span(words.data() + 1, 80), 0x2000,
       true, iree_byte_span_empty(), 0, &chunk));
 #if defined(IREE_ARCH_X86_64)
   _mm_sfence();
@@ -199,8 +201,12 @@ TEST_F(AqlTransferTest, StreamingBlitAbiPreservesPayloadAndAdjacentStorage) {
   EXPECT_EQ(arguments.length, UINT64_C(4) << 30);
   EXPECT_EQ(arguments.pattern, 0u);
   EXPECT_EQ(arguments.fill, 0u);
+  EXPECT_EQ(arguments.row_count, 1u);
+  EXPECT_EQ(arguments.slice_count, 1u);
+  EXPECT_EQ(arguments.groups_y, 1u);
+  EXPECT_EQ(arguments.groups_z, 1u);
   EXPECT_EQ(chunk.packet_count, 1u);
-  EXPECT_EQ(chunk.argument_length, 32u);
+  EXPECT_EQ(chunk.argument_length, 80u);
   EXPECT_EQ(chunk.staging_length, 0u);
 }
 
@@ -224,14 +230,14 @@ TEST_F(AqlTransferTest, MultiGigabyteDeviceRangesNeedOnlyOnePacketEach) {
       .count = IREE_ARRAYSIZE(operations),
       .operations = operations,
   };
-  std::array<uint8_t, 66> bytes;
+  std::array<uint8_t, 162> bytes;
   bytes.fill(0xCC);
   iree_hal_amd_gpu_aql_transfer_chunk_t chunk;
   IREE_ASSERT_OK(iree_hal_amd_gpu_aql_transfer_prepare_chunk(
-      &transfer, 0x1000, 2, iree_make_byte_span(bytes.data() + 1, 64), 0x2000,
+      &transfer, 0x1000, 2, iree_make_byte_span(bytes.data() + 1, 160), 0x2000,
       false, iree_byte_span_empty(), 0, &chunk));
   EXPECT_EQ(chunk.packet_count, 2u);
-  EXPECT_EQ(chunk.argument_length, 64u);
+  EXPECT_EQ(chunk.argument_length, 160u);
   EXPECT_EQ(chunk.next.index, 2u);
   EXPECT_EQ(chunk.next.offset, 0u);
   EXPECT_EQ(chunk.download.length, 0u);
@@ -240,16 +246,90 @@ TEST_F(AqlTransferTest, MultiGigabyteDeviceRangesNeedOnlyOnePacketEach) {
   EXPECT_EQ(copy.target, 0x123500000010u);
   EXPECT_EQ(copy.length, length);
   EXPECT_EQ(copy.fill, 0u);
-  auto fill = Arguments(bytes.data() + 33);
+  auto fill = Arguments(bytes.data() + 81);
   EXPECT_EQ(fill.source, 0u);
   EXPECT_EQ(fill.target, 0x123500000020u);
   EXPECT_EQ(fill.length, length);
   EXPECT_EQ(fill.pattern, 0xA1B2C3D4u);
   EXPECT_EQ(fill.fill, 1u);
   EXPECT_EQ(chunk.packets[0].words[10], 0x2000u);
-  EXPECT_EQ(chunk.packets[1].words[10], 0x2020u);
+  EXPECT_EQ(chunk.packets[1].words[10], 0x2050u);
   EXPECT_EQ(bytes.front(), 0xCC);
   EXPECT_EQ(bytes.back(), 0xCC);
+}
+
+TEST_F(AqlTransferTest, RectanglesUseOneGridAndPackHostStaging) {
+  const iree_hal_transfer_region_t region = {
+      .row_length = 37,
+      .row_count = 3,
+      .slice_count = 2,
+      .source_strides = {.row_stride = 48, .slice_stride = 160},
+      .target_strides = {.row_stride = 64, .slice_stride = 208},
+  };
+  std::array<uint8_t, 384> host;
+  host.fill(0xCC);
+  for (size_t i = 0; i < 222; ++i) {
+    host[(i / 111) * 160 + (i % 111 / 37) * 48 + i % 37] =
+        static_cast<uint8_t>(i);
+  }
+  for (auto type : {IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
+                    IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+                    IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE,
+                    IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+                    IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD}) {
+    SCOPED_TRACE(type);
+    const bool upload = type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE ||
+                        type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
+    const bool download = type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+    iree_hal_amd_gpu_transfer_operation_t operation = {
+        .type = static_cast<uint32_t>(type),
+        .rectangular = true,
+        .pattern = 0xA5A5A5A5,
+        .source = Device(16),
+        .target = Device(32),
+        .region = &region,
+    };
+    if (upload) {
+      operation.source.host = host.data();
+    }
+    if (download) {
+      operation.target.host = host.data();
+    }
+    iree_hal_amd_gpu_transfer_t transfer = {
+        .count = 1,
+        .operations = &operation,
+    };
+    std::array<uint8_t, 224> staging;
+    staging.fill(0xDD);
+    iree_hal_amd_gpu_blit_arguments_t arguments;
+    iree_hal_amd_gpu_aql_transfer_chunk_t chunk;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_aql_transfer_prepare_chunk(
+        &transfer, 0x1000, 1,
+        iree_make_byte_span(&arguments, sizeof(arguments)), 0x2000, false,
+        iree_make_byte_span(staging.data() + 1, 222), 0xABC000004000, &chunk));
+    ASSERT_EQ(chunk.packet_count, 1u);
+    EXPECT_EQ(chunk.next.index, 1u);
+    EXPECT_EQ(chunk.next.offset, 0u);
+    EXPECT_EQ(chunk.packets[0].words[0], 0x30002u);
+    EXPECT_EQ(chunk.packets[0].words[3], 64u);
+    EXPECT_EQ(chunk.packets[0].words[4], 3u);
+    EXPECT_EQ(chunk.packets[0].words[5], 2u);
+    EXPECT_EQ(arguments.length, 37u);
+    EXPECT_EQ(arguments.row_count, 3u);
+    EXPECT_EQ(arguments.slice_count, 2u);
+    EXPECT_EQ(arguments.target, download ? 0xABC000004000u : 0x123500000010u);
+    EXPECT_EQ(arguments.source_row_stride, upload ? 37u : 48u);
+    EXPECT_EQ(arguments.source_slice_stride, upload ? 111u : 160u);
+    EXPECT_EQ(arguments.target_row_stride, download ? 37u : 64u);
+    EXPECT_EQ(arguments.target_slice_stride, download ? 111u : 208u);
+    EXPECT_EQ(chunk.staging_length, upload || download ? 222u : 0u);
+    EXPECT_EQ(chunk.download.length, download ? 222u : 0u);
+    for (size_t i = 0; i < 222; ++i) {
+      EXPECT_EQ(staging[i + 1], upload ? static_cast<uint8_t>(i) : 0xDD);
+    }
+    EXPECT_EQ(staging.front(), 0xDD);
+    EXPECT_EQ(staging.back(), 0xDD);
+  }
 }
 
 TEST_F(AqlTransferTest, HostRangesRespectCursorAndStagingCapacity) {
@@ -261,7 +341,7 @@ TEST_F(AqlTransferTest, HostRangesRespectCursorAndStagingCapacity) {
     std::array<uint8_t, 8> target = {};
     const bool download = type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
     iree_hal_amd_gpu_transfer_operation_t operation = {
-        .type = type,
+        .type = static_cast<uint32_t>(type),
         .length = source.size(),
     };
     if (download) {
@@ -276,17 +356,17 @@ TEST_F(AqlTransferTest, HostRangesRespectCursorAndStagingCapacity) {
         .operations = &operation,
         .cursor = {.offset = 3},
     };
-    std::array<uint8_t, 34> bytes;
+    std::array<uint8_t, 82> bytes;
     bytes.fill(0xCC);
     std::array<uint8_t, 5> staging;
     staging.fill(0xDD);
     iree_hal_amd_gpu_aql_transfer_chunk_t chunk;
     IREE_ASSERT_OK(iree_hal_amd_gpu_aql_transfer_prepare_chunk(
-        &transfer, 0x1000, 1, iree_make_byte_span(bytes.data() + 1, 32), 0x2000,
+        &transfer, 0x1000, 1, iree_make_byte_span(bytes.data() + 1, 80), 0x2000,
         false, iree_make_byte_span(staging.data() + 1, 3), 0xABC000004000,
         &chunk));
     EXPECT_EQ(chunk.packet_count, 1u);
-    EXPECT_EQ(chunk.argument_length, 32u);
+    EXPECT_EQ(chunk.argument_length, 80u);
     EXPECT_EQ(chunk.staging_length, 3u);
     EXPECT_EQ(chunk.next.index, 0u);
     EXPECT_EQ(chunk.next.offset, 6u);
@@ -308,11 +388,11 @@ TEST_F(AqlTransferTest, HostRangesRespectCursorAndStagingCapacity) {
     }
     transfer.cursor = chunk.next;
     IREE_ASSERT_OK(iree_hal_amd_gpu_aql_transfer_prepare_chunk(
-        &transfer, 0x1000, 1, iree_make_byte_span(bytes.data() + 1, 32), 0x2000,
+        &transfer, 0x1000, 1, iree_make_byte_span(bytes.data() + 1, 80), 0x2000,
         false, iree_make_byte_span(staging.data() + 1, 3), 0xABC000004000,
         &chunk));
     EXPECT_EQ(chunk.packet_count, 1u);
-    EXPECT_EQ(chunk.argument_length, 32u);
+    EXPECT_EQ(chunk.argument_length, 80u);
     EXPECT_EQ(chunk.staging_length, 2u);
     EXPECT_EQ(chunk.next.index, 1u);
     EXPECT_EQ(chunk.next.offset, 0u);
@@ -343,7 +423,7 @@ TEST_F(AqlTransferTest, DownloadEndsThePieceBeforeItsSibling) {
       .count = 2,
       .operations = operations,
   };
-  std::array<uint8_t, 64> bytes;
+  std::array<uint8_t, 160> bytes;
   bytes.fill(0xCC);
   std::array<uint8_t, 8> staging;
   staging.fill(0xDD);
@@ -355,14 +435,14 @@ TEST_F(AqlTransferTest, DownloadEndsThePieceBeforeItsSibling) {
   EXPECT_EQ(chunk.packet_count, 1u);
   EXPECT_EQ(chunk.next.index, 1u);
   EXPECT_EQ(chunk.next.offset, 0u);
-  EXPECT_EQ(chunk.argument_length, 32u);
+  EXPECT_EQ(chunk.argument_length, 80u);
   EXPECT_EQ(chunk.staging_length, 8u);
   EXPECT_EQ(chunk.download.source, staging.data());
   EXPECT_EQ(chunk.download.operation, operations);
   EXPECT_EQ(chunk.download.offset, 0u);
   EXPECT_EQ(chunk.download.length, 8u);
   EXPECT_EQ(Arguments(bytes.data()).target, 0x9000u);
-  EXPECT_TRUE(std::all_of(bytes.begin() + 32, bytes.end(),
+  EXPECT_TRUE(std::all_of(bytes.begin() + 80, bytes.end(),
                           [](uint8_t byte) { return byte == 0xCC; }));
 }
 
@@ -384,19 +464,20 @@ TEST_F(AqlTransferTest, ConsecutiveDownloadsShareOneRetirement) {
   };
   for (size_t capacity : {0u, 1u, 5u, 6u, 13u, 14u, 21u, 22u}) {
     SCOPED_TRACE(capacity);
-    std::array<uint8_t, 98> bytes;
+    std::array<uint8_t, 242> bytes;
     bytes.fill(0xCC);
     std::array<uint8_t, 24> staging;
     staging.fill(0xDD);
     iree_hal_amd_gpu_aql_transfer_chunk_t chunk;
     IREE_ASSERT_OK(iree_hal_amd_gpu_aql_transfer_prepare_chunk(
-        &transfer, 0x1000, 3, iree_make_byte_span(bytes.data() + 1, 96), 0x2000,
-        false, iree_make_byte_span(staging.data() + 1, capacity), 0x9000,
-        &chunk));
+        &transfer, 0x1000, 3, iree_make_byte_span(bytes.data() + 1, 240),
+        0x2000, false, iree_make_byte_span(staging.data() + 1, capacity),
+        0x9000, &chunk));
     const size_t length = std::min(capacity, size_t{21});
     const size_t packets = !length ? 0 : 1 + (length + 2) / 8;
     EXPECT_EQ(chunk.packet_count, packets);
-    EXPECT_EQ(chunk.argument_length, packets * 32);
+    EXPECT_EQ(chunk.argument_length,
+              packets * sizeof(iree_hal_amd_gpu_blit_arguments_t));
     EXPECT_EQ(chunk.staging_length, length);
     EXPECT_EQ(chunk.download.length, length);
     EXPECT_EQ(chunk.next.index, (length + 3) / 8);
@@ -407,7 +488,7 @@ TEST_F(AqlTransferTest, ConsecutiveDownloadsShareOneRetirement) {
       EXPECT_EQ(chunk.download.offset, 3u);
     }
     if (length > 5) {
-      const auto arguments = Arguments(bytes.data() + 33);
+      const auto arguments = Arguments(bytes.data() + 81);
       EXPECT_EQ(arguments.source, binding_.device_address + 16);
       EXPECT_EQ(arguments.target, 0x9005u);
       EXPECT_EQ(arguments.length, std::min(length - 5, size_t{8}));

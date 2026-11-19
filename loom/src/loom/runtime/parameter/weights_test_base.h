@@ -148,13 +148,18 @@ struct loom_runtime_test_weight_activation_t {
       status = loom_runtime_execution_execute(self->execution, self->command,
                                               {1, &binding}, &completion);
     }
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = sizeof(*self->readback),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
             {
                 .source_buffer = self->output,
                 .target = self->readback->data(),
-                .length = sizeof(*self->readback),
+                .region = &download_region,
             },
     };
     if (iree_status_is_ok(status)) {
@@ -691,7 +696,9 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     };
     download.download.source_buffer = output_buffer_;
     download.download.target = output_.data();
-    download.download.length = sizeof(output_);
+    const iree_hal_transfer_region_t download_transfer_region = {
+        .row_length = sizeof(output_), .row_count = 1, .slice_count = 1};
+    download.download.region = &download_transfer_region;
     IREE_ASSERT_OK(
         loom_runtime_execution_feedback(execution, 1, &download, &completion));
     IREE_ASSERT_OK(loom_runtime_execution_feedback_wait(execution, completion));

@@ -9,6 +9,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "iree/hal/queue.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -83,15 +84,20 @@ iree_status_t iree_hal_amd_xdna_queue_capture_allocate_metadata(
     iree_hal_amd_xdna_queue_capture_t* capture, iree_host_size_t byte_length,
     void** out_ptr);
 
-// Copies |source| into fixed-size payload chunks owned by |capture|.
+// Copies useful source bytes into fixed-size payload chunks owned by capture.
+// NULL geometry denotes contiguous bytes; otherwise source.data_length is the
+// useful byte count, and source strides address the borrowed caller storage.
 iree_status_t iree_hal_amd_xdna_queue_capture_payload(
     iree_hal_amd_xdna_queue_capture_t* capture, iree_const_byte_span_t source,
+    const iree_hal_transfer_region_t* region,
     iree_hal_amd_xdna_queue_payload_t* out_payload);
 
 // Copies a complete captured payload into |target| in capture order.
-// |target| must have at least payload.data_length writable bytes.
+// NULL geometry denotes contiguous bytes; otherwise scatter through its target
+// strides without writing padding. The full addressed target span must be live.
 void iree_hal_amd_xdna_queue_payload_copy(
-    const iree_hal_amd_xdna_queue_payload_t* payload, void* target);
+    const iree_hal_amd_xdna_queue_payload_t* payload, void* target,
+    const iree_hal_transfer_region_t* region);
 
 // Returns all captured blocks to their queue-owned pools. The capture and
 // every allocation made from it become invalid.

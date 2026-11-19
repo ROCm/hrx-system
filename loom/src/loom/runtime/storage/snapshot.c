@@ -49,25 +49,32 @@ static iree_status_t loom_runtime_snapshot_transfer(
   }
   uint8_t* data = snapshot->data;
   iree_hal_transfer_operation_t operations[64];
+  iree_hal_transfer_region_t operations_regions[IREE_ARRAYSIZE(operations)];
   iree_host_size_t operation_count = 0;
   uint64_t completion = 0;
   for (iree_host_size_t i = 0; i < range_count && iree_status_is_ok(status);
        ++i) {
     const loom_runtime_snapshot_range_t* range = &ranges[i];
     if (type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD) {
-      operations[operation_count++] = (iree_hal_transfer_operation_t){
+      operations_regions[operation_count] = (iree_hal_transfer_region_t){
+          .row_length = range->length, .row_count = 1, .slice_count = 1};
+      operations[operation_count] = (iree_hal_transfer_operation_t){
           .type = type,
           .upload = {.source = data,
                      .target_buffer = views[range->buffer_index],
                      .target_offset = range->offset,
-                     .length = range->length}};
+                     .region = &operations_regions[operation_count]}};
+      ++operation_count;
     } else {
-      operations[operation_count++] = (iree_hal_transfer_operation_t){
+      operations_regions[operation_count] = (iree_hal_transfer_region_t){
+          .row_length = range->length, .row_count = 1, .slice_count = 1};
+      operations[operation_count] = (iree_hal_transfer_operation_t){
           .type = type,
           .download = {.source_buffer = views[range->buffer_index],
                        .source_offset = range->offset,
                        .target = data,
-                       .length = range->length}};
+                       .region = &operations_regions[operation_count]}};
+      ++operation_count;
     }
     data += range->length;
     if (operation_count == IREE_ARRAYSIZE(operations)) {

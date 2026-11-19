@@ -156,7 +156,7 @@ TEST_P(GpuNativeBindingCaptureTest,
   ASSERT_FALSE(HasFatalFailure());
   uint64_t one = 1, two = 2;
   uint32_t zero = 0;
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       queues_[0], {1, &gate, &one}, {1, &done, &one}, output, 0, 64, &zero,
       sizeof(zero), nullptr, IREE_HAL_FILL_FLAG_NONE));
   std::array<iree_hal_buffer_binding_t, 3> table = {};
@@ -212,7 +212,7 @@ TEST_F(GpuNativeRecordingTest, PrimarySubmissionBoundsPacketBytesAndFixups) {
     const uint32_t seed = static_cast<uint32_t>(epoch + 1);
     for (uint32_t i = 0; i < count; ++i) {
       const uint32_t pattern = seed + i;
-      IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+      IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
           recording,
           iree_hal_make_buffer_ref(output, i * bytes_per_write,
                                    bytes_per_write),
@@ -230,7 +230,7 @@ TEST_F(GpuNativeRecordingTest, PrimarySubmissionBoundsPacketBytesAndFixups) {
     IREE_ASSERT_OK(iree_hal_queue_execute(
         queues_[0], {}, {1, &timeline, &executed}, recording, {}, 0));
     std::array<uint32_t, 128> values = {};
-    IREE_ASSERT_OK(iree_hal_queue_download(
+    IREE_ASSERT_OK(iree_hal_queue_download_linear(
         queues_[0], {1, &timeline, &executed}, {1, &timeline, &downloaded},
         output, 0, values.data(), count * bytes_per_write, nullptr));
     IREE_ASSERT_OK(
@@ -270,9 +270,9 @@ TEST_F(GpuNativeRecordingTest, HostCallPublishesShaderAndHostWrites) {
   CreateSemaphore(&progress);
   uint64_t initialized = 1, produced = 2, called = 3, consumed = 4;
   uint32_t initial = 31, first_addend = 7, last_addend = 11;
-  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {},
-                                     {1, &progress, &initialized}, output, 0, 4,
-                                     &initial, 4, nullptr, 0));
+  IREE_ASSERT_OK(
+      iree_hal_queue_fill_linear(queues_[0], {}, {1, &progress, &initialized},
+                                 output, 0, 4, &initial, 4, nullptr, 0));
   const iree_hal_barrier_list_t empty = {};
   const iree_hal_queue_barriers_t producer_barriers = {
       .before = nullptr,
@@ -365,18 +365,18 @@ TEST_F(GpuNativeRecordingTest,
   CreateSemaphore(&done);
   uint64_t value = 1;
   const uint32_t zero = 0;
-  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {}, {1, &done, &value}, output,
-                                     0, 4, &zero, 4, nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
+      queues_[0], {}, {1, &done, &value}, output, 0, 4, &zero, 4, nullptr, 0));
   uint64_t previous = value++;
-  IREE_ASSERT_OK(iree_hal_queue_update(queues_[0], {1, &done, &previous},
-                                       {1, &done, &value}, &native, 0,
-                                       arguments, 0, 12, nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_update_linear(queues_[0], {1, &done, &previous},
+                                              {1, &done, &value}, &native, 0,
+                                              arguments, 0, 12, nullptr, 0));
   auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
   config.workgroup_size[0] = 32;
   config.workgroup_size[1] = config.workgroup_size[2] = 1;
   const std::array<uint32_t, 3> counts = {1, 1, 1};
   previous = value++;
-  IREE_ASSERT_OK(iree_hal_queue_update(
+  IREE_ASSERT_OK(iree_hal_queue_update_linear(
       queues_[0], {1, &done, &previous}, {1, &done, &value}, counts.data(), 0,
       arguments, 16, sizeof(counts), nullptr, 0));
   for (auto argument_flags :
@@ -468,7 +468,7 @@ TEST_P(GpuNativeRecordingSizeTest,
         pool_, iree_hal_make_pool_reservation_request(64, 4),
         iree_infinite_timeout(), &outputs[i]));
     CreateSemaphore(&done[i]);
-    IREE_ASSERT_OK(iree_hal_queue_fill(
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
         queues_[i], {1, &gate, &one}, {1, &done[i], &one}, outputs[i], 0, 64,
         &zero, sizeof(zero), nullptr, IREE_HAL_FILL_FLAG_NONE));
   }
@@ -548,12 +548,17 @@ TEST_P(GpuNativeRecordingSizeTest,
          IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT, &recording);
   ASSERT_FALSE(HasFatalFailure());
   uint32_t value = 0;
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       queues_[0], {1, &done, &one}, {1, &done, &two}, output, 0, 64, &value,
       sizeof(value), nullptr, IREE_HAL_FILL_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_queue_execute(queues_[1], {1, &done, &two},
                                         {1, &done, &three}, recording, {}, 0));
   iree_hal_command_buffer_release(recording);
+  const iree_hal_transfer_region_t download_region = {
+      .row_length = sizeof(value),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
@@ -561,7 +566,7 @@ TEST_P(GpuNativeRecordingSizeTest,
               .source_buffer = output,
               .source_offset = 4,
               .target = &value,
-              .length = sizeof(value),
+              .region = &download_region,
           },
   };
   IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], {1, &done, &three},
@@ -605,12 +610,12 @@ TEST_F(GpuNativeRecordingTest, TransferBarriersJoinOnlyPendingCopies) {
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &barrier));
     uint32_t pattern = 0x12345678;
     const auto reference = iree_hal_make_buffer_ref(output, 0, kLength);
-    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
         recording, reference, &pattern, sizeof(pattern), 0));
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &barrier));
     if (copy_at_exit) {
       pattern = 0x9abcdef0;
-      IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+      IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
           recording, reference, &pattern, sizeof(pattern), 0));
     }
     IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
@@ -645,13 +650,18 @@ TEST_F(GpuNativeRecordingTest, TransferBarriersJoinOnlyPendingCopies) {
         IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
     iree_hal_command_buffer_release(recording);
     std::vector<uint32_t> actual(kLength / sizeof(uint32_t));
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = kLength,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
             {
                 .source_buffer = output,
                 .target = actual.data(),
-                .length = kLength,
+                .region = &download_region,
             },
     };
     IREE_ASSERT_OK(iree_hal_queue_transfer(
@@ -710,7 +720,7 @@ TEST_F(GpuNativeRecordingTest,
                      << "indirect=" << indirect << " length=" << length
                      << " offset=" << offset);
         uint64_t initialized = ++epoch;
-        IREE_ASSERT_OK(iree_hal_queue_fill(
+        IREE_ASSERT_OK(iree_hal_queue_fill_linear(
             queues_[0], {}, {1, &timeline, &initialized}, output, 0,
             kBufferLength, &guard, sizeof(guard), nullptr, 0));
         Ref<iree_hal_command_buffer_t> recording;
@@ -740,7 +750,7 @@ TEST_F(GpuNativeRecordingTest,
           auto target = reference(offset + position);
           target.length = std::min<uint32_t>(
               length - position, IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE);
-          IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+          IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
               recording, source.data(), position, target, 0));
           position += static_cast<uint32_t>(target.length);
         }
@@ -767,11 +777,11 @@ TEST_F(GpuNativeRecordingTest,
           std::memcpy(expected.data() + 4 + offset + kRegionStride, &first_word,
                       sizeof(first_word));
         }
-        IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+        IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
             recording, reference(offset), reference(offset + kRegionStride),
             0));
         IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &dependency));
-        IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+        IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
             recording, reference(offset), &pattern, sizeof(pattern), 0));
         const iree_hal_barrier_t release = {
             .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
@@ -787,7 +797,7 @@ TEST_F(GpuNativeRecordingTest,
             recording, {indirect ? 1u : 0u, &binding}, 0));
         std::vector<uint8_t> actual(kBufferLength);
         uint64_t downloaded = ++epoch;
-        IREE_ASSERT_OK(iree_hal_queue_download(
+        IREE_ASSERT_OK(iree_hal_queue_download_linear(
             queues_[1], {1, &timeline, &executed}, {1, &timeline, &downloaded},
             output, 0, actual.data(), actual.size(), nullptr));
         IREE_ASSERT_OK(iree_hal_semaphore_wait(done, downloaded,
@@ -831,7 +841,7 @@ TEST_F(GpuNativeRecordingTest, CopyPacketsRespectPublicSourceExtent) {
         iree_hal_queue_family(queues_[0]), 0,
         IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0, recording.out()));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
-    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
         recording,
         iree_hal_make_buffer_ref(output, copy.source_offset, copy.length),
         iree_hal_make_buffer_ref(output, copy.target_offset, copy.length), 0));
@@ -894,7 +904,7 @@ TEST_F(GpuNativeRecordingTest, TransfersAndDispatchSharePendingNativeBindings) {
     };
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
     const uint32_t zero = 0, initial = 10, increment = 17;
-    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
         recording, reference(0, IREE_HAL_WHOLE_BUFFER), &zero, sizeof(zero),
         0));
     // The fill can use a shader while the update uses a CP write. Their
@@ -911,8 +921,8 @@ TEST_F(GpuNativeRecordingTest, TransfersAndDispatchSharePendingNativeBindings) {
     };
     IREE_ASSERT_OK(
         iree_hal_command_buffer_barrier(recording, &transfer_dependency));
-    IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(recording, &initial, 0,
-                                                         reference(8, 4), 0));
+    IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
+        recording, &initial, 0, reference(8, 4), 0));
     const iree_hal_memory_barrier_t to_shader_memory = {
         .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
         .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
@@ -944,7 +954,7 @@ TEST_F(GpuNativeRecordingTest, TransfersAndDispatchSharePendingNativeBindings) {
         .memory_barriers = &to_transfer_memory,
     };
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &to_transfer));
-    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
         recording, reference(8, 4), reference(16, 4), 0));
     const iree_hal_barrier_t release = {
         .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
@@ -961,6 +971,11 @@ TEST_F(GpuNativeRecordingTest, TransfersAndDispatchSharePendingNativeBindings) {
     table.fill({});
     iree_hal_command_buffer_release(recording);
     std::array<uint32_t, 8> actual;
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = sizeof(actual),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
@@ -968,7 +983,7 @@ TEST_F(GpuNativeRecordingTest, TransfersAndDispatchSharePendingNativeBindings) {
                 .source_buffer = output,
                 .source_offset = 8,
                 .target = actual.data(),
-                .length = sizeof(actual),
+                .region = &download_region,
             },
     };
     IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], {1, &done, &two},
@@ -1051,7 +1066,7 @@ TEST_F(GpuNativeInvocationTest, WholeCopyConstraintsCoverTransitiveBindings) {
   for (size_t i = 0; i < source.size(); ++i) {
     source[i] = (uint8_t)(i * 7 + 3);
   }
-  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
       recording, source.data(), 0, iree_hal_make_buffer_ref(buffers[0], 0, 64),
       0));
   const iree_hal_memory_barrier_t memory = {
@@ -1072,8 +1087,8 @@ TEST_F(GpuNativeInvocationTest, WholeCopyConstraintsCoverTransitiveBindings) {
   };
   for (size_t i = 0; i < 3; ++i) {
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &dependency));
-    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(recording, references[i],
-                                                       references[i + 1], 0));
+    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
+        recording, references[i], references[i + 1], 0));
   }
   const iree_hal_barrier_t release = {
       .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
@@ -1111,12 +1126,12 @@ TEST_F(GpuNativeInvocationTest,
       IREE_HAL_COMMAND_CATEGORY_TRANSFER, 2, &recording));
   recordings_.emplace_back(recording, iree_hal_command_buffer_release);
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
-  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
       recording, iree_hal_make_indirect_buffer_ref(0, 0, IREE_HAL_WHOLE_BUFFER),
       iree_hal_make_indirect_buffer_ref(1, 8, IREE_HAL_WHOLE_BUFFER), 0));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_command_buffer_copy_buffer(
+      iree_hal_command_buffer_copy_buffer_linear(
           recording,
           iree_hal_make_indirect_buffer_ref(1, 0, IREE_HAL_WHOLE_BUFFER),
           iree_hal_make_indirect_buffer_ref(0, 0, IREE_HAL_WHOLE_BUFFER), 0));
@@ -1266,13 +1281,23 @@ TEST_P(GpuNativeIndirectTest,
         shared_recording = recording;
       }
     }
+    const auto fill_region = iree_hal_fill_region_t{
+        .row_length = 4096,
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    const auto update_region = iree_hal_transfer_region_t{
+        .row_length = 12,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const std::array<iree_hal_transfer_operation_t, 2> initialize = {{
         {
             .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
             .fill =
                 {
                     .target_buffer = buffers[1],
-                    .length = 4096,
+                    .region = &fill_region,
                     .pattern = &zero,
                     .pattern_length = 4,
                 },
@@ -1284,7 +1309,7 @@ TEST_P(GpuNativeIndirectTest,
                     .source_buffer = shapes[invocation].data(),
                     .target_buffer = buffers[0],
                     .target_offset = 4,
-                    .length = 12,
+                    .region = &update_region,
                 },
         },
     }};
@@ -1320,6 +1345,11 @@ TEST_P(GpuNativeIndirectTest,
           consumer, config, constants, bindings, nullptr, flags));
     }
     submitted_values_[invocation] = four;
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = kLength,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
@@ -1327,7 +1357,7 @@ TEST_P(GpuNativeIndirectTest,
                 .source_buffer = buffers[1],
                 .source_offset = 4,
                 .target = actual_[invocation].data(),
-                .length = kLength,
+                .region = &download_region,
             },
     };
     IREE_ASSERT_OK(iree_hal_queue_transfer(
@@ -1471,13 +1501,23 @@ TEST_P(GpuNativePacketTest, ShaderObservesCompleteInvocationOwnedPacket) {
     const iree_hal_buffer_ref_list_t bindings =
         argument_mode == 1 ? iree_hal_buffer_ref_list_empty()
                            : iree_hal_buffer_ref_list_t{1, &binding};
+    const auto fill_region = iree_hal_fill_region_t{
+        .row_length = kResultLength,
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    const auto update_region = iree_hal_transfer_region_t{
+        .row_length = 12,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const std::array<iree_hal_transfer_operation_t, 3> initialize = {{
         {
             .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
             .fill =
                 {
                     .target_buffer = buffers[1],
-                    .length = kResultLength,
+                    .region = &fill_region,
                     .pattern = &zero,
                     .pattern_length = 4,
                 },
@@ -1488,7 +1528,7 @@ TEST_P(GpuNativePacketTest, ShaderObservesCompleteInvocationOwnedPacket) {
                 {
                     .source_buffer = shapes[invocation].data(),
                     .target_buffer = buffers[0],
-                    .length = 12,
+                    .region = &update_region,
                 },
         },
         {
@@ -1498,7 +1538,7 @@ TEST_P(GpuNativePacketTest, ShaderObservesCompleteInvocationOwnedPacket) {
                     .source_buffer = &native,
                     .target_buffer = buffers[0],
                     .target_offset = 64,
-                    .length = 12,
+                    .region = &update_region,
                 },
         },
     }};
@@ -1541,7 +1581,7 @@ TEST_P(GpuNativePacketTest, ShaderObservesCompleteInvocationOwnedPacket) {
         if (count_mode >= 3) {
           const bool copy = count_mode == 4;
           if (copy) {
-            IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+            IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
                 recording, reference(0, 0, 12), reference(0, 4084, 12), 0));
           } else {
             const std::array<iree_hal_buffer_ref_t, 2> references = {
@@ -1600,13 +1640,18 @@ TEST_P(GpuNativePacketTest, ShaderObservesCompleteInvocationOwnedPacket) {
           executable_, consumer, config, constants, bindings, nullptr, flags));
     }
     submitted_values_[invocation] = three;
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = kResultLength,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
             {
                 .source_buffer = buffers[1],
                 .target = actual_[invocation].data(),
-                .length = kResultLength,
+                .region = &download_region,
             },
     };
     IREE_ASSERT_OK(iree_hal_queue_transfer(

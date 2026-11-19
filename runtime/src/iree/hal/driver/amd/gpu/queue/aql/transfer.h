@@ -46,11 +46,11 @@ typedef struct iree_hal_amd_gpu_aql_transfer_chunk_t {
   iree_hal_amd_gpu_download_t download;
 } iree_hal_amd_gpu_aql_transfer_chunk_t;
 
-// Complete native blit with no implicit application memory transition. length
-// selects bounded parallelism, while the kernel itself traverses the full
-// range.
+// Complete native blit with no implicit application memory transition. The
+// kernel traverses all rows/slices using the supplied bounded workgroup grid.
 iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_transfer_packet(
-    uint64_t kernel, uint64_t arguments, uint64_t length, uint32_t header);
+    uint64_t kernel, uint64_t arguments, const uint32_t workgroup_count[3],
+    uint32_t header);
 
 // Returns the payload capacity for the next nonempty transfer piece.
 // A zero capacity queries growth for one largest captured host operation.

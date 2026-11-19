@@ -247,14 +247,10 @@ static iree_status_t iree_hal_webgpu_queue_transfer(
     iree_host_size_t operation_count,
     const iree_hal_transfer_operation_t* operations,
     const iree_hal_queue_barriers_t* barriers) {
-  (void)barriers;
-  (void)base_queue;
-  (void)wait_semaphore_list;
-  (void)signal_semaphore_list;
-  (void)operation_count;
-  (void)operations;
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "WebGPU exact-queue transfers are not implemented");
+  IREE_RETURN_IF_ERROR(iree_hal_webgpu_queue_validate_barriers(barriers));
+  return iree_hal_webgpu_queue_submit_transfer(
+      (iree_hal_webgpu_queue_t*)base_queue, wait_semaphore_list,
+      signal_semaphore_list, operation_count, operations);
 }
 
 static iree_status_t iree_hal_webgpu_queue_read(
@@ -444,6 +440,9 @@ static iree_status_t iree_hal_webgpu_queue_execute_scratch_builder(
     entries[slot_entries[i].slot].gpu_buffer_handle =
         slot_entries[i].gpu_buffer_handle;
     entries[slot_entries[i].slot].base_offset = 0;
+    entries[slot_entries[i].slot].reserved = 0;
+    entries[slot_entries[i].slot].length =
+        iree_hal_buffer_byte_length(slot_entries[i].buffer);
   }
 
   iree_hal_webgpu_isa_builtins_descriptor_t builtins_descriptor;
@@ -570,10 +569,35 @@ static iree_status_t iree_hal_webgpu_queue_register_signal_completion(
   return iree_ok_status();
 }
 
-// Forward declaration — defined in the FIFO wait elision section.
+// Returns true if all wait semaphores can be elided because this queue has
+// already submitted (but possibly not completed) signals that will satisfy
+// every wait. Uses the submitted signal provenance fields on each semaphore
+// to check if GPU FIFO ordering guarantees the wait will be satisfied.
+static bool iree_hal_webgpu_queue_can_elide_waits(
+    iree_hal_webgpu_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list) {
+  for (iree_host_size_t i = 0; i < wait_semaphore_list.count; ++i) {
+    if (!iree_hal_webgpu_semaphore_has_submitted_signal(
+            wait_semaphore_list.semaphores[i], queue->axis,
+            wait_semaphore_list.payload_values[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Marks all semaphores in the signal list as having a pending submitted signal
+// from this queue. Called after GPU work is submitted in fast-path queue
+// operations so that subsequent same-queue ops can use FIFO wait elision.
 static void iree_hal_webgpu_queue_mark_signals_submitted(
     iree_hal_webgpu_queue_t* queue,
-    const iree_hal_semaphore_list_t signal_semaphore_list);
+    const iree_hal_semaphore_list_t signal_semaphore_list) {
+  for (iree_host_size_t i = 0; i < signal_semaphore_list.count; ++i) {
+    iree_hal_webgpu_semaphore_mark_submitted_signal(
+        signal_semaphore_list.semaphores[i], queue->axis,
+        signal_semaphore_list.payload_values[i]);
+  }
+}
 
 // Finalizes and executes the scratch builder, then registers signal completion.
 // Used by fast-path queue operations (fill, update, copy, dispatch) that build
@@ -631,21 +655,51 @@ static iree_status_t iree_hal_webgpu_queue_execute_one_shot(
 // CPU-only (barrier):
 //   wait → CPU work → signal inline → advance epoch → free slab.
 //
-// GPU-submit (fill, update, copy, dispatch, execute):
-//   wait → GPU work → release per-op resources → init embedded signal
-//   → register onSubmittedWorkDone → [slab lives on]
-//   → onSubmittedWorkDone fires → signal → advance epoch → free slab.
+// GPU-submit (transfer, dispatch, execute):
+//   wait → GPU work → register native completion → [slab lives on]
+//   → native completion → release resources → signal → advance epoch → free
+//   slab.
+// Downloads include the asynchronous map and host scatter before completion.
 
 typedef enum iree_hal_webgpu_queue_op_type_e {
   // CPU-only: wait → CPU work → signal inline.
   IREE_HAL_WEBGPU_QUEUE_OP_BARRIER,
   // GPU-submit: wait → GPU work → signal on GPU completion.
-  IREE_HAL_WEBGPU_QUEUE_OP_FILL,
-  IREE_HAL_WEBGPU_QUEUE_OP_UPDATE,
-  IREE_HAL_WEBGPU_QUEUE_OP_COPY,
+  IREE_HAL_WEBGPU_QUEUE_OP_TRANSFER,
   IREE_HAL_WEBGPU_QUEUE_OP_DISPATCH,
   IREE_HAL_WEBGPU_QUEUE_OP_EXECUTE,
 } iree_hal_webgpu_queue_op_type_t;
+
+// Fixed-width bridge record consumed by queue_transfer in webgpu_imports.mjs.
+// The native transfer owner retains the HAL buffers separately from these
+// handles.
+typedef struct iree_hal_webgpu_transfer_t {
+  // HAL transfer operation kind.
+  uint32_t type;
+  // Native source buffer handle, or zero for host input and fills.
+  uint32_t source_handle;
+  // Native destination buffer handle, or zero for host output.
+  uint32_t target_handle;
+  // Fill pattern expanded to a complete word.
+  uint32_t pattern;
+  // Native source offset, including the HAL subspan origin.
+  uint64_t source_offset;
+  // Native target offset, including the HAL subspan origin.
+  uint64_t target_offset;
+  // Borrowed wasm address, or captured UPDATE storage within the same owner.
+  uint64_t host_address;
+  // Full-width geometry captured at admission.
+  iree_hal_transfer_region_t region;
+} iree_hal_webgpu_transfer_t;
+static_assert(sizeof(iree_hal_webgpu_transfer_t) == 96,
+              "transfer bridge layout");
+
+typedef struct iree_hal_webgpu_transfer_buffers_t {
+  // Retained device source, if any.
+  iree_hal_buffer_t* source;
+  // Retained device target, if any.
+  iree_hal_buffer_t* target;
+} iree_hal_webgpu_transfer_buffers_t;
 
 typedef struct iree_hal_webgpu_queue_state_t {
   // Must be first — the proactor casts between base operation and this.
@@ -670,28 +724,15 @@ typedef struct iree_hal_webgpu_queue_state_t {
 
   union {
     struct {
-      iree_hal_buffer_t* target_buffer;  // Retained.
-      iree_device_size_t target_offset;
-      iree_device_size_t length;
-      uint32_t pattern;
-      iree_host_size_t pattern_length;
-    } fill;
-
-    struct {
-      iree_hal_buffer_t* target_buffer;  // Retained.
-      iree_device_size_t target_offset;
-      iree_device_size_t length;
-      void* captured_data;                 // Points into acquired block.
-      iree_arena_block_t* captured_block;  // For releasing back to pool.
-    } update;
-
-    struct {
-      iree_hal_buffer_t* source_buffer;  // Retained.
-      iree_device_size_t source_offset;
-      iree_hal_buffer_t* target_buffer;  // Retained.
-      iree_device_size_t target_offset;
-      iree_device_size_t length;
-    } copy;
+      // Number of nonempty transfer records.
+      iree_host_size_t count;
+      // Bridge records in the trailing owner allocation.
+      iree_hal_webgpu_transfer_t* records;
+      // HAL buffers retained until all native and host copies retire.
+      iree_hal_webgpu_transfer_buffers_t* buffers;
+      // Downloads require host completion before dependent GPU publication.
+      bool has_download;
+    } transfer;
 
     struct {
       iree_hal_webgpu_handle_t pipeline_handle;
@@ -729,18 +770,11 @@ static void iree_hal_webgpu_queue_op_release_resources(
   switch (state->op_type) {
     case IREE_HAL_WEBGPU_QUEUE_OP_BARRIER:
       break;
-    case IREE_HAL_WEBGPU_QUEUE_OP_FILL:
-      iree_hal_buffer_release(state->fill.target_buffer);
-      break;
-    case IREE_HAL_WEBGPU_QUEUE_OP_UPDATE:
-      iree_hal_buffer_release(state->update.target_buffer);
-      iree_arena_block_pool_release(&state->queue->block_pool,
-                                    state->update.captured_block,
-                                    state->update.captured_block);
-      break;
-    case IREE_HAL_WEBGPU_QUEUE_OP_COPY:
-      iree_hal_buffer_release(state->copy.source_buffer);
-      iree_hal_buffer_release(state->copy.target_buffer);
+    case IREE_HAL_WEBGPU_QUEUE_OP_TRANSFER:
+      for (iree_host_size_t i = 0; i < state->transfer.count; ++i) {
+        iree_hal_buffer_release(state->transfer.buffers[i].source);
+        iree_hal_buffer_release(state->transfer.buffers[i].target);
+      }
       break;
     case IREE_HAL_WEBGPU_QUEUE_OP_DISPATCH:
       iree_hal_executable_release(state->dispatch.executable);
@@ -759,13 +793,10 @@ static void iree_hal_webgpu_queue_op_release_resources(
   }
 }
 
-// Cleans up a queue state slab after proactor submission fails. Fails signal
-// semaphores (so downstream waiters see the error rather than hanging),
-// releases per-op resources, both semaphore lists, and frees the slab.
-static void iree_hal_webgpu_queue_state_submit_failed(
-    iree_hal_webgpu_queue_state_t* state, iree_status_t submit_status) {
-  iree_hal_semaphore_list_fail(state->signal_semaphore_list,
-                               iree_status_clone(submit_status));
+// Releases an unaccepted operation. Synchronous rejection leaves the caller's
+// signal semaphores untouched; asynchronous failures use the completion path.
+static void iree_hal_webgpu_queue_state_discard(
+    iree_hal_webgpu_queue_state_t* state) {
   iree_hal_webgpu_queue_op_release_resources(state);
   iree_hal_semaphore_list_release(state->wait_semaphore_list);
   iree_hal_semaphore_list_release(state->signal_semaphore_list);
@@ -783,14 +814,16 @@ static void iree_hal_webgpu_queue_op_signal_completion(
                                        offsetof(iree_hal_webgpu_queue_state_t,
                                                 signal_operation));
 
+  iree_hal_webgpu_queue_op_release_resources(state);
   if (iree_status_is_ok(status)) {
     iree_async_single_frontier_t frontier_storage;
     const iree_async_frontier_t* frontier =
         iree_hal_webgpu_queue_build_frontier(state->queue, state->epoch,
                                              &frontier_storage);
-    iree_status_ignore(
-        iree_hal_semaphore_list_signal(state->signal_semaphore_list, frontier));
-  } else {
+    status =
+        iree_hal_semaphore_list_signal(state->signal_semaphore_list, frontier);
+  }
+  if (!iree_status_is_ok(status)) {
     iree_hal_semaphore_list_fail(state->signal_semaphore_list, status);
   }
 
@@ -801,8 +834,7 @@ static void iree_hal_webgpu_queue_op_signal_completion(
 
 // Registers the embedded signal_operation for onSubmittedWorkDone completion
 // tracking. Called from GPU-submit cases in the wait callback after GPU work
-// has been submitted. On success: releases per-op resources (GPU holds its
-// own references) and returns true — the caller MUST return immediately
+// has been submitted. On success returns true — the caller returns immediately
 // (slab ownership transfers to the signal callback). On failure: fails the
 // signal semaphores and returns false — the caller should break to shared
 // cleanup.
@@ -821,8 +853,6 @@ static bool iree_hal_webgpu_queue_op_register_embedded_signal(
   }
   iree_hal_webgpu_import_queue_on_submitted_work_done(
       state->queue->queue_handle, token);
-  // Per-op resources released now — GPU has its own references to buffers.
-  iree_hal_webgpu_queue_op_release_resources(state);
   return true;
 }
 
@@ -848,6 +878,31 @@ static bool iree_hal_webgpu_queue_op_finalize_and_submit(
     return false;
   }
   return iree_hal_webgpu_queue_op_register_embedded_signal(state);
+}
+
+// Registers native completion before invoking JS. One token spans every upload,
+// device transfer, and map/scatter continuation in this finite transaction.
+static iree_status_t iree_hal_webgpu_queue_transfer_begin(
+    iree_hal_webgpu_queue_state_t* state) {
+  iree_async_operation_initialize(
+      &state->signal_operation, IREE_ASYNC_OPERATION_TYPE_NOP,
+      IREE_ASYNC_OPERATION_FLAG_NONE,
+      iree_hal_webgpu_queue_op_signal_completion, NULL);
+  uint32_t token = UINT32_MAX;
+  IREE_RETURN_IF_ERROR(iree_async_proactor_js_submit_external(
+      state->queue->proactor, &state->signal_operation, &token));
+  iree_hal_webgpu_isa_builtins_descriptor_t builtins;
+  iree_hal_webgpu_builtins_get_descriptor(state->queue->builtins, &builtins);
+  iree_hal_webgpu_import_queue_transfer(
+      state->queue->device_handle, state->queue->queue_handle,
+      (uint32_t)(uintptr_t)&builtins,
+      (uint32_t)(uintptr_t)state->transfer.records, state->transfer.count,
+      token);
+  if (!state->transfer.has_download) {
+    iree_hal_webgpu_queue_mark_signals_submitted(state->queue,
+                                                 state->signal_semaphore_list);
+  }
+  return iree_ok_status();
 }
 
 // Wait completion callback for all unified async queue operations. Dispatches
@@ -886,63 +941,12 @@ static void iree_hal_webgpu_queue_op_wait_completion(
           state->signal_semaphore_list, frontier));
       break;
 
-    case IREE_HAL_WEBGPU_QUEUE_OP_FILL: {
-      // GPU-submit: scratch build fill → GPU execute → signal on completion.
-      iree_hal_webgpu_queue_t* queue = state->queue;
-      iree_status_t work_status =
-          iree_hal_webgpu_builder_reset(&queue->scratch_builder);
-      if (iree_status_is_ok(work_status)) {
-        iree_hal_buffer_ref_t target_ref = iree_hal_make_buffer_ref(
-            state->fill.target_buffer, state->fill.target_offset,
-            state->fill.length);
-        work_status = iree_hal_webgpu_builder_fill_buffer(
-            &queue->scratch_builder, target_ref, &state->fill.pattern,
-            state->fill.pattern_length);
-      }
-      if (iree_hal_webgpu_queue_op_finalize_and_submit(state, work_status)) {
+    case IREE_HAL_WEBGPU_QUEUE_OP_TRANSFER: {
+      iree_status_t status = iree_hal_webgpu_queue_transfer_begin(state);
+      if (iree_status_is_ok(status)) {
         return;
       }
-      break;
-    }
-
-    case IREE_HAL_WEBGPU_QUEUE_OP_UPDATE: {
-      // GPU-submit: scratch build update → GPU execute → signal on completion.
-      // Source data was captured into a block pool block at submit time.
-      iree_hal_webgpu_queue_t* queue = state->queue;
-      iree_status_t work_status =
-          iree_hal_webgpu_builder_reset(&queue->scratch_builder);
-      if (iree_status_is_ok(work_status)) {
-        iree_hal_buffer_ref_t target_ref = iree_hal_make_buffer_ref(
-            state->update.target_buffer, state->update.target_offset,
-            state->update.length);
-        work_status = iree_hal_webgpu_builder_update_buffer(
-            &queue->scratch_builder, state->update.captured_data,
-            /*source_offset=*/0, target_ref);
-      }
-      if (iree_hal_webgpu_queue_op_finalize_and_submit(state, work_status)) {
-        return;
-      }
-      break;
-    }
-
-    case IREE_HAL_WEBGPU_QUEUE_OP_COPY: {
-      // GPU-submit: scratch build copy → GPU execute → signal on completion.
-      iree_hal_webgpu_queue_t* queue = state->queue;
-      iree_status_t work_status =
-          iree_hal_webgpu_builder_reset(&queue->scratch_builder);
-      if (iree_status_is_ok(work_status)) {
-        iree_hal_buffer_ref_t source_ref = iree_hal_make_buffer_ref(
-            state->copy.source_buffer, state->copy.source_offset,
-            state->copy.length);
-        iree_hal_buffer_ref_t target_ref = iree_hal_make_buffer_ref(
-            state->copy.target_buffer, state->copy.target_offset,
-            state->copy.length);
-        work_status = iree_hal_webgpu_builder_copy_buffer(
-            &queue->scratch_builder, source_ref, target_ref);
-      }
-      if (iree_hal_webgpu_queue_op_finalize_and_submit(state, work_status)) {
-        return;
-      }
+      iree_hal_semaphore_list_fail(state->signal_semaphore_list, status);
       break;
     }
 
@@ -1122,8 +1126,6 @@ static iree_status_t iree_hal_webgpu_queue_state_allocate(
   }
 
   if (!iree_status_is_ok(status)) {
-    iree_hal_semaphore_list_fail(signal_semaphore_list,
-                                 iree_status_clone(status));
     return status;
   }
 
@@ -1131,8 +1133,6 @@ static iree_status_t iree_hal_webgpu_queue_state_allocate(
   status =
       iree_allocator_malloc(queue->host_allocator, total_size, (void**)&state);
   if (!iree_status_is_ok(status)) {
-    iree_hal_semaphore_list_fail(signal_semaphore_list,
-                                 iree_status_clone(status));
     return status;
   }
 
@@ -1145,211 +1145,151 @@ static iree_status_t iree_hal_webgpu_queue_state_allocate(
   return iree_ok_status();
 }
 
-// Submits an initialized queue state to the proactor. On failure, cleans up
-// the state (fails signals, releases resources and semaphore lists, frees
-// slab).
+// Submits an initialized queue state to the proactor. A rejected submission
+// releases its state without affecting caller semaphores.
 static iree_status_t iree_hal_webgpu_queue_state_submit(
     iree_hal_webgpu_queue_state_t* state) {
   iree_status_t status = iree_async_proactor_submit_one(
       state->queue->proactor, &state->wait_operation.base);
   if (!iree_status_is_ok(status)) {
-    iree_hal_webgpu_queue_state_submit_failed(state, status);
+    iree_hal_webgpu_queue_state_discard(state);
   }
   return status;
-}
-
-//===----------------------------------------------------------------------===//
-// FIFO wait elision
-//===----------------------------------------------------------------------===//
-
-// Returns true if all wait semaphores can be elided because this queue has
-// already submitted (but possibly not completed) signals that will satisfy
-// every wait. Uses the submitted signal provenance fields on each semaphore
-// to check if GPU FIFO ordering guarantees the wait will be satisfied.
-static bool iree_hal_webgpu_queue_can_elide_waits(
-    iree_hal_webgpu_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list) {
-  for (iree_host_size_t i = 0; i < wait_semaphore_list.count; ++i) {
-    if (!iree_hal_webgpu_semaphore_has_submitted_signal(
-            wait_semaphore_list.semaphores[i], queue->axis,
-            wait_semaphore_list.payload_values[i])) {
-      return false;
-    }
-  }
-  return true;
-}
-
-// Marks all semaphores in the signal list as having a pending submitted signal
-// from this queue. Called after GPU work is submitted in fast-path queue
-// operations so that subsequent same-queue ops can use FIFO wait elision.
-static void iree_hal_webgpu_queue_mark_signals_submitted(
-    iree_hal_webgpu_queue_t* queue,
-    const iree_hal_semaphore_list_t signal_semaphore_list) {
-  for (iree_host_size_t i = 0; i < signal_semaphore_list.count; ++i) {
-    iree_hal_webgpu_semaphore_mark_submitted_signal(
-        signal_semaphore_list.semaphores[i], queue->axis,
-        signal_semaphore_list.payload_values[i]);
-  }
 }
 
 //===----------------------------------------------------------------------===//
 // Queue operations (scratch builder)
 //===----------------------------------------------------------------------===//
 
-iree_status_t iree_hal_webgpu_queue_fill(
-    iree_hal_webgpu_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, const void* pattern,
-    iree_host_size_t pattern_length, iree_hal_fill_flags_t flags) {
-  // Fast path: waits satisfied or FIFO-elided — execute synchronously.
-  if (wait_semaphore_list.count == 0 ||
-      iree_hal_semaphore_list_poll(wait_semaphore_list) ||
-      iree_hal_webgpu_queue_can_elide_waits(queue, wait_semaphore_list)) {
-    iree_status_t status =
-        iree_hal_webgpu_builder_reset(&queue->scratch_builder);
-    if (iree_status_is_ok(status)) {
-      iree_hal_buffer_ref_t target_ref =
-          iree_hal_make_buffer_ref(target_buffer, target_offset, length);
-      status = iree_hal_webgpu_builder_fill_buffer(
-          &queue->scratch_builder, target_ref, pattern, pattern_length);
+iree_status_t iree_hal_webgpu_queue_submit_transfer(
+    iree_hal_webgpu_queue_t* queue, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_host_size_t operation_count,
+    const iree_hal_transfer_operation_t* operations) {
+  iree_host_size_t count = 0;
+  iree_host_size_t capture_length = 0;
+  bool has_download = false;
+  for (iree_host_size_t i = 0; i < operation_count; ++i) {
+    const iree_device_size_t length =
+        iree_hal_transfer_operation_length(&operations[i]);
+    if (!length) {
+      continue;
     }
-    return iree_hal_webgpu_queue_submit_scratch_and_signal(
-        queue, signal_semaphore_list, status);
+    ++count;
+    has_download |=
+        operations[i].type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+    if (operations[i].type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE &&
+        !iree_host_size_checked_add(capture_length, (iree_host_size_t)length,
+                                    &capture_length)) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "WebGPU transfer capture exceeds address space");
+    }
   }
-
-  // Async path: capture params and submit wait. The callback does the scratch
-  // build + GPU execute and registers an embedded signal for completion.
+  if (!count) {
+    return iree_hal_webgpu_queue_submit_execute(
+        queue, waits, signals, NULL, iree_hal_buffer_binding_table_empty(),
+        IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
+  }
+  iree_host_size_t size = 0, records_offset = 0, buffers_offset = 0,
+                   data_offset = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      0, &size,
+      IREE_STRUCT_FIELD(count, iree_hal_webgpu_transfer_t, &records_offset),
+      IREE_STRUCT_FIELD(count, iree_hal_webgpu_transfer_buffers_t,
+                        &buffers_offset),
+      IREE_STRUCT_FIELD(capture_length, uint8_t, &data_offset)));
   iree_hal_webgpu_queue_state_t* state = NULL;
+  iree_host_size_t offset = 0;
   IREE_RETURN_IF_ERROR(iree_hal_webgpu_queue_state_allocate(
-      queue, IREE_HAL_WEBGPU_QUEUE_OP_FILL, wait_semaphore_list,
-      signal_semaphore_list, /*trailing_count=*/0,
-      /*trailing_element_size=*/0, /*out_trailing_offset=*/NULL, &state));
-
-  iree_hal_buffer_retain(target_buffer);
-  state->fill.target_buffer = target_buffer;
-  state->fill.target_offset = target_offset;
-  state->fill.length = length;
-  IREE_ASSERT(pattern_length <= sizeof(state->fill.pattern));
-  memcpy(&state->fill.pattern, pattern, pattern_length);
-  state->fill.pattern_length = pattern_length;
-
-  return iree_hal_webgpu_queue_state_submit(state);
-}
-
-iree_status_t iree_hal_webgpu_queue_update(
-    iree_hal_webgpu_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    const void* source_buffer, iree_host_size_t source_offset,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, iree_hal_update_flags_t flags) {
-  // Fast path: waits satisfied or FIFO-elided — execute synchronously. The
-  // builder copies source data into the instruction stream blocks inline, so
-  // the caller's source_buffer is consumed before this function returns.
-  if (wait_semaphore_list.count == 0 ||
-      iree_hal_semaphore_list_poll(wait_semaphore_list) ||
-      iree_hal_webgpu_queue_can_elide_waits(queue, wait_semaphore_list)) {
-    iree_status_t status =
-        iree_hal_webgpu_builder_reset(&queue->scratch_builder);
-    if (iree_status_is_ok(status)) {
-      iree_hal_buffer_ref_t target_ref =
-          iree_hal_make_buffer_ref(target_buffer, target_offset, length);
-      status = iree_hal_webgpu_builder_update_buffer(
-          &queue->scratch_builder, source_buffer, source_offset, target_ref);
+      queue, IREE_HAL_WEBGPU_QUEUE_OP_TRANSFER, waits, signals, 1, size,
+      &offset, &state));
+  uint8_t* storage = (uint8_t*)state + offset;
+  state->transfer.count = count;
+  state->transfer.records =
+      (iree_hal_webgpu_transfer_t*)(storage + records_offset);
+  state->transfer.buffers =
+      (iree_hal_webgpu_transfer_buffers_t*)(storage + buffers_offset);
+  state->transfer.has_download = has_download;
+  uint8_t* data = storage + data_offset;
+  count = 0;
+  for (iree_host_size_t i = 0; i < operation_count; ++i) {
+    const iree_hal_transfer_operation_t* operation = &operations[i];
+    const iree_device_size_t length =
+        iree_hal_transfer_operation_length(operation);
+    if (!length) {
+      continue;
     }
-    return iree_hal_webgpu_queue_submit_scratch_and_signal(
-        queue, signal_semaphore_list, status);
+    iree_hal_webgpu_transfer_t* record = &state->transfer.records[count];
+    iree_hal_webgpu_transfer_buffers_t* buffers =
+        &state->transfer.buffers[count++];
+    *record = (iree_hal_webgpu_transfer_t){
+        .type = operation->type,
+        .region = iree_hal_transfer_operation_region(operation),
+    };
+    *buffers = (iree_hal_webgpu_transfer_buffers_t){0};
+    switch (operation->type) {
+      case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
+        buffers->target = operation->fill.target_buffer;
+        record->target_offset = operation->fill.target_offset;
+        memcpy(&record->pattern, operation->fill.pattern,
+               operation->fill.pattern_length);
+        if (operation->fill.pattern_length == 1) {
+          record->pattern *= UINT32_C(0x01010101);
+        }
+        if (operation->fill.pattern_length == 2) {
+          record->pattern |= record->pattern << 16;
+        }
+        break;
+      case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
+        buffers->target = operation->update.target_buffer;
+        record->target_offset = operation->update.target_offset;
+        iree_hal_transfer_gather_host(
+            (const uint8_t*)operation->update.source_buffer +
+                operation->update.source_offset,
+            &record->region, 0, length, data);
+        record->host_address = (uintptr_t)data;
+        record->region.source_strides.row_stride = record->region.row_length;
+        record->region.source_strides.slice_stride =
+            record->region.row_length * record->region.row_count;
+        data += length;
+        break;
+      case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
+        buffers->source = operation->copy.source_buffer;
+        record->source_offset = operation->copy.source_offset;
+        buffers->target = operation->copy.target_buffer;
+        record->target_offset = operation->copy.target_offset;
+        break;
+      case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
+        buffers->target = operation->upload.target_buffer;
+        record->target_offset = operation->upload.target_offset;
+        record->host_address = (uintptr_t)operation->upload.source;
+        break;
+      case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
+        buffers->source = operation->download.source_buffer;
+        record->source_offset = operation->download.source_offset;
+        record->host_address = (uintptr_t)operation->download.target;
+        break;
+    }
+    if (buffers->source) {
+      iree_hal_buffer_retain(buffers->source);
+      record->source_handle = iree_hal_webgpu_buffer_handle(buffers->source);
+      record->source_offset += iree_hal_buffer_byte_offset(buffers->source);
+    }
+    if (buffers->target) {
+      iree_hal_buffer_retain(buffers->target);
+      record->target_handle = iree_hal_webgpu_buffer_handle(buffers->target);
+      record->target_offset += iree_hal_buffer_byte_offset(buffers->target);
+    }
   }
-
-  // Async path: source data may be stack memory that becomes invalid after
-  // this function returns. Validate length fits in a block, then acquire a
-  // block from the pool and copy the data.
-  if (length > queue->block_pool.total_block_size) {
-    iree_status_t status = iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "queue_update length %" PRIdsz " exceeds block capacity %" PRIhsz,
-        length, queue->block_pool.total_block_size);
-    iree_hal_semaphore_list_fail(signal_semaphore_list,
-                                 iree_status_clone(status));
+  if (!waits.count || iree_hal_semaphore_list_poll(waits) ||
+      iree_hal_webgpu_queue_can_elide_waits(queue, waits)) {
+    iree_status_t status = iree_hal_webgpu_queue_transfer_begin(state);
+    if (iree_status_is_ok(status)) {
+      iree_hal_semaphore_list_release(state->wait_semaphore_list);
+    } else {
+      iree_hal_webgpu_queue_state_discard(state);
+    }
     return status;
   }
-  iree_arena_block_t* captured_block = NULL;
-  void* captured_data = NULL;
-  {
-    iree_status_t status = iree_arena_block_pool_acquire(
-        &queue->block_pool, &captured_block, &captured_data);
-    if (!iree_status_is_ok(status)) {
-      iree_hal_semaphore_list_fail(signal_semaphore_list,
-                                   iree_status_clone(status));
-      return status;
-    }
-  }
-  memcpy(captured_data, (const uint8_t*)source_buffer + source_offset,
-         (size_t)length);
-
-  iree_hal_webgpu_queue_state_t* state = NULL;
-  iree_status_t status = iree_hal_webgpu_queue_state_allocate(
-      queue, IREE_HAL_WEBGPU_QUEUE_OP_UPDATE, wait_semaphore_list,
-      signal_semaphore_list, /*trailing_count=*/0,
-      /*trailing_element_size=*/0, /*out_trailing_offset=*/NULL, &state);
-  if (!iree_status_is_ok(status)) {
-    iree_arena_block_pool_release(&queue->block_pool, captured_block,
-                                  captured_block);
-    return status;
-  }
-
-  iree_hal_buffer_retain(target_buffer);
-  state->update.target_buffer = target_buffer;
-  state->update.target_offset = target_offset;
-  state->update.length = length;
-  state->update.captured_data = captured_data;
-  state->update.captured_block = captured_block;
-
-  return iree_hal_webgpu_queue_state_submit(state);
-}
-
-iree_status_t iree_hal_webgpu_queue_copy(
-    iree_hal_webgpu_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, iree_hal_copy_flags_t flags) {
-  // Fast path: waits satisfied or FIFO-elided — execute synchronously.
-  if (wait_semaphore_list.count == 0 ||
-      iree_hal_semaphore_list_poll(wait_semaphore_list) ||
-      iree_hal_webgpu_queue_can_elide_waits(queue, wait_semaphore_list)) {
-    iree_status_t status =
-        iree_hal_webgpu_builder_reset(&queue->scratch_builder);
-    if (iree_status_is_ok(status)) {
-      iree_hal_buffer_ref_t source_ref =
-          iree_hal_make_buffer_ref(source_buffer, source_offset, length);
-      iree_hal_buffer_ref_t target_ref =
-          iree_hal_make_buffer_ref(target_buffer, target_offset, length);
-      status = iree_hal_webgpu_builder_copy_buffer(&queue->scratch_builder,
-                                                   source_ref, target_ref);
-    }
-    return iree_hal_webgpu_queue_submit_scratch_and_signal(
-        queue, signal_semaphore_list, status);
-  }
-
-  // Async path: capture params (retain both buffers) and submit wait.
-  iree_hal_webgpu_queue_state_t* state = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_webgpu_queue_state_allocate(
-      queue, IREE_HAL_WEBGPU_QUEUE_OP_COPY, wait_semaphore_list,
-      signal_semaphore_list, /*trailing_count=*/0,
-      /*trailing_element_size=*/0, /*out_trailing_offset=*/NULL, &state));
-
-  iree_hal_buffer_retain(source_buffer);
-  state->copy.source_buffer = source_buffer;
-  state->copy.source_offset = source_offset;
-  iree_hal_buffer_retain(target_buffer);
-  state->copy.target_buffer = target_buffer;
-  state->copy.target_offset = target_offset;
-  state->copy.length = length;
-
   return iree_hal_webgpu_queue_state_submit(state);
 }
 
@@ -1689,11 +1629,18 @@ static iree_status_t iree_hal_webgpu_queue_execute_recording(
           iree_hal_buffer_allocated_buffer(binding->buffer);
       dynamic_entries[i].gpu_buffer_handle =
           iree_hal_webgpu_buffer_handle(allocated);
+      dynamic_entries[i].reserved = 0;
       dynamic_entries[i].base_offset =
-          (uint32_t)iree_hal_buffer_byte_offset(binding->buffer);
+          iree_hal_buffer_byte_offset(binding->buffer) + binding->offset;
+      dynamic_entries[i].length =
+          binding->length == IREE_HAL_WHOLE_BUFFER
+              ? iree_hal_buffer_byte_length(binding->buffer) - binding->offset
+              : binding->length;
     } else {
       dynamic_entries[i].gpu_buffer_handle = 0;
       dynamic_entries[i].base_offset = 0;
+      dynamic_entries[i].reserved = 0;
+      dynamic_entries[i].length = 0;
     }
   }
 
@@ -1736,6 +1683,9 @@ static iree_status_t iree_hal_webgpu_queue_execute_one_shot(
     entries[slot_entries[i].slot].gpu_buffer_handle =
         slot_entries[i].gpu_buffer_handle;
     entries[slot_entries[i].slot].base_offset = 0;
+    entries[slot_entries[i].slot].reserved = 0;
+    entries[slot_entries[i].slot].length =
+        iree_hal_buffer_byte_length(slot_entries[i].buffer);
   }
 
   iree_hal_webgpu_isa_builtins_descriptor_t builtins_descriptor;

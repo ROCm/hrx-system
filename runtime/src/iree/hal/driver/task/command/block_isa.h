@@ -71,6 +71,10 @@ enum iree_hal_cmd_flag_bits_e {
   IREE_HAL_CMD_FLAG_PRESERVE_SUBNORMAL_INPUTS = 1u << 3,
   // Dispatch results require gradual floating-point underflow.
   IREE_HAL_CMD_FLAG_PRESERVE_SUBNORMAL_RESULTS = 1u << 4,
+  // Transfer has immutable rectangular geometry following its fixed header.
+  // Mutually exclusive with INDIRECT parameters; bindings may still be
+  // indirect.
+  IREE_HAL_CMD_FLAG_RECTANGULAR = 1u << 5,
 };
 
 // Target byte length for each transfer tile. This is large enough to amortize
@@ -549,7 +553,7 @@ static_assert(sizeof(iree_hal_cmd_copy_t) == 32, "copy command is 4 qwords");
 
 // Copies inline host data (captured at recording time) to a device buffer.
 // The source data follows the command header inline in .text. At execution
-// the processor does a single memcpy. UPDATE is effectively single-tile because
+// the processor copies useful bytes only. UPDATE is single-tile because
 // the inline command payload is capped at 2040 bytes.
 typedef struct iree_hal_cmd_update_t {
   iree_hal_cmd_header_t header;  // opcode=UPDATE
@@ -558,13 +562,13 @@ typedef struct iree_hal_cmd_update_t {
   uint16_t target_binding;
   uint16_t reserved;
 
-  // Offset within the target buffer to write to.
+  // Offset within the target binding to the first useful byte.
   iree_device_size_t target_offset;
   // Number of bytes to copy from the inline source data.
   iree_device_size_t length;
 
-  // Inline source data captured at recording time. Accessed as
-  // cmd->source_data[i]. Total command size is 8-byte aligned.
+  // Packed source bytes, preceded by transfer_region_t when RECTANGULAR.
+  // The geometry's source strides are dense. Total size is 8-byte aligned.
   uint8_t source_data[];
 } iree_hal_cmd_update_t;
 

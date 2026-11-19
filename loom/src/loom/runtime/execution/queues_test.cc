@@ -253,15 +253,21 @@ TEST_P(ExecutionQueuesTest, TransferPlacementCountsTheWholeBatch) {
   ASSERT_NE(buffer, nullptr);
   std::vector<uint8_t> data(kLimit / 2);
   const uint8_t fill = 0xC5;
+  const iree_hal_transfer_region_t empty_region = {};
+  const iree_hal_transfer_region_t upload_region = {data.size(), 1, 1};
+  iree_hal_fill_region_t fill_region = {data.size(), 1, 1};
   iree_hal_transfer_operation_t batch[] = {
-      {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD},  // Empty range.
+      {
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+          .download = {.region = &empty_region},
+      },
       {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
           .upload =
               {
                   .source = data.data(),
                   .target_buffer = buffer.get(),
-                  .length = data.size(),
+                  .region = &upload_region,
               },
       },
       {
@@ -270,7 +276,7 @@ TEST_P(ExecutionQueuesTest, TransferPlacementCountsTheWholeBatch) {
               {
                   .target_buffer = buffer.get(),
                   .target_offset = data.size(),
-                  .length = data.size(),
+                  .region = &fill_region,
                   .pattern = &fill,
                   .pattern_length = 1,
               },
@@ -280,7 +286,7 @@ TEST_P(ExecutionQueuesTest, TransferPlacementCountsTheWholeBatch) {
       &binding, IREE_ARRAYSIZE(batch), batch);
   EXPECT_EQ(plan.queue, binding.dispatch);
   EXPECT_TRUE(plan.capture_uploads);
-  ++batch[2].fill.length;
+  ++fill_region.row_length;
   plan = loom_runtime_execution_binding_plan_transfer(
       &binding, IREE_ARRAYSIZE(batch), batch);
   EXPECT_EQ(plan.queue, binding.transfer);
@@ -325,8 +331,10 @@ TEST_P(ExecutionQueuesTest, CopiesHonorSourceAndTargetFamilyGrants) {
   crossed[1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
   crossed[1].copy.source_buffer = shared.get();
   crossed[1].copy.target_buffer = restricted.get();
+  iree_hal_transfer_region_t region = {kLength, 1, 1};
+  crossed[0].copy.region = crossed[1].copy.region = &region;
   for (size_t length : {kLength, size_t{4}}) {
-    crossed[0].copy.length = crossed[1].copy.length = length;
+    region.row_length = length;
     EXPECT_EQ(
         loom_runtime_execution_binding_plan_transfer(&binding, 1, &crossed[0])
             .queue,
@@ -362,6 +370,7 @@ TEST_P(ExecutionQueuesTest, ControlUploadsCaptureBeforeTheirDeviceWait) {
     const size_t length = count * sizeof(uint32_t);
     auto buffer = Allocate(storage_pool_, length);
     ASSERT_NE(buffer, nullptr);
+    const iree_hal_transfer_region_t upload_region = {sizeof(uint32_t), 1, 1};
     for (size_t i = 0; i < count; ++i) {
       words[i] = 0x13240000u + i;
       uploads[i] = {
@@ -371,7 +380,7 @@ TEST_P(ExecutionQueuesTest, ControlUploadsCaptureBeforeTheirDeviceWait) {
                   .source = &words[i],
                   .target_buffer = buffer.get(),
                   .target_offset = i * sizeof(uint32_t),
-                  .length = sizeof(uint32_t),
+                  .region = &upload_region,
               },
       };
     }
@@ -383,13 +392,14 @@ TEST_P(ExecutionQueuesTest, ControlUploadsCaptureBeforeTheirDeviceWait) {
     iree_status_t status = loom_runtime_execution_transfer(
         execution_, uploads.size(), uploads.data(), &work);
     std::fill(words.begin(), words.end(), 0xDEADBEEFu);
+    const iree_hal_transfer_region_t download_region = {length, 1, 1};
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
             {
                 .source_buffer = buffer.get(),
                 .target = result.data(),
-                .length = length,
+                .region = &download_region,
             },
     };
     if (iree_status_is_ok(status)) {

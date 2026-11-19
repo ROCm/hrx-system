@@ -663,7 +663,12 @@ TEST_P(ExecutionTest, ConsumerFirstKernelsShareOneBacking) {
     };
     download.download.source_buffer = root;
     download.download.target = result.data();
-    download.download.length = sizeof(result);
+    const iree_hal_transfer_region_t download_transfer_region = {
+        .row_length = sizeof(result),
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    download.download.region = &download_transfer_region;
     IREE_ASSERT_OK(iree_hal_queue_transfer(
         participants_[kCpu].queue, {1, &cpu_timeline, &consumed},
         {1, &cpu_timeline, &downloaded}, 1, &download,
@@ -714,7 +719,12 @@ TEST_P(ExecutionTest, ConsumerFirstKernelsShareOneBacking) {
     };
     upload.update.source_buffer = initial.data();
     upload.update.target_buffer = root;
-    upload.update.length = sizeof(initial);
+    const iree_hal_transfer_region_t upload_transfer_region = {
+        .row_length = sizeof(initial),
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    upload.update.region = &upload_transfer_region;
     IREE_ASSERT_OK(iree_hal_queue_transfer(
         participants_[kCpu].queue,
         {1, (remapped || (pooled && !replay)) ? &memory_timeline : &start,
@@ -760,7 +770,7 @@ TEST_P(ExecutionTest, ConsumerFirstKernelsShareOneBacking) {
           {1, &memory_timeline, &acquired}, block_pool, 1, &request,
           reused.out()));
       const uint32_t pattern = 0x71727374u;
-      IREE_ASSERT_OK(iree_hal_queue_fill(
+      IREE_ASSERT_OK(iree_hal_queue_fill_linear(
           participants_[kGpu].queue, {1, &memory_timeline, &acquired},
           {1, &memory_timeline, &filled}, reused, 0, sizeof(Payload), &pattern,
           sizeof(pattern), nullptr, IREE_HAL_FILL_FLAG_NONE));
@@ -769,7 +779,12 @@ TEST_P(ExecutionTest, ConsumerFirstKernelsShareOneBacking) {
       };
       readback.download.source_buffer = reused;
       readback.download.target = recycled.data();
-      readback.download.length = sizeof(recycled);
+      const iree_hal_transfer_region_t readback_transfer_region = {
+          .row_length = sizeof(recycled),
+          .row_count = 1,
+          .slice_count = 1,
+      };
+      readback.download.region = &readback_transfer_region;
       IREE_ASSERT_OK(iree_hal_queue_transfer(
           participants_[kCpu].queue, {1, &memory_timeline, &filled},
           {1, &memory_timeline, &read}, 1, &readback, nullptr));

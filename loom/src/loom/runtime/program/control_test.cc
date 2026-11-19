@@ -346,13 +346,18 @@ class ControlTest
                                        inputs_[row].tokens.data(),
                                        inputs_[row].progress.data()};
     std::array<iree_hal_transfer_operation_t, 3> operations = {};
+    std::array<iree_hal_transfer_region_t, 3> operations_transfer_regions = {};
     for (size_t i = 0; i < count; ++i) {
       const size_t slot = first + i;
       operations[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
       operations[i].upload.source = data[slot];
       operations[i].upload.target_buffer = buffers_[row][slot];
-      operations[i].upload.length =
-          count == 1 ? sizeof(int32_t) : kLengths[slot];
+      operations_transfer_regions[i] = {
+          .row_length = count == 1 ? sizeof(int32_t) : kLengths[slot],
+          .row_count = 1,
+          .slice_count = 1,
+      };
+      operations[i].upload.region = &operations_transfer_regions[i];
     }
     return loom_runtime_execution_transfer(execution_, count, operations.data(),
                                            out_value);
@@ -363,11 +368,17 @@ class ControlTest
                                  outputs_[row].tokens.data(),
                                  outputs_[row].progress.data()};
     std::array<iree_hal_transfer_operation_t, 3> operations = {};
+    std::array<iree_hal_transfer_region_t, 3> operations_transfer_regions = {};
     for (size_t i = 0; i < operations.size(); ++i) {
       operations[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
       operations[i].download.source_buffer = buffers_[row][i];
       operations[i].download.target = data[i];
-      operations[i].download.length = kLengths[i];
+      operations_transfer_regions[i] = {
+          .row_length = kLengths[i],
+          .row_count = 1,
+          .slice_count = 1,
+      };
+      operations[i].download.region = &operations_transfer_regions[i];
     }
     return loom_runtime_execution_feedback(execution_, operations.size(),
                                            operations.data(), out_value);
@@ -564,7 +575,12 @@ TEST_P(ControlTest, FeedbackForkDoesNotAdvanceWork) {
   invalid.download.source_buffer = buffers_[0][1];
   invalid.download.source_offset = kLengths[1];
   invalid.download.target = outputs_[0].tokens.data();
-  invalid.download.length = sizeof(int32_t);
+  const iree_hal_transfer_region_t invalid_transfer_region = {
+      .row_length = sizeof(int32_t),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  invalid.download.region = &invalid_transfer_region;
   feedback_completion = 777;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                         loom_runtime_execution_feedback(execution_, 1, &invalid,
@@ -936,13 +952,19 @@ TEST_P(ControlTest, FailedExternalReadinessPreservesConsumerState) {
   // the failed model timeline. Checking only the failure status would miss a
   // consumer that ran before the external read became ready.
   std::array<iree_hal_transfer_operation_t, 3> downloads = {};
+  std::array<iree_hal_transfer_region_t, 3> downloads_transfer_regions = {};
   void* destinations[] = {outputs_[0].control.data(), outputs_[0].tokens.data(),
                           outputs_[0].progress.data()};
   for (size_t i = 0; i < downloads.size(); ++i) {
     downloads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
     downloads[i].download.source_buffer = buffers_[0][i];
     downloads[i].download.target = destinations[i];
-    downloads[i].download.length = kLengths[i];
+    downloads_transfer_regions[i] = {
+        .row_length = kLengths[i],
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    downloads[i].download.region = &downloads_transfer_regions[i];
   }
   uint64_t one = 1;
   IREE_ASSERT_OK(iree_hal_queue_transfer(
@@ -956,13 +978,19 @@ TEST_P(ControlTest, FailedExternalReadinessPreservesConsumerState) {
 
 TEST_P(ControlTest, DeviceProducedCountsGateConcurrentContinuation) {
   std::array<iree_hal_transfer_operation_t, 2> uploads = {};
+  std::array<iree_hal_transfer_region_t, 2> uploads_transfer_regions = {};
   const void* sources[] = {continuation_.schedule.data(),
                            continuation_.input.data()};
   for (size_t i = 0; i < uploads.size(); ++i) {
     uploads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
     uploads[i].upload.source = sources[i];
     uploads[i].upload.target_buffer = continuation_.buffers[i];
-    uploads[i].upload.length = kContinuationLengths[i];
+    uploads_transfer_regions[i] = {
+        .row_length = kContinuationLengths[i],
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    uploads[i].upload.region = &uploads_transfer_regions[i];
   }
   uint64_t completion = 0;
   IREE_ASSERT_OK(loom_runtime_execution_transfer(execution_, uploads.size(),
@@ -990,7 +1018,12 @@ TEST_P(ControlTest, DeviceProducedCountsGateConcurrentContinuation) {
   };
   download.download.source_buffer = continuation_.buffers[1];
   download.download.target = continuation_.output.data();
-  download.download.length = kContinuationLengths[1];
+  const iree_hal_transfer_region_t download_transfer_region = {
+      .row_length = kContinuationLengths[1],
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  download.download.region = &download_transfer_region;
   IREE_ASSERT_OK(
       loom_runtime_execution_feedback(execution_, 1, &download, &completion));
   IREE_ASSERT_OK(loom_runtime_execution_feedback_wait(execution_, completion));

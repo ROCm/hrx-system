@@ -273,9 +273,9 @@ void FabricHostNumaMemoryTest::RoundTrip(iree_hal_pool_t* pool,
     const uint32_t pattern = UINT32_C(0xA5910000) | (node_id << 8) | epoch;
     uint64_t filled = ++sequence_;
     const iree_hal_semaphore_list_t fill_done = {1, &done_, &filled};
-    IREE_ASSERT_OK(iree_hal_queue_fill(queue, {}, fill_done, buffer, 0,
-                                       granularity_, &pattern, sizeof(pattern),
-                                       &fill_barriers, 0));
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
+        queue, {}, fill_done, buffer, 0, granularity_, &pattern,
+        sizeof(pattern), &fill_barriers, 0));
     IREE_ASSERT_OK(
         iree_hal_semaphore_wait(done_, filled, iree_infinite_timeout(), 0));
     SdmaCommandWriter commands(
@@ -291,9 +291,9 @@ void FabricHostNumaMemoryTest::RoundTrip(iree_hal_pool_t* pool,
     ASSERT_NO_FATAL_FAILURE(SubmitAndWait(commands));
     uint64_t downloaded = ++sequence_;
     const iree_hal_semaphore_list_t download_done = {1, &done_, &downloaded};
-    IREE_ASSERT_OK(iree_hal_queue_download(queue, {}, download_done, buffer,
-                                           granularity_, result.data(),
-                                           granularity_, &download_barriers));
+    IREE_ASSERT_OK(iree_hal_queue_download_linear(
+        queue, {}, download_done, buffer, granularity_, result.data(),
+        granularity_, &download_barriers));
     IREE_ASSERT_OK(
         iree_hal_semaphore_wait(done_, downloaded, iree_infinite_timeout(), 0));
     for (uint32_t word : result) {

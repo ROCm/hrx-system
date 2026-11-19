@@ -145,6 +145,20 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_test(
+    name = "webgpu_builder_test",
+    srcs = ["webgpu_builder_test.cc"],
+    deps = [
+        ":webgpu_builder",
+        ":webgpu_isa",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_runtime_cc_library(
     name = "webgpu_builtins",
     srcs = ["webgpu_builtins.c"],

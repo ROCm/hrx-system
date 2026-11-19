@@ -245,6 +245,7 @@ static void AppendImmediateQueueTransferRecord(
   };
   iree_hal_replay_queue_transfer_operation_payload_t operation = {
       .type = IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+      .region = {.row_length = 4, .row_count = 1, .slice_count = 1},
   };
   operation.source_ref.buffer_id = queue_id + 11;
   operation.source_ref.length = 4;

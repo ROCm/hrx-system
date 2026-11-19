@@ -982,6 +982,90 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_dealloca(
   return status;
 }
 
+void iree_hal_transfer_copy_host(const void* source, void* target,
+                                 const iree_hal_transfer_region_t* region) {
+  if (!region->row_length || !region->row_count || !region->slice_count) {
+    return;
+  }
+  if (iree_hal_transfer_range_is_linear(region->row_length, region->row_count,
+                                        region->slice_count,
+                                        &region->source_strides) &&
+      iree_hal_transfer_range_is_linear(region->row_length, region->row_count,
+                                        region->slice_count,
+                                        &region->target_strides)) {
+    memcpy(target, source, iree_hal_transfer_region_length(region));
+    return;
+  }
+  const uint64_t source_row =
+      region->row_count > 1 ? region->source_strides.row_stride : 0;
+  const uint64_t target_row =
+      region->row_count > 1 ? region->target_strides.row_stride : 0;
+  const uint64_t source_slice =
+      region->slice_count > 1 ? region->source_strides.slice_stride : 0;
+  const uint64_t target_slice =
+      region->slice_count > 1 ? region->target_strides.slice_stride : 0;
+  for (uint64_t z = 0; z < region->slice_count; ++z) {
+    const uint8_t* source_bytes = (const uint8_t*)source + z * source_slice;
+    uint8_t* target_bytes = (uint8_t*)target + z * target_slice;
+    for (uint64_t y = 0; y < region->row_count; ++y) {
+      memcpy(target_bytes + y * target_row, source_bytes + y * source_row,
+             region->row_length);
+    }
+  }
+}
+
+static void iree_hal_transfer_copy_host_span(
+    const void* source, void* target, const iree_hal_transfer_region_t* region,
+    uint64_t offset, iree_host_size_t length, bool scatter) {
+  if (!length) {
+    return;
+  }
+  const iree_hal_transfer_strides_t* strides =
+      scatter ? &region->target_strides : &region->source_strides;
+  if (iree_hal_transfer_range_is_linear(region->row_length, region->row_count,
+                                        region->slice_count, strides)) {
+    memcpy((uint8_t*)target + (scatter ? offset : 0),
+           (const uint8_t*)source + (scatter ? 0 : offset), length);
+    return;
+  }
+  const uint64_t slice_length = region->row_length * region->row_count;
+  uint64_t slice = offset / slice_length;
+  uint64_t row = (offset % slice_length) / region->row_length;
+  uint64_t column = offset % region->row_length;
+  uint64_t position = 0;
+  while (length) {
+    const uint64_t displacement =
+        column + (region->row_count > 1 ? row * strides->row_stride : 0) +
+        (region->slice_count > 1 ? slice * strides->slice_stride : 0);
+    const iree_host_size_t part = iree_min(length, region->row_length - column);
+    memcpy((uint8_t*)target + (scatter ? displacement : position),
+           (const uint8_t*)source + (scatter ? position : displacement), part);
+    position += part;
+    length -= part;
+    column = 0;
+    if (++row == region->row_count) {
+      row = 0;
+      ++slice;
+    }
+  }
+}
+
+void iree_hal_transfer_gather_host(const void* source,
+                                   const iree_hal_transfer_region_t* region,
+                                   uint64_t offset, iree_host_size_t length,
+                                   void* target) {
+  iree_hal_transfer_copy_host_span(source, target, region, offset, length,
+                                   false);
+}
+
+void iree_hal_transfer_scatter_host(const void* source,
+                                    const iree_hal_transfer_region_t* region,
+                                    uint64_t offset, iree_host_size_t length,
+                                    void* target) {
+  iree_hal_transfer_copy_host_span(source, target, region, offset, length,
+                                   true);
+}
+
 static iree_status_t iree_hal_queue_validate_transfer_buffer(
     const iree_hal_queue_t* queue, iree_hal_buffer_t* buffer,
     iree_device_size_t offset, iree_device_size_t length,
@@ -1007,155 +1091,173 @@ static iree_status_t iree_hal_queue_validate_transfer_operation(
     const iree_hal_queue_t* queue, iree_host_size_t operation_index,
     const iree_hal_transfer_operation_t* operation,
     bool* out_has_borrowed_host_range) {
-  bool has_borrowed_host_range = false;
+  *out_has_borrowed_host_range = false;
+  const void* region_pointer = NULL;
+  switch (operation->type) {
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
+      region_pointer = operation->fill.region;
+      break;
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
+      region_pointer = operation->update.region;
+      break;
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
+      region_pointer = operation->copy.region;
+      break;
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
+      region_pointer = operation->upload.region;
+      break;
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
+      region_pointer = operation->download.region;
+      break;
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "unknown transfer operation type %u",
+                              (uint32_t)operation->type);
+  }
+  if (!region_pointer) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "transfer operation %" PRIhsz " has no geometry",
+                            operation_index);
+  }
+  const iree_hal_transfer_region_t region =
+      iree_hal_transfer_operation_region(operation);
+  if (!region.row_length || !region.row_count || !region.slice_count) {
+    return iree_ok_status();
+  }
+  uint64_t length = 0;
+  if (!iree_checked_mul_u64(region.row_length, region.row_count, &length) ||
+      !iree_checked_mul_u64(length, region.slice_count, &length) ||
+      !iree_hal_transfer_range_fits(0, region.row_length, region.row_count,
+                                    region.slice_count, &region.source_strides,
+                                    UINT64_MAX) ||
+      !iree_hal_transfer_range_fits(0, region.row_length, region.row_count,
+                                    region.slice_count, &region.target_strides,
+                                    UINT64_MAX)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "transfer operation %" PRIhsz " geometry overflows",
+                            operation_index);
+  }
+  const uint64_t source_length = iree_hal_transfer_range_length(
+      region.row_length, region.row_count, region.slice_count,
+      &region.source_strides);
+  const uint64_t target_length = iree_hal_transfer_range_length(
+      region.row_length, region.row_count, region.slice_count,
+      &region.target_strides);
   iree_status_t status = iree_ok_status();
   switch (operation->type) {
     case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
-      if (operation->fill.length == 0) {
-        break;
-      }
-      if (IREE_UNLIKELY(operation->fill.flags != IREE_HAL_FILL_FLAG_NONE)) {
+      if (operation->fill.flags || !operation->fill.pattern ||
+          (operation->fill.pattern_length != 1 &&
+           operation->fill.pattern_length != 2 &&
+           operation->fill.pattern_length != 4)) {
+        status =
+            iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "fill requires a 1/2/4-byte pattern and no flags");
+      } else if (operation->fill.target_offset %
+                     operation->fill.pattern_length ||
+                 region.row_length % operation->fill.pattern_length ||
+                 (region.row_count > 1 && region.target_strides.row_stride %
+                                              operation->fill.pattern_length) ||
+                 (region.slice_count > 1 &&
+                  region.target_strides.slice_stride %
+                      operation->fill.pattern_length)) {
         status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "unsupported fill flags: 0x%016" PRIx64,
-                                  operation->fill.flags);
-      } else if (IREE_UNLIKELY(!operation->fill.pattern)) {
-        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "fill pattern is null");
-      } else if (IREE_UNLIKELY(operation->fill.pattern_length != 1 &&
-                               operation->fill.pattern_length != 2 &&
-                               operation->fill.pattern_length != 4)) {
-        status = iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "fill pattern length must be 1, 2, or 4 bytes (got %" PRIhsz ")",
-            operation->fill.pattern_length);
-      } else if (IREE_UNLIKELY(operation->fill.target_offset %
-                                       operation->fill.pattern_length !=
-                                   0 ||
-                               operation->fill.length %
-                                       operation->fill.pattern_length !=
-                                   0)) {
-        status = iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "fill range must be aligned to the pattern length");
+                                  "fill origin, row length, and used strides "
+                                  "must align to the pattern");
       } else {
         status = iree_hal_queue_validate_transfer_buffer(
             queue, operation->fill.target_buffer, operation->fill.target_offset,
-            operation->fill.length, IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
+            target_length, IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
             IREE_HAL_MEMORY_ACCESS_WRITE);
       }
       break;
     case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
-      if (operation->update.length == 0) {
-        break;
-      }
-      if (IREE_UNLIKELY(operation->update.flags != IREE_HAL_UPDATE_FLAG_NONE)) {
+      if (operation->update.flags || !operation->update.source_buffer) {
         status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "unsupported update flags: 0x%016" PRIx64,
-                                  operation->update.flags);
-      } else if (IREE_UNLIKELY(operation->update.length > IREE_HOST_SIZE_MAX)) {
-        status = iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "update length exceeds the host addressable range");
-      } else if (IREE_UNLIKELY(
-                     operation->update.source_offset >
-                     IREE_HOST_SIZE_MAX -
-                         (iree_host_size_t)operation->update.length)) {
-        status = iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "update source range exceeds the host addressable range");
-      } else if (IREE_UNLIKELY(!operation->update.source_buffer)) {
-        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "update source is null");
+                                  "update requires a source and no flags");
+      } else if (source_length > IREE_HOST_SIZE_MAX ||
+                 operation->update.source_offset >
+                     IREE_HOST_SIZE_MAX - source_length ||
+                 length > IREE_HOST_SIZE_MAX) {
+        status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "update exceeds the host addressable range");
       } else {
         status = iree_hal_queue_validate_transfer_buffer(
             queue, operation->update.target_buffer,
-            operation->update.target_offset, operation->update.length,
+            operation->update.target_offset, target_length,
             IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
             IREE_HAL_MEMORY_ACCESS_WRITE);
       }
       break;
     case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
-      if (operation->copy.length == 0) {
-        break;
-      }
-      if (IREE_UNLIKELY(operation->copy.flags != IREE_HAL_COPY_FLAG_NONE)) {
+      if (operation->copy.flags) {
         status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "unsupported copy flags: 0x%016" PRIx64,
-                                  operation->copy.flags);
+                                  "copy requires no flags");
       } else {
         status = iree_hal_queue_validate_transfer_buffer(
             queue, operation->copy.source_buffer, operation->copy.source_offset,
-            operation->copy.length, IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
+            source_length, IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
             IREE_HAL_MEMORY_ACCESS_READ);
       }
       if (iree_status_is_ok(status)) {
         status = iree_hal_queue_validate_transfer_buffer(
             queue, operation->copy.target_buffer, operation->copy.target_offset,
-            operation->copy.length, IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
+            target_length, IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
             IREE_HAL_MEMORY_ACCESS_WRITE);
       }
       if (iree_status_is_ok(status) &&
-          IREE_UNLIKELY(
-              iree_hal_buffer_test_overlap(
-                  operation->copy.source_buffer, operation->copy.source_offset,
-                  operation->copy.length, operation->copy.target_buffer,
-                  operation->copy.target_offset, operation->copy.length) !=
-              IREE_HAL_BUFFER_OVERLAP_DISJOINT)) {
+          iree_hal_transfer_range_is_linear(region.row_length, region.row_count,
+                                            region.slice_count,
+                                            &region.source_strides) &&
+          iree_hal_transfer_range_is_linear(region.row_length, region.row_count,
+                                            region.slice_count,
+                                            &region.target_strides) &&
+          iree_hal_buffer_test_overlap(operation->copy.source_buffer,
+                                       operation->copy.source_offset, length,
+                                       operation->copy.target_buffer,
+                                       operation->copy.target_offset, length) !=
+              IREE_HAL_BUFFER_OVERLAP_DISJOINT) {
         status = iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
-            "copy source and target ranges overlap within one allocation");
+            "copy useful ranges overlap within one allocation");
       }
       break;
     case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
-      if (operation->upload.length == 0) {
-        break;
-      }
-      if (IREE_UNLIKELY(operation->upload.length > IREE_HOST_SIZE_MAX)) {
-        status = iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "upload length exceeds the host addressable range");
-      } else if (IREE_UNLIKELY(!operation->upload.source)) {
+      if (!operation->upload.source) {
         status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                   "upload source is null");
+      } else if (source_length > IREE_HOST_SIZE_MAX) {
+        status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "upload exceeds the host addressable range");
       } else {
         status = iree_hal_queue_validate_transfer_buffer(
             queue, operation->upload.target_buffer,
-            operation->upload.target_offset, operation->upload.length,
+            operation->upload.target_offset, target_length,
             IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
             IREE_HAL_MEMORY_ACCESS_WRITE);
       }
-      has_borrowed_host_range = iree_status_is_ok(status);
+      *out_has_borrowed_host_range = iree_status_is_ok(status);
       break;
     case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
-      if (operation->download.length == 0) {
-        break;
-      }
-      if (IREE_UNLIKELY(operation->download.length > IREE_HOST_SIZE_MAX)) {
-        status = iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "download length exceeds the host addressable range");
-      } else if (IREE_UNLIKELY(!operation->download.target)) {
+      if (!operation->download.target) {
         status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                   "download target is null");
+      } else if (target_length > IREE_HOST_SIZE_MAX) {
+        status =
+            iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                             "download exceeds the host addressable range");
       } else {
         status = iree_hal_queue_validate_transfer_buffer(
             queue, operation->download.source_buffer,
-            operation->download.source_offset, operation->download.length,
+            operation->download.source_offset, source_length,
             IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE, IREE_HAL_MEMORY_ACCESS_READ);
       }
-      has_borrowed_host_range = iree_status_is_ok(status);
-      break;
-    default:
-      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "unknown transfer operation type %u",
-                                (uint32_t)operation->type);
+      *out_has_borrowed_host_range = iree_status_is_ok(status);
       break;
   }
   if (!iree_status_is_ok(status)) {
     status = iree_status_annotate_f(status, "transfer operation %" PRIhsz,
                                     operation_index);
-  } else {
-    *out_has_borrowed_host_range = has_borrowed_host_range;
   }
   return status;
 }
@@ -1211,16 +1313,16 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_fill(
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, const void* pattern,
-    iree_host_size_t pattern_length, const iree_hal_queue_barriers_t* barriers,
-    iree_hal_fill_flags_t flags) {
+    const void* pattern, iree_host_size_t pattern_length,
+    const iree_hal_fill_region_t* region,
+    const iree_hal_queue_barriers_t* barriers, iree_hal_fill_flags_t flags) {
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
       .fill =
           {
               .target_buffer = target_buffer,
               .target_offset = target_offset,
-              .length = length,
+              .region = region,
               .pattern = pattern,
               .pattern_length = pattern_length,
               .flags = flags,
@@ -1231,14 +1333,32 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_fill(
                                  barriers);
 }
 
+IREE_API_EXPORT iree_status_t iree_hal_queue_fill_linear(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, const void* pattern,
+    iree_host_size_t pattern_length, const iree_hal_queue_barriers_t* barriers,
+    iree_hal_fill_flags_t flags) {
+  const iree_hal_fill_region_t region = {
+      .row_length = length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  return iree_hal_queue_fill(queue, wait_semaphore_list, signal_semaphore_list,
+                             target_buffer, target_offset, pattern,
+                             pattern_length, &region, barriers, flags);
+}
+
 IREE_API_EXPORT iree_status_t iree_hal_queue_update(
     iree_hal_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     const void* source_buffer, iree_host_size_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, const iree_hal_queue_barriers_t* barriers,
-    iree_hal_update_flags_t flags) {
+    const iree_hal_transfer_region_t* region,
+    const iree_hal_queue_barriers_t* barriers, iree_hal_update_flags_t flags) {
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE,
       .update =
@@ -1247,13 +1367,31 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_update(
               .source_offset = source_offset,
               .target_buffer = target_buffer,
               .target_offset = target_offset,
-              .length = length,
+              .region = region,
               .flags = flags,
           },
   };
   return iree_hal_queue_transfer(queue, wait_semaphore_list,
                                  signal_semaphore_list, 1, &operation,
                                  barriers);
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_queue_update_linear(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    const void* source_buffer, iree_host_size_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, const iree_hal_queue_barriers_t* barriers,
+    iree_hal_update_flags_t flags) {
+  const iree_hal_transfer_region_t region = {
+      .row_length = length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  return iree_hal_queue_update(
+      queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
+      source_offset, target_buffer, target_offset, &region, barriers, flags);
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_queue_copy(
@@ -1262,8 +1400,8 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_copy(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, const iree_hal_queue_barriers_t* barriers,
-    iree_hal_copy_flags_t flags) {
+    const iree_hal_transfer_region_t* region,
+    const iree_hal_queue_barriers_t* barriers, iree_hal_copy_flags_t flags) {
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
       .copy =
@@ -1272,7 +1410,7 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_copy(
               .source_offset = source_offset,
               .target_buffer = target_buffer,
               .target_offset = target_offset,
-              .length = length,
+              .region = region,
               .flags = flags,
           },
   };
@@ -1281,12 +1419,31 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_copy(
                                  barriers);
 }
 
+IREE_API_EXPORT iree_status_t iree_hal_queue_copy_linear(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, const iree_hal_queue_barriers_t* barriers,
+    iree_hal_copy_flags_t flags) {
+  const iree_hal_transfer_region_t region = {
+      .row_length = length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  return iree_hal_queue_copy(queue, wait_semaphore_list, signal_semaphore_list,
+                             source_buffer, source_offset, target_buffer,
+                             target_offset, &region, barriers, flags);
+}
+
 IREE_API_EXPORT iree_status_t iree_hal_queue_upload(
     iree_hal_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list, const void* source,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, const iree_hal_queue_barriers_t* barriers) {
+    const iree_hal_transfer_region_t* region,
+    const iree_hal_queue_barriers_t* barriers) {
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
       .upload =
@@ -1294,7 +1451,7 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_upload(
               .source = source,
               .target_buffer = target_buffer,
               .target_offset = target_offset,
-              .length = length,
+              .region = region,
           },
   };
   return iree_hal_queue_transfer(queue, wait_semaphore_list,
@@ -1302,12 +1459,28 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_upload(
                                  barriers);
 }
 
+IREE_API_EXPORT iree_status_t iree_hal_queue_upload_linear(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list, const void* source,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, const iree_hal_queue_barriers_t* barriers) {
+  const iree_hal_transfer_region_t region = {
+      .row_length = length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  return iree_hal_queue_upload(queue, wait_semaphore_list,
+                               signal_semaphore_list, source, target_buffer,
+                               target_offset, &region, barriers);
+}
+
 IREE_API_EXPORT iree_status_t iree_hal_queue_download(
     iree_hal_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
-    void* target, iree_device_size_t length,
+    void* target, const iree_hal_transfer_region_t* region,
     const iree_hal_queue_barriers_t* barriers) {
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
@@ -1316,12 +1489,29 @@ IREE_API_EXPORT iree_status_t iree_hal_queue_download(
               .source_buffer = source_buffer,
               .source_offset = source_offset,
               .target = target,
-              .length = length,
+              .region = region,
           },
   };
   return iree_hal_queue_transfer(queue, wait_semaphore_list,
                                  signal_semaphore_list, 1, &operation,
                                  barriers);
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_queue_download_linear(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
+    void* target, iree_device_size_t length,
+    const iree_hal_queue_barriers_t* barriers) {
+  const iree_hal_transfer_region_t region = {
+      .row_length = length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  return iree_hal_queue_download(queue, wait_semaphore_list,
+                                 signal_semaphore_list, source_buffer,
+                                 source_offset, target, &region, barriers);
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_queue_read(

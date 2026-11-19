@@ -60,10 +60,10 @@ TEST(XdnaQueueStorageTest, ReusesMetadataAndChunkedPayloadBlocks) {
     iree_hal_amd_xdna_queue_payload_t payload;
     IREE_ASSERT_OK(iree_hal_amd_xdna_queue_capture_payload(
         &capture, iree_make_const_byte_span(source.data(), source.size()),
-        &payload));
+        nullptr, &payload));
     EXPECT_EQ(payload.data_length, source.size());
     std::vector<uint8_t> actual(source.size());
-    iree_hal_amd_xdna_queue_payload_copy(&payload, actual.data());
+    iree_hal_amd_xdna_queue_payload_copy(&payload, actual.data(), nullptr);
     EXPECT_EQ(actual, source);
     iree_hal_amd_xdna_queue_capture_deinitialize(&capture);
   };

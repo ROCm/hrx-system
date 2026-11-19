@@ -497,15 +497,15 @@ class FabricVirtualBufferTest
     const uint32_t pattern = UINT32_C(0xA5913CE7);
     uint64_t filled = ++sequence_;
     const iree_hal_semaphore_list_t fill_done = {1, &done_, &filled};
-    IREE_ASSERT_OK(iree_hal_queue_fill(queue, {}, fill_done, buffer, 0,
-                                       granularity_, &pattern, sizeof(pattern),
-                                       &fill_barriers, 0));
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
+        queue, {}, fill_done, buffer, 0, granularity_, &pattern,
+        sizeof(pattern), &fill_barriers, 0));
     std::array<uint32_t, 64> result = {};
     uint64_t downloaded = ++sequence_;
     const iree_hal_semaphore_list_t download_done = {1, &done_, &downloaded};
-    IREE_ASSERT_OK(iree_hal_queue_download(queue, fill_done, download_done,
-                                           buffer, 0, result.data(),
-                                           sizeof(result), &download_barriers));
+    IREE_ASSERT_OK(iree_hal_queue_download_linear(
+        queue, fill_done, download_done, buffer, 0, result.data(),
+        sizeof(result), &download_barriers));
     IREE_ASSERT_OK(
         iree_hal_semaphore_wait(done_, downloaded, iree_infinite_timeout(), 0));
     for (uint32_t word : result) {

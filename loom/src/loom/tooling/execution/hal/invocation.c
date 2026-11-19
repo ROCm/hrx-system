@@ -825,6 +825,8 @@ static iree_status_t loom_run_hal_transfer_bindings(
       staged_bindings[LOOM_RUN_HAL_MAX_BINDING_COUNT] = {0};
   iree_hal_transfer_operation_t
       transfer_operations[LOOM_RUN_HAL_MAX_BINDING_COUNT] = {0};
+  iree_hal_transfer_region_t
+      transfer_operations_regions[IREE_ARRAYSIZE(transfer_operations)];
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        iree_status_is_ok(status) && i < binding_list->count; ++i) {
@@ -849,6 +851,8 @@ static iree_status_t loom_run_hal_transfer_bindings(
     if (iree_status_is_ok(status)) {
       target->byte_offset = 0;
       target->byte_length = source->byte_length;
+      transfer_operations_regions[i] = (iree_hal_transfer_region_t){
+          .row_length = source->byte_length, .row_count = 1, .slice_count = 1};
       transfer_operations[i] = (iree_hal_transfer_operation_t){
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
           .copy =
@@ -857,7 +861,7 @@ static iree_status_t loom_run_hal_transfer_bindings(
                   .source_offset = source->byte_offset,
                   .target_buffer = target->buffer,
                   .target_offset = 0,
-                  .length = source->byte_length,
+                  .region = &transfer_operations_regions[i],
                   .flags = IREE_HAL_COPY_FLAG_NONE,
               },
       };

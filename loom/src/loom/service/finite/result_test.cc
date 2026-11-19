@@ -222,12 +222,17 @@ class SnapshotLifetimeTest : public ResultTest,
     IREE_ASSERT_OK(
         loom_runtime_execution_alloca(execution_, 1, &request, &source_));
     const uint32_t pattern = 0x3F800000;
+    const iree_hal_fill_region_t fill_region = {
+        .row_length = 32,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t fill = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
         .fill =
             {
                 .target_buffer = source_,
-                .length = 32,
+                .region = &fill_region,
                 .pattern = &pattern,
                 .pattern_length = sizeof(pattern),
             },
@@ -422,13 +427,18 @@ TEST_F(SuballocationLifetimeTest, RetainsLogicalStorageAfterProducerRetires) {
   iree_hal_buffer_retain(view_);
   IREE_ASSERT_OK(loom_runtime_retirement_track(&producer_, &view_,
                                                iree_allocator_system()));
+  const iree_hal_transfer_region_t upload_region = {
+      .row_length = sizeof(values_),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t upload = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
       .upload =
           {
               .source = values_.data(),
               .target_buffer = view_,
-              .length = sizeof(values_),
+              .region = &upload_region,
           },
   };
   uint64_t completion = 0;
@@ -468,6 +478,11 @@ TEST_F(SuballocationLifetimeTest, RetainsLogicalStorageAfterProducerRetires) {
 TEST_F(SuballocationLifetimeTest, LogicalRowsRetainDistinctBackingAndOffsets) {
   IREE_ASSERT_OK(CreatePlan());
   IREE_ASSERT_OK(CreateResult(iree_allocator_system()));
+  const iree_hal_transfer_region_t uploads_region = {
+      .row_length = sizeof(values_),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t uploads[] = {
       {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
@@ -475,7 +490,7 @@ TEST_F(SuballocationLifetimeTest, LogicalRowsRetainDistinctBackingAndOffsets) {
               {
                   .source = values_.data(),
                   .target_buffer = output_,
-                  .length = sizeof(values_),
+                  .region = &uploads_region,
               },
       },
       {
@@ -485,7 +500,7 @@ TEST_F(SuballocationLifetimeTest, LogicalRowsRetainDistinctBackingAndOffsets) {
                   .source = values_.data(),
                   .target_buffer = prefix_,
                   .target_offset = 12,
-                  .length = sizeof(values_),
+                  .region = &uploads_region,
               },
       },
   };

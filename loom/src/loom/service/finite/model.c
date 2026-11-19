@@ -1439,11 +1439,16 @@ iree_status_t loom_service_finite_model_submit(
       execution, IREE_ARRAYSIZE(requests), requests, model->buffers);
   uint64_t value = 0;
   if (iree_status_is_ok(status)) {
+    const iree_hal_transfer_region_t upload_region = {
+        .row_length = input.data_length,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t upload = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
         .upload = {.source = input.data,
                    .target_buffer = model->buffers[0],
-                   .length = input.data_length}};
+                   .region = &upload_region}};
     status = loom_runtime_execution_transfer(execution, 1, &upload, &value);
   }
   if (iree_status_is_ok(status)) {

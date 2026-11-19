@@ -1106,15 +1106,25 @@ static iree_status_t loom_serve_text_submit_step(
     row->step.source_position = (uint32_t)source_position;
   }
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+  const iree_hal_transfer_region_t downloads_region_0 = {
+      .row_length = sizeof(int32_t),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  const iree_hal_transfer_region_t downloads_region_1 = {
+      .row_length = sizeof(row->transfer.progress),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t downloads[] = {
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
        .download = {.source_buffer = row->state->buffers[TEXT_TOKENS],
                     .target = &row->transfer.token,
-                    .length = sizeof(int32_t)}},
+                    .region = &downloads_region_0}},
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
        .download = {.source_buffer = row->state->buffers[TEXT_PROGRESS],
                     .target = row->transfer.progress,
-                    .length = sizeof(row->transfer.progress)}},
+                    .region = &downloads_region_1}},
   };
   uint64_t completion = 0;
   if (iree_status_is_ok(status)) {
@@ -1171,11 +1181,16 @@ static iree_status_t loom_serve_text_publish_state_bindings(
   const iree_byte_span_t origins =
       model->control.host.bytes[TEXT_HOST_STATE_ORIGINS];
   if (origins.data_length) {
+    const iree_hal_transfer_region_t upload_region = {
+        .row_length = origins.data_length,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t upload = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
         .upload = {.source = origins.data,
                    .target_buffer = model->state.epoch.buffers[2],
-                   .length = origins.data_length},
+                   .region = &upload_region},
     };
     uint64_t completion = 0;
     IREE_RETURN_IF_ERROR(loom_runtime_execution_transfer(model->execution, 1,
@@ -1755,15 +1770,25 @@ iree_status_t loom_serve_text_row_submit_prefill(
   row->transfer.control[0] = (int32_t)count;
   row->transfer.control[1] = (int32_t)row->state->position;
   row->transfer.control[2] = model->source.eos_token;
+  const iree_hal_transfer_region_t uploads_region_0 = {
+      .row_length = sizeof(row->transfer.control),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  const iree_hal_transfer_region_t uploads_region_1 = {
+      .row_length = input_length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t uploads[] = {
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
        .upload = {.source = row->transfer.control,
                   .target_buffer = row->state->buffers[TEXT_CONTROL],
-                  .length = sizeof(row->transfer.control)}},
+                  .region = &uploads_region_0}},
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
        .upload = {.source = input,
                   .target_buffer = row->state->buffers[TEXT_TOKENS],
-                  .length = input_length}},
+                  .region = &uploads_region_1}},
   };
   uint64_t completion = 0;
   iree_status_t status = loom_runtime_execution_transfer(
@@ -1812,15 +1837,25 @@ iree_status_t loom_serve_text_row_submit_decode(
   row->transfer.control[0] = (int32_t)row->state->position;
   row->transfer.control[1] = row->transfer.progress[0];
   row->transfer.control[2] = row->model->source.eos_token;
+  const iree_hal_transfer_region_t uploads_region_0 = {
+      .row_length = sizeof(row->transfer.control),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  const iree_hal_transfer_region_t uploads_region_1 = {
+      .row_length = sizeof(int32_t),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t uploads[] = {
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
        .upload = {.source = row->transfer.control,
                   .target_buffer = row->state->buffers[TEXT_CONTROL],
-                  .length = sizeof(row->transfer.control)}},
+                  .region = &uploads_region_0}},
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
        .upload = {.source = &row->transfer.token,
                   .target_buffer = row->state->buffers[TEXT_TOKENS],
-                  .length = sizeof(int32_t)}},
+                  .region = &uploads_region_1}},
   };
   uint64_t completion = 0;
   iree_status_t status = loom_runtime_execution_transfer(

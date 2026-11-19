@@ -205,7 +205,7 @@ TEST_P(DispatchIndirectParametersTest, StaticParametersFromQueueUpdate) {
   };
   SemaphoreList update_signal(device_, {0}, {1});
   SemaphoreList empty_wait;
-  IREE_ASSERT_OK(iree_hal_queue_update(
+  IREE_ASSERT_OK(iree_hal_queue_update_linear(
       transfer_queue_, empty_wait, update_signal, parameter_data,
       /*source_offset=*/0, parameter_buffer, /*target_offset=*/0,
       sizeof(parameter_data), /*barriers=*/NULL, IREE_HAL_UPDATE_FLAG_NONE));
@@ -250,7 +250,7 @@ TEST_P(DispatchIndirectParametersTest, WholeBufferParameterRef) {
   };
   SemaphoreList update_signal(device_, {0}, {1});
   SemaphoreList empty_wait;
-  IREE_ASSERT_OK(iree_hal_queue_update(
+  IREE_ASSERT_OK(iree_hal_queue_update_linear(
       transfer_queue_, empty_wait, update_signal, parameter_data,
       /*source_offset=*/0, parameter_buffer, /*target_offset=*/0,
       sizeof(parameter_data), /*barriers=*/NULL, IREE_HAL_UPDATE_FLAG_NONE));
@@ -289,7 +289,7 @@ TEST_P(DispatchIndirectParametersTest, DynamicParametersFromUpdate) {
       1,
       1,
   };
-  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
       command_buffer, parameter_data, /*source_offset=*/0,
       ParameterRef(parameter_buffer), IREE_HAL_UPDATE_FLAG_NONE));
   RecordFullExecutionBarrier(command_buffer);
@@ -314,7 +314,7 @@ TEST_P(DispatchIndirectParametersTest, DynamicParametersFromFill) {
       binding_capacity(), command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   const uint32_t one = 1;
-  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
       command_buffer, ParameterRef(parameter_buffer), &one, sizeof(one),
       IREE_HAL_FILL_FLAG_NONE));
   RecordFullExecutionBarrier(command_buffer);

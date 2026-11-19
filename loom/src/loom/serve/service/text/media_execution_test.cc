@@ -519,13 +519,18 @@ TEST_F(MediaExecutionTest,
   ASSERT_NO_FATAL_FAILURE(RemoveProducer());
   IREE_ASSERT_OK(loom_runtime_pool_trim(storage_owner_, 0));
   output_.resize(packet_.device_length);
+  const iree_hal_transfer_region_t download_region = {
+      .row_length = output_.size(),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
           {
               .source_buffer = buffers_[1],
               .target = output_.data(),
-              .length = output_.size(),
+              .region = &download_region,
           },
   };
   IREE_ASSERT_OK(
@@ -602,7 +607,7 @@ TEST_F(MediaExecutionTest, DenseRangesCoalesceAcrossRequestsAndContinuation) {
   EXPECT_EQ(copy.type, IREE_HAL_TRANSFER_OPERATION_TYPE_COPY);
   EXPECT_EQ(copy.copy.source_offset, 0u);
   EXPECT_EQ(copy.copy.target_offset, 96u);
-  EXPECT_EQ(copy.copy.length, 48u);
+  EXPECT_EQ(copy.copy.region->row_length, 48u);
   iree_const_byte_span_t plan;
   IREE_ASSERT_OK(iree_vm_buffer_map_read(
       packet_.plan, 0, iree_vm_buffer_length(packet_.plan), &plan));

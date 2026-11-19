@@ -385,7 +385,7 @@ TEST_F(CommandBufferTest, CapturedUpdatesAndNaturalFillEdgesPreserveAllBytes) {
       const uint32_t offset = slot * 64 + geometry.residue;
       const uint32_t length = elements * geometry.width;
       const uint32_t pattern = 0xa5c17e39u ^ (slot * 0x05030709u);
-      IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+      IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
           recording_, iree_hal_make_buffer_ref(&target->base, offset, length),
           &pattern, geometry.width, 0));
       for (uint32_t i = 0; i < length; ++i) {
@@ -400,12 +400,12 @@ TEST_F(CommandBufferTest, CapturedUpdatesAndNaturalFillEdgesPreserveAllBytes) {
     update[i] = 0x51u + i * 7u;
   }
   memcpy(expected.data() + 1900, update.data(), update.size());
-  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
       recording_, update.data(), 0,
       iree_hal_make_buffer_ref(&target->base, 1900, update.size()), 0));
   update.fill(0);  // Recording owns the original source bytes.
   ASSERT_NO_FATAL_FAILURE(Barrier());
-  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
       recording_, iree_hal_make_buffer_ref(&target->base, 0, payload.size()),
       iree_hal_make_buffer_ref(&destination->base, 0, output.size()), 0));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(recording_));
@@ -437,13 +437,61 @@ TEST_F(CommandBufferTest, CapturedUpdatesAndNaturalFillEdgesPreserveAllBytes) {
   iree_hal_amd_gpu_program_cancel(storage, instance);
 }
 
+TEST_F(CommandBufferTest, RectanglesCaptureAndScatterOnlyUsefulBytes) {
+  std::vector<uint8_t> source_data(2048, 0x19);
+  std::vector<uint8_t> target_data(4096, 0x23);
+  std::vector<uint8_t> expected = target_data;
+  for (size_t i = 0; i < source_data.size(); ++i) {
+    source_data[i] = i * 31;
+  }
+  auto* target = MakeBuffer(reinterpret_cast<uintptr_t>(target_data.data()),
+                            target_data.size());
+  const iree_hal_transfer_region_t region = {
+      .row_length = 17,
+      .row_count = 7,
+      .slice_count = 3,
+      .source_strides = {32, 256},
+      .target_strides = {64, 768},
+  };
+  for (size_t slice = 0; slice < 3; ++slice) {
+    for (size_t row = 0; row < 7; ++row) {
+      memcpy(expected.data() + 5 + slice * 768 + row * 64,
+             source_data.data() + 3 + slice * 256 + row * 32, 17);
+    }
+  }
+  ASSERT_NO_FATAL_FAILURE(Begin(1));
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+      recording_, source_data.data(), 3,
+      iree_hal_make_indirect_buffer_ref(0, 5, IREE_HAL_WHOLE_BUFFER), &region,
+      0));
+  std::fill(source_data.begin(), source_data.end(), 0);
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(recording_));
+  auto* storage = iree_hal_amd_gpu_sdma_command_buffer_storage(recording_);
+  ASSERT_NE(storage, nullptr);
+  const uint64_t frontier[2] = {};
+  auto* instance = iree_hal_amd_gpu_program_try_acquire(storage, 0, frontier);
+  ASSERT_NE(instance, nullptr);
+  const iree_hal_buffer_binding_t binding = {&target->base, 0,
+                                             target_data.size()};
+  Invocation invocation;
+  IREE_ASSERT_OK(invocation.Initialize(recording_, {1, &binding}));
+  IREE_ASSERT_OK(invocation.Resolve(instance->address));
+  iree_hal_amd_gpu_sdma_program_progress_t progress;
+  do {
+    const auto words = Emit(invocation, &progress);
+    ASSERT_NO_FATAL_FAILURE(Apply(words));
+  } while (progress != IREE_HAL_AMD_GPU_SDMA_PROGRAM_END);
+  EXPECT_EQ(target_data, expected);
+  iree_hal_amd_gpu_program_cancel(storage, instance);
+}
+
 TEST_F(CommandBufferTest,
        SharedWholeRangeRecordingHasIndependentLargeAndEmptyInvocations) {
   constexpr uint64_t kLength = (UINT64_C(5) << 30) + 31;
   auto* source = MakeBuffer(0, kLength + 128);
   auto* target = MakeBuffer(0, kLength + 128);
   ASSERT_NO_FATAL_FAILURE(Begin(2));
-  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
       recording_,
       iree_hal_make_indirect_buffer_ref(0, 11, IREE_HAL_WHOLE_BUFFER),
       iree_hal_make_indirect_buffer_ref(1, 13, IREE_HAL_WHOLE_BUFFER), 0));
@@ -493,7 +541,7 @@ TEST_F(CommandBufferTest,
   auto* source = MakeBuffer(0x1000, 256);
   auto* target = MakeBuffer(0x2000, 256);
   ASSERT_NO_FATAL_FAILURE(Begin(2));
-  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
       recording_,
       iree_hal_make_indirect_buffer_ref(0, 3, IREE_HAL_WHOLE_BUFFER),
       iree_hal_make_indirect_buffer_ref(1, 5, IREE_HAL_WHOLE_BUFFER), 0));
@@ -511,7 +559,7 @@ TEST_F(CommandBufferTest,
   auto* source = MakeBuffer(UINT64_C(0x1234fffffff1), kLength);
   auto* target = MakeBuffer(UINT64_C(0x5678fffffffb), kLength);
   ASSERT_NO_FATAL_FAILURE(Begin());
-  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
       recording_, iree_hal_make_buffer_ref(&source->base, 0, kLength),
       iree_hal_make_buffer_ref(&target->base, 0, kLength), 0));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(recording_));
@@ -545,7 +593,7 @@ TEST_F(CommandBufferTest, KernelSubmissionsSplitOnlyAtInteriorCacheBoundaries) {
       ASSERT_NO_FATAL_FAILURE(
           Barrier(IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE));
     }
-    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
         recording_, iree_hal_make_buffer_ref(&source->base, i * 8, 8),
         iree_hal_make_buffer_ref(&target->base, i * 8, 8), 0));
   }
@@ -584,7 +632,7 @@ TEST_F(CommandBufferTest, WholeFillStreamsDwordBodyAndByteEdgesPastFourGiB) {
   auto* target = MakeBuffer(kTarget, kLength);
   ASSERT_NO_FATAL_FAILURE(Begin(1));
   const uint8_t pattern = 0xd9;
-  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
       recording_,
       iree_hal_make_indirect_buffer_ref(0, 0, IREE_HAL_WHOLE_BUFFER), &pattern,
       1, 0));
@@ -634,7 +682,7 @@ TEST_F(CommandBufferTest, UserCacheBoundariesStayInTheNativeStream) {
       .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
   };
   IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording_, &acquire));
-  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
       recording_, iree_hal_make_buffer_ref(&source->base, 0, 8),
       iree_hal_make_buffer_ref(&target->base, 0, 8), 0));
   const iree_hal_barrier_t release = {
@@ -754,7 +802,7 @@ TEST_F(CommandBufferTest, UnmappedCapturedDataKeepsAnOrderedUploadSource) {
   ASSERT_NO_FATAL_FAILURE(Begin());
   const std::array<uint8_t, 8> bytes = {0x39, 0x72, 0xa1, 0x8d,
                                         0x16, 0xca, 0x57, 0xe3};
-  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
       recording_, bytes.data(), 0,
       iree_hal_make_buffer_ref(&target->base, 0, bytes.size()), 0));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(recording_));
@@ -774,7 +822,7 @@ TEST_F(CommandBufferTest, FailedNativeAllocationLeavesRecordingUnexecutable) {
   auto* target = MakeBuffer(0x1000, 32);
   ASSERT_NO_FATAL_FAILURE(Begin());
   const uint32_t pattern = 0x73d92ca1;
-  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
       recording_, iree_hal_make_buffer_ref(&target->base, 0, 32), &pattern, 4,
       0));
   fail_allocate_ = true;
@@ -791,7 +839,7 @@ TEST_F(CommandBufferTest, FailedNativePublicationRetainsAndReleasesItsBacking) {
   auto* target = MakeBuffer(0x1000, 32);
   ASSERT_NO_FATAL_FAILURE(Begin());
   const uint32_t pattern = 0x73d92ca1;
-  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
       recording_, iree_hal_make_buffer_ref(&target->base, 0, 32), &pattern, 4,
       0));
   publish_status_ = amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);

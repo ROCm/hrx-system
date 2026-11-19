@@ -133,7 +133,7 @@ uint32_t* iree_hal_amd_gpu_pm4_fixup_emit(
 // visibility and lifetime, as for any recorded shader dispatch.
 uint32_t* iree_hal_amd_gpu_pm4_blit_emit(
     uint32_t* words, const iree_hal_amd_gpu_pm4_launch_t* launch,
-    uint64_t argument_address, uint32_t workgroup_count);
+    uint64_t argument_address, const uint32_t groups[3]);
 
 // One workitem scalar launch. Its target is a separate argument fixup; the
 // kernarg address is the same DWORD-24 pair used by the other small builtins.

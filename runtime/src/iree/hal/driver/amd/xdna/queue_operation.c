@@ -17,34 +17,19 @@ static void iree_hal_amd_xdna_transfer_buffers(
   *out_target = NULL;
   switch (operation->type) {
     case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
-      if (!operation->fill.length) {
-        break;
-      }
       *out_target = operation->fill.target_buffer;
       break;
     case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
-      if (!operation->update.length) {
-        break;
-      }
       *out_target = operation->update.target_buffer;
       break;
     case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
-      if (!operation->copy.length) {
-        break;
-      }
       *out_source = operation->copy.source_buffer;
       *out_target = operation->copy.target_buffer;
       break;
     case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
-      if (!operation->upload.length) {
-        break;
-      }
       *out_target = operation->upload.target_buffer;
       break;
     case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
-      if (!operation->download.length) {
-        break;
-      }
       *out_source = operation->download.source_buffer;
       break;
   }
@@ -140,90 +125,103 @@ static iree_status_t iree_hal_amd_xdna_buffer_execution_publish(
 }
 
 static iree_status_t iree_hal_amd_xdna_update_execute(
-    const iree_hal_amd_xdna_transfer_t* transfer) {
+    const iree_hal_amd_xdna_transfer_t* transfer,
+    const iree_hal_transfer_region_t* region) {
   const iree_hal_transfer_operation_t* operation = &transfer->operation;
   iree_byte_span_t target;
   IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_buffer_execution_write(
       operation->update.target_buffer, operation->update.target_offset,
-      operation->update.length, &target));
-  iree_hal_amd_xdna_queue_payload_copy(&transfer->update_payload, target.data);
+      iree_hal_transfer_range_length(region->row_length, region->row_count,
+                                     region->slice_count,
+                                     &region->target_strides),
+      &target));
+  iree_hal_amd_xdna_queue_payload_copy(&transfer->update_payload, target.data,
+                                       region);
   return iree_hal_amd_xdna_buffer_execution_publish(
       operation->update.target_buffer, operation->update.target_offset,
       target.data_length);
 }
 
 static iree_status_t iree_hal_amd_xdna_transfer_execute(
-    const iree_hal_amd_xdna_transfer_t* transfer) {
+    const iree_hal_amd_xdna_transfer_t* transfer,
+    const iree_hal_transfer_region_t* region) {
   const iree_hal_transfer_operation_t* operation = &transfer->operation;
+  const uint64_t source_length = iree_hal_transfer_range_length(
+      region->row_length, region->row_count, region->slice_count,
+      &region->source_strides);
+  const uint64_t target_length = iree_hal_transfer_range_length(
+      region->row_length, region->row_count, region->slice_count,
+      &region->target_strides);
+  if (!region->row_length || !region->row_count || !region->slice_count) {
+    return iree_ok_status();
+  }
   switch (operation->type) {
-    case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
-      if (!operation->fill.length) {
-        return iree_ok_status();
-      }
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL: {
       iree_byte_span_t fill_target;
       IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_buffer_execution_write(
           operation->fill.target_buffer, operation->fill.target_offset,
-          operation->fill.length, &fill_target));
-      if (operation->fill.pattern_length == 1) {
-        memset(fill_target.data, *(const uint8_t*)operation->fill.pattern,
-               fill_target.data_length);
-      } else {
-        for (iree_host_size_t offset = 0; offset < fill_target.data_length;
-             offset += operation->fill.pattern_length) {
-          memcpy(fill_target.data + offset, operation->fill.pattern,
-                 operation->fill.pattern_length);
+          target_length, &fill_target));
+      const uint64_t row_length = region->row_length;
+      const uint64_t row_count = region->row_count;
+      const uint64_t slice_count = region->slice_count;
+      const uint64_t row_stride =
+          row_count > 1 ? region->target_strides.row_stride : 0;
+      const uint64_t slice_stride =
+          slice_count > 1 ? region->target_strides.slice_stride : 0;
+      for (uint64_t z = 0; z < slice_count; ++z) {
+        for (uint64_t y = 0; y < row_count; ++y) {
+          uint8_t* row = fill_target.data + z * slice_stride + y * row_stride;
+          if (operation->fill.pattern_length == 1) {
+            memset(row, *(const uint8_t*)operation->fill.pattern, row_length);
+          } else {
+            for (uint64_t offset = 0; offset < row_length;
+                 offset += operation->fill.pattern_length) {
+              memcpy(row + offset, operation->fill.pattern,
+                     operation->fill.pattern_length);
+            }
+          }
         }
       }
       return iree_hal_amd_xdna_buffer_execution_publish(
           operation->fill.target_buffer, operation->fill.target_offset,
           fill_target.data_length);
+    }
     case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
-      if (!operation->update.length) {
-        return iree_ok_status();
-      }
-      return iree_hal_amd_xdna_update_execute(transfer);
-    case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
-      if (!operation->copy.length) {
-        return iree_ok_status();
-      }
+      return iree_hal_amd_xdna_update_execute(transfer, region);
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY: {
       iree_byte_span_t copy_source;
       IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_buffer_execution_read(
           operation->copy.source_buffer, operation->copy.source_offset,
-          operation->copy.length, &copy_source));
+          source_length, &copy_source));
       iree_byte_span_t copy_target;
       IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_buffer_execution_write(
           operation->copy.target_buffer, operation->copy.target_offset,
-          operation->copy.length, &copy_target));
-      const iree_host_size_t copy_length =
-          iree_min(copy_source.data_length, copy_target.data_length);
-      memcpy(copy_target.data, copy_source.data, copy_length);
+          target_length, &copy_target));
+      iree_hal_transfer_copy_host(copy_source.data, copy_target.data, region);
       return iree_hal_amd_xdna_buffer_execution_publish(
           operation->copy.target_buffer, operation->copy.target_offset,
-          copy_length);
-    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
-      if (!operation->upload.length) {
-        return iree_ok_status();
-      }
+          copy_target.data_length);
+    }
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD: {
       iree_byte_span_t upload_target;
       IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_buffer_execution_write(
           operation->upload.target_buffer, operation->upload.target_offset,
-          operation->upload.length, &upload_target));
-      memcpy(upload_target.data, operation->upload.source,
-             upload_target.data_length);
+          target_length, &upload_target));
+      iree_hal_transfer_copy_host(operation->upload.source, upload_target.data,
+                                  region);
       return iree_hal_amd_xdna_buffer_execution_publish(
           operation->upload.target_buffer, operation->upload.target_offset,
           upload_target.data_length);
-    case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
-      if (!operation->download.length) {
-        return iree_ok_status();
-      }
+    }
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD: {
       iree_byte_span_t download_source;
       IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_buffer_execution_read(
           operation->download.source_buffer, operation->download.source_offset,
-          operation->download.length, &download_source));
-      memcpy(operation->download.target, download_source.data,
-             download_source.data_length);
+          source_length, &download_source));
+      iree_hal_transfer_copy_host(download_source.data,
+                                  operation->download.target, region);
       return iree_ok_status();
+    }
     default:
       IREE_BUILTIN_UNREACHABLE();
   }
@@ -238,12 +236,19 @@ static iree_status_t iree_hal_amd_xdna_execution_transfer(
   IREE_RETURN_IF_ERROR(iree_hal_buffer_binding_table_resolve_ref(
       execution->table, record->transfer.target, &target));
   iree_hal_amd_xdna_transfer_t transfer = {0};
+  iree_hal_transfer_region_t region = {
+      .row_length = target.length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  if (record->rectangular) {
+    region = *(const iree_hal_transfer_region_t*)(record + 1);
+  }
   switch (record->kind) {
     case IREE_HAL_AMD_XDNA_RECORD_FILL:
       transfer.operation.type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
       transfer.operation.fill.target_buffer = target.buffer;
       transfer.operation.fill.target_offset = target.offset;
-      transfer.operation.fill.length = target.length;
       transfer.operation.fill.pattern = record->transfer.pattern;
       transfer.operation.fill.pattern_length = record->transfer.pattern_length;
       break;
@@ -251,7 +256,6 @@ static iree_status_t iree_hal_amd_xdna_execution_transfer(
       transfer.operation.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE;
       transfer.operation.update.target_buffer = target.buffer;
       transfer.operation.update.target_offset = target.offset;
-      transfer.operation.update.length = target.length;
       transfer.update_payload = record->transfer.payload;
       break;
     case IREE_HAL_AMD_XDNA_RECORD_COPY: {
@@ -263,13 +267,15 @@ static iree_status_t iree_hal_amd_xdna_execution_transfer(
       transfer.operation.copy.source_offset = source.offset;
       transfer.operation.copy.target_buffer = target.buffer;
       transfer.operation.copy.target_offset = target.offset;
-      transfer.operation.copy.length = iree_min(source.length, target.length);
+      if (!record->rectangular) {
+        region.row_length = iree_min(source.length, target.length);
+      }
       break;
     }
     case IREE_HAL_AMD_XDNA_RECORD_DISPATCH:
       IREE_BUILTIN_UNREACHABLE();
   }
-  return iree_hal_amd_xdna_transfer_execute(&transfer);
+  return iree_hal_amd_xdna_transfer_execute(&transfer, &region);
 }
 
 uint32_t iree_hal_amd_xdna_operation_execute_host(
@@ -318,7 +324,10 @@ uint32_t iree_hal_amd_xdna_operation_execute_host(
       for (iree_hal_amd_xdna_transfer_t* transfer = operation->transfer.head;
            transfer && iree_status_is_ok(operation->status);
            transfer = transfer->next) {
-        operation->status = iree_hal_amd_xdna_transfer_execute(transfer);
+        const iree_hal_transfer_region_t region =
+            iree_hal_transfer_operation_region(&transfer->operation);
+        operation->status =
+            iree_hal_amd_xdna_transfer_execute(transfer, &region);
         if (count < UINT32_MAX) {
           ++count;
         }
@@ -365,30 +374,35 @@ iree_status_t iree_hal_amd_xdna_queue_transfer(
       IREE_HAL_AMD_XDNA_OPERATION_TRANSFER, &operation));
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+    const uint64_t length = iree_hal_transfer_operation_length(&operations[i]);
+    if (!length) {
+      continue;
+    }
     iree_hal_amd_xdna_transfer_t* captured = NULL;
     status = iree_hal_amd_xdna_queue_capture_allocate_metadata(
-        &operation->capture, sizeof(*captured), (void**)&captured);
+        &operation->capture,
+        sizeof(*captured) + sizeof(iree_hal_transfer_region_t),
+        (void**)&captured);
     if (!iree_status_is_ok(status)) {
       break;
     }
     *captured = (iree_hal_amd_xdna_transfer_t){0};
     captured->operation = operations[i];
-    if (captured->operation.type == IREE_HAL_TRANSFER_OPERATION_TYPE_FILL &&
-        captured->operation.fill.length) {
+    iree_hal_transfer_operation_capture_region(&captured->operation,
+                                               captured + 1);
+    if (captured->operation.type == IREE_HAL_TRANSFER_OPERATION_TYPE_FILL) {
       memcpy(captured->fill_pattern, captured->operation.fill.pattern,
              captured->operation.fill.pattern_length);
       captured->operation.fill.pattern = captured->fill_pattern;
     } else if (captured->operation.type ==
-                   IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE &&
-               captured->operation.update.length) {
+               IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE) {
       const uint8_t* source =
           (const uint8_t*)captured->operation.update.source_buffer +
           captured->operation.update.source_offset;
       status = iree_hal_amd_xdna_queue_capture_payload(
           &operation->capture,
-          iree_make_const_byte_span(
-              source, (iree_host_size_t)captured->operation.update.length),
-          &captured->update_payload);
+          iree_make_const_byte_span(source, (iree_host_size_t)length),
+          captured->operation.update.region, &captured->update_payload);
       captured->operation.update.source_buffer = NULL;
       captured->operation.update.source_offset = 0;
     }

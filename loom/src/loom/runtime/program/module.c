@@ -177,12 +177,17 @@ static iree_status_t loom_runtime_module_feedback(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "runner feedback source is null");
   }
+  const iree_hal_transfer_region_t operation_region = {
+      .row_length = length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download = {.source_buffer = (iree_hal_buffer_t*)ref.object,
                    .source_offset = offset,
                    .target = module->feedback[slot].data,
-                   .length = length},
+                   .region = &operation_region},
   };
   return loom_runtime_execution_feedback(module->execution, 1, &operation,
                                          out_value);

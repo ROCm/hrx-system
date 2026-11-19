@@ -511,7 +511,7 @@ TEST_P(DispatchReuseTest, DirectionalStorageBindings) {
               usages[i]);
     const float value = i == 0 ? -2.5f : -9.0f;
     SemaphoreList signal(device_, {0}, {1});
-    IREE_ASSERT_OK(iree_hal_queue_fill(
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
         transfer_queue_, iree_hal_semaphore_list_empty(), signal, buffers[i], 0,
         kByteLength, &value, sizeof(value), /*barriers=*/NULL,
         IREE_HAL_FILL_FLAG_NONE));
@@ -587,7 +587,7 @@ TEST_P(DispatchReuseTest, MixedDirectAndIndirectBindings) {
       .values = binding_refs,
   };
   const float fill_value = -1.0f;
-  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
       command_buffer, binding_refs[1], &fill_value, sizeof(fill_value),
       IREE_HAL_FILL_FLAG_NONE));
   const iree_hal_memory_barrier_t fill_barrier = {

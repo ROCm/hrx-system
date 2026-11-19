@@ -76,6 +76,12 @@ iree_status_t loom_serve_text_state_allocate(
   const uint32_t zero = 0;
   iree_hal_transfer_operation_t
       transfers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT + 2] = {0};
+  union {
+    // Geometry for initialization fills.
+    iree_hal_fill_region_t fill;
+    // Geometry for initialization uploads.
+    iree_hal_transfer_region_t transfer;
+  } transfers_regions[IREE_ARRAYSIZE(transfers)];
   iree_host_size_t transfer_count = 0;
   iree_hal_pool_reservation_request_t
       requests[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
@@ -179,14 +185,17 @@ iree_status_t loom_serve_text_state_allocate(
     for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
          ++i) {
       if (clear_lengths[i]) {
-        transfers[transfer_count++] = (iree_hal_transfer_operation_t){
+        transfers_regions[transfer_count].fill = (iree_hal_fill_region_t){
+            .row_length = clear_lengths[i], .row_count = 1, .slice_count = 1};
+        transfers[transfer_count] = (iree_hal_transfer_operation_t){
             .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
             .fill = {.target_buffer =
                          *loom_serve_text_state_allocation(state, i),
-                     .length = clear_lengths[i],
+                     .region = &transfers_regions[transfer_count].fill,
                      .pattern = &zero,
                      .pattern_length = sizeof(zero)},
         };
+        ++transfer_count;
       }
     }
   }
@@ -218,9 +227,11 @@ iree_status_t loom_serve_text_state_allocate(
     }
   }
   if (iree_status_is_ok(status) && state->cache.capacity) {
-    status = iree_allocator_malloc_array(
-        state->host_allocator, state->row_count,
-        2 * sizeof(*state->cache.uploads), (void**)&state->cache.uploads);
+    status =
+        iree_allocator_malloc_array(state->host_allocator, state->row_count,
+                                    2 * (sizeof(*state->cache.uploads) +
+                                         sizeof(iree_hal_transfer_region_t)),
+                                    (void**)&state->cache.uploads);
   }
   if (iree_status_is_ok(status) && state->checkpoints.capacity) {
     status = loom_runtime_block_pool_initialize(state->checkpoints.capacity,
@@ -265,12 +276,15 @@ iree_status_t loom_serve_text_state_allocate(
     const iree_const_byte_span_t origins =
         state->storage.bytes[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS];
     if (origins.data_length) {
-      transfers[transfer_count++] = (iree_hal_transfer_operation_t){
+      transfers_regions[transfer_count].transfer = (iree_hal_transfer_region_t){
+          .row_length = origins.data_length, .row_count = 1, .slice_count = 1};
+      transfers[transfer_count] = (iree_hal_transfer_operation_t){
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
           .upload = {.source = origins.data,
                      .target_buffer = state->epoch.buffers[2],
-                     .length = origins.data_length},
+                     .region = &transfers_regions[transfer_count].transfer},
       };
+      ++transfer_count;
     }
   }
   if (iree_status_is_ok(status) &&
@@ -284,12 +298,15 @@ iree_status_t loom_serve_text_state_allocate(
     const iree_const_byte_span_t origins =
         state->storage.bytes[LOOM_SERVE_TEXT_STORAGE_DRAFT_ORIGINS];
     if (origins.data_length) {
-      transfers[transfer_count++] = (iree_hal_transfer_operation_t){
+      transfers_regions[transfer_count].transfer = (iree_hal_transfer_region_t){
+          .row_length = origins.data_length, .row_count = 1, .slice_count = 1};
+      transfers[transfer_count] = (iree_hal_transfer_operation_t){
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
           .upload = {.source = origins.data,
                      .target_buffer = state->draft.row_table,
-                     .length = origins.data_length},
+                     .region = &transfers_regions[transfer_count].transfer},
       };
+      ++transfer_count;
     }
   }
   if (iree_status_is_ok(status)) {

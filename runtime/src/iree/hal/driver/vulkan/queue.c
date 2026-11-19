@@ -526,8 +526,8 @@ struct iree_hal_vulkan_queue_pending_submission_t {
       // Target byte offset captured from queue_copy.
       iree_device_size_t target_offset;
 
-      // Number of bytes to copy into the target buffer.
-      iree_device_size_t length;
+      // Captured copy geometry, with independently strided endpoints.
+      iree_hal_transfer_region_t region;
 
       // HAL copy flags captured from queue_copy.
       iree_hal_copy_flags_t flags;
@@ -2869,31 +2869,15 @@ static uint64_t iree_hal_vulkan_queue_profile_payload_length(
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_UPDATE:
       return submission->update.length;
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_COPY:
-      return submission->copy.length;
+      return iree_hal_transfer_region_length(&submission->copy.region);
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_TRANSFER: {
       uint64_t total_length = 0;
       for (iree_host_size_t i = 0; i < submission->transfer.operation_count;
            ++i) {
         const iree_hal_transfer_operation_t* operation =
             &submission->transfer.operations[i];
-        uint64_t operation_length = 0;
-        switch (operation->type) {
-          case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
-            operation_length = operation->fill.length;
-            break;
-          case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
-            operation_length = operation->update.length;
-            break;
-          case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
-            operation_length = operation->copy.length;
-            break;
-          case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
-            operation_length = operation->upload.length;
-            break;
-          case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
-            operation_length = operation->download.length;
-            break;
-        }
+        const uint64_t operation_length =
+            iree_hal_transfer_operation_length(operation);
         if (operation_length > UINT64_MAX - total_length) {
           return UINT64_MAX;
         }
@@ -3049,7 +3033,7 @@ static bool iree_hal_vulkan_queue_profile_submission_requires_native_timestamp(
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_UPDATE:
       return submission->update.length != 0;
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_COPY:
-      return submission->copy.length != 0;
+      return iree_hal_transfer_region_length(&submission->copy.region) != 0;
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_TRANSFER:
       return submission->transfer.operation_count != 0;
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_EXECUTE:
@@ -3840,13 +3824,12 @@ static void iree_hal_vulkan_queue_record_native_copy_region(
                        &copy_region);
 }
 
-static void iree_hal_vulkan_queue_record_staged_fill_ranges(
+static void iree_hal_vulkan_queue_prepare_fill_scratch(
     iree_hal_vulkan_queue_t* queue,
     iree_hal_vulkan_queue_pending_submission_t* submission,
     VkBuffer staging_handle, VkDeviceSize staging_offset,
-    VkBuffer target_handle, VkDeviceSize target_offset,
-    VkDeviceSize target_length, const uint8_t* pattern,
-    iree_host_size_t pattern_length, bool* inout_scratch_used) {
+    const uint8_t* pattern, iree_host_size_t pattern_length,
+    bool* inout_scratch_used) {
   if (*inout_scratch_used) {
     // All fills in the batch share this command buffer's scratch slot. Finish
     // the previous edge reads before overwriting their pattern.
@@ -3890,6 +3873,15 @@ static void iree_hal_vulkan_queue_record_staged_fill_ranges(
   };
   iree_vkCmdPipelineBarrier2(IREE_VULKAN_DEVICE(&queue->syms),
                              submission->native_command_buffer, &dependency);
+}
+
+static void iree_hal_vulkan_queue_record_staged_fill_ranges(
+    iree_hal_vulkan_queue_t* queue,
+    iree_hal_vulkan_queue_pending_submission_t* submission,
+    VkBuffer staging_handle, VkDeviceSize staging_offset,
+    VkBuffer target_handle, VkDeviceSize target_offset,
+    VkDeviceSize target_length, const uint8_t* pattern,
+    iree_host_size_t pattern_length) {
   const VkDeviceSize target_end = target_offset + target_length;
   const VkDeviceSize leading_length =
       (sizeof(uint32_t) - (target_offset % sizeof(uint32_t))) %
@@ -3937,8 +3929,68 @@ static iree_status_t iree_hal_vulkan_queue_record_transfer_fill(
   iree_hal_vulkan_queue_resolved_transfer_buffer_t target = {0};
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_queue_resolve_transfer_buffer(
       operation->fill.target_buffer, operation->fill.target_offset, &target));
+  const iree_hal_fill_region_t* region = operation->fill.region;
+  if (!iree_hal_transfer_range_is_linear(region->row_length, region->row_count,
+                                         region->slice_count,
+                                         &region->target_strides)) {
+    if (iree_all_bits_set(queue->queue_flags, VK_QUEUE_COMPUTE_BIT)) {
+      IREE_RETURN_IF_ERROR(iree_hal_vulkan_builtins_record_fill_region(
+          queue->builtins, submission->native_command_buffer, descriptor_pool,
+          descriptor_pool ? NULL : *inout_descriptor_sets, target.handle,
+          target.offset, operation->fill.pattern,
+          operation->fill.pattern_length, region));
+      if (!descriptor_pool) {
+        const iree_hal_fill_region_t tile =
+            iree_hal_vulkan_builtins_fill_tile(queue->builtins, region);
+        *inout_descriptor_sets +=
+            ((region->row_length - 1) / tile.row_length + 1) *
+            ((region->row_count - 1) / tile.row_count + 1) *
+            ((region->slice_count - 1) / tile.slice_count + 1);
+      }
+      return iree_ok_status();
+    }
+    const uint64_t row_stride =
+        region->row_count > 1 ? region->target_strides.row_stride : 0;
+    const uint64_t slice_stride =
+        region->slice_count > 1 ? region->target_strides.slice_stride : 0;
+    const bool aligned =
+        ((target.offset | region->row_length | row_stride | slice_stride) &
+         3) == 0;
+    iree_hal_vulkan_queue_resolved_transfer_buffer_t staging = {0};
+    if (!aligned) {
+      const iree_hal_vulkan_queue_command_buffer_lease_t* lease =
+          &submission->native_command_buffer_lease;
+      IREE_RETURN_IF_ERROR(iree_hal_vulkan_queue_resolve_transfer_buffer(
+          lease->block->fill_scratch,
+          lease->slot * IREE_HAL_VULKAN_QUEUE_FILL_SCRATCH_SIZE, &staging));
+      iree_hal_vulkan_queue_prepare_fill_scratch(
+          queue, submission, staging.handle, staging.offset,
+          operation->fill.pattern, operation->fill.pattern_length,
+          inout_scratch_used);
+    }
+    const uint32_t pattern = iree_hal_vulkan_queue_expand_fill_pattern(
+        operation->fill.pattern, operation->fill.pattern_length, 0);
+    for (uint64_t z = 0; z < region->slice_count; ++z) {
+      for (uint64_t y = 0; y < region->row_count; ++y) {
+        const VkDeviceSize offset =
+            target.offset + z * slice_stride + y * row_stride;
+        if (aligned) {
+          iree_vkCmdFillBuffer(IREE_VULKAN_DEVICE(&queue->syms),
+                               submission->native_command_buffer, target.handle,
+                               offset, region->row_length, pattern);
+        } else {
+          iree_hal_vulkan_queue_record_staged_fill_ranges(
+              queue, submission, staging.handle, staging.offset, target.handle,
+              offset, region->row_length, operation->fill.pattern,
+              operation->fill.pattern_length);
+        }
+      }
+    }
+    return iree_ok_status();
+  }
   VkDeviceSize fill_offset = target.offset;
-  VkDeviceSize fill_length = (VkDeviceSize)operation->fill.length;
+  VkDeviceSize fill_length =
+      (VkDeviceSize)iree_hal_transfer_operation_length(operation);
   const bool needs_unaligned_fill = fill_offset % sizeof(uint32_t) != 0 ||
                                     fill_length % sizeof(uint32_t) != 0;
   if (needs_unaligned_fill &&
@@ -3949,10 +4001,14 @@ static iree_status_t iree_hal_vulkan_queue_record_transfer_fill(
     IREE_RETURN_IF_ERROR(iree_hal_vulkan_queue_resolve_transfer_buffer(
         lease->block->fill_scratch,
         lease->slot * IREE_HAL_VULKAN_QUEUE_FILL_SCRATCH_SIZE, &staging));
+    iree_hal_vulkan_queue_prepare_fill_scratch(
+        queue, submission, staging.handle, staging.offset,
+        operation->fill.pattern, operation->fill.pattern_length,
+        inout_scratch_used);
     iree_hal_vulkan_queue_record_staged_fill_ranges(
         queue, submission, staging.handle, staging.offset, target.handle,
         target.offset, fill_length, operation->fill.pattern,
-        operation->fill.pattern_length, inout_scratch_used);
+        operation->fill.pattern_length);
     return iree_ok_status();
   }
   if (needs_unaligned_fill) {
@@ -4171,7 +4227,7 @@ static iree_status_t iree_hal_vulkan_queue_can_record_update_native(
 static iree_status_t iree_hal_vulkan_queue_record_copy_native_buffers(
     iree_hal_vulkan_queue_t* queue, iree_hal_buffer_t* source_buffer,
     iree_device_size_t source_offset, iree_hal_buffer_t* target_buffer,
-    iree_device_size_t target_offset, iree_device_size_t length,
+    iree_device_size_t target_offset, const iree_hal_transfer_region_t* region,
     VkCommandBuffer command_buffer,
     const iree_hal_vulkan_queue_pending_submission_t* submission) {
   IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_usage(
@@ -4218,14 +4274,9 @@ static iree_status_t iree_hal_vulkan_queue_record_copy_native_buffers(
                                    submission->native_command_buffer,
                                    &submission->barriers.before);
   }
-  VkBufferCopy copy_region = {
-      .srcOffset = (VkDeviceSize)source_backing_offset,
-      .dstOffset = (VkDeviceSize)target_backing_offset,
-      .size = (VkDeviceSize)length,
-  };
-  iree_vkCmdCopyBuffer(IREE_VULKAN_DEVICE(&queue->syms), command_buffer,
-                       source_handle, target_handle, /*regionCount=*/1,
-                       &copy_region);
+  iree_hal_vulkan_builtins_record_copy_region(
+      &queue->syms, command_buffer, source_handle, source_backing_offset,
+      target_handle, target_backing_offset, region);
   if (submission) {
     iree_hal_vulkan_barrier_record(&queue->syms, queue->queue_flags,
                                    submission->native_command_buffer,
@@ -4242,7 +4293,7 @@ static iree_status_t iree_hal_vulkan_queue_record_copy_native(
   return iree_hal_vulkan_queue_record_copy_native_buffers(
       queue, submission->copy.source_buffer, submission->copy.source_offset,
       submission->copy.target_buffer, submission->copy.target_offset,
-      submission->copy.length, submission->native_command_buffer, submission);
+      &submission->copy.region, submission->native_command_buffer, submission);
 }
 
 static iree_status_t iree_hal_vulkan_queue_record_transfer_native(
@@ -4313,7 +4364,7 @@ static iree_status_t iree_hal_vulkan_queue_record_transfer_native(
             is_upload ? operation->upload.target_offset
                       : operation->update.target_offset;
         const iree_device_size_t length =
-            is_upload ? operation->upload.length : operation->update.length;
+            iree_hal_transfer_operation_length(operation);
         const void* source = is_upload ? operation->upload.source
                                        : operation->update.source_buffer;
         const iree_host_size_t source_offset =
@@ -4340,15 +4391,10 @@ static iree_status_t iree_hal_vulkan_queue_record_transfer_native(
               &target);
         }
         if (iree_status_is_ok(status)) {
-          const VkBufferCopy copy_region = {
-              .srcOffset = source.offset,
-              .dstOffset = target.offset,
-              .size = (VkDeviceSize)operation->copy.length,
-          };
-          iree_vkCmdCopyBuffer(IREE_VULKAN_DEVICE(&queue->syms),
-                               submission->native_command_buffer, source.handle,
-                               target.handle,
-                               /*regionCount=*/1, &copy_region);
+          iree_hal_vulkan_builtins_record_copy_region(
+              &queue->syms, submission->native_command_buffer, source.handle,
+              source.offset, target.handle, target.offset,
+              operation->copy.region);
         }
         break;
       }
@@ -6175,7 +6221,8 @@ static iree_status_t iree_hal_vulkan_queue_submit_copy_with_action(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, const iree_hal_vulkan_queue_barriers_t* barriers,
+    const iree_hal_transfer_region_t* region,
+    const iree_hal_vulkan_queue_barriers_t* barriers,
     iree_hal_copy_flags_t flags,
     iree_hal_vulkan_queue_completion_action_t completion_action) {
   IREE_ASSERT_ARGUMENT(queue);
@@ -6183,6 +6230,13 @@ static iree_status_t iree_hal_vulkan_queue_submit_copy_with_action(
   IREE_ASSERT_ARGUMENT(target_buffer);
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  const uint64_t length = iree_hal_transfer_region_length(region);
+  const uint64_t source_length = iree_hal_transfer_range_length(
+      region->row_length, region->row_count, region->slice_count,
+      &region->source_strides);
+  const uint64_t target_length = iree_hal_transfer_range_length(
+      region->row_length, region->row_count, region->slice_count,
+      &region->target_strides);
   iree_status_t status = iree_ok_status();
   if (flags != IREE_HAL_COPY_FLAG_NONE) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -6190,8 +6244,8 @@ static iree_status_t iree_hal_vulkan_queue_submit_copy_with_action(
                               flags);
   }
   if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_buffer_validate_range(source_buffer, source_offset, length);
+    status = iree_hal_buffer_validate_range(source_buffer, source_offset,
+                                            source_length);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_buffer_validate_memory_type(
@@ -6199,8 +6253,8 @@ static iree_status_t iree_hal_vulkan_queue_submit_copy_with_action(
         IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE);
   }
   if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_buffer_validate_range(target_buffer, target_offset, length);
+    status = iree_hal_buffer_validate_range(target_buffer, target_offset,
+                                            target_length);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_buffer_validate_memory_type(
@@ -6235,7 +6289,7 @@ static iree_status_t iree_hal_vulkan_queue_submit_copy_with_action(
     submission->copy.target_buffer = target_buffer;
     iree_hal_buffer_retain(target_buffer);
     submission->copy.target_offset = target_offset;
-    submission->copy.length = length;
+    submission->copy.region = *region;
     submission->copy.flags = flags;
     iree_hal_vulkan_queue_set_completion_action(submission, completion_action);
   }
@@ -6289,9 +6343,14 @@ iree_status_t iree_hal_vulkan_queue_submit_copy(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, const iree_hal_vulkan_queue_barriers_t* barriers,
     iree_hal_copy_flags_t flags) {
+  const iree_hal_transfer_region_t region = {
+      .row_length = length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   return iree_hal_vulkan_queue_submit_copy_with_action(
       queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
-      source_offset, target_buffer, target_offset, length, barriers, flags,
+      source_offset, target_buffer, target_offset, &region, barriers, flags,
       iree_hal_vulkan_queue_completion_action_null());
 }
 
@@ -6358,7 +6417,10 @@ struct iree_hal_vulkan_staged_transfer_t {
   // User buffer byte offset for the first requested byte.
   iree_device_size_t buffer_offset;
 
-  // Total requested transfer length.
+  // Useful-byte geometry between the caller host range and device buffer.
+  iree_hal_transfer_region_t region;
+
+  // Total requested useful transfer length, excluding padding.
   iree_device_size_t requested_length;
 
   // Maximum bytes assigned to one physical staging slot.
@@ -6577,9 +6639,10 @@ static void iree_hal_vulkan_staged_transfer_copy_complete(
     status = iree_hal_buffer_mapping_invalidate_range(
         &transfer->ring->mapping, chunk->slot->buffer_offset, chunk->length);
     if (iree_status_is_ok(status)) {
-      memcpy(transfer->host_contents.data + transfer->host_offset +
-                 chunk->transfer_offset,
-             chunk->slot->host_span.data, (iree_host_size_t)chunk->length);
+      iree_hal_transfer_scatter_host(
+          chunk->slot->host_span.data, &transfer->region,
+          chunk->transfer_offset, (iree_host_size_t)chunk->length,
+          transfer->host_contents.data + transfer->host_offset);
     }
   }
   if (iree_status_is_ok(status)) {
@@ -6593,25 +6656,37 @@ static void iree_hal_vulkan_staged_transfer_copy_complete(
 static iree_status_t iree_hal_vulkan_staged_transfer_submit_copy(
     iree_hal_vulkan_staged_transfer_chunk_t* chunk) {
   iree_hal_vulkan_staged_transfer_t* transfer = chunk->transfer;
+  uint64_t source_displacement = 0, target_displacement = 0;
+  iree_hal_transfer_region_t region = iree_hal_transfer_region_slice(
+      &transfer->region, chunk->transfer_offset, chunk->length,
+      &source_displacement, &target_displacement);
   iree_status_t status = iree_ok_status();
   iree_hal_buffer_t* source_buffer = NULL;
   iree_device_size_t source_offset = 0;
   iree_hal_buffer_t* target_buffer = NULL;
   iree_device_size_t target_offset = 0;
   if (transfer->kind == IREE_HAL_VULKAN_STAGED_TRANSFER_READ) {
-    memcpy(chunk->slot->host_span.data,
-           transfer->host_contents.data + transfer->host_offset +
-               chunk->transfer_offset,
-           (iree_host_size_t)chunk->length);
+    iree_hal_transfer_gather_host(
+        transfer->host_contents.data + transfer->host_offset, &transfer->region,
+        chunk->transfer_offset, (iree_host_size_t)chunk->length,
+        chunk->slot->host_span.data);
+    region.source_strides = (iree_hal_transfer_strides_t){
+        .row_stride = region.row_length,
+        .slice_stride = region.row_length * region.row_count,
+    };
     status = iree_hal_buffer_mapping_flush_range(
         &transfer->ring->mapping, chunk->slot->buffer_offset, chunk->length);
     source_buffer = transfer->ring->buffer;
     source_offset = chunk->slot->buffer_offset;
     target_buffer = transfer->buffer;
-    target_offset = transfer->buffer_offset + chunk->transfer_offset;
+    target_offset = transfer->buffer_offset + target_displacement;
   } else {
     source_buffer = transfer->buffer;
-    source_offset = transfer->buffer_offset + chunk->transfer_offset;
+    source_offset = transfer->buffer_offset + source_displacement;
+    region.target_strides = (iree_hal_transfer_strides_t){
+        .row_stride = region.row_length,
+        .slice_stride = region.row_length * region.row_count,
+    };
     target_buffer = transfer->ring->buffer;
     target_offset = chunk->slot->buffer_offset;
   }
@@ -6622,7 +6697,7 @@ static iree_status_t iree_hal_vulkan_staged_transfer_submit_copy(
   return iree_hal_vulkan_queue_submit_copy_with_action(
       transfer->queue, iree_hal_semaphore_list_empty(),
       iree_hal_semaphore_list_empty(), source_buffer, source_offset,
-      target_buffer, target_offset, chunk->length, /*barriers=*/NULL,
+      target_buffer, target_offset, &region, /*barriers=*/NULL,
       IREE_HAL_COPY_FLAG_NONE,
       (iree_hal_vulkan_queue_completion_action_t){
           .fn = iree_hal_vulkan_staged_transfer_copy_complete,
@@ -6666,7 +6741,13 @@ static void iree_hal_vulkan_staged_transfer_pump(
             transfer->requested_length - transfer->submitted_length;
         chunk->slot = slot;
         chunk->transfer_offset = transfer->submitted_length;
-        chunk->length = iree_min(transfer->chunk_size, remaining_length);
+        uint64_t source_displacement = 0, target_displacement = 0;
+        const iree_hal_transfer_region_t region =
+            iree_hal_transfer_region_slice(
+                &transfer->region, transfer->submitted_length,
+                iree_min(transfer->chunk_size, remaining_length),
+                &source_displacement, &target_displacement);
+        chunk->length = iree_hal_transfer_region_length(&region);
         transfer->submitted_length += chunk->length;
         ++transfer->active_chunk_count;
       }
@@ -6705,9 +6786,11 @@ static iree_status_t iree_hal_vulkan_staged_transfer_create(
     iree_hal_vulkan_queue_t* queue, iree_hal_vulkan_staged_transfer_kind_t kind,
     iree_byte_span_t host_contents, iree_host_size_t host_offset,
     iree_hal_buffer_t* buffer, iree_device_size_t buffer_offset,
-    iree_device_size_t length, iree_hal_vulkan_staged_transfer_flags_t flags,
+    const iree_hal_transfer_region_t* region,
+    iree_hal_vulkan_staged_transfer_flags_t flags,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_vulkan_staged_transfer_t** out_transfer) {
+  const uint64_t length = iree_hal_transfer_region_length(region);
   const iree_hal_vulkan_staged_transfer_flags_t known_flags =
       IREE_HAL_VULKAN_STAGED_TRANSFER_FLAG_CAPTURE_HOST_RANGE;
   if (iree_any_bit_set(flags, ~known_flags)) {
@@ -6728,9 +6811,13 @@ static iree_status_t iree_hal_vulkan_staged_transfer_create(
         IREE_STATUS_OUT_OF_RANGE,
         "Vulkan staged transfer length exceeds host addressable size");
   }
+  const uint64_t host_span_length = iree_hal_transfer_range_length(
+      region->row_length, region->row_count, region->slice_count,
+      kind == IREE_HAL_VULKAN_STAGED_TRANSFER_READ ? &region->source_strides
+                                                   : &region->target_strides);
   const iree_host_size_t host_length = (iree_host_size_t)length;
   if (host_offset > host_contents.data_length ||
-      host_length > host_contents.data_length - host_offset) {
+      host_span_length > host_contents.data_length - host_offset) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "Vulkan staged transfer host range exceeds available contents");
@@ -6779,8 +6866,8 @@ static iree_status_t iree_hal_vulkan_staged_transfer_create(
   transfer->chunks = (iree_hal_vulkan_staged_transfer_chunk_t*)(transfer + 1);
   uint8_t* captured_host_data = (uint8_t*)transfer->chunks + chunks_size;
   if (captures_host_range && captured_host_length != 0) {
-    memcpy(captured_host_data, host_contents.data + host_offset,
-           captured_host_length);
+    iree_hal_transfer_gather_host(host_contents.data + host_offset, region, 0,
+                                  captured_host_length, captured_host_data);
     host_contents =
         iree_make_byte_span(captured_host_data, captured_host_length);
     host_offset = 0;
@@ -6797,6 +6884,13 @@ static iree_status_t iree_hal_vulkan_staged_transfer_create(
   transfer->buffer = buffer;
   iree_hal_buffer_retain(transfer->buffer);
   transfer->buffer_offset = buffer_offset;
+  transfer->region = *region;
+  if (captures_host_range) {
+    transfer->region.source_strides = (iree_hal_transfer_strides_t){
+        .row_stride = region->row_length,
+        .slice_stride = region->row_length * region->row_count,
+    };
+  }
   transfer->requested_length = length;
   transfer->chunk_size = (iree_host_size_t)ring->slot_size;
   transfer->kind = kind;
@@ -6829,12 +6923,17 @@ static iree_status_t iree_hal_vulkan_queue_submit_staged_update(
     const void* source_buffer, iree_host_size_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length) {
+  const iree_hal_transfer_region_t region = {
+      .row_length = length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   iree_byte_span_t source_contents = iree_make_byte_span(
       (uint8_t*)source_buffer + source_offset, (iree_host_size_t)length);
   iree_hal_vulkan_staged_transfer_t* transfer = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_staged_transfer_create(
       queue, IREE_HAL_VULKAN_STAGED_TRANSFER_READ, source_contents,
-      /*host_offset=*/0, target_buffer, target_offset, length,
+      /*host_offset=*/0, target_buffer, target_offset, &region,
       IREE_HAL_VULKAN_STAGED_TRANSFER_FLAG_CAPTURE_HOST_RANGE,
       signal_semaphore_list, &transfer));
 
@@ -7044,14 +7143,27 @@ static iree_status_t iree_hal_vulkan_transfer_select_strategy(
           operation->fill.target_buffer, operation->fill.target_offset,
           &target));
       if (iree_all_bits_set(queue->queue_flags, VK_QUEUE_COMPUTE_BIT)) {
-        const uint32_t descriptor_set_count =
-            iree_hal_vulkan_builtins_fill_unaligned_descriptor_set_count(
-                target.offset, (VkDeviceSize)operation->fill.length);
+        const iree_hal_fill_region_t* region = operation->fill.region;
+        uint64_t descriptor_set_count = 0;
+        if (iree_hal_transfer_range_is_linear(
+                region->row_length, region->row_count, region->slice_count,
+                &region->target_strides)) {
+          descriptor_set_count =
+              iree_hal_vulkan_builtins_fill_unaligned_descriptor_set_count(
+                  target.offset, iree_hal_transfer_operation_length(operation));
+        } else {
+          const iree_hal_fill_region_t tile =
+              iree_hal_vulkan_builtins_fill_tile(queue->builtins, region);
+          descriptor_set_count =
+              ((region->row_length - 1) / tile.row_length + 1) *
+              ((region->row_count - 1) / tile.row_count + 1) *
+              ((region->slice_count - 1) / tile.slice_count + 1);
+        }
         if (descriptor_set_count > UINT32_MAX - *inout_descriptor_set_count) {
           return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                   "Vulkan transfer descriptor count overflows");
         }
-        *inout_descriptor_set_count += descriptor_set_count;
+        *inout_descriptor_set_count += (uint32_t)descriptor_set_count;
       }
       *out_strategy = IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE;
       return iree_ok_status();
@@ -7069,14 +7181,23 @@ static iree_status_t iree_hal_vulkan_transfer_select_strategy(
           is_upload ? operation->upload.target_offset
                     : operation->update.target_offset;
       const iree_device_size_t length =
-          is_upload ? operation->upload.length : operation->update.length;
+          iree_hal_transfer_operation_length(operation);
       if (!iree_hal_vulkan_queue_buffer_has_recordable_backing(target_buffer)) {
         *out_strategy = IREE_HAL_VULKAN_TRANSFER_STRATEGY_PENDING;
         return iree_ok_status();
       }
       bool can_record_native = false;
-      IREE_RETURN_IF_ERROR(iree_hal_vulkan_queue_can_record_update_native(
-          target_buffer, target_offset, length, &can_record_native));
+      const iree_hal_transfer_region_t* region =
+          is_upload ? operation->upload.region : operation->update.region;
+      if (iree_hal_transfer_range_is_linear(
+              region->row_length, region->row_count, region->slice_count,
+              &region->source_strides) &&
+          iree_hal_transfer_range_is_linear(
+              region->row_length, region->row_count, region->slice_count,
+              &region->target_strides)) {
+        IREE_RETURN_IF_ERROR(iree_hal_vulkan_queue_can_record_update_native(
+            target_buffer, target_offset, length, &can_record_native));
+      }
       *out_strategy = can_record_native
                           ? IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE
                           : IREE_HAL_VULKAN_TRANSFER_STRATEGY_STAGED_UPLOAD;
@@ -7111,36 +7232,37 @@ static iree_status_t iree_hal_vulkan_transfer_create_staged_operation(
   iree_byte_span_t host_contents = iree_byte_span_empty();
   iree_hal_buffer_t* buffer = NULL;
   iree_device_size_t buffer_offset = 0;
-  iree_device_size_t length = 0;
+  const iree_hal_transfer_region_t region =
+      iree_hal_transfer_operation_region(operation);
+  const uint64_t host_length = iree_hal_transfer_range_length(
+      region.row_length, region.row_count, region.slice_count,
+      strategy == IREE_HAL_VULKAN_TRANSFER_STRATEGY_STAGED_DOWNLOAD
+          ? &region.target_strides
+          : &region.source_strides);
   if (strategy == IREE_HAL_VULKAN_TRANSFER_STRATEGY_STAGED_DOWNLOAD) {
     staged_kind = IREE_HAL_VULKAN_STAGED_TRANSFER_WRITE;
-    host_contents =
-        iree_make_byte_span(operation->download.target,
-                            (iree_host_size_t)operation->download.length);
+    host_contents = iree_make_byte_span(operation->download.target,
+                                        (iree_host_size_t)host_length);
     buffer = operation->download.source_buffer;
     buffer_offset = operation->download.source_offset;
-    length = operation->download.length;
   } else if (operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE) {
     host_contents = iree_make_byte_span(
         (void*)((const uint8_t*)operation->update.source_buffer +
                 operation->update.source_offset),
-        (iree_host_size_t)operation->update.length);
+        (iree_host_size_t)host_length);
     buffer = operation->update.target_buffer;
     buffer_offset = operation->update.target_offset;
-    length = operation->update.length;
   } else {
-    host_contents =
-        iree_make_byte_span((void*)operation->upload.source,
-                            (iree_host_size_t)operation->upload.length);
+    host_contents = iree_make_byte_span((void*)operation->upload.source,
+                                        (iree_host_size_t)host_length);
     buffer = operation->upload.target_buffer;
     buffer_offset = operation->upload.target_offset;
-    length = operation->upload.length;
   }
 
   iree_hal_vulkan_staged_transfer_t* staged_transfer = NULL;
   iree_status_t status = iree_hal_vulkan_staged_transfer_create(
       queue, staged_kind, host_contents, /*host_offset=*/0, buffer,
-      buffer_offset, length, IREE_HAL_VULKAN_STAGED_TRANSFER_FLAG_NONE,
+      buffer_offset, &region, IREE_HAL_VULKAN_STAGED_TRANSFER_FLAG_NONE,
       iree_hal_semaphore_list_empty(), &staged_transfer);
   if (iree_status_is_ok(status)) {
     *out_staged_transfer = staged_transfer;
@@ -7182,11 +7304,12 @@ static iree_status_t iree_hal_vulkan_transfer_transaction_create(
         iree_hal_vulkan_transfer_validate_operation(queue, operation));
     iree_host_size_t capture_length = 0;
     if (operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_FILL &&
-        operation->fill.length != 0) {
+        iree_hal_transfer_operation_length(operation) != 0) {
       capture_length = operation->fill.pattern_length;
     } else if (operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE &&
-               operation->update.length != 0) {
-      capture_length = (iree_host_size_t)operation->update.length;
+               iree_hal_transfer_operation_length(operation) != 0) {
+      capture_length =
+          (iree_host_size_t)iree_hal_transfer_operation_length(operation);
     }
     if (IREE_UNLIKELY(!iree_host_size_checked_add(
             captured_data_length, capture_length, &captured_data_length))) {
@@ -7197,6 +7320,7 @@ static iree_status_t iree_hal_vulkan_transfer_transaction_create(
   }
 
   iree_host_size_t operations_offset = 0;
+  iree_host_size_t regions_offset = 0;
   iree_host_size_t strategies_offset = 0;
   iree_host_size_t native_operations_offset = 0;
   iree_host_size_t staged_transfers_offset = 0;
@@ -7207,6 +7331,8 @@ static iree_status_t iree_hal_vulkan_transfer_transaction_create(
       IREE_STRUCT_FIELD_ALIGNED(operation_count, iree_hal_transfer_operation_t,
                                 iree_alignof(iree_hal_transfer_operation_t),
                                 &operations_offset),
+      IREE_STRUCT_FIELD(operation_count, iree_hal_transfer_region_t,
+                        &regions_offset),
       IREE_STRUCT_FIELD_ALIGNED(
           operation_count, iree_hal_vulkan_transfer_strategy_t,
           iree_alignof(iree_hal_vulkan_transfer_strategy_t),
@@ -7250,6 +7376,9 @@ static iree_status_t iree_hal_vulkan_transfer_transaction_create(
 
   for (iree_host_size_t i = 0; i < operation_count; ++i) {
     iree_hal_transfer_operation_t* operation = &transaction->operations[i];
+    iree_hal_transfer_operation_capture_region(
+        operation, (uint8_t*)transaction + regions_offset +
+                       i * sizeof(iree_hal_transfer_region_t));
     const iree_device_size_t length =
         iree_hal_transfer_operation_length(operation);
     switch (operation->type) {
@@ -7264,10 +7393,16 @@ static iree_status_t iree_hal_vulkan_transfer_transaction_create(
         break;
       case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
         if (length != 0) {
-          memcpy(captured_data,
-                 (const uint8_t*)operation->update.source_buffer +
-                     operation->update.source_offset,
-                 (iree_host_size_t)length);
+          iree_hal_transfer_region_t* region =
+              (iree_hal_transfer_region_t*)operation->update.region;
+          iree_hal_transfer_gather_host(
+              (const uint8_t*)operation->update.source_buffer +
+                  operation->update.source_offset,
+              region, 0, (iree_host_size_t)length, captured_data);
+          region->source_strides = (iree_hal_transfer_strides_t){
+              .row_stride = region->row_length,
+              .slice_stride = region->row_length * region->row_count,
+          };
           operation->update.source_buffer = captured_data;
           operation->update.source_offset = 0;
           captured_data += (iree_host_size_t)length;

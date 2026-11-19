@@ -410,13 +410,13 @@ static iree_status_t loom_runtime_execution_capture_uploads(
   for (iree_host_size_t i = 0; i < count; ++i) {
     const iree_hal_transfer_operation_t* operation = &operations[i];
     if (operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD &&
-        operation->upload.length) {
+        iree_hal_transfer_operation_length(operation)) {
       captured[i] = (iree_hal_transfer_operation_t){
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE,
           .update = {.source_buffer = operation->upload.source,
                      .target_buffer = operation->upload.target_buffer,
                      .target_offset = operation->upload.target_offset,
-                     .length = operation->upload.length}};
+                     .region = operation->upload.region}};
     } else {
       captured[i] = *operation;
     }

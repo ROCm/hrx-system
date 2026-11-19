@@ -223,11 +223,13 @@ class GpuNativeFileBatchTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
     const uint8_t padding = 0xCD;
     const uint8_t invalid = 0xFF;
     uint64_t one = 1;
+    const iree_hal_fill_region_t payload_region = {kBufferLength, 1, 1};
+    const iree_hal_fill_region_t metadata_region = {kMetadataLength, 1, 1};
     iree_hal_transfer_operation_t initialization[2] = {};
     initialization[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
-    initialization[0].fill = {payload, 0, kBufferLength, &padding, 1};
+    initialization[0].fill = {payload, 0, &payload_region, &padding, 1};
     initialization[1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
-    initialization[1].fill = {metadata, 0, kMetadataLength, &invalid, 1};
+    initialization[1].fill = {metadata, 0, &metadata_region, &invalid, 1};
     IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], {},
                                            {1, &initialized_handle, &one}, 2,
                                            initialization, nullptr));
@@ -235,10 +237,10 @@ class GpuNativeFileBatchTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
         iree_hal_semaphore_wait(initialized, one, iree_infinite_timeout(), 0));
     iree_hal_semaphore_t* producer_waits[] = {initialized, gate};
     uint64_t producer_values[] = {one, one};
-    IREE_ASSERT_OK(
-        iree_hal_queue_upload(queues_[0], {2, producer_waits, producer_values},
-                              {1, &requests_handle, &one}, words.data(),
-                              metadata, 0, sizeof(words), nullptr));
+    IREE_ASSERT_OK(iree_hal_queue_upload_linear(
+        queues_[0], {2, producer_waits, producer_values},
+        {1, &requests_handle, &one}, words.data(), metadata, 0, sizeof(words),
+        nullptr));
 
     iree_hal_file_binding_t input_binding = {
         source_file,
@@ -277,9 +279,9 @@ class GpuNativeFileBatchTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
     iree_hal_semaphore_t* tail = requests_handle;
     if (iree_status_is_ok(status)) {
       tail = rows_handle;
-      status = iree_hal_queue_copy(queues_[0], {1, &rows_handle, &one},
-                                   {1, &consumed_handle, &one}, payload, 0,
-                                   consumer, 0, kBufferLength, nullptr, 0);
+      status = iree_hal_queue_copy_linear(
+          queues_[0], {1, &rows_handle, &one}, {1, &consumed_handle, &one},
+          payload, 0, consumer, 0, kBufferLength, nullptr, 0);
     }
     if (iree_status_is_ok(status)) {
       tail = consumed_handle;
@@ -290,7 +292,7 @@ class GpuNativeFileBatchTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
     }
     if (iree_status_is_ok(status)) {
       tail = written_handle;
-      status = iree_hal_queue_download(
+      status = iree_hal_queue_download_linear(
           queues_[0], {1, &written_handle, &one}, {1, &completed_handle, &one},
           consumer, 0, observed.data(), observed.size(), nullptr);
     }
@@ -303,13 +305,13 @@ class GpuNativeFileBatchTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
     uint64_t independent_value = 0, next = 1;
     const uint32_t pattern = 0x23A56BCD;
     if (iree_status_is_ok(status)) {
-      status = iree_hal_queue_fill(
+      status = iree_hal_queue_fill_linear(
           io_queue, {}, {1, &independent_handle, &next}, independent, 0,
           sizeof(independent_values), &pattern, sizeof(pattern), nullptr, 0);
     }
     if (iree_status_is_ok(status)) {
       independent_value = next++;
-      status = iree_hal_queue_download(
+      status = iree_hal_queue_download_linear(
           io_queue, {1, &independent_handle, &independent_value},
           {1, &independent_handle, &next}, independent, 0,
           independent_values.data(), sizeof(independent_values), nullptr);

@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <numeric>
 #include <string>
 #include <vector>
@@ -61,10 +62,10 @@ class QueueTransferTest : public CtsTestBase<> {
                         iree_host_size_t pattern_length) {
     SemaphoreList signal(device_, {0}, {1});
     SemaphoreList empty_wait;
-    IREE_ASSERT_OK(
-        iree_hal_queue_fill(transfer_queue_, empty_wait, signal, target_buffer,
-                            target_offset, length, pattern, pattern_length,
-                            /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
+        transfer_queue_, empty_wait, signal, target_buffer, target_offset,
+        length, pattern, pattern_length,
+        /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));
     IREE_ASSERT_OK(iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
                                                 IREE_ASYNC_WAIT_FLAG_NONE));
   }
@@ -77,7 +78,7 @@ class QueueTransferTest : public CtsTestBase<> {
                           iree_device_size_t length) {
     SemaphoreList signal(device_, {0}, {1});
     SemaphoreList empty_wait;
-    IREE_ASSERT_OK(iree_hal_queue_update(
+    IREE_ASSERT_OK(iree_hal_queue_update_linear(
         transfer_queue_, empty_wait, signal, source_buffer, source_offset,
         target_buffer, target_offset, length, /*barriers=*/NULL,
         IREE_HAL_UPDATE_FLAG_NONE));
@@ -93,10 +94,10 @@ class QueueTransferTest : public CtsTestBase<> {
                         iree_device_size_t length) {
     SemaphoreList signal(device_, {0}, {1});
     SemaphoreList empty_wait;
-    IREE_ASSERT_OK(
-        iree_hal_queue_copy(transfer_queue_, empty_wait, signal, source_buffer,
-                            source_offset, target_buffer, target_offset, length,
-                            /*barriers=*/NULL, IREE_HAL_COPY_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_queue_copy_linear(
+        transfer_queue_, empty_wait, signal, source_buffer, source_offset,
+        target_buffer, target_offset, length,
+        /*barriers=*/NULL, IREE_HAL_COPY_FLAG_NONE));
     IREE_ASSERT_OK(iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
                                                 IREE_ASYNC_WAIT_FLAG_NONE));
   }
@@ -112,6 +113,136 @@ class QueueTransferTest : public CtsTestBase<> {
 //===----------------------------------------------------------------------===//
 // queue_transfer tests
 //===----------------------------------------------------------------------===//
+
+TEST_P(QueueTransferTest, RectanglesCaptureAndPreservePadding) {
+  constexpr size_t kRows = 1300, kSlices = 3, kWidth = 37;
+  constexpr size_t kCapacity = 512 * 1024;
+  Ref<iree_hal_buffer_t> source_buffer, target_buffer;
+  IREE_ASSERT_OK(CreateZeroedDeviceBuffer(kCapacity, source_buffer.out()));
+  IREE_ASSERT_OK(CreateZeroedDeviceBuffer(kCapacity, target_buffer.out()));
+  iree_hal_transfer_region_t update = {
+      .row_length = kWidth,
+      .row_count = kRows,
+      .slice_count = kSlices,
+      .source_strides = {.row_stride = 48, .slice_stride = 64 * 1024},
+      .target_strides = {.row_stride = 64, .slice_stride = 96 * 1024},
+  };
+  iree_hal_transfer_region_t copy = {
+      .row_length = kWidth,
+      .row_count = kRows,
+      .slice_count = kSlices,
+      .source_strides = update.target_strides,
+      .target_strides = {.row_stride = 80, .slice_stride = 112 * 1024},
+  };
+  iree_hal_fill_region_t fill = {
+      .row_length = 4,
+      .row_count = kRows,
+      .slice_count = kSlices,
+      .target_strides = copy.target_strides,
+  };
+  const uint32_t marker = 0x1973A5CD;
+  std::vector<uint8_t> source(3 * 64 * 1024);
+  for (size_t i = 0; i < source.size(); ++i) {
+    source[i] = uint8_t(i * 13 + 7);
+  }
+  std::vector<uint8_t> initial(kCapacity, 0xCC);
+  std::vector<uint8_t> expected = initial;
+  std::vector<uint8_t> actual(kCapacity);
+  for (size_t z = 0; z < kSlices; ++z) {
+    for (size_t y = 0; y < kRows; ++y) {
+      memcpy(expected.data() + 3 + z * copy.target_strides.slice_stride +
+                 y * copy.target_strides.row_stride,
+             source.data() + 5 + z * update.source_strides.slice_stride +
+                 y * update.source_strides.row_stride,
+             kWidth);
+      memcpy(expected.data() + 44 + z * fill.target_strides.slice_stride +
+                 y * fill.target_strides.row_stride,
+             &marker, sizeof(marker));
+    }
+  }
+  uint64_t submitted = 0;
+  const auto join = [&submitted](iree_hal_semaphore_t* semaphore) {
+    if (submitted) {
+      IREE_EXPECT_OK(iree_hal_semaphore_wait(semaphore, submitted,
+                                             iree_infinite_timeout(), 0));
+    }
+    iree_hal_semaphore_release(semaphore);
+  };
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
+  std::unique_ptr<iree_hal_semaphore_t, decltype(join)> timeline(semaphore,
+                                                                 join);
+  ASSERT_FALSE(HasFatalFailure());
+  uint64_t next = 1;
+  IREE_ASSERT_OK(iree_hal_queue_upload_linear(
+      transfer_queue_, {}, {1, &semaphore, &next}, initial.data(),
+      target_buffer, 0, kCapacity, nullptr));
+  submitted = next++;
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, submitted,
+                                         iree_infinite_timeout(), 0));
+  Ref<iree_hal_semaphore_t> gate;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_NONE, gate.out()));
+  ASSERT_FALSE(HasFatalFailure());
+  iree_hal_semaphore_t* gate_pointer = gate;
+  uint64_t ready = 1;
+  IREE_ASSERT_OK(iree_hal_queue_update(
+      transfer_queue_, {1, &gate_pointer, &ready}, {1, &semaphore, &next},
+      source.data(), 5, source_buffer, 7, &update, nullptr, 0));
+  submitted = next++;
+  std::fill(source.begin(), source.end(), 0xEE);
+  update = {};
+  IREE_EXPECT_OK(iree_hal_semaphore_signal(gate, ready, nullptr));
+  IREE_ASSERT_OK(iree_hal_queue_copy(
+      transfer_queue_, {1, &semaphore, &submitted}, {1, &semaphore, &next},
+      source_buffer, 7, target_buffer, 3, &copy, nullptr, 0));
+  submitted = next++;
+  IREE_ASSERT_OK(iree_hal_queue_fill(
+      transfer_queue_, {1, &semaphore, &submitted}, {1, &semaphore, &next},
+      target_buffer, 44, &marker, sizeof(marker), &fill, nullptr, 0));
+  submitted = next++;
+  IREE_ASSERT_OK(iree_hal_queue_download_linear(
+      transfer_queue_, {1, &semaphore, &submitted}, {1, &semaphore, &next},
+      target_buffer, 0, actual.data(), kCapacity, nullptr));
+  submitted = next++;
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, submitted,
+                                         iree_infinite_timeout(), 0));
+  EXPECT_EQ(std::mismatch(actual.begin(), actual.end(), expected.begin()).first,
+            actual.end());
+
+  // Borrowed host rectangles cross staging windows in both directions. Only
+  // useful rows move; host and device padding retain their sentinel values.
+  source = expected;
+  actual.assign(kCapacity, 0xCC);
+  iree_hal_transfer_region_t host_region = copy;
+  host_region.source_strides = copy.target_strides;
+  host_region.target_strides = copy.source_strides;
+  IREE_ASSERT_OK(iree_hal_queue_upload(
+      transfer_queue_, {1, &semaphore, &submitted}, {1, &semaphore, &next},
+      source.data() + 3, source_buffer, 7, &host_region, nullptr));
+  submitted = next++;
+  host_region.source_strides = copy.source_strides;
+  host_region.target_strides = copy.target_strides;
+  IREE_ASSERT_OK(iree_hal_queue_download(
+      transfer_queue_, {1, &semaphore, &submitted}, {1, &semaphore, &next},
+      source_buffer, 7, actual.data() + 3, &host_region, nullptr));
+  submitted = next;
+  host_region = {};
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, submitted,
+                                         iree_infinite_timeout(), 0));
+  for (size_t z = 0; z < kSlices; ++z) {
+    for (size_t y = 0; y < kRows; ++y) {
+      memset(expected.data() + 44 + z * fill.target_strides.slice_stride +
+                 y * fill.target_strides.row_stride,
+             0xCC, sizeof(marker));
+    }
+  }
+  EXPECT_EQ(std::mismatch(actual.begin(), actual.end(), expected.begin()).first,
+            actual.end());
+}
 
 TEST_P(QueueTransferTest, TransferExecutesMixedBatch) {
   constexpr iree_device_size_t kBufferSize = 512 * 1024;
@@ -133,28 +264,38 @@ TEST_P(QueueTransferTest, TransferExecutesMixedBatch) {
   Ref<iree_hal_buffer_t> upload_target;
   IREE_ASSERT_OK(CreateZeroedDeviceBuffer(kBufferSize, upload_target.out()));
 
+  const iree_hal_fill_region_t fill_region = {
+      .row_length = kBufferSize,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  const iree_hal_transfer_region_t region = {
+      .row_length = kBufferSize,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   iree_hal_transfer_operation_t operations[5] = {};
   operations[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
   operations[0].fill.target_buffer = fill_target;
-  operations[0].fill.length = kBufferSize;
+  operations[0].fill.region = &fill_region;
   operations[0].fill.pattern = &fill_pattern;
   operations[0].fill.pattern_length = sizeof(fill_pattern);
   operations[1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE;
   operations[1].update.source_buffer = update_source_data.data();
   operations[1].update.target_buffer = update_target;
-  operations[1].update.length = kBufferSize;
+  operations[1].update.region = &region;
   operations[2].type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
   operations[2].copy.source_buffer = copy_source;
   operations[2].copy.target_buffer = copy_target;
-  operations[2].copy.length = kBufferSize;
+  operations[2].copy.region = &region;
   operations[3].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
   operations[3].upload.source = upload_source_data.data();
   operations[3].upload.target_buffer = upload_target;
-  operations[3].upload.length = kBufferSize;
+  operations[3].upload.region = &region;
   operations[4].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
   operations[4].download.source_buffer = copy_source;
   operations[4].download.target = download_target.data();
-  operations[4].download.length = kBufferSize;
+  operations[4].download.region = &region;
 
   SemaphoreList empty_wait;
   SemaphoreList signal(device_, {0}, {1});
@@ -202,20 +343,30 @@ TEST_P(QueueTransferTest, TransferReleasesBuffersBeforeCompletion) {
       IREE_ASSERT_OK(CreateZeroedDeviceBuffer(kBufferSize, copy_target.out()));
       const uint32_t pattern = 0xA5C35A3Cu;
       std::vector<uint8_t> update(kBufferSize, 0xC3);
+      const iree_hal_fill_region_t fill_region = {
+          .row_length = kBufferSize,
+          .row_count = 1,
+          .slice_count = 1,
+      };
+      const iree_hal_transfer_region_t region = {
+          .row_length = kBufferSize,
+          .row_count = 1,
+          .slice_count = 1,
+      };
       iree_hal_transfer_operation_t operations[3] = {};
       operations[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
       operations[0].fill.target_buffer = fill_target;
-      operations[0].fill.length = kBufferSize;
+      operations[0].fill.region = &fill_region;
       operations[0].fill.pattern = &pattern;
       operations[0].fill.pattern_length = sizeof(pattern);
       operations[1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE;
       operations[1].update.source_buffer = update.data();
       operations[1].update.target_buffer = update_target;
-      operations[1].update.length = kBufferSize;
+      operations[1].update.region = &region;
       operations[2].type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
       operations[2].copy.source_buffer = source;
       operations[2].copy.target_buffer = copy_target;
-      operations[2].copy.length = kBufferSize;
+      operations[2].copy.region = &region;
 
       SemaphoreList gate(device_, {ready ? 1u : 0u}, {1});
       SemaphoreList signal(device_, {0}, {1});
@@ -301,7 +452,7 @@ TEST_P(QueueTransferTest, BufferViewStagingRoundTrip) {
 
   SemaphoreList empty_wait;
   SemaphoreList copy_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_copy(
+  IREE_ASSERT_OK(iree_hal_queue_copy_linear(
       transfer_queue_, empty_wait, copy_signal,
       iree_hal_buffer_view_buffer(staging_view),
       /*source_offset=*/0, iree_hal_buffer_view_buffer(device_view),
@@ -310,7 +461,7 @@ TEST_P(QueueTransferTest, BufferViewStagingRoundTrip) {
 
   int32_t downloaded_values[IREE_ARRAYSIZE(source_values)] = {0};
   SemaphoreList download_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_download(
+  IREE_ASSERT_OK(iree_hal_queue_download_linear(
       transfer_queue_, copy_signal, download_signal,
       iree_hal_buffer_view_buffer(device_view), /*source_offset=*/0,
       downloaded_values, sizeof(downloaded_values), /*barriers=*/NULL));
@@ -338,7 +489,7 @@ TEST_P(QueueTransferTest, UploadPreservesRangesAndDestinationWaits) {
       IREE_ASSERT_OK(CreateZeroedDeviceBuffer(expected.size(), target.out()));
       SemaphoreList wait(device_, {0}, {1});
       SemaphoreList signal(device_, {0}, {1});
-      IREE_ASSERT_OK(iree_hal_queue_upload(
+      IREE_ASSERT_OK(iree_hal_queue_upload_linear(
           transfer_queue_, wait, signal, source.data(), target, offset, length,
           /*barriers=*/nullptr));
       uint64_t signal_value = 0;
@@ -364,7 +515,7 @@ TEST_P(QueueTransferTest, DownloadWritesBeforeSignaling) {
 
   SemaphoreList download_wait(device_, {0}, {1});
   SemaphoreList download_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_download(
+  IREE_ASSERT_OK(iree_hal_queue_download_linear(
       transfer_queue_, download_wait, download_signal, source, 0, target.data(),
       kBufferSize, /*barriers=*/NULL));
 
@@ -389,11 +540,11 @@ TEST_P(QueueTransferTest, BorrowedHostRangesRequireSignalSemaphore) {
 
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_queue_upload(transfer_queue_, empty_list, empty_list,
-                            host_data.data(), buffer, 0, kBufferSize,
-                            /*barriers=*/NULL));
+      iree_hal_queue_upload_linear(transfer_queue_, empty_list, empty_list,
+                                   host_data.data(), buffer, 0, kBufferSize,
+                                   /*barriers=*/NULL));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        iree_hal_queue_download(
+                        iree_hal_queue_download_linear(
                             transfer_queue_, empty_list, empty_list, buffer, 0,
                             host_data.data(), kBufferSize, /*barriers=*/NULL));
 }
@@ -404,16 +555,20 @@ TEST_P(QueueTransferTest, ValidationFailureRejectsCompleteBatch) {
   IREE_ASSERT_OK(CreateZeroedDeviceBuffer(kBufferSize, target.out()));
   const uint32_t pattern = 0xDEADBEEFu;
 
+  const iree_hal_fill_region_t regions[] = {
+      {.row_length = kBufferSize, .row_count = 1, .slice_count = 1},
+      {.row_length = sizeof(pattern), .row_count = 1, .slice_count = 1},
+  };
   iree_hal_transfer_operation_t operations[2] = {};
   operations[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
   operations[0].fill.target_buffer = target;
-  operations[0].fill.length = kBufferSize;
+  operations[0].fill.region = &regions[0];
   operations[0].fill.pattern = &pattern;
   operations[0].fill.pattern_length = sizeof(pattern);
   operations[1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
   operations[1].fill.target_buffer = target;
   operations[1].fill.target_offset = kBufferSize;
-  operations[1].fill.length = sizeof(pattern);
+  operations[1].fill.region = &regions[1];
   operations[1].fill.pattern = &pattern;
   operations[1].fill.pattern_length = sizeof(pattern);
 
@@ -432,21 +587,28 @@ TEST_P(QueueTransferTest, ValidationFailureRejectsCompleteBatch) {
 }
 
 TEST_P(QueueTransferTest, ZeroLengthEntriesFormBarrier) {
+  const iree_hal_fill_region_t fill_region = {};
+  const iree_hal_transfer_region_t region = {};
   iree_hal_transfer_operation_t operations[5] = {};
   operations[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
+  operations[0].fill.region = &fill_region;
   operations[0].fill.target_offset = IREE_DEVICE_SIZE_MAX;
   operations[0].fill.flags = ~IREE_HAL_FILL_FLAG_NONE;
   operations[1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE;
+  operations[1].update.region = &region;
   operations[1].update.source_offset = IREE_HOST_SIZE_MAX;
   operations[1].update.target_offset = IREE_DEVICE_SIZE_MAX;
   operations[1].update.flags = ~IREE_HAL_UPDATE_FLAG_NONE;
   operations[2].type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
+  operations[2].copy.region = &region;
   operations[2].copy.source_offset = IREE_DEVICE_SIZE_MAX;
   operations[2].copy.target_offset = IREE_DEVICE_SIZE_MAX;
   operations[2].copy.flags = ~IREE_HAL_COPY_FLAG_NONE;
   operations[3].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
+  operations[3].upload.region = &region;
   operations[3].upload.target_offset = IREE_DEVICE_SIZE_MAX;
   operations[4].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+  operations[4].download.region = &region;
   operations[4].download.source_offset = IREE_DEVICE_SIZE_MAX;
 
   SemaphoreList barrier_wait(device_, {0}, {1});
@@ -873,7 +1035,7 @@ TEST_P(QueueTransferTest, UpdateCapturesSourceBeforeWaitResolves) {
 
   SemaphoreList update_wait(device_, {0}, {1});
   SemaphoreList update_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_update(
+  IREE_ASSERT_OK(iree_hal_queue_update_linear(
       transfer_queue_, update_wait, update_signal, source.data(), source_offset,
       buffer, target_offset, update_length, /*barriers=*/NULL,
       IREE_HAL_UPDATE_FLAG_NONE));
@@ -1074,7 +1236,7 @@ TEST_P(QueueTransferTest, BurstCopySubmit) {
          ++submit_ordinal) {
       copy_signals.emplace_back(device_, std::vector<uint64_t>{0},
                                 std::vector<uint64_t>{1});
-      IREE_ASSERT_OK(iree_hal_queue_copy(
+      IREE_ASSERT_OK(iree_hal_queue_copy_linear(
           transfer_queue_, empty_wait, copy_signals.back(), source, 0, target,
           kBurstCopySize * submit_ordinal, kBurstCopySize, /*barriers=*/NULL,
           IREE_HAL_COPY_FLAG_NONE))
@@ -1121,12 +1283,12 @@ TEST_P(QueueTransferTest, FillAndCopyHostQueueEventProfiling) {
   SemaphoreList empty_wait;
   SemaphoreList fill_signal(device_, {0}, {1});
   uint32_t pattern = 0xA5A5A5A5u;
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       transfer_queue_, empty_wait, fill_signal, source, 0, buffer_size,
       &pattern, sizeof(pattern), /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));
 
   SemaphoreList copy_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_copy(
+  IREE_ASSERT_OK(iree_hal_queue_copy_linear(
       transfer_queue_, fill_signal, copy_signal, source, 0, target, 0,
       buffer_size, /*barriers=*/NULL, IREE_HAL_COPY_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -1203,14 +1365,14 @@ TEST_P(QueueTransferTest, ChainedFillThenCopy) {
   SemaphoreList fill_signal(device_, {0}, {1});
   SemaphoreList empty_wait;
   uint32_t pattern = 0x11223344;
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       transfer_queue_, empty_wait, fill_signal, source, 0, buffer_size,
       &pattern, sizeof(pattern), /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));
 
   // Copy waits on fill completion (value 1), signals at value 1 on its own
   // semaphore.
   SemaphoreList copy_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_copy(
+  IREE_ASSERT_OK(iree_hal_queue_copy_linear(
       transfer_queue_, fill_signal, copy_signal, source, 0, target, 0,
       buffer_size, /*barriers=*/NULL, IREE_HAL_COPY_FLAG_NONE));
 
@@ -1239,13 +1401,13 @@ TEST_P(QueueTransferTest, ChainedUpdateThenCopy) {
   // Update signals at value 1.
   SemaphoreList update_signal(device_, {0}, {1});
   SemaphoreList empty_wait;
-  IREE_ASSERT_OK(iree_hal_queue_update(
+  IREE_ASSERT_OK(iree_hal_queue_update_linear(
       transfer_queue_, empty_wait, update_signal, host_data.data(), 0, source,
       0, buffer_size, /*barriers=*/NULL, IREE_HAL_UPDATE_FLAG_NONE));
 
   // Copy waits on update, signals its own semaphore.
   SemaphoreList copy_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_copy(
+  IREE_ASSERT_OK(iree_hal_queue_copy_linear(
       transfer_queue_, update_signal, copy_signal, source, 0, target, 0,
       buffer_size, /*barriers=*/NULL, IREE_HAL_COPY_FLAG_NONE));
 
@@ -1270,20 +1432,20 @@ TEST_P(QueueTransferTest, ChainedFillCopyFill) {
   // Step 1: fill buffer_a with 0xAA.
   SemaphoreList step1_signal(device_, {0}, {1});
   uint8_t pattern1 = 0xAA;
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       transfer_queue_, empty_wait, step1_signal, buffer_a, 0, buffer_size,
       &pattern1, sizeof(pattern1), /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));
 
   // Step 2: copy buffer_a → buffer_b (waits on step 1).
   SemaphoreList step2_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_copy(
+  IREE_ASSERT_OK(iree_hal_queue_copy_linear(
       transfer_queue_, step1_signal, step2_signal, buffer_a, 0, buffer_b, 0,
       buffer_size, /*barriers=*/NULL, IREE_HAL_COPY_FLAG_NONE));
 
   // Step 3: fill buffer_a with 0xBB (waits on step 2, so copy has read a).
   SemaphoreList step3_signal(device_, {0}, {1});
   uint8_t pattern3 = 0xBB;
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       transfer_queue_, step2_signal, step3_signal, buffer_a, 0, buffer_size,
       &pattern3, sizeof(pattern3), /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));
 
@@ -1329,7 +1491,7 @@ TEST_P(QueueTransferTest, BarrierPreservesOrdering) {
   // Fill source.
   SemaphoreList fill_signal(device_, {0}, {1});
   uint32_t pattern = 0xBAADF00D;
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       transfer_queue_, empty_wait, fill_signal, source, 0, buffer_size,
       &pattern, sizeof(pattern), /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));
 
@@ -1342,7 +1504,7 @@ TEST_P(QueueTransferTest, BarrierPreservesOrdering) {
 
   // Copy waits on barrier.
   SemaphoreList copy_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_copy(
+  IREE_ASSERT_OK(iree_hal_queue_copy_linear(
       transfer_queue_, barrier_signal, copy_signal, source, 0, target, 0,
       buffer_size, /*barriers=*/NULL, IREE_HAL_COPY_FLAG_NONE));
 

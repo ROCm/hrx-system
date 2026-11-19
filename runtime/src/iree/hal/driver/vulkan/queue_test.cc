@@ -73,26 +73,48 @@ TEST_P(VulkanQueueTest, RecordableTransferHasOneNativeCompletionPoint) {
   const uint32_t pattern = 0xCDCDCDCDu;
   std::vector<uint8_t> update(64, 0xEF);
   iree_hal_transfer_operation_t operations[4] = {};
+  iree_hal_fill_region_t operations_fill_regions[4] = {};
+  iree_hal_transfer_region_t operations_transfer_regions[4] = {};
   operations[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
   operations[0].fill.target_buffer = target;
-  operations[0].fill.length = 64;
+  operations_fill_regions[0] = {
+      .row_length = 64,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  operations[0].fill.region = &operations_fill_regions[0];
   operations[0].fill.pattern = &pattern;
   operations[0].fill.pattern_length = sizeof(pattern);
   operations[1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE;
   operations[1].update.source_buffer = update.data();
   operations[1].update.target_buffer = target;
   operations[1].update.target_offset = 64;
-  operations[1].update.length = 64;
+  operations_transfer_regions[1] = {
+      .row_length = 64,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  operations[1].update.region = &operations_transfer_regions[1];
   operations[2].type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
   operations[2].copy.source_buffer = source;
   operations[2].copy.target_buffer = target;
   operations[2].copy.target_offset = 128;
-  operations[2].copy.length = 64;
+  operations_transfer_regions[2] = {
+      .row_length = 64,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  operations[2].copy.region = &operations_transfer_regions[2];
   operations[3].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
   operations[3].upload.source = update.data();
   operations[3].upload.target_buffer = target;
   operations[3].upload.target_offset = 192;
-  operations[3].upload.length = 64;
+  operations_transfer_regions[3] = {
+      .row_length = 64,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  operations[3].upload.region = &operations_transfer_regions[3];
 
   auto* queue = reinterpret_cast<iree_hal_vulkan_queue_t*>(transfer_queue_);
   iree_slim_mutex_lock(&queue->submission_mutex);
@@ -148,12 +170,18 @@ TEST_P(VulkanQueueTest, UnalignedFillBatchHasOneNativeCompletionPoint) {
       const uint8_t patterns[3][4] = {
           {0xA5}, {0x39, 0xC7}, {0x42, 0xD3, 0x81, 0x6E}};
       iree_hal_transfer_operation_t operations[3] = {};
+      iree_hal_fill_region_t operations_fill_regions[3] = {};
       for (iree_host_size_t i = 0; i < operation_count; ++i) {
         const iree_host_size_t pattern_length = iree_host_size_t{1} << i;
         operations[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
         operations[i].fill.target_buffer = view;
         operations[i].fill.target_offset = i * 32;
-        operations[i].fill.length = pattern_length * 5;
+        operations_fill_regions[i] = {
+            .row_length = pattern_length * 5,
+            .row_count = 1,
+            .slice_count = 1,
+        };
+        operations[i].fill.region = &operations_fill_regions[i];
         operations[i].fill.pattern = patterns[i];
         operations[i].fill.pattern_length = pattern_length;
         for (iree_host_size_t j = 0; j < pattern_length * 5; ++j) {
@@ -248,9 +276,9 @@ TEST_P(VulkanQueueTest, UploadRunsBeforeProducerRetirement) {
     const iree_hal_semaphore_list_t consumer_waits = {
         1, producer_signals.semaphores.data(),
         producer_signals.payload_values.data()};
-    Status consumer_status(
-        iree_hal_queue_upload(transfer_queue_, consumer_waits, consumer_signals,
-                              input.data(), target, 0, input.size(), nullptr));
+    Status consumer_status(iree_hal_queue_upload_linear(
+        transfer_queue_, consumer_waits, consumer_signals, input.data(), target,
+        0, input.size(), nullptr));
     Status availability_status;
     if (consumer_status.ok()) {
       iree_async_semaphore_t* availability = nullptr;

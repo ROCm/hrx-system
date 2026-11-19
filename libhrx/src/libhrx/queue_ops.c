@@ -359,7 +359,7 @@ hrx_status_t hrx_queue_fill(hrx_queue_t queue,
     status = hrx_barrier_storage_initialize(barriers, &storage);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_queue_fill(
+    status = iree_hal_queue_fill_linear(
         queue->hal_queue, semaphore_lists.wait.list,
         semaphore_lists.signal.list, buffer->hal_buffer,
         (iree_device_size_t)offset, (iree_device_size_t)size, pattern,
@@ -404,7 +404,7 @@ hrx_status_t hrx_queue_copy(hrx_queue_t queue,
     status = hrx_barrier_storage_initialize(barriers, &storage);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_queue_copy(
+    status = iree_hal_queue_copy_linear(
         queue->hal_queue, semaphore_lists.wait.list,
         semaphore_lists.signal.list, src->hal_buffer,
         (iree_device_size_t)src_offset, dst->hal_buffer,

@@ -147,28 +147,45 @@ static iree_status_t loom_serve_text_row_initialize(
     loom_serve_text_state_row_t* row) {
   loom_serve_text_state_t* state = row->owner;
   const uint32_t zero = 0;
+  const iree_hal_fill_region_t fills_region_0 = {
+      .row_length = iree_hal_buffer_byte_length(row->buffers[TEXT_CONTROL]),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  const iree_hal_fill_region_t fills_region_1 = {
+      .row_length = iree_hal_buffer_byte_length(row->buffers[TEXT_RECURRENT]),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  const iree_hal_fill_region_t fills_region_2 = {
+      .row_length = iree_hal_buffer_byte_length(row->buffers[TEXT_TOKENS]),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  const iree_hal_fill_region_t fills_region_3 = {
+      .row_length = 8 * sizeof(int32_t),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   iree_hal_transfer_operation_t fills[] = {
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
        .fill = {.target_buffer = row->buffers[TEXT_CONTROL],
-                .length =
-                    iree_hal_buffer_byte_length(row->buffers[TEXT_CONTROL]),
+                .region = &fills_region_0,
                 .pattern = &zero,
                 .pattern_length = sizeof(zero)}},
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
        .fill = {.target_buffer = row->buffers[TEXT_RECURRENT],
-                .length =
-                    iree_hal_buffer_byte_length(row->buffers[TEXT_RECURRENT]),
+                .region = &fills_region_1,
                 .pattern = &zero,
                 .pattern_length = sizeof(zero)}},
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
        .fill = {.target_buffer = row->buffers[TEXT_TOKENS],
-                .length =
-                    iree_hal_buffer_byte_length(row->buffers[TEXT_TOKENS]),
+                .region = &fills_region_2,
                 .pattern = &zero,
                 .pattern_length = sizeof(zero)}},
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
        .fill = {.target_buffer = row->buffers[TEXT_PROGRESS],
-                .length = 8 * sizeof(int32_t),
+                .region = &fills_region_3,
                 .pattern = &zero,
                 .pattern_length = sizeof(zero)}},
   };
@@ -176,12 +193,17 @@ static iree_status_t loom_serve_text_row_initialize(
   iree_status_t status = loom_runtime_execution_transfer(
       state->execution, IREE_ARRAYSIZE(fills), fills, &completion);
   if (iree_status_is_ok(status) && row->owner->storage.carry_stride) {
+    const iree_hal_fill_region_t clear_carry_region = {
+        .row_length = row->owner->storage.carry_stride,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t clear_carry = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
         .fill = {.target_buffer = row->owner->carry,
                  .target_offset =
                      (uint64_t)row->index * row->owner->storage.carry_stride,
-                 .length = row->owner->storage.carry_stride,
+                 .region = &clear_carry_region,
                  .pattern = &zero,
                  .pattern_length = sizeof(zero)},
     };
@@ -382,17 +404,22 @@ iree_status_t loom_serve_text_state_row_try_resume(
                                            range_count, ranges);
   }
   if (iree_status_is_ok(status) && admitted) {
+    const iree_hal_transfer_region_t uploads_region = {
+        .row_length = needed * sizeof(*blocks),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t uploads[] = {
         {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
          .upload = {.source = blocks,
                     .target_buffer = state->epoch.buffers[2],
                     .target_offset = state->storage.map_origin + map_index * 4,
-                    .length = needed * sizeof(*blocks)}},
+                    .region = &uploads_region}},
         {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
          .upload = {.source = blocks,
                     .target_buffer = state->draft.row_table,
                     .target_offset = state->storage.map_origin + map_index * 4,
-                    .length = needed * sizeof(*blocks)}},
+                    .region = &uploads_region}},
     };
     uint64_t completion = 0;
     status = loom_runtime_execution_transfer(
@@ -420,13 +447,18 @@ static iree_status_t loom_serve_text_copy_carry(loom_serve_text_state_t* state,
   if (!state->storage.carry_stride) {
     return iree_ok_status();
   }
+  const iree_hal_transfer_region_t copy_region = {
+      .row_length = state->storage.carry_stride,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t copy = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
       .copy = {.source_buffer = state->carry,
                .source_offset = source * state->storage.carry_stride,
                .target_buffer = state->carry,
                .target_offset = target * state->storage.carry_stride,
-               .length = state->storage.carry_stride}};
+               .region = &copy_region}};
   uint64_t completion = 0;
   return loom_runtime_execution_transfer(state->execution, 1, &copy,
                                          &completion);
@@ -706,17 +738,22 @@ iree_status_t loom_serve_text_state_row_try_restore(
       (iree_host_size_t)(checkpoint - state->checkpoints.values);
   iree_status_t status = loom_serve_text_copy_carry(
       state, state->row_count + checkpoint_index, row_index);
+  const iree_hal_transfer_region_t uploads_region = {
+      .row_length = row->block_count * sizeof(*blocks),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t uploads[] = {
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
        .upload = {.source = blocks,
                   .target_buffer = state->epoch.buffers[2],
                   .target_offset = state->storage.map_origin + map_index * 4,
-                  .length = row->block_count * sizeof(*blocks)}},
+                  .region = &uploads_region}},
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
        .upload = {.source = blocks,
                   .target_buffer = state->draft.row_table,
                   .target_offset = state->storage.map_origin + map_index * 4,
-                  .length = row->block_count * sizeof(*blocks)}},
+                  .region = &uploads_region}},
   };
   uint64_t completion = 0;
   if (iree_status_is_ok(status)) {
@@ -759,6 +796,7 @@ uint32_t loom_serve_text_state_row_growth(
 static iree_status_t loom_serve_text_fork_cache_block(
     loom_serve_text_state_t* state, uint32_t source, uint32_t target) {
   iree_hal_transfer_operation_t copies[64];
+  iree_hal_transfer_region_t copies_regions[IREE_ARRAYSIZE(copies)];
   iree_host_size_t count = 0;
   uint64_t completion = 0;
   iree_status_t status = iree_ok_status();
@@ -773,14 +811,19 @@ static iree_status_t loom_serve_text_fork_cache_block(
           region->blocks.origin + plane * region->blocks.stride;
       const iree_device_size_t target_offset =
           origin + target * region->blocks.block_bytes;
-      copies[count++] = (iree_hal_transfer_operation_t){
+      copies_regions[count] =
+          (iree_hal_transfer_region_t){.row_length = region->blocks.block_bytes,
+                                       .row_count = 1,
+                                       .slice_count = 1};
+      copies[count] = (iree_hal_transfer_operation_t){
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
           .copy = {
               .source_buffer = buffer,
               .source_offset = origin + source * region->blocks.block_bytes,
               .target_buffer = buffer,
               .target_offset = target_offset,
-              .length = region->blocks.block_bytes}};
+              .region = &copies_regions[count]}};
+      ++count;
       if (count == IREE_ARRAYSIZE(copies)) {
         status = loom_runtime_execution_transfer(state->execution, count,
                                                  copies, &completion);
@@ -1247,6 +1290,11 @@ iree_status_t loom_serve_text_state_reservation_submit(
           blocks[reservation->prefix - reservation->preserved - 1]);
     }
     if (iree_status_is_ok(status) && count != unchanged) {
+      const iree_hal_transfer_region_t uploads_region = {
+          .row_length = (count - unchanged) * sizeof(*blocks),
+          .row_count = 1,
+          .slice_count = 1,
+      };
       const iree_hal_transfer_operation_t uploads[] = {
           {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
            .upload = {.source = state->cache.maps +
@@ -1257,7 +1305,7 @@ iree_status_t loom_serve_text_state_reservation_submit(
                           state->storage.map_origin +
                           (index * state->storage.blocks_per_row + unchanged) *
                               4,
-                      .length = (count - unchanged) * sizeof(*blocks)}},
+                      .region = &uploads_region}},
           {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
            .upload = {.source = state->cache.maps +
                                 index * state->storage.blocks_per_row +
@@ -1267,7 +1315,7 @@ iree_status_t loom_serve_text_state_reservation_submit(
                           state->storage.map_origin +
                           (index * state->storage.blocks_per_row + unchanged) *
                               4,
-                      .length = (count - unchanged) * sizeof(*blocks)}},
+                      .region = &uploads_region}},
       };
       uint64_t completion = 0;
       status = loom_runtime_execution_transfer(state->execution,
@@ -1378,6 +1426,8 @@ iree_status_t loom_serve_text_state_grow(loom_serve_text_state_t* state,
                             "text state exceeds logical page addressability");
   }
   iree_hal_transfer_operation_t* uploads = state->cache.uploads;
+  iree_hal_transfer_region_t* upload_regions =
+      (iree_hal_transfer_region_t*)(uploads + 2 * state->row_count);
   iree_host_size_t upload_count = 0;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < span_count && iree_status_is_ok(status);
@@ -1449,14 +1499,19 @@ iree_status_t loom_serve_text_state_grow(loom_serve_text_state_t* state,
         break;
       }
     }
-    uploads[upload_count++] = (iree_hal_transfer_operation_t){
+    upload_regions[upload_count] =
+        (iree_hal_transfer_region_t){.row_length = count * sizeof(*blocks),
+                                     .row_count = 1,
+                                     .slice_count = 1};
+    uploads[upload_count] = (iree_hal_transfer_operation_t){
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
         .upload = {.source = blocks,
                    .target_buffer = state->epoch.buffers[2],
                    .target_offset =
                        state->storage.map_origin + map_index * sizeof(*blocks),
-                   .length = count * sizeof(*blocks)},
+                   .region = &upload_regions[upload_count]},
     };
+    ++upload_count;
     if (state->draft.row_table) {
       uploads[upload_count] = uploads[upload_count - 1];
       uploads[upload_count++].upload.target_buffer = state->draft.row_table;

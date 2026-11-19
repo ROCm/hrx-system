@@ -110,20 +110,30 @@ static void loom_serve_text_media_epoch_copy(
   if (epoch->transfer.operation_count) {
     iree_hal_transfer_operation_t* previous =
         &epoch->transfer.operations[epoch->transfer.operation_count - 1];
+    iree_hal_transfer_region_t* previous_region =
+        &epoch->transfer.regions[epoch->transfer.operation_count - 1];
     if (previous->copy.source_buffer == row.buffer &&
-        previous->copy.source_offset + previous->copy.length == row.offset &&
-        previous->copy.target_offset + previous->copy.length == offset) {
-      previous->copy.length += row.length;
+        previous->copy.source_offset + previous_region->row_length ==
+            row.offset &&
+        previous->copy.target_offset + previous_region->row_length == offset) {
+      previous_region->row_length += row.length;
       return;
     }
   }
+  iree_hal_transfer_region_t* region =
+      &epoch->transfer.regions[epoch->transfer.operation_count];
+  *region = (iree_hal_transfer_region_t){
+      .row_length = row.length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   epoch->transfer.operations[epoch->transfer.operation_count++] =
       (iree_hal_transfer_operation_t){
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
           .copy = {.source_buffer = row.buffer,
                    .source_offset = row.offset,
                    .target_offset = offset,
-                   .length = row.length},
+                   .region = region},
       };
 }
 
@@ -224,7 +234,8 @@ iree_status_t loom_serve_text_media_epoch_initialize(
                             "mixed input metadata exceeds 32-bit extent");
   }
   const iree_host_size_t operation_bytes =
-      layout.copy_count * sizeof(iree_hal_transfer_operation_t);
+      layout.copy_count * (sizeof(iree_hal_transfer_operation_t) +
+                           sizeof(iree_hal_transfer_region_t));
   const iree_host_size_t result_bytes =
       layout.image_count * sizeof(loom_service_finite_result_t*);
   loom_serve_text_media_epoch_t epoch = {
@@ -250,6 +261,9 @@ iree_status_t loom_serve_text_media_epoch_initialize(
   }
   iree_byte_span_t plan = iree_byte_span_empty();
   if (iree_status_is_ok(status)) {
+    epoch.transfer.regions =
+        (iree_hal_transfer_region_t*)(epoch.transfer.operations +
+                                      layout.copy_count);
     epoch.transfer.results =
         (const loom_service_finite_result_t**)((uint8_t*)
                                                    epoch.transfer.operations +

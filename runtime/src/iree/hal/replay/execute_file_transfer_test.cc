@@ -178,9 +178,9 @@ class ReplayFileTransferTest : public ::testing::Test {
       }
     }
     if (!capture_ranges) {
-      IREE_ASSERT_OK(iree_hal_queue_update(queue, {}, point(0), words.data(), 0,
-                                           metadata, 0, sizeof(words), nullptr,
-                                           IREE_HAL_UPDATE_FLAG_NONE));
+      IREE_ASSERT_OK(iree_hal_queue_update_linear(
+          queue, {}, point(0), words.data(), 0, metadata, 0, sizeof(words),
+          nullptr, IREE_HAL_UPDATE_FLAG_NONE));
     }
     const iree_hal_file_binding_t sources[] = {
         {files[0], kOrigin, kRows * kFileStride},
@@ -203,9 +203,9 @@ class ReplayFileTransferTest : public ::testing::Test {
         IREE_HAL_READ_FLAG_NONE));
     std::vector<uint8_t> downloaded(kRows * kBufferStride);
     if (capture_ranges) {
-      IREE_ASSERT_OK(iree_hal_queue_download(queue, point(1), point(2), buffer,
-                                             0, downloaded.data(),
-                                             downloaded.size(), nullptr));
+      IREE_ASSERT_OK(iree_hal_queue_download_linear(
+          queue, point(1), point(2), buffer, 0, downloaded.data(),
+          downloaded.size(), nullptr));
     } else {
       IREE_ASSERT_OK(iree_hal_queue_write(queue, point(1), point(2),
                                           {2, buffers}, {2, targets}, &list,

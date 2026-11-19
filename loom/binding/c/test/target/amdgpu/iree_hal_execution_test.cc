@@ -373,24 +373,41 @@ void RunSparseByteOffsetExecution(
   iree_hal_semaphore_list_t download_signal = {1, &semaphore, &download_value};
 
   iree_hal_transfer_operation_t uploads[4] = {};
+  iree_hal_transfer_region_t uploads_regions[IREE_ARRAYSIZE(uploads)];
   iree_hal_transfer_operation_t downloads[2] = {};
+  iree_hal_transfer_region_t downloads_regions[IREE_ARRAYSIZE(downloads)];
   for (iree_host_size_t i = 0; i < 2; ++i) {
     uploads[i * 2].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
     uploads[i * 2].upload.source = input[i].data();
     uploads[i * 2].upload.target_buffer = input_buffer.get();
     uploads[i * 2].upload.target_offset = i * SparseTestBuffer::kHighPageOffset;
-    uploads[i * 2].upload.length = sizeof(input[i]);
+    uploads_regions[i * 2] = iree_hal_transfer_region_t{
+        .row_length = sizeof(input[i]),
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    uploads[i * 2].upload.region = &uploads_regions[i * 2];
     uploads[i * 2 + 1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
     uploads[i * 2 + 1].upload.source = output[i].data();
     uploads[i * 2 + 1].upload.target_buffer = output_buffer.get();
     uploads[i * 2 + 1].upload.target_offset =
         i * SparseTestBuffer::kHighPageOffset;
-    uploads[i * 2 + 1].upload.length = sizeof(output[i]);
+    uploads_regions[i * 2 + 1] = iree_hal_transfer_region_t{
+        .row_length = sizeof(output[i]),
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    uploads[i * 2 + 1].upload.region = &uploads_regions[i * 2 + 1];
     downloads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
     downloads[i].download.source_buffer = output_buffer.get();
     downloads[i].download.source_offset = i * SparseTestBuffer::kHighPageOffset;
     downloads[i].download.target = output[i].data();
-    downloads[i].download.length = sizeof(output[i]);
+    downloads_regions[i] = iree_hal_transfer_region_t{
+        .row_length = sizeof(output[i]),
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    downloads[i].download.region = &downloads_regions[i];
   }
 
   // Retire the last successfully submitted operation before releasing any host

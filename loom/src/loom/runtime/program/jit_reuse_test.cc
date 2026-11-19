@@ -38,17 +38,20 @@ class JitClassReuseTest : public loom_runtime::testing::JitTest {
     for (size_t i = 0; i < commands_.size(); ++i) {
       SCOPED_TRACE(i);
       uint64_t completion = 0;
+      const iree_hal_transfer_region_t upload_region_0 = {sizeof(input_), 1, 1};
       const iree_hal_transfer_operation_t upload = {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
-          .upload = {input_.data(), buffer_, 0, sizeof(input_)},
+          .upload = {input_.data(), buffer_, 0, &upload_region_0},
       };
       IREE_ASSERT_OK(
           loom_runtime_execution_transfer(execution_, 1, &upload, &completion));
       IREE_ASSERT_OK(loom_runtime_execution_execute(
           execution_, commands_[i], {1, &binding}, &completion));
+      const iree_hal_transfer_region_t download_region_0 = {sizeof(output_), 1,
+                                                            1};
       const iree_hal_transfer_operation_t download = {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
-          .download = {buffer_, 0, output_.data(), sizeof(output_)},
+          .download = {buffer_, 0, output_.data(), &download_region_0},
       };
       IREE_ASSERT_OK(loom_runtime_execution_feedback(execution_, 1, &download,
                                                      &completion));

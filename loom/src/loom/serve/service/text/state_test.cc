@@ -129,6 +129,11 @@ class TextStateTest : public ::testing::TestWithParam<uint32_t> {
 
   iree_status_t Upload(iree_hal_buffer_t* buffer, uint64_t offset,
                        const std::vector<uint8_t>& data) {
+    const iree_hal_transfer_region_t upload_region = {
+        .row_length = data.size(),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t upload = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
         .upload =
@@ -136,7 +141,7 @@ class TextStateTest : public ::testing::TestWithParam<uint32_t> {
                 .source = data.data(),
                 .target_buffer = buffer,
                 .target_offset = offset,
-                .length = data.size(),
+                .region = &upload_region,
             },
     };
     uint64_t completion = 0;
@@ -148,6 +153,11 @@ class TextStateTest : public ::testing::TestWithParam<uint32_t> {
   void CheckBytes(iree_hal_buffer_t* buffer, uint64_t offset,
                   const std::vector<uint8_t>& expected) {
     std::vector<uint8_t> actual(expected.size());
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = actual.size(),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
@@ -155,7 +165,7 @@ class TextStateTest : public ::testing::TestWithParam<uint32_t> {
                 .source_buffer = buffer,
                 .source_offset = offset,
                 .target = actual.data(),
-                .length = actual.size(),
+                .region = &download_region,
             },
     };
     uint64_t completion = 0;

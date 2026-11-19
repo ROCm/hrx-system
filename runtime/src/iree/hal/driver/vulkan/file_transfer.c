@@ -58,8 +58,8 @@ typedef struct iree_hal_vulkan_file_piece_t {
   uint32_t buffer_binding;
   // Byte offset within the captured buffer binding.
   iree_device_size_t buffer_offset;
-  // Useful transferred bytes, excluding staging alignment padding.
-  iree_device_size_t length;
+  // Native copy geometry; row_length is this piece's useful byte count.
+  iree_hal_transfer_region_t region;
 } iree_hal_vulkan_file_piece_t;
 
 typedef struct iree_hal_vulkan_file_transfer_t iree_hal_vulkan_file_transfer_t;
@@ -146,8 +146,8 @@ struct iree_hal_vulkan_file_transfer_t {
     iree_hal_file_transfer_record_t* records;
     // Number of records acquired by this page, or zero for the count word.
     iree_host_size_t record_count;
-    // Exact useful download length.
-    iree_host_size_t length;
+    // Native metadata copy geometry; row_length is the acquired byte count.
+    iree_hal_transfer_region_t region;
     // Owned callback result, transferred by the metadata-ready bit.
     iree_status_t status;
     // True while the native metadata copy owns its slot.
@@ -284,7 +284,7 @@ static iree_status_t iree_hal_vulkan_file_window_cache(
     }
     span.contents =
         iree_make_byte_span(span.contents.data + piece->buffer_offset,
-                            (iree_host_size_t)piece->length);
+                            (iree_host_size_t)piece->region.row_length);
     span.allocation_offset += piece->buffer_offset;
     status = flush ? iree_hal_vulkan_buffer_flush_host_span(&span)
                    : iree_hal_vulkan_buffer_invalidate_host_span(&span);
@@ -463,7 +463,11 @@ static iree_status_t iree_hal_vulkan_file_window_fill(
     }
     piece->buffer_binding = range.buffer_binding;
     piece->buffer_offset = range.buffer_offset;
-    piece->length = length;
+    piece->region = (iree_hal_transfer_region_t){
+        .row_length = length,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     if (window->slot || file->kind == IREE_HAL_VULKAN_FILE_DEVICE) {
       iree_hal_buffer_t* other = window->slot ? ring->buffer : file->buffer;
       const iree_device_size_t other_offset =
@@ -477,7 +481,7 @@ static iree_status_t iree_hal_vulkan_file_window_fill(
                    .source_offset = reading ? other_offset : payload_offset,
                    .target_buffer = reading ? buffer_binding.buffer : other,
                    .target_offset = reading ? payload_offset : other_offset,
-                   .length = length}};
+                   .region = &piece->region}};
     }
     if (window->slot) {
       window->staging_length = position + length;
@@ -496,7 +500,8 @@ static iree_status_t iree_hal_vulkan_file_metadata_apply(
         &transfer->iterator));
     transfer->count_ready = true;
   } else {
-    memcpy(transfer->metadata.records, data, transfer->metadata.length);
+    memcpy(transfer->metadata.records, data,
+           transfer->metadata.region.row_length);
     iree_hal_file_transfer_iterator_acquire(&transfer->iterator,
                                             transfer->metadata.records,
                                             transfer->metadata.record_count);
@@ -517,7 +522,7 @@ static iree_status_t iree_hal_vulkan_file_metadata_acquire(
   iree_hal_buffer_t* buffer = list->indirect.count_buffer;
   iree_device_size_t offset = list->indirect.count_offset;
   transfer->metadata.record_count = 0;
-  transfer->metadata.length = 8;
+  transfer->metadata.region.row_length = 8;
   if (transfer->count_ready) {
     buffer = list->indirect.records.buffer;
     offset = list->indirect.records.offset +
@@ -525,12 +530,13 @@ static iree_status_t iree_hal_vulkan_file_metadata_acquire(
     transfer->metadata.record_count =
         iree_min(transfer->iterator.count - transfer->iterator.index,
                  IREE_HAL_VULKAN_FILE_BATCH_CAPACITY);
-    transfer->metadata.length = transfer->metadata.record_count *
-                                sizeof(iree_hal_file_transfer_record_t);
+    transfer->metadata.region.row_length =
+        transfer->metadata.record_count *
+        sizeof(iree_hal_file_transfer_record_t);
   }
   iree_hal_vulkan_buffer_host_span_t span;
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_buffer_resolve_host_span(
-      buffer, offset, transfer->metadata.length, &span));
+      buffer, offset, transfer->metadata.region.row_length, &span));
   if (span.allocation) {
     IREE_RETURN_IF_ERROR(iree_hal_vulkan_buffer_invalidate_host_span(&span));
     return iree_hal_vulkan_file_metadata_apply(transfer, span.contents.data);
@@ -541,13 +547,15 @@ static iree_status_t iree_hal_vulkan_file_metadata_acquire(
                                             &transfer->metadata.slot)) {
     return iree_ok_status();
   }
+  transfer->metadata.region.row_count = 1;
+  transfer->metadata.region.slice_count = 1;
   transfer->metadata.copy = (iree_hal_transfer_operation_t){
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
       .copy = {.source_buffer = buffer,
                .source_offset = offset,
                .target_buffer = ring->buffer,
                .target_offset = transfer->metadata.slot->buffer_offset,
-               .length = transfer->metadata.length}};
+               .region = &transfer->metadata.region}};
   // The entry dependency acquires the complete published metadata once. Each
   // page only publishes its download to the host; it does not flush producers
   // again as the finite iterator advances.
@@ -595,7 +603,7 @@ static void iree_hal_vulkan_file_drain(
       if (iree_status_is_ok(status)) {
         status = iree_hal_buffer_mapping_invalidate_range(
             &download->mapping, transfer->metadata.slot->buffer_offset,
-            transfer->metadata.length);
+            transfer->metadata.region.row_length);
       }
       if (iree_status_is_ok(status)) {
         status = iree_hal_vulkan_file_metadata_apply(

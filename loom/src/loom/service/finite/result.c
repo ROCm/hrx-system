@@ -311,15 +311,20 @@ iree_status_t loom_service_finite_result_download(
   memcpy(snapshot->storage, result->records, result->records_length);
   const iree_host_size_t count =
       result->gathered_rows ? result->gathered_row_count : 1;
+  iree_hal_transfer_region_t inline_region;
+  iree_hal_transfer_region_t* regions = &inline_region;
   iree_hal_transfer_operation_t inline_operation;
   iree_hal_transfer_operation_t* operations = &inline_operation;
   iree_hal_transfer_operation_t* allocated_operations = NULL;
   iree_status_t status = iree_ok_status();
   if (count > 1) {
     status = iree_allocator_malloc_array(result->host_allocator, count,
-                                         sizeof(*operations),
+                                         sizeof(*operations) + sizeof(*regions),
                                          (void**)&allocated_operations);
     operations = allocated_operations;
+    if (iree_status_is_ok(status)) {
+      regions = (iree_hal_transfer_region_t*)(operations + count);
+    }
   }
   iree_host_size_t initialized = 0;
   iree_host_size_t target_offset = 0;
@@ -338,12 +343,18 @@ iree_status_t loom_service_finite_result_download(
         result->host_allocator, &source);
     if (iree_status_is_ok(status)) {
       loom_service_finite_snapshot_retain(snapshot);
-      operations[initialized++] = (iree_hal_transfer_operation_t){
+      regions[initialized] = (iree_hal_transfer_region_t){
+          .row_length = row.length,
+          .row_count = 1,
+          .slice_count = 1,
+      };
+      operations[initialized] = (iree_hal_transfer_operation_t){
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
           .download = {.source_buffer = source,
                        .target = snapshot->storage + snapshot->records_length +
                                  target_offset,
-                       .length = row.length}};
+                       .region = &regions[initialized]}};
+      ++initialized;
       target_offset += row.length;
     }
   }

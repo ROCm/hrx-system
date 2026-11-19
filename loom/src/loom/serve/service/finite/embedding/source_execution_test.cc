@@ -567,6 +567,11 @@ TEST_P(GenerationSelectionTest,
         consumer_, {2, ready.semaphores, ready.values}));
     const auto row = loom_service_finite_result_row(results_[i], 0, 0);
     ASSERT_EQ(row.length, 4 * sizeof(float));
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = row.length,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
@@ -574,7 +579,7 @@ TEST_P(GenerationSelectionTest,
                 .source_buffer = row.buffer,
                 .source_offset = row.offset,
                 .target = output_.data() + i * 4,
-                .length = row.length,
+                .region = &download_region,
             },
     };
     uint64_t value = 0;
@@ -996,11 +1001,17 @@ TEST_F(DeviceResultTest, RaggedCohortsComposeBeforeProducerRetirement) {
       loom_runtime_execution_alloca(consumer_, 1, &reservation, &target_));
 
   std::array<iree_hal_transfer_operation_t, 3> copies = {};
+  iree_hal_transfer_region_t copies_regions[IREE_ARRAYSIZE(copies)];
   const std::array<std::array<size_t, 2>, 3> rows = {{{0, 0}, {0, 1}, {1, 0}}};
   iree_device_size_t offset = 0;
   for (size_t i = 0; i < rows.size(); ++i) {
     const auto row =
         loom_service_finite_result_row(results_[0], rows[i][0], rows[i][1]);
+    copies_regions[i] = iree_hal_transfer_region_t{
+        .row_length = row.length,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     copies[i] = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
         .copy =
@@ -1009,7 +1020,7 @@ TEST_F(DeviceResultTest, RaggedCohortsComposeBeforeProducerRetirement) {
                 .source_offset = row.offset,
                 .target_buffer = target_,
                 .target_offset = offset,
-                .length = row.length,
+                .region = &copies_regions[i],
             },
     };
     offset += row.length;
@@ -1021,6 +1032,11 @@ TEST_F(DeviceResultTest, RaggedCohortsComposeBeforeProducerRetirement) {
   // Enqueue the consumer before observing the second producer's completion.
   // Retaining the first cohort did not prevent producing the next one.
   const auto row = loom_service_finite_result_row(results_[1], 0, 0);
+  const iree_hal_transfer_region_t copy_region = {
+      .row_length = row.length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t copy = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
       .copy =
@@ -1029,7 +1045,7 @@ TEST_F(DeviceResultTest, RaggedCohortsComposeBeforeProducerRetirement) {
               .source_offset = row.offset,
               .target_buffer = target_,
               .target_offset = offset,
-              .length = row.length,
+              .region = &copy_region,
           },
   };
   IREE_ASSERT_OK(loom_runtime_execution_transfer(consumer_, 1, &copy, &value));
@@ -1044,13 +1060,18 @@ TEST_F(DeviceResultTest, RaggedCohortsComposeBeforeProducerRetirement) {
   // release the allocation captured by the still-blocked consumer.
   IREE_ASSERT_OK(loom_runtime_pool_trim(storage_owner_, 0));
   IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, 1, nullptr));
+  const iree_hal_transfer_region_t download_region = {
+      .row_length = sizeof(output_),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
           {
               .source_buffer = target_,
               .target = output_.data(),
-              .length = sizeof(output_),
+              .region = &download_region,
           },
   };
   IREE_ASSERT_OK(

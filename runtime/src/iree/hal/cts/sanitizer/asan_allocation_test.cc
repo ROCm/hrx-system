@@ -284,7 +284,7 @@ TEST_P(AsanAllocationTest, ScopedSourcesPreserveNativeSanitizerAdvice) {
                               allocated, pool, 1, &request, buffer.out()));
     const uint32_t value = 0x1234ABCD;
     SemaphoreList filled(device(), {0}, {1});
-    IREE_ASSERT_OK(iree_hal_queue_fill(
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
         queue(), allocated, filled, buffer, 0, kAsanAllocationBufferLength,
         &value, sizeof(value), /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));
     IREE_ASSERT_OK(iree_hal_semaphore_list_wait(filled, iree_infinite_timeout(),
@@ -305,9 +305,9 @@ TEST_P(AsanAllocationTest, ScopedSourcesPreserveNativeSanitizerAdvice) {
         kAsanAllocationSentinelLength, kAsanReportExpectationFlagNone);
     uint32_t output = 0;
     SemaphoreList downloaded(device(), {0}, {1});
-    IREE_ASSERT_OK(iree_hal_queue_download(queue(), filled, downloaded, buffer,
-                                           0, &output, sizeof(output),
-                                           /*barriers=*/NULL));
+    IREE_ASSERT_OK(iree_hal_queue_download_linear(
+        queue(), filled, downloaded, buffer, 0, &output, sizeof(output),
+        /*barriers=*/NULL));
     IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
         downloaded, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
     EXPECT_EQ(output, value);

@@ -2755,7 +2755,7 @@ iree_status_t iree_hal_streaming_memory_memset(
   iree_hal_buffer_ref_t target_ref =
       iree_hal_streaming_convert_range_buffer_ref(dst_ref, length);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_command_buffer_fill_buffer(
+    status = iree_hal_command_buffer_fill_buffer_linear(
         stream->command_buffer, target_ref, pattern, pattern_length,
         IREE_HAL_FILL_FLAG_NONE);
   }
@@ -2782,6 +2782,11 @@ static iree_status_t iree_hal_streaming_enqueue_buffer_copy(
                             "copy operands are not queue-compatible buffers");
   }
 
+  const iree_hal_transfer_region_t operation_region = {
+      .row_length = size,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
       .copy =
@@ -2790,7 +2795,7 @@ static iree_status_t iree_hal_streaming_enqueue_buffer_copy(
               .source_offset = src_ref.offset,
               .target_buffer = dst_ref.buffer->buffer,
               .target_offset = dst_ref.offset,
-              .length = size,
+              .region = &operation_region,
               .flags = IREE_HAL_COPY_FLAG_NONE,
           },
   };
@@ -2846,6 +2851,11 @@ static iree_status_t iree_hal_streaming_enqueue_host_update(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "host update destination is not a device buffer");
   }
+  const iree_hal_transfer_region_t operation_region = {
+      .row_length = size,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE,
       .update =
@@ -2853,7 +2863,7 @@ static iree_status_t iree_hal_streaming_enqueue_host_update(
               .source_buffer = src,
               .target_buffer = dst_ref.buffer->buffer,
               .target_offset = dst_ref.offset,
-              .length = size,
+              .region = &operation_region,
           },
   };
   return iree_hal_streaming_direct_transfer_enqueue(stream, 1, &operation);
@@ -2921,6 +2931,11 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device_2d(
   iree_hal_streaming_buffer_ref_t first_source_ref = {0};
   const bool source_is_registered = iree_hal_streaming_memory_try_lookup(
       context, (iree_hal_streaming_deviceptr_t)src, &first_source_ref);
+  const iree_hal_transfer_region_t row_region = {
+      .row_length = width,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   iree_hal_transfer_operation_t* operations = NULL;
   iree_status_t status = iree_allocator_malloc_array_uninitialized(
       context->host_allocator, height, sizeof(*operations),
@@ -2938,7 +2953,7 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device_2d(
               {
                   .target_buffer = destination_ref.buffer->buffer,
                   .target_offset = destination_ref.offset,
-                  .length = width,
+                  .region = &row_region,
               },
       };
     }
@@ -2980,7 +2995,7 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device_2d(
         const iree_hal_buffer_ref_t destination = iree_hal_make_buffer_ref(
             operations[row].copy.target_buffer,
             operations[row].copy.target_offset + chunk_offset, chunk_size);
-        status = iree_hal_command_buffer_update_buffer(
+        status = iree_hal_command_buffer_update_buffer_linear(
             stream->command_buffer,
             (const uint8_t*)src + row * src_pitch + chunk_offset, 0,
             destination, IREE_HAL_UPDATE_FLAG_NONE);
@@ -3058,6 +3073,11 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device_resolved(
   // queue. Keep the copy on its owning device, with a stream timeline point
   // spanning the blocking transfer instead of joining unrelated contexts.
   if (stream && context->device != stream->context->device) {
+    const iree_hal_transfer_region_t operation_region = {
+        .row_length = size,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t operation = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
         .upload =
@@ -3065,7 +3085,7 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device_resolved(
                 .source = src,
                 .target_buffer = dst_ref.buffer->buffer,
                 .target_offset = dst_ref.offset,
-                .length = size,
+                .region = &operation_region,
             },
     };
     iree_status_t status =
@@ -3110,6 +3130,11 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device_resolved(
     // A large pageable source stays borrowed through the blocking transaction.
     // The selected HAL queue owns transport staging; the frontend needs no
     // context-wide payload cache or lock across the copy and wait.
+    const iree_hal_transfer_region_t operation_region = {
+        .row_length = size,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t operation = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
         .upload =
@@ -3117,7 +3142,7 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device_resolved(
                 .source = src,
                 .target_buffer = dst_ref.buffer->buffer,
                 .target_offset = dst_ref.offset,
-                .length = size,
+                .region = &operation_region,
             },
     };
     iree_status_t status =
@@ -3184,6 +3209,11 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host_resolved(
     iree_hal_streaming_buffer_ref_t src_ref, iree_device_size_t size,
     iree_hal_streaming_stream_t* stream) {
   if (stream && context->device != stream->context->device) {
+    const iree_hal_transfer_region_t operation_region = {
+        .row_length = size,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t operation = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
@@ -3191,7 +3221,7 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host_resolved(
                 .source_buffer = src_ref.buffer->buffer,
                 .source_offset = src_ref.offset,
                 .target = dst,
-                .length = size,
+                .region = &operation_region,
             },
     };
     iree_status_t status =
@@ -3222,6 +3252,11 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host_resolved(
             "device-to-host destination is not host memory");
       }
     } else {
+      const iree_hal_transfer_region_t operation_region = {
+          .row_length = size,
+          .row_count = 1,
+          .slice_count = 1,
+      };
       const iree_hal_transfer_operation_t operation = {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
           .download =
@@ -3229,7 +3264,7 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host_resolved(
                   .source_buffer = src_ref.buffer->buffer,
                   .source_offset = src_ref.offset,
                   .target = dst,
-                  .length = size,
+                  .region = &operation_region,
               },
       };
       iree_status_t status =
@@ -3351,6 +3386,11 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host_2d(
     }
   }
 
+  const iree_hal_transfer_region_t row_region = {
+      .row_length = width,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   iree_hal_transfer_operation_t* operations = NULL;
   iree_status_t status = iree_allocator_malloc_array_uninitialized(
       context->host_allocator, height, sizeof(*operations),
@@ -3370,7 +3410,7 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host_2d(
                     .source_offset = source_ref.offset,
                     .target_buffer = destination_ref.buffer->buffer,
                     .target_offset = destination_ref.offset + row * dst_pitch,
-                    .length = width,
+                    .region = &row_region,
                 },
         };
       } else {
@@ -3381,7 +3421,7 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host_2d(
                     .source_buffer = source_ref.buffer->buffer,
                     .source_offset = source_ref.offset,
                     .target = (uint8_t*)dst + row * dst_pitch,
-                    .length = width,
+                    .region = &row_region,
                 },
         };
       }
@@ -3475,6 +3515,11 @@ iree_status_t iree_hal_streaming_memcpy_device_to_device_2d(
                              "D2D row count exceeds device address space"));
   }
 
+  const iree_hal_transfer_region_t row_region = {
+      .row_length = width,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   iree_hal_transfer_operation_t* operations = NULL;
   iree_status_t status = iree_allocator_malloc_array_uninitialized(
       context->host_allocator, height, sizeof(*operations),
@@ -3498,7 +3543,7 @@ iree_status_t iree_hal_streaming_memcpy_device_to_device_2d(
                   .source_offset = source_ref.offset,
                   .target_buffer = destination_ref.buffer->buffer,
                   .target_offset = destination_ref.offset,
-                  .length = width,
+                  .region = &row_region,
               },
       };
     }

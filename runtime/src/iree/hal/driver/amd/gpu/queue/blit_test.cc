@@ -17,6 +17,107 @@
 
 namespace {
 
+TEST(BlitGeometryTest, ChunkedGridCoversUsefulBytesWithoutPadding) {
+  for (uint64_t width : {1u, 15u, 37u}) {
+    for (uint64_t rows : {1u, 3u}) {
+      for (uint64_t slices : {1u, 4u}) {
+        const iree_hal_transfer_region_t region = {
+            .row_length = width,
+            .row_count = rows,
+            .slice_count = slices,
+            .source_strides = {width + 7, (width + 7) * rows + 11},
+            .target_strides = {width + 13, (width + 13) * rows + 23},
+        };
+        const uint64_t total = width * rows * slices;
+        for (uint64_t capacity : {1u, 13u, 31u, 64u, 4096u}) {
+          SCOPED_TRACE(::testing::Message()
+                       << width << 'x' << rows << 'x' << slices
+                       << " capacity=" << capacity);
+          uint64_t cursor = 0;
+          while (cursor < total) {
+            iree_hal_amd_gpu_blit_arguments_t arguments;
+            const uint64_t length = iree_hal_amd_gpu_blit_prepare_region(
+                &region, cursor, capacity, &arguments);
+            ASSERT_GT(length, 0u);
+            ASSERT_LE(length, capacity);
+            ASSERT_LE(length, total - cursor);
+            EXPECT_LE(iree_hal_amd_gpu_blit_workgroup_count(arguments.length) *
+                          arguments.groups_y * arguments.groups_z,
+                      256u);
+            uint64_t emitted = 0;
+            for (uint32_t z = 0; z < arguments.slice_count; ++z) {
+              for (uint32_t y = 0; y < arguments.row_count; ++y) {
+                for (uint64_t x = 0; x < arguments.length; ++x) {
+                  const uint64_t logical = cursor + emitted++;
+                  const uint64_t row = logical / width % rows;
+                  const uint64_t slice = logical / (width * rows);
+                  const uint64_t column = logical % width;
+                  EXPECT_EQ(
+                      arguments.source + z * arguments.source_slice_stride +
+                          y * arguments.source_row_stride + x,
+                      slice * region.source_strides.slice_stride +
+                          row * region.source_strides.row_stride + column);
+                  EXPECT_EQ(
+                      arguments.target + z * arguments.target_slice_stride +
+                          y * arguments.target_row_stride + x,
+                      slice * region.target_strides.slice_stride +
+                          row * region.target_strides.row_stride + column);
+                }
+              }
+            }
+            EXPECT_EQ(emitted, length);
+            cursor += length;
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(BlitGeometryTest, PublicDimensionsExceedNativeSignedIndices) {
+  constexpr uint64_t kCount = UINT64_C(1) << 32;
+  iree_hal_transfer_region_t region = {
+      .row_length = 1,
+      .row_count = kCount + 7,
+      .slice_count = 2,
+      .source_strides = {2, (kCount + 7) * 2},
+      .target_strides = {3, (kCount + 7) * 3},
+  };
+  uint64_t cursor = 0;
+  unsigned chunks = 0;
+  while (cursor < region.row_count * region.slice_count) {
+    iree_hal_amd_gpu_blit_arguments_t arguments;
+    const uint64_t length = iree_hal_amd_gpu_blit_prepare_region(
+        &region, cursor, UINT64_MAX, &arguments);
+    ASSERT_GT(length, 0u);
+    EXPECT_LE(arguments.row_count - 1 + arguments.groups_y,
+              uint32_t{INT32_MAX});
+    EXPECT_EQ(arguments.source, cursor * 2);
+    EXPECT_EQ(arguments.target, cursor * 3);
+    cursor += length;
+    ++chunks;
+  }
+  EXPECT_EQ(chunks, 6u);
+  region.row_count = 1;
+  region.slice_count = kCount + 7;
+  region.source_strides.slice_stride = 5;
+  region.target_strides.slice_stride = 7;
+  cursor = 0;
+  chunks = 0;
+  while (cursor < region.slice_count) {
+    iree_hal_amd_gpu_blit_arguments_t arguments;
+    const uint64_t length = iree_hal_amd_gpu_blit_prepare_region(
+        &region, cursor, UINT64_MAX, &arguments);
+    ASSERT_GT(length, 0u);
+    EXPECT_LE(arguments.slice_count - 1 + arguments.groups_z,
+              uint32_t{INT32_MAX});
+    EXPECT_EQ(arguments.source, cursor * region.source_strides.slice_stride);
+    cursor += length;
+    ++chunks;
+  }
+  EXPECT_EQ(chunks, 3u);
+}
+
 class BlitTest : public ::testing::TestWithParam<size_t> {
  protected:
   void TearDown() override { iree_hal_amd_gpu_image_deinitialize(&image_); }
@@ -46,10 +147,11 @@ TEST_P(BlitTest, EmbeddedInstructionsAndDescriptorMatchSource) {
   ASSERT_EQ(image_.relocation_count, 0u);
   ASSERT_EQ(image_.import_count, 0u);
   const auto& metadata = image_.metadata.kernels[0];
-  EXPECT_EQ(metadata.kernarg_segment_size, 32u);
+  EXPECT_EQ(metadata.kernarg_segment_size,
+            sizeof(iree_hal_amd_gpu_blit_arguments_t));
   EXPECT_EQ(metadata.private_segment_fixed_size, 0u);
   EXPECT_EQ(metadata.group_segment_fixed_size, 0u);
-  ASSERT_EQ(metadata.argument_count, 5u);
+  ASSERT_EQ(metadata.argument_count, 13u);
   for (size_t i = 0; i < 3; ++i) {
     EXPECT_EQ(metadata.arguments[i].offset, i * 8);
     EXPECT_EQ(metadata.arguments[i].size, 8u);
@@ -58,6 +160,14 @@ TEST_P(BlitTest, EmbeddedInstructionsAndDescriptorMatchSource) {
   EXPECT_EQ(metadata.arguments[3].size, 4u);
   EXPECT_EQ(metadata.arguments[4].offset, 28u);
   EXPECT_EQ(metadata.arguments[4].size, 4u);
+  for (size_t i = 5; i < 9; ++i) {
+    EXPECT_EQ(metadata.arguments[i].offset, 32 + (i - 5) * 8);
+    EXPECT_EQ(metadata.arguments[i].size, 8u);
+  }
+  for (size_t i = 9; i < 13; ++i) {
+    EXPECT_EQ(metadata.arguments[i].offset, 64 + (i - 9) * 4);
+    EXPECT_EQ(metadata.arguments[i].size, 4u);
+  }
   iree_const_byte_span_t code;
   iree_hal_amd_gpu_image_kernel_t descriptor;
   IREE_ASSERT_OK(iree_hal_amd_gpu_blit_program_query(image_.target.version,

@@ -219,7 +219,7 @@ TEST_P(DispatchPipelineTest, FillDispatchDispatchPipeline) {
   // Fill input with a recognizable pattern via update_buffer.
   // We use update_buffer because it embeds host data directly.
   std::vector<uint32_t> fill_data = {10, 20, 30, 40};
-  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
       cmd, fill_data.data(), /*source_offset=*/0,
       iree_hal_make_buffer_ref(input, 0, kBufferSize),
       IREE_HAL_UPDATE_FLAG_NONE));

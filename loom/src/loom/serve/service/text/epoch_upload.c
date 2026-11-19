@@ -25,6 +25,7 @@ iree_status_t loom_serve_text_epoch_upload(
   // Batching bounds stack use, not the number of source ranges. HAL captures
   // the descriptors during submission; only packet bytes escape this call.
   iree_hal_transfer_operation_t operations[64];
+  iree_hal_transfer_region_t operations_regions[IREE_ARRAYSIZE(operations)];
   iree_host_size_t operation_count = 0;
   uint64_t completion = 0;
   iree_status_t status = iree_ok_status();
@@ -35,14 +36,17 @@ iree_status_t loom_serve_text_epoch_upload(
     if (!range.length) {
       continue;
     }
-    operations[operation_count++] = (iree_hal_transfer_operation_t){
+    operations_regions[operation_count] = (iree_hal_transfer_region_t){
+        .row_length = range.length, .row_count = 1, .slice_count = 1};
+    operations[operation_count] = (iree_hal_transfer_operation_t){
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
         .upload = {.source =
                        packets[range.source_binding].data + range.source_offset,
                    .target_buffer = targets[range.target_binding],
                    .target_offset = range.target_offset,
-                   .length = range.length},
+                   .region = &operations_regions[operation_count]},
     };
+    ++operation_count;
     if (operation_count == IREE_ARRAYSIZE(operations)) {
       status = loom_runtime_execution_transfer(execution, operation_count,
                                                operations, &completion);

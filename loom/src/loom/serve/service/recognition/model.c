@@ -1281,16 +1281,20 @@ static iree_status_t loom_serve_recognition_generator_admit(
       invocation->payload, 0, iree_vm_buffer_length(invocation->payload),
       &payload));
   iree_hal_transfer_operation_t uploads[2];
+  iree_hal_transfer_region_t uploads_regions[IREE_ARRAYSIZE(uploads)];
   iree_host_size_t upload_count = 0;
   if (payload.data_length) {
-    uploads[upload_count++] = (iree_hal_transfer_operation_t){
+    uploads_regions[upload_count] = (iree_hal_transfer_region_t){
+        .row_length = payload.data_length, .row_count = 1, .slice_count = 1};
+    uploads[upload_count] = (iree_hal_transfer_operation_t){
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
         .upload = {
             .source = payload.data,
             .target_buffer = loom_runtime_rows_buffer(&model->state,
                                                       LOOM_RUNTIME_ROWS_INPUT),
             .target_offset = invocation->row_index * model->input_capacity,
-            .length = payload.data_length}};
+            .region = &uploads_regions[upload_count]}};
+    ++upload_count;
   }
   if (!model->conditioning_initialized) {
     iree_const_byte_span_t initial;
@@ -1298,12 +1302,15 @@ static iree_status_t loom_serve_recognition_generator_admit(
         model->control.initial_conditioning, 0,
         iree_vm_buffer_length(model->control.initial_conditioning), &initial));
     if (initial.data_length) {
-      uploads[upload_count++] = (iree_hal_transfer_operation_t){
+      uploads_regions[upload_count] = (iree_hal_transfer_region_t){
+          .row_length = initial.data_length, .row_count = 1, .slice_count = 1};
+      uploads[upload_count] = (iree_hal_transfer_operation_t){
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
           .upload = {.source = initial.data,
                      .target_buffer = loom_runtime_rows_buffer(
                          &model->state, LOOM_RUNTIME_ROWS_CONDITIONING),
-                     .length = initial.data_length}};
+                     .region = &uploads_regions[upload_count]}};
+      ++upload_count;
     }
   }
   if (upload_count) {
@@ -1521,11 +1528,16 @@ static iree_status_t loom_serve_recognition_generator_submit(
                                     requests, model->batch.buffers);
   uint64_t value = 0;
   if (iree_status_is_ok(status)) {
+    const iree_hal_transfer_region_t upload_region = {
+        .row_length = payload.data_length,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t upload = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
         .upload = {.source = payload.data,
                    .target_buffer = model->batch.buffers[0],
-                   .length = payload.data_length}};
+                   .region = &upload_region}};
     status =
         loom_runtime_execution_transfer(model->execution, 1, &upload, &value);
   }

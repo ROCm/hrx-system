@@ -19,6 +19,8 @@ typedef enum iree_hal_amd_gpu_sdma_program_segment_kind_e {
   IREE_HAL_AMD_GPU_SDMA_PROGRAM_COPY,
   IREE_HAL_AMD_GPU_SDMA_PROGRAM_FILL,
   IREE_HAL_AMD_GPU_SDMA_PROGRAM_RETIRE,
+  IREE_HAL_AMD_GPU_SDMA_PROGRAM_COPY_REGION,
+  IREE_HAL_AMD_GPU_SDMA_PROGRAM_FILL_REGION,
 } iree_hal_amd_gpu_sdma_program_segment_kind_t;
 
 // Dense invocation values supply all external facts. A constant extent has
@@ -30,8 +32,12 @@ typedef struct iree_hal_amd_gpu_sdma_program_range_t {
   uint32_t source_value;
   // Dense target address input.
   uint32_t target_value;
-  // Dense logical extent input, or UINT32_MAX for a constant extent.
-  uint32_t length_value;
+  union {
+    // Dense logical extent input, or UINT32_MAX for a constant linear extent.
+    uint32_t length_value;
+    // REGION geometry within program.data; length is its useful byte count.
+    uint32_t region_offset;
+  };
   // Repeated DWORD for FILL; zero for COPY.
   uint32_t pattern;
   // Displacement added to the source input, in bytes.

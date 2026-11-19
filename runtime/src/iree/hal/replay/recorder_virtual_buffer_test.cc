@@ -297,7 +297,7 @@ TEST_F(ReplayRecorderVirtualBufferTest,
       iree_hal_buffer_subspan(second, 32, 16, iree_allocator_system(), &alias));
   const uint32_t first_pattern = 0x12345678;
   uint64_t filled = 3;
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       queue_, Point(&mapped), Point(&filled), first, 32, 16, &first_pattern,
       sizeof(first_pattern), nullptr, IREE_HAL_FILL_FLAG_NONE));
   Wait(filled);

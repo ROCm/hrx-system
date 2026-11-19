@@ -424,7 +424,7 @@ hrx_status_t hrx_stream_fill_buffer(hrx_stream_t stream, hrx_buffer_t buffer,
   iree_status_t iree_status = hrx_stream_prepare_recording(
       stream, IREE_HAL_COMMAND_CATEGORY_TRANSFER, &command_buffer);
   if (iree_status_is_ok(iree_status)) {
-    iree_status = iree_hal_command_buffer_fill_buffer(
+    iree_status = iree_hal_command_buffer_fill_buffer_linear(
         command_buffer, target_ref, pattern, (iree_host_size_t)pattern_size,
         /*flags=*/0);
   }
@@ -453,7 +453,7 @@ hrx_status_t hrx_stream_copy_buffer(hrx_stream_t stream, hrx_buffer_t src,
   iree_status_t iree_status = hrx_stream_prepare_recording(
       stream, IREE_HAL_COMMAND_CATEGORY_TRANSFER, &command_buffer);
   if (iree_status_is_ok(iree_status)) {
-    iree_status = iree_hal_command_buffer_copy_buffer(
+    iree_status = iree_hal_command_buffer_copy_buffer_linear(
         command_buffer, source_ref, target_ref, /*flags=*/0);
   }
   hrx_stream_finish_command(stream, command_buffer,
@@ -480,7 +480,7 @@ hrx_status_t hrx_stream_update_buffer(hrx_stream_t stream,
   iree_status_t iree_status = hrx_stream_prepare_recording(
       stream, IREE_HAL_COMMAND_CATEGORY_TRANSFER, &command_buffer);
   if (iree_status_is_ok(iree_status)) {
-    iree_status = iree_hal_command_buffer_update_buffer(
+    iree_status = iree_hal_command_buffer_update_buffer_linear(
         command_buffer, host_data, (iree_host_size_t)0, target_ref,
         /*flags=*/0);
   }

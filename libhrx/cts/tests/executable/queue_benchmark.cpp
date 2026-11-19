@@ -148,7 +148,7 @@ class Environment {
       const iree_hal_semaphore_list_t waits = {1, &semaphore, &tail_};
       const iree_hal_semaphore_list_t signals = {1, &semaphore, &next};
       if constexpr (Op == Operation::kFill) {
-        CheckNative(iree_hal_queue_fill(
+        CheckNative(iree_hal_queue_fill_linear(
             queue_->hal_queue, waits, signals, output_.get()->hal_buffer, 0,
             4096, &expected_, sizeof(expected_),
             Prepared ? &native_barriers_.barriers : nullptr,

@@ -105,6 +105,7 @@ TEST_F(RelocationTest, RepeatedPlanesCrossBatchAndAddressBoundaries) {
                                                iree_allocator_system()));
   std::array<loom_runtime_memory_range_t, kPlaneCount> commitments;
   std::array<iree_hal_transfer_operation_t, kPlaneCount * kLiveBlocks> fills;
+  iree_hal_fill_region_t fills_regions[IREE_ARRAYSIZE(fills)];
   std::array<uint32_t, kPlaneCount * kLiveBlocks> fill_values;
   size_t initialization_count = 0;
   uint64_t completion = 0;
@@ -120,13 +121,18 @@ TEST_F(RelocationTest, RepeatedPlanesCrossBatchAndAddressBoundaries) {
           region.origin + plane * region.stride + block * region.block_bytes;
       const size_t initialization_index = initialization_count++;
       fill_values[initialization_index] = plane * 1000 + block;
+      fills_regions[initialization_index] = iree_hal_fill_region_t{
+          .row_length = region.block_bytes,
+          .row_count = 1,
+          .slice_count = 1,
+      };
       fills[initialization_index] = {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
           .fill =
               {
                   .target_buffer = view,
                   .target_offset = offset,
-                  .length = region.block_bytes,
+                  .region = &fills_regions[initialization_index],
                   .pattern = &fill_values[initialization_index],
                   .pattern_length = sizeof(fill_values[initialization_index]),
               },
@@ -217,6 +223,11 @@ TEST_F(RelocationTest, RepeatedPlanesCrossBatchAndAddressBoundaries) {
   std::vector<uint32_t> observed(kLiveBlocks * region.block_bytes /
                                  sizeof(uint32_t));
   for (uint32_t plane = 0; plane < region.count; ++plane) {
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = kLiveBlocks * region.block_bytes,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
@@ -224,7 +235,7 @@ TEST_F(RelocationTest, RepeatedPlanesCrossBatchAndAddressBoundaries) {
                 .source_buffer = view,
                 .source_offset = region.origin + plane * region.stride,
                 .target = observed.data(),
-                .length = kLiveBlocks * region.block_bytes,
+                .region = &download_region,
             },
     };
     IREE_ASSERT_OK(

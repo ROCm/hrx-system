@@ -59,7 +59,7 @@ TEST_P(CommandBufferUpdateBufferTest, WholeBuffer) {
                                      binding_capacity(), &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
-  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
       command_buffer,
       /*source_buffer=*/source_buffer.data(), /*source_offset=*/0,
       MakeTargetRef(device_buffer, 0, target_buffer_size),
@@ -74,6 +74,57 @@ TEST_P(CommandBufferUpdateBufferTest, WholeBuffer) {
 
   iree_hal_command_buffer_release(command_buffer);
   iree_hal_buffer_release(device_buffer);
+}
+
+TEST_P(CommandBufferUpdateBufferTest, CapturedRectanglePreservesPadding) {
+  constexpr size_t kWidth = 37, kRows = 129, kSlices = 3;
+  constexpr size_t kSourceStride = 48, kTargetStride = 60;
+  constexpr size_t kSourceSlice = kRows * kSourceStride + 24;
+  constexpr size_t kTargetSlice = kRows * kTargetStride + 40;
+  constexpr size_t kCapacity = kSlices * kTargetSlice + 32;
+  std::vector<uint8_t> source(kSlices * kSourceSlice + 16, 0xCC);
+  std::vector<uint8_t> expected(kCapacity, 0);
+  for (size_t z = 0; z < kSlices; ++z) {
+    for (size_t y = 0; y < kRows; ++y) {
+      for (size_t x = 0; x < kWidth; ++x) {
+        const uint8_t value = static_cast<uint8_t>(x * 29 + y * 13 + z * 7);
+        source[5 + z * kSourceSlice + y * kSourceStride + x] = value;
+        expected[7 + z * kTargetSlice + y * kTargetStride + x] = value;
+      }
+    }
+  }
+  Ref<iree_hal_buffer_t> buffer;
+  IREE_ASSERT_OK(CreateZeroedDeviceBuffer(kCapacity, buffer.out()));
+  Ref<iree_hal_command_buffer_t> command_buffer;
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+                                     binding_capacity(), command_buffer.out()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+  iree_hal_transfer_region_t region = {
+      .row_length = kWidth,
+      .row_count = kRows,
+      .slice_count = kSlices,
+      .source_strides =
+          {
+              .row_stride = kSourceStride,
+              .slice_stride = kSourceSlice,
+          },
+      .target_strides =
+          {
+              .row_stride = kTargetStride,
+              .slice_stride = kTargetSlice,
+          },
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+      command_buffer, source.data(), 5, MakeTargetRef(buffer, 7, kCapacity - 7),
+      &region, IREE_HAL_UPDATE_FLAG_NONE));
+  std::fill(source.begin(), source.end(), 0xEE);
+  region = {};
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+  IREE_ASSERT_OK(SubmitWithBindings(command_buffer, buffer));
+  std::vector<uint8_t> actual(kCapacity);
+  IREE_ASSERT_OK(DownloadBufferData(buffer, 0, actual.data(), actual.size()));
+  EXPECT_THAT(actual, ContainerEq(expected));
 }
 
 TEST_P(CommandBufferUpdateBufferTest, LargerPayload) {
@@ -92,7 +143,7 @@ TEST_P(CommandBufferUpdateBufferTest, LargerPayload) {
                                      binding_capacity(), &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
-  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
       command_buffer,
       /*source_buffer=*/source_buffer.data(), /*source_offset=*/0,
       MakeTargetRef(device_buffer, 0, target_buffer_size),
@@ -125,7 +176,7 @@ TEST_P(CommandBufferUpdateBufferTest, WithOffsets) {
                                      binding_capacity(), &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
-  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
       command_buffer,
       /*source_buffer=*/source_buffer.data(), /*source_offset=*/4,
       MakeTargetRef(device_buffer, /*target_offset=*/4, /*length=*/8),
@@ -169,7 +220,7 @@ TEST_P(CommandBufferUpdateBufferTest, Subspan) {
                                      binding_capacity(), &command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
-  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
       command_buffer,
       /*source_buffer=*/source_buffer.data(), /*source_offset=*/4,
       MakeTargetRef(buffer_subspan, /*target_offset=*/4, /*length=*/4),
@@ -216,20 +267,20 @@ TEST_P(CommandBufferUpdateBufferTest, CaptureExtentIsExplicitAndBounded) {
   }
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_command_buffer_update_buffer(
+      iree_hal_command_buffer_update_buffer_linear(
           recording, source.data(), 0,
           MakeTargetRef(target, 0, IREE_HAL_WHOLE_BUFFER), 0));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
-      iree_hal_command_buffer_update_buffer(
+      iree_hal_command_buffer_update_buffer_linear(
           recording, source.data(), 0,
           MakeTargetRef(target, 0, IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE + 1),
           0));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        iree_hal_command_buffer_update_buffer(
+                        iree_hal_command_buffer_update_buffer_linear(
                             recording, source.data(), IREE_HOST_SIZE_MAX,
                             MakeTargetRef(target, 0, 4), 0));
-  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer_linear(
       recording, source.data(), 7,
       MakeTargetRef(target, 4, IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE), 0));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));

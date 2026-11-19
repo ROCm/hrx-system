@@ -161,7 +161,7 @@ TEST_P(TransientBufferTest, FillTransientBuffer) {
 
   uint32_t pattern = 0xDEADCAFE;
   IREE_ASSERT_OK(SubmitTransferAndWait([&](iree_hal_command_buffer_t* cmd) {
-    return iree_hal_command_buffer_fill_buffer(
+    return iree_hal_command_buffer_fill_buffer_linear(
         cmd, iree_hal_make_buffer_ref(transient, 0, buffer_size), &pattern,
         sizeof(pattern), IREE_HAL_FILL_FLAG_NONE);
   }));
@@ -185,12 +185,12 @@ TEST_P(TransientBufferTest, FillTransientBufferSubrange) {
   uint8_t zero = 0x00;
   uint32_t pattern = 0xCAFEF00D;
   IREE_ASSERT_OK(SubmitTransferAndWait([&](iree_hal_command_buffer_t* cmd) {
-    return iree_hal_command_buffer_fill_buffer(
+    return iree_hal_command_buffer_fill_buffer_linear(
         cmd, iree_hal_make_buffer_ref(transient, 0, buffer_size), &zero,
         sizeof(zero), IREE_HAL_FILL_FLAG_NONE);
   }));
   IREE_ASSERT_OK(SubmitTransferAndWait([&](iree_hal_command_buffer_t* cmd) {
-    return iree_hal_command_buffer_fill_buffer(
+    return iree_hal_command_buffer_fill_buffer_linear(
         cmd, iree_hal_make_buffer_ref(transient, fill_offset, fill_length),
         &pattern, sizeof(pattern), IREE_HAL_FILL_FLAG_NONE);
   }));
@@ -223,7 +223,7 @@ TEST_P(TransientBufferTest, FillTransientBuffer1Byte) {
 
   uint8_t pattern = 0xAB;
   IREE_ASSERT_OK(SubmitTransferAndWait([&](iree_hal_command_buffer_t* cmd) {
-    return iree_hal_command_buffer_fill_buffer(
+    return iree_hal_command_buffer_fill_buffer_linear(
         cmd, iree_hal_make_buffer_ref(transient, 0, buffer_size), &pattern,
         sizeof(pattern), IREE_HAL_FILL_FLAG_NONE);
   }));
@@ -250,7 +250,7 @@ TEST_P(TransientBufferTest, CopyToTransientBuffer) {
   Ref<iree_hal_buffer_t> transient(raw);
 
   IREE_ASSERT_OK(SubmitTransferAndWait([&](iree_hal_command_buffer_t* cmd) {
-    return iree_hal_command_buffer_copy_buffer(
+    return iree_hal_command_buffer_copy_buffer_linear(
         cmd, iree_hal_make_buffer_ref(source, 0, buffer_size),
         iree_hal_make_buffer_ref(transient, 0, buffer_size),
         IREE_HAL_COPY_FLAG_NONE);
@@ -273,7 +273,7 @@ TEST_P(TransientBufferTest, CopyFromTransientBuffer) {
 
   uint32_t pattern = 0xBBBBBBBB;
   IREE_ASSERT_OK(SubmitTransferAndWait([&](iree_hal_command_buffer_t* cmd) {
-    return iree_hal_command_buffer_fill_buffer(
+    return iree_hal_command_buffer_fill_buffer_linear(
         cmd, iree_hal_make_buffer_ref(transient, 0, buffer_size), &pattern,
         sizeof(pattern), IREE_HAL_FILL_FLAG_NONE);
   }));
@@ -283,7 +283,7 @@ TEST_P(TransientBufferTest, CopyFromTransientBuffer) {
   IREE_ASSERT_OK(CreateZeroedDeviceBuffer(buffer_size, target.out()));
 
   IREE_ASSERT_OK(SubmitTransferAndWait([&](iree_hal_command_buffer_t* cmd) {
-    return iree_hal_command_buffer_copy_buffer(
+    return iree_hal_command_buffer_copy_buffer_linear(
         cmd, iree_hal_make_buffer_ref(transient, 0, buffer_size),
         iree_hal_make_buffer_ref(target, 0, buffer_size),
         IREE_HAL_COPY_FLAG_NONE);
@@ -316,7 +316,7 @@ TEST_P(TransientBufferTest, FillThenCopyInSingleCommandBuffer) {
   uint32_t pattern = 0x11223344;
   IREE_ASSERT_OK(SubmitTransferAndWait([&](iree_hal_command_buffer_t* cmd) {
     // Fill the transient buffer.
-    IREE_RETURN_IF_ERROR(iree_hal_command_buffer_fill_buffer(
+    IREE_RETURN_IF_ERROR(iree_hal_command_buffer_fill_buffer_linear(
         cmd, iree_hal_make_buffer_ref(transient, 0, buffer_size), &pattern,
         sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
 
@@ -341,7 +341,7 @@ TEST_P(TransientBufferTest, FillThenCopyInSingleCommandBuffer) {
         iree_hal_command_buffer_barrier(cmd, &execution_barrier));
 
     // Copy transient → output.
-    return iree_hal_command_buffer_copy_buffer(
+    return iree_hal_command_buffer_copy_buffer_linear(
         cmd, iree_hal_make_buffer_ref(transient, 0, buffer_size),
         iree_hal_make_buffer_ref(output, 0, buffer_size),
         IREE_HAL_COPY_FLAG_NONE);
@@ -372,7 +372,7 @@ TEST_P(TransientBufferTest, UpdateTransientBuffer) {
   std::iota(host_data.begin(), host_data.end(), 100u);
 
   IREE_ASSERT_OK(SubmitTransferAndWait([&](iree_hal_command_buffer_t* cmd) {
-    return iree_hal_command_buffer_update_buffer(
+    return iree_hal_command_buffer_update_buffer_linear(
         cmd, host_data.data(), /*source_offset=*/0,
         iree_hal_make_buffer_ref(transient, 0, buffer_size),
         IREE_HAL_UPDATE_FLAG_NONE);
@@ -408,7 +408,7 @@ TEST_P(TransientBufferTest, FillTransient) {
   // Fill via command buffer — this is the path that was broken.
   uint32_t pattern = 0x55AA55AA;
   IREE_ASSERT_OK(SubmitTransferAndWait([&](iree_hal_command_buffer_t* cmd) {
-    return iree_hal_command_buffer_fill_buffer(
+    return iree_hal_command_buffer_fill_buffer_linear(
         cmd, iree_hal_make_buffer_ref(transient, 0, buffer_size), &pattern,
         sizeof(pattern), IREE_HAL_FILL_FLAG_NONE);
   }));
@@ -447,7 +447,7 @@ TEST_P(AsyncTransientBufferTest, StaticRefRecordedBeforeAllocaCommitExecutes) {
       /*binding_capacity=*/0, command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   uint32_t pattern = 0xA55A1337u;
-  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
       command_buffer,
       iree_hal_make_buffer_ref(transient, 0, IREE_HAL_WHOLE_BUFFER), &pattern,
       sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
@@ -484,7 +484,7 @@ TEST_P(AsyncTransientBufferTest, IndirectRefResolvedAfterAllocaCommit) {
       /*binding_capacity=*/2, command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   uint32_t pattern = 0x5AA5C0DEu;
-  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
       command_buffer,
       iree_hal_make_indirect_buffer_ref(/*binding=*/0, 0,
                                         IREE_HAL_WHOLE_BUFFER),
@@ -501,7 +501,7 @@ TEST_P(AsyncTransientBufferTest, IndirectRefResolvedAfterAllocaCommit) {
       .memory_barriers = &memory_barrier,
   };
   IREE_ASSERT_OK(iree_hal_command_buffer_barrier(command_buffer, &barrier));
-  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer_linear(
       command_buffer,
       iree_hal_make_indirect_buffer_ref(0, 0, IREE_HAL_WHOLE_BUFFER),
       iree_hal_make_indirect_buffer_ref(1, 0, IREE_HAL_WHOLE_BUFFER),

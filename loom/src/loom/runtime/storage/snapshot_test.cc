@@ -137,13 +137,19 @@ TEST_F(SnapshotTest, LogicalRangesSurviveSourceDestructionAndFreshPlacement) {
   std::array<loom_runtime_snapshot_range_t, kRangeCount> ranges;
   std::array<uint32_t, kRangeCount> patterns;
   std::array<iree_hal_transfer_operation_t, kRangeCount> fills = {};
+  std::array<iree_hal_fill_region_t, kRangeCount> fills_regions;
   for (size_t i = 0; i < ranges.size(); ++i) {
     // Logical order intentionally opposes physical offset order.
     ranges[i] = {i % 2, kHighOffset + (kRangeCount - i - 1) * 256, 16};
     patterns[i] = 0xABC00000u + static_cast<uint32_t>(i * 17);
     fills[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
+    fills_regions[i] = iree_hal_fill_region_t{
+        .row_length = ranges[i].length,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     fills[i].fill = {roots[ranges[i].buffer_index], ranges[i].offset,
-                     ranges[i].length, &patterns[i], sizeof(patterns[i])};
+                     &fills_regions[i], &patterns[i], sizeof(patterns[i])};
   }
   uint64_t completion = 0;
   IREE_ASSERT_OK(loom_runtime_execution_transfer(execution, fills.size(),
@@ -184,10 +190,16 @@ TEST_F(SnapshotTest, LogicalRangesSurviveSourceDestructionAndFreshPlacement) {
   loom_runtime_snapshot_release(std::exchange(snapshot, nullptr));
   std::array<std::array<uint32_t, 4>, kRangeCount> observed = {};
   std::array<iree_hal_transfer_operation_t, kRangeCount> downloads = {};
+  std::array<iree_hal_transfer_region_t, kRangeCount> downloads_regions;
   for (size_t i = 0; i < ranges.size(); ++i) {
     downloads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+    downloads_regions[i] = iree_hal_transfer_region_t{
+        .row_length = ranges[i].length,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     downloads[i].download = {roots[ranges[i].buffer_index], ranges[i].offset,
-                             observed[i].data(), ranges[i].length};
+                             observed[i].data(), &downloads_regions[i]};
   }
   IREE_ASSERT_OK(loom_runtime_execution_transfer(
       execution, downloads.size(), downloads.data(), &completion));
@@ -211,9 +223,10 @@ TEST_F(SnapshotTest, CaptureAndRestoreMayGroupTheSameLogicalBytesDifferently) {
     IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(reservations[i], 0, 512));
   }
   const std::array<uint32_t, 6> expected = {17, 31, 53, 79, 113, 151};
+  const iree_hal_transfer_region_t upload_region_0 = {sizeof(expected), 1, 1};
   const iree_hal_transfer_operation_t upload = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
-      .upload = {expected.data(), roots[0], 256, sizeof(expected)},
+      .upload = {expected.data(), roots[0], 256, &upload_region_0},
   };
   uint64_t completion = 0;
   IREE_ASSERT_OK(
@@ -241,9 +254,10 @@ TEST_F(SnapshotTest, CaptureAndRestoreMayGroupTheSameLogicalBytesDifferently) {
   IREE_ASSERT_OK(loom_runtime_snapshot_restore(
       snapshot, execution, roots.size(), roots.data(), 1, &restored));
   std::array<uint32_t, 6> observed = {};
+  const iree_hal_transfer_region_t download_region_0 = {sizeof(observed), 1, 1};
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
-      .download = {roots[0], 0, observed.data(), sizeof(observed)},
+      .download = {roots[0], 0, observed.data(), &download_region_0},
   };
   IREE_ASSERT_OK(
       loom_runtime_execution_transfer(execution, 1, &download, &completion));
@@ -288,14 +302,20 @@ TEST_F(SnapshotTest, LargeSparseStateSurvivesBackingReuseAndFreshPlacement) {
     expected[i] = (static_cast<uint32_t>(i) * 2654435761u) ^ 0x12345678u;
   }
   std::array<iree_hal_transfer_operation_t, kPageCount + 5> uploads = {};
+  std::array<iree_hal_transfer_region_t, kPageCount + 5> uploads_regions;
   size_t offset = 0;
   for (size_t i = 0; i < ranges.size(); ++i) {
     const auto& range = ranges[i];
     IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(
         reservations[range.buffer_index], range.offset, range.length));
     uploads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
+    uploads_regions[i] = iree_hal_transfer_region_t{
+        .row_length = range.length,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     uploads[i].upload = {expected.data() + offset, roots[range.buffer_index],
-                         range.offset, range.length};
+                         range.offset, &uploads_regions[i]};
     offset += range.length / sizeof(uint32_t);
   }
   uint64_t completion = 0;
@@ -303,12 +323,18 @@ TEST_F(SnapshotTest, LargeSparseStateSurvivesBackingReuseAndFreshPlacement) {
                                                  uploads.data(), &completion));
   std::vector<uint32_t> observed(kPayloadBytes / sizeof(uint32_t));
   std::array<iree_hal_transfer_operation_t, kPageCount + 5> downloads = {};
+  std::array<iree_hal_transfer_region_t, kPageCount + 5> downloads_regions;
   offset = 0;
   for (size_t i = 0; i < ranges.size(); ++i) {
     const auto& range = ranges[i];
     downloads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+    downloads_regions[i] = iree_hal_transfer_region_t{
+        .row_length = range.length,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     downloads[i].download = {roots[range.buffer_index], range.offset,
-                             observed.data() + offset, range.length};
+                             observed.data() + offset, &downloads_regions[i]};
     offset += range.length / sizeof(uint32_t);
   }
   IREE_ASSERT_OK(loom_runtime_execution_transfer(
@@ -347,8 +373,13 @@ TEST_F(SnapshotTest, LargeSparseStateSurvivesBackingReuseAndFreshPlacement) {
   for (size_t i = 0; i < ranges.size(); ++i) {
     const auto& range = ranges[i];
     downloads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+    downloads_regions[i] = iree_hal_transfer_region_t{
+        .row_length = range.length,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     downloads[i].download = {roots[range.buffer_index], range.offset,
-                             observed.data() + offset, range.length};
+                             observed.data() + offset, &downloads_regions[i]};
     offset += range.length / sizeof(uint32_t);
   }
   IREE_ASSERT_OK(loom_runtime_execution_transfer(
@@ -390,11 +421,17 @@ struct loom_runtime_test_snapshot_transfer_t {
     loom_runtime_snapshot_release(std::exchange(self->snapshot, nullptr));
     local_ranges.fill({});
     std::array<iree_hal_transfer_operation_t, kRangeCount> downloads = {};
+    std::array<iree_hal_transfer_region_t, kRangeCount> downloads_regions;
     for (size_t i = 0; i < downloads.size(); ++i) {
       const auto& range = self->ranges[i];
       downloads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+      downloads_regions[i] = iree_hal_transfer_region_t{
+          .row_length = range.length,
+          .row_count = 1,
+          .slice_count = 1,
+      };
       downloads[i].download = {self->roots[range.buffer_index], range.offset,
-                               self->observed[i].data(), range.length};
+                               self->observed[i].data(), &downloads_regions[i]};
     }
     uint64_t completion = 0;
     if (iree_status_is_ok(status)) {
@@ -576,13 +613,19 @@ TEST_P(AsyncSnapshotTest, OneWorkerSubmitsAndReleasesBeforeNativeRetirement) {
   }
   std::array<uint32_t, kRangeCount> patterns;
   std::array<iree_hal_transfer_operation_t, kRangeCount> fills = {};
+  std::array<iree_hal_fill_region_t, kRangeCount> fills_regions;
   for (size_t i = 0; i < transfer.ranges.size(); ++i) {
     transfer.ranges[i] = {i % 2, kHighOffset + (kRangeCount - i - 1) * 256, 16};
     const auto& range = transfer.ranges[i];
     patterns[i] = 0xFED00000u + static_cast<uint32_t>(i * 31);
     fills[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
+    fills_regions[i] = iree_hal_fill_region_t{
+        .row_length = range.length,
+        .row_count = 1,
+        .slice_count = 1,
+    };
     fills[i].fill = {transfer.roots[range.buffer_index], range.offset,
-                     range.length, &patterns[i], sizeof(patterns[i])};
+                     &fills_regions[i], &patterns[i], sizeof(patterns[i])};
   }
   uint64_t completion = 0;
   IREE_ASSERT_OK(loom_runtime_execution_transfer(execution, fills.size(),

@@ -118,6 +118,7 @@ iree_status_t iree_hal_amd_xdna_queue_capture_allocate_metadata(
 
 iree_status_t iree_hal_amd_xdna_queue_capture_payload(
     iree_hal_amd_xdna_queue_capture_t* capture, iree_const_byte_span_t source,
+    const iree_hal_transfer_region_t* region,
     iree_hal_amd_xdna_queue_payload_t* out_payload) {
   *out_payload = (iree_hal_amd_xdna_queue_payload_t){0};
   const iree_host_size_t maximum_allocation_size =
@@ -140,7 +141,12 @@ iree_status_t iree_hal_amd_xdna_queue_capture_payload(
     if (iree_status_is_ok(status)) {
       chunk->next = NULL;
       chunk->data_length = chunk_length;
-      memcpy(chunk->data, source.data + source_offset, chunk_length);
+      if (region) {
+        iree_hal_transfer_gather_host(source.data, region, source_offset,
+                                      chunk_length, chunk->data);
+      } else {
+        memcpy(chunk->data, source.data + source_offset, chunk_length);
+      }
       if (tail) {
         tail->next = chunk;
       } else {
@@ -157,12 +163,18 @@ iree_status_t iree_hal_amd_xdna_queue_capture_payload(
 }
 
 void iree_hal_amd_xdna_queue_payload_copy(
-    const iree_hal_amd_xdna_queue_payload_t* payload, void* target) {
-  uint8_t* target_bytes = target;
+    const iree_hal_amd_xdna_queue_payload_t* payload, void* target,
+    const iree_hal_transfer_region_t* region) {
+  uint64_t offset = 0;
   for (const iree_hal_amd_xdna_queue_payload_chunk_t* chunk = payload->head;
        chunk; chunk = chunk->next) {
-    memcpy(target_bytes, chunk->data, chunk->data_length);
-    target_bytes += chunk->data_length;
+    if (region) {
+      iree_hal_transfer_scatter_host(chunk->data, region, offset,
+                                     chunk->data_length, target);
+    } else {
+      memcpy((uint8_t*)target + offset, chunk->data, chunk->data_length);
+    }
+    offset += chunk->data_length;
   }
 }
 

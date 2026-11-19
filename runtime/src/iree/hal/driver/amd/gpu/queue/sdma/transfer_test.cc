@@ -130,9 +130,10 @@ TEST(TransferTest, MixedPacketsKeepStagingAndDownloadOwnershipExact) {
       }
       for (uint32_t i = 1; i <= 3; ++i) {
         operations[i] = {
-            .type = i == 1   ? IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE
-                    : i == 2 ? IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD
-                             : IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
+            .type = static_cast<uint32_t>(
+                i == 1   ? IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE
+                : i == 2 ? IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD
+                         : IREE_HAL_TRANSFER_OPERATION_TYPE_COPY),
             .target =
                 {
                     .device = iree_hal_amd_gpu_buffer_reference_borrow(

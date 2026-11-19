@@ -716,12 +716,17 @@ TEST_P(WeightsTest, CachedConsumersSurviveBackingReuseAndPreparationReplay) {
   EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).committed_bytes,
             2 * kSlabBytes);
   const uint32_t poison = 0xDEADBEEF;
+  const iree_hal_fill_region_t fill_region = {
+      .row_length = 2 * kSlabBytes,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t fill = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
       .fill =
           {
               .target_buffer = loom_runtime_virtual_buffer_handle(other),
-              .length = 2 * kSlabBytes,
+              .region = &fill_region,
               .pattern = &poison,
               .pattern_length = sizeof(poison),
           },
@@ -1500,12 +1505,17 @@ TEST_P(WeightsTest, MutableGrowthReclaimsIdleParametersWithoutDiscardingState) {
   EXPECT_EQ(loom_runtime_weights_statistics(plans_[0]).committed_bytes, 0u);
   const uint32_t value = 0xA1B2C3D4;
   uint32_t observed = 0;
+  const iree_hal_fill_region_t fill_region = {
+      .row_length = sizeof(value),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t fill = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
       .fill =
           {
               .target_buffer = loom_runtime_virtual_buffer_handle(state_),
-              .length = sizeof(value),
+              .region = &fill_region,
               .pattern = &value,
               .pattern_length = sizeof(value),
           },
@@ -1520,13 +1530,18 @@ TEST_P(WeightsTest, MutableGrowthReclaimsIdleParametersWithoutDiscardingState) {
   EXPECT_FALSE(admitted);
   IREE_ASSERT_OK(loom_runtime_residency_cache_trim(ResidencyCache(), 0));
   EXPECT_EQ(state_statistics_.committed_bytes, 2 * kSlabBytes);
+  const iree_hal_transfer_region_t download_region = {
+      .row_length = sizeof(observed),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
           {
               .source_buffer = loom_runtime_virtual_buffer_handle(state_),
               .target = &observed,
-              .length = sizeof(observed),
+              .region = &download_region,
           },
   };
   IREE_ASSERT_OK(
@@ -1809,7 +1824,12 @@ TEST_P(ArenaWeightsTest, SelectedPreparedBanksShareOneParameterBinding) {
       };
       upload.upload.source = request_offsets.data();
       upload.upload.target_buffer = workspace_;
-      upload.upload.length = sizeof(request_offsets);
+      const iree_hal_transfer_region_t upload_transfer_region = {
+          .row_length = sizeof(request_offsets),
+          .row_count = 1,
+          .slice_count = 1,
+      };
+      upload.upload.region = &upload_transfer_region;
       IREE_RETURN_IF_ERROR(
           loom_runtime_execution_transfer(execution_, 1, &upload, &completion));
       const iree_hal_buffer_binding_t bindings[] = {
@@ -1823,7 +1843,12 @@ TEST_P(ArenaWeightsTest, SelectedPreparedBanksShareOneParameterBinding) {
       };
       download.download.source_buffer = output_buffer_;
       download.download.target = output_.data();
-      download.download.length = sizeof(output_);
+      const iree_hal_transfer_region_t download_transfer_region = {
+          .row_length = sizeof(output_),
+          .row_count = 1,
+          .slice_count = 1,
+      };
+      download.download.region = &download_transfer_region;
       IREE_RETURN_IF_ERROR(loom_runtime_execution_feedback(
           execution_, 1, &download, &completion));
       return loom_runtime_execution_feedback_wait(execution_, completion);

@@ -316,6 +316,17 @@ __attribute__((import_module("iree_webgpu"),
 iree_hal_webgpu_import_queue_on_submitted_work_done(uint32_t queue_handle,
                                                     uint32_t token);
 
+// Executes a captured finite queue transfer batch. Records use the 96-byte
+// iree_hal_webgpu_transfer_t layout; the owner retains their storage and host
+// endpoints until token completion, including asynchronous download scatter.
+__attribute__((import_module("iree_webgpu"),
+               import_name("queue_transfer"))) extern void
+iree_hal_webgpu_import_queue_transfer(uint32_t device_handle,
+                                      uint32_t queue_handle,
+                                      uint32_t builtins_pointer,
+                                      uint32_t records_pointer, uint32_t count,
+                                      uint32_t token);
+
 // Copies data from wasm linear memory to a GPU buffer via the queue.
 // This is a convenience function that stages data internally — the source
 // memory can be reused immediately after the call returns.
@@ -639,6 +650,16 @@ static inline void iree_hal_webgpu_import_queue_submit(
 static inline void iree_hal_webgpu_import_queue_on_submitted_work_done(
     uint32_t queue_handle, uint32_t token) {
   (void)queue_handle;
+  (void)token;
+}
+static inline void iree_hal_webgpu_import_queue_transfer(
+    uint32_t device_handle, uint32_t queue_handle, uint32_t builtins_pointer,
+    uint32_t records_pointer, uint32_t count, uint32_t token) {
+  (void)device_handle;
+  (void)queue_handle;
+  (void)builtins_pointer;
+  (void)records_pointer;
+  (void)count;
   (void)token;
 }
 static inline void iree_hal_webgpu_import_queue_write_buffer(

@@ -135,13 +135,16 @@ class TextStagesTest : public loom_runtime::testing::JitTest {
         loom_runtime_pool_storage(storage_owner_),
         iree_hal_make_pool_reservation_request(sizeof(input_), 0),
         iree_infinite_timeout(), &buffer_));
+    const iree_hal_transfer_region_t upload_region_0 = {sizeof(input_), 1, 1};
     const iree_hal_transfer_operation_t upload = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
-        .upload = {input_.data(), buffer_, 0, sizeof(input_)},
+        .upload = {input_.data(), buffer_, 0, &upload_region_0},
     };
+    const iree_hal_transfer_region_t download_region_0 = {sizeof(output_), 1,
+                                                          1};
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
-        .download = {buffer_, 0, output_.data(), sizeof(output_)},
+        .download = {buffer_, 0, output_.data(), &download_region_0},
     };
     const iree_hal_buffer_binding_t binding = {buffer_, 0, sizeof(input_)};
     for (size_t i = 0; i < stages_.size(); ++i) {

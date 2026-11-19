@@ -856,9 +856,9 @@ TEST_P(AqlPublicationTest, FullTransferStorageLeavesLaunchArgumentsAvailable) {
             IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE);
   IREE_ASSERT_OK(status);
   EXPECT_EQ(payload, source);
-  EXPECT_EQ(arguments_.end, 32u);
+  EXPECT_EQ(arguments_.end, sizeof(iree_hal_amd_gpu_blit_arguments_t));
   EXPECT_EQ(transfers.end, 4096u);
-  EXPECT_EQ(issued_[0].arguments, 32u);
+  EXPECT_EQ(issued_[0].arguments, sizeof(iree_hal_amd_gpu_blit_arguments_t));
   EXPECT_EQ(issued_[0].transfer.end, 4096u);
   EXPECT_EQ(PacketAddress(0, 10), arguments_.address);
   iree_hal_amd_gpu_blit_arguments_t blit;

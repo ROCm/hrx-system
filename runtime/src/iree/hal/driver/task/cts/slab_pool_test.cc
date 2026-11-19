@@ -572,10 +572,10 @@ TEST_P(TaskSlabPoolTest, PublicHostGrantsRemainIndependentOfExecution) {
       iree_infinite_timeout(), buffer.out()));
   SemaphoreList filled(devices_[0], {0}, {1});
   const uint32_t value = 0xAABBCCDD;
-  IREE_ASSERT_OK(
-      iree_hal_queue_fill(queues_[0], iree_hal_semaphore_list_empty(), filled,
-                          buffer, 0, sizeof(value), &value, sizeof(value),
-                          /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
+      queues_[0], iree_hal_semaphore_list_empty(), filled, buffer, 0,
+      sizeof(value), &value, sizeof(value),
+      /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));
   IREE_ASSERT_OK(Wait(filled));
   iree_hal_buffer_mapping_t mapping = {};
   IREE_EXPECT_STATUS_IS(
@@ -604,10 +604,10 @@ TEST_P(TaskSlabPoolTest, NativeOnlyScopeDoesNotInventSemanticPermissions) {
   uint32_t value = 42;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_PERMISSION_DENIED,
-      iree_hal_queue_update(queues_[0], iree_hal_semaphore_list_empty(),
-                            iree_hal_semaphore_list_empty(), &value, 0, buffer,
-                            0, sizeof(value), /*barriers=*/NULL,
-                            IREE_HAL_UPDATE_FLAG_NONE));
+      iree_hal_queue_update_linear(queues_[0], iree_hal_semaphore_list_empty(),
+                                   iree_hal_semaphore_list_empty(), &value, 0,
+                                   buffer, 0, sizeof(value), /*barriers=*/NULL,
+                                   IREE_HAL_UPDATE_FLAG_NONE));
   buffer.reset();
 }
 
@@ -683,18 +683,18 @@ TEST_P(TaskSlabPoolTest, InteriorArenasInheritTheCompleteScope) {
 
   SemaphoreList filled(devices_[0], {0}, {1});
   const uint32_t value = 0x01234567;
-  IREE_ASSERT_OK(iree_hal_queue_update(
+  IREE_ASSERT_OK(iree_hal_queue_update_linear(
       queues_[0], iree_hal_semaphore_list_empty(), filled, &value, 0, buffer, 0,
       sizeof(value), /*barriers=*/NULL, IREE_HAL_UPDATE_FLAG_NONE));
   uint32_t result = 0;
   SemaphoreList downloaded(devices_[1], {0}, {1});
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_PERMISSION_DENIED,
-      iree_hal_queue_download(queues_[2], filled, downloaded, buffer, 0,
-                              &result, sizeof(result), /*barriers=*/NULL));
-  IREE_ASSERT_OK(iree_hal_queue_download(queues_[1], filled, downloaded, buffer,
-                                         0, &result, sizeof(result),
-                                         /*barriers=*/NULL));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
+                        iree_hal_queue_download_linear(
+                            queues_[2], filled, downloaded, buffer, 0, &result,
+                            sizeof(result), /*barriers=*/NULL));
+  IREE_ASSERT_OK(iree_hal_queue_download_linear(
+      queues_[1], filled, downloaded, buffer, 0, &result, sizeof(result),
+      /*barriers=*/NULL));
   IREE_ASSERT_OK(Wait(downloaded));
   EXPECT_EQ(result, value);
   EXPECT_EQ(iree_atomic_ref_count_load(&buffer.get()->resource.ref_count), 1);
@@ -837,14 +837,14 @@ TEST_P(TaskSlabPoolTest, SharedBackingAcrossDevicesAndAllocationPolicies) {
       for (size_t i = 0; i < views.size(); ++i) {
         const iree_hal_semaphore_list_t done = {1, &uploaded.semaphores[i],
                                                 &uploaded.payload_values[i]};
-        IREE_ASSERT_OK(iree_hal_queue_upload(
+        IREE_ASSERT_OK(iree_hal_queue_upload_linear(
             queues_[0], allocated, done, inputs[i].data(), roots[i], 0,
             sizeof(inputs[i]), /*barriers=*/NULL));
       }
       const std::array<uint32_t, 3> workgroups = {1, 1, 1};
       const iree_hal_semaphore_list_t parameters_uploaded = {
           1, &uploaded.semaphores[3], &uploaded.payload_values[3]};
-      IREE_ASSERT_OK(iree_hal_queue_upload(
+      IREE_ASSERT_OK(iree_hal_queue_upload_linear(
           queues_[0], allocated, parameters_uploaded, workgroups.data(),
           roots[3], 0, sizeof(workgroups), /*barriers=*/NULL));
       const bool indirect = mode == DispatchMode::kIndirectRecording;
@@ -903,12 +903,12 @@ TEST_P(TaskSlabPoolTest, SharedBackingAcrossDevicesAndAllocationPolicies) {
       }
       std::array<float, 8> result = {};
       SemaphoreList downloaded(devices_[0], {0}, {1});
-      IREE_EXPECT_STATUS_IS(
-          IREE_STATUS_PERMISSION_DENIED,
-          iree_hal_queue_download(queues_[2], executed, downloaded, roots[2], 0,
-                                  result.data(), sizeof(result),
-                                  /*barriers=*/NULL));
-      IREE_ASSERT_OK(iree_hal_queue_download(
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
+                            iree_hal_queue_download_linear(
+                                queues_[2], executed, downloaded, roots[2], 0,
+                                result.data(), sizeof(result),
+                                /*barriers=*/NULL));
+      IREE_ASSERT_OK(iree_hal_queue_download_linear(
           queues_[0], executed, downloaded, roots[2], 0, result.data(),
           sizeof(result), /*barriers=*/NULL));
       IREE_ASSERT_OK(Wait(downloaded));
@@ -1014,9 +1014,9 @@ TEST_P(TaskSlabPoolTest, RecordedAtomicsSurviveReplacementFromAnotherPool) {
         iree_infinite_timeout(), backings[i].out()));
     const uint32_t initial = 40 + i;
     SemaphoreList initialized(devices_[0], {0}, {1});
-    IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {}, initialized, backings[i],
-                                       0, sizeof(initial), &initial,
-                                       sizeof(initial), nullptr, 0));
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
+        queues_[0], {}, initialized, backings[i], 0, sizeof(initial), &initial,
+        sizeof(initial), nullptr, 0));
     const iree_hal_memory_mapping_t mapping = {
         .target = target,
         .scope = all,
@@ -1032,9 +1032,9 @@ TEST_P(TaskSlabPoolTest, RecordedAtomicsSurviveReplacementFromAnotherPool) {
         iree_hal_queue_execute(queues_[1], mapped, executed, commands, {}, 0));
     uint32_t result = 0;
     SemaphoreList read(devices_[0], {0}, {1});
-    IREE_ASSERT_OK(iree_hal_queue_download(queues_[0], executed, read,
-                                           backings[i], 0, &result,
-                                           sizeof(result), nullptr));
+    IREE_ASSERT_OK(iree_hal_queue_download_linear(queues_[0], executed, read,
+                                                  backings[i], 0, &result,
+                                                  sizeof(result), nullptr));
     IREE_ASSERT_OK(Wait(read));
     EXPECT_EQ(result, initial + 1);
     const auto current = iree_hal_memory_transition_query(table, pair);
@@ -1100,12 +1100,12 @@ TEST_P(TaskSlabPoolTest, CapturedViewsKeepAddressesAliveThroughRemoval) {
   uint32_t observed = 0;
   IREE_EXPECT_OK(iree_hal_queue_map(queues_[0], gate, mapped, 1, &mapping,
                                     IREE_HAL_QUEUE_MAP_FLAG_NONE));
-  IREE_EXPECT_OK(iree_hal_queue_fill(queues_[1], mapped, filled, view, 0, kUnit,
-                                     &value, sizeof(value), nullptr,
-                                     IREE_HAL_FILL_FLAG_NONE));
-  IREE_EXPECT_OK(iree_hal_queue_download(queues_[0], filled, downloaded,
-                                         backing, 0, &observed,
-                                         sizeof(observed), nullptr));
+  IREE_EXPECT_OK(iree_hal_queue_fill_linear(queues_[1], mapped, filled, view, 0,
+                                            kUnit, &value, sizeof(value),
+                                            nullptr, IREE_HAL_FILL_FLAG_NONE));
+  IREE_EXPECT_OK(iree_hal_queue_download_linear(queues_[0], filled, downloaded,
+                                                backing, 0, &observed,
+                                                sizeof(observed), nullptr));
   mapping.source = nullptr;
   mapping.access = IREE_HAL_MEMORY_ACCESS_NONE;
   IREE_EXPECT_OK(iree_hal_queue_map(queues_[1], downloaded, detached, 1,
@@ -1180,10 +1180,10 @@ TEST_P(TaskSlabPoolTest, CapturedPoolViewsKeepTheirRangeUntilMappingCompletes) {
                         : IREE_HAL_QUEUE_MAP_FLAG_BORROW_BUFFERS;
     IREE_EXPECT_OK(iree_hal_queue_map(queues_[0], gate, mapped, 1, &mapping,
                                       mapping_flags));
-    IREE_EXPECT_OK(iree_hal_queue_fill(queues_[1], mapped, filled, view, 0,
-                                       kUnit, &value, sizeof(value), nullptr,
-                                       IREE_HAL_FILL_FLAG_NONE));
-    IREE_EXPECT_OK(iree_hal_queue_download(
+    IREE_EXPECT_OK(iree_hal_queue_fill_linear(
+        queues_[1], mapped, filled, view, 0, kUnit, &value, sizeof(value),
+        nullptr, IREE_HAL_FILL_FLAG_NONE));
+    IREE_EXPECT_OK(iree_hal_queue_download_linear(
         queues_[0], filled, downloaded, backing, generation * kUnit, &observed,
         sizeof(observed), nullptr));
     mapping.source = nullptr;
@@ -1258,12 +1258,12 @@ TEST_P(TaskSlabPoolTest, MappingTargetsResolveAfterQueuedAllocation) {
   uint32_t observed = 0;
   IREE_EXPECT_OK(iree_hal_queue_map(queues_[1], allocated, mapped, 1, &mapping,
                                     IREE_HAL_QUEUE_MAP_FLAG_NONE));
-  IREE_EXPECT_OK(iree_hal_queue_fill(queues_[1], mapped, filled, target, 0,
-                                     kUnit, &value, sizeof(value), nullptr,
-                                     IREE_HAL_FILL_FLAG_NONE));
-  IREE_EXPECT_OK(iree_hal_queue_download(queues_[0], filled, downloaded,
-                                         backing, 0, &observed,
-                                         sizeof(observed), nullptr));
+  IREE_EXPECT_OK(iree_hal_queue_fill_linear(queues_[1], mapped, filled, target,
+                                            0, kUnit, &value, sizeof(value),
+                                            nullptr, IREE_HAL_FILL_FLAG_NONE));
+  IREE_EXPECT_OK(iree_hal_queue_download_linear(queues_[0], filled, downloaded,
+                                                backing, 0, &observed,
+                                                sizeof(observed), nullptr));
   mapping.source = nullptr;
   mapping.access = IREE_HAL_MEMORY_ACCESS_NONE;
   IREE_EXPECT_OK(iree_hal_queue_map(queues_[1], downloaded, detached, 1,
@@ -1407,7 +1407,7 @@ TEST_P(TaskSlabPoolTest, BatchedMappingOrdersOldAndNewUsersAcrossReservations) {
   for (size_t i = 0; i < initial.size(); ++i) {
     const iree_hal_semaphore_list_t done = {1, &uploaded.semaphores[i],
                                             &uploaded.payload_values[i]};
-    IREE_ASSERT_OK(iree_hal_queue_fill(
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
         queues_[0], iree_hal_semaphore_list_empty(), done, backing, i * kUnit,
         kUnit, &initial[i], sizeof(float), nullptr, IREE_HAL_FILL_FLAG_NONE));
   }
@@ -1456,9 +1456,9 @@ TEST_P(TaskSlabPoolTest, BatchedMappingOrdersOldAndNewUsersAcrossReservations) {
   std::array<float, 4> result = {};
   // Hold old use while both replacement and its consumer are submitted. Queue
   // submission must return without waiting for this caller-controlled gate.
-  IREE_EXPECT_OK(iree_hal_queue_download(queues_[0], gate, old_done,
-                                         first_child, 0, old_values.data(),
-                                         sizeof(old_values), nullptr));
+  IREE_EXPECT_OK(iree_hal_queue_download_linear(
+      queues_[0], gate, old_done, first_child, 0, old_values.data(),
+      sizeof(old_values), nullptr));
   for (auto& mapping : mappings) {
     mapping.previous_source = mapping.source;
     mapping.previous_source_offset = mapping.source_offset;
@@ -1482,9 +1482,9 @@ TEST_P(TaskSlabPoolTest, BatchedMappingOrdersOldAndNewUsersAcrossReservations) {
       iree_hal_make_static_dispatch_config(1, 1, 1),
       iree_const_byte_span_empty(), {IREE_ARRAYSIZE(refs), refs}, nullptr,
       IREE_HAL_DISPATCH_FLAG_NONE));
-  IREE_EXPECT_OK(iree_hal_queue_download(queues_[0], dispatched, downloaded,
-                                         output, 0, result.data(),
-                                         sizeof(result), nullptr));
+  IREE_EXPECT_OK(iree_hal_queue_download_linear(
+      queues_[0], dispatched, downloaded, output, 0, result.data(),
+      sizeof(result), nullptr));
   uint64_t observed = UINT64_MAX;
   IREE_EXPECT_OK(iree_hal_semaphore_query(replaced.semaphores[0], &observed));
   EXPECT_EQ(observed, 0u);
@@ -1496,11 +1496,11 @@ TEST_P(TaskSlabPoolTest, BatchedMappingOrdersOldAndNewUsersAcrossReservations) {
   // Writes through the virtual buffer update the original physical storage.
   SemaphoreList written(devices_[1], {0}, {1});
   const float value = 11;
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       queues_[1], downloaded, written, first_child, 0, 4 * sizeof(float),
       &value, sizeof(value), nullptr, IREE_HAL_FILL_FLAG_NONE));
   SemaphoreList alias_read(devices_[0], {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_download(
+  IREE_ASSERT_OK(iree_hal_queue_download_linear(
       queues_[0], written, alias_read, backing, 2 * kUnit + kChildOffset,
       result.data(), sizeof(result), nullptr));
   IREE_ASSERT_OK(Wait(alias_read));
@@ -1530,9 +1530,9 @@ TEST_P(TaskSlabPoolTest, BatchedMappingOrdersOldAndNewUsersAcrossReservations) {
                                     &mappings[1],
                                     IREE_HAL_QUEUE_MAP_FLAG_NONE));
   SemaphoreList reuse_read(devices_[0], {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_download(queues_[0], reused, reuse_read,
-                                         second_child, 0, result.data(),
-                                         sizeof(result), nullptr));
+  IREE_ASSERT_OK(iree_hal_queue_download_linear(queues_[0], reused, reuse_read,
+                                                second_child, 0, result.data(),
+                                                sizeof(result), nullptr));
   IREE_ASSERT_OK(Wait(reuse_read));
   EXPECT_THAT(result, ::testing::ElementsAre(11, 11, 11, 11));
   mappings[1].operation = IREE_HAL_MEMORY_MAPPING_OPERATION_PROTECT;
@@ -1548,9 +1548,9 @@ TEST_P(TaskSlabPoolTest, BatchedMappingOrdersOldAndNewUsersAcrossReservations) {
                                     IREE_HAL_QUEUE_MAP_FLAG_NONE));
   SemaphoreList restored_read(devices_[0], {0}, {1});
   result.fill(0);
-  IREE_ASSERT_OK(iree_hal_queue_download(queues_[0], restored, restored_read,
-                                         second_child, 0, result.data(),
-                                         sizeof(result), nullptr));
+  IREE_ASSERT_OK(iree_hal_queue_download_linear(
+      queues_[0], restored, restored_read, second_child, 0, result.data(),
+      sizeof(result), nullptr));
   IREE_ASSERT_OK(Wait(restored_read));
   EXPECT_THAT(result, ::testing::ElementsAre(11, 11, 11, 11));
   EXPECT_EQ(iree_hal_buffer_memory_view(backing)
@@ -1648,14 +1648,14 @@ TEST_P(TaskSlabPoolTest, OnlyRootReservationEndPermitsAShortMappingUnit) {
         iree_hal_queue_map(queues_[1], {}, replaced, 1, &mapping, 0));
     const uint32_t pattern = 0xA5B61234u;
     SemaphoreList filled(devices_[0], {0}, {1});
-    IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], replaced, filled, final_view,
-                                       0, tail, &pattern, sizeof(pattern),
-                                       nullptr, IREE_HAL_FILL_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_queue_fill_linear(
+        queues_[0], replaced, filled, final_view, 0, tail, &pattern,
+        sizeof(pattern), nullptr, IREE_HAL_FILL_FLAG_NONE));
     std::array<uint32_t, 16> observed = {};
     SemaphoreList downloaded(devices_[1], {0}, {1});
-    IREE_ASSERT_OK(iree_hal_queue_download(queues_[1], filled, downloaded,
-                                           backing, unit, observed.data(),
-                                           sizeof(observed), nullptr));
+    IREE_ASSERT_OK(iree_hal_queue_download_linear(
+        queues_[1], filled, downloaded, backing, unit, observed.data(),
+        sizeof(observed), nullptr));
     IREE_ASSERT_OK(Wait(downloaded));
     for (const auto value : observed) {
       EXPECT_EQ(value, pattern);
@@ -1840,13 +1840,13 @@ TEST_P(TaskSlabPoolTest, QueueMappingSourcesRecycleThroughSharedSlabCache) {
                                       mappings.size(), mappings.data(),
                                       IREE_HAL_QUEUE_MAP_FLAG_NONE));
     const uint32_t value = 0x12345678;
-    IREE_EXPECT_OK(iree_hal_queue_fill(queues_[1], mapped, filled, target.get(),
-                                       0, 2 * kUnit, &value, sizeof(value),
-                                       nullptr, IREE_HAL_FILL_FLAG_NONE));
+    IREE_EXPECT_OK(iree_hal_queue_fill_linear(
+        queues_[1], mapped, filled, target.get(), 0, 2 * kUnit, &value,
+        sizeof(value), nullptr, IREE_HAL_FILL_FLAG_NONE));
     uint32_t observed = 0;
-    IREE_EXPECT_OK(iree_hal_queue_download(queues_[0], filled, downloaded,
-                                           roots[1], 0, &observed,
-                                           sizeof(observed), nullptr));
+    IREE_EXPECT_OK(iree_hal_queue_download_linear(
+        queues_[0], filled, downloaded, roots[1], 0, &observed,
+        sizeof(observed), nullptr));
     IREE_ASSERT_OK(iree_hal_semaphore_signal(gate.semaphores[0], 1, nullptr));
     IREE_ASSERT_OK(Wait(downloaded));
     EXPECT_EQ(observed, value);

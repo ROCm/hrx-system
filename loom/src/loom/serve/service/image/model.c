@@ -1271,7 +1271,12 @@ static iree_status_t loom_serve_image_begin(loom_serve_image_model_t* model) {
   upload.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
   upload.upload.source = input.data;
   upload.upload.target_buffer = model->invocation.input;
-  upload.upload.length = input.data_length;
+  const iree_hal_transfer_region_t region = {
+      .row_length = input.data_length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  upload.upload.region = &region;
   uint64_t completion = 0;
   IREE_RETURN_IF_ERROR(loom_runtime_execution_transfer(model->execution, 1,
                                                        &upload, &completion));

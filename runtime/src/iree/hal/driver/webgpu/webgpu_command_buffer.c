@@ -175,6 +175,9 @@ static iree_status_t iree_hal_webgpu_command_buffer_end(
         static_entries[i].gpu_buffer_handle = slot_entries[i].gpu_buffer_handle;
         static_entries[i].base_offset =
             0;  // Static: offset is in instructions.
+        static_entries[i].reserved = 0;
+        static_entries[i].length =
+            iree_hal_buffer_byte_length(slot_entries[i].buffer);
       }
     }
 
@@ -275,11 +278,12 @@ static iree_status_t iree_hal_webgpu_command_buffer_advise_buffer(
 static iree_status_t iree_hal_webgpu_command_buffer_fill_buffer(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_buffer_ref_t target_ref, const void* pattern,
-    iree_host_size_t pattern_length, iree_hal_fill_flags_t flags) {
+    iree_host_size_t pattern_length, const iree_hal_fill_region_t* region,
+    iree_hal_fill_flags_t flags) {
   iree_hal_webgpu_command_buffer_t* command_buffer =
       iree_hal_webgpu_command_buffer_cast(base_command_buffer);
   return iree_hal_webgpu_builder_fill_buffer(
-      &command_buffer->builder, target_ref, pattern, pattern_length);
+      &command_buffer->builder, target_ref, pattern, pattern_length, region);
 }
 
 //===----------------------------------------------------------------------===//
@@ -289,11 +293,12 @@ static iree_status_t iree_hal_webgpu_command_buffer_fill_buffer(
 static iree_status_t iree_hal_webgpu_command_buffer_update_buffer(
     iree_hal_command_buffer_t* base_command_buffer, const void* source_buffer,
     iree_host_size_t source_offset, iree_hal_buffer_ref_t target_ref,
-    iree_hal_update_flags_t flags) {
+    const iree_hal_transfer_region_t* region, iree_hal_update_flags_t flags) {
   iree_hal_webgpu_command_buffer_t* command_buffer =
       iree_hal_webgpu_command_buffer_cast(base_command_buffer);
-  return iree_hal_webgpu_builder_update_buffer(
-      &command_buffer->builder, source_buffer, source_offset, target_ref);
+  return iree_hal_webgpu_builder_update_buffer(&command_buffer->builder,
+                                               source_buffer, source_offset,
+                                               target_ref, region);
 }
 
 //===----------------------------------------------------------------------===//
@@ -303,11 +308,11 @@ static iree_status_t iree_hal_webgpu_command_buffer_update_buffer(
 static iree_status_t iree_hal_webgpu_command_buffer_copy_buffer(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_buffer_ref_t source_ref, iree_hal_buffer_ref_t target_ref,
-    iree_hal_copy_flags_t flags) {
+    const iree_hal_transfer_region_t* region, iree_hal_copy_flags_t flags) {
   iree_hal_webgpu_command_buffer_t* command_buffer =
       iree_hal_webgpu_command_buffer_cast(base_command_buffer);
   return iree_hal_webgpu_builder_copy_buffer(&command_buffer->builder,
-                                             source_ref, target_ref);
+                                             source_ref, target_ref, region);
 }
 
 //===----------------------------------------------------------------------===//

@@ -93,6 +93,12 @@ static iree_status_t iree_hal_webgpu_builder_reserve(
     uint32_t** out_words) {
   if (IREE_UNLIKELY(builder->cursor + word_count >
                     builder->block_word_capacity)) {
+    const uint32_t remaining = builder->block_word_capacity - builder->cursor;
+    if (remaining) {
+      builder->block_ptrs[builder->block_count - 1][builder->cursor] =
+          iree_hal_webgpu_isa_header_encode(IREE_HAL_WEBGPU_ISA_OP_BARRIER, 0,
+                                            remaining);
+    }
     IREE_RETURN_IF_ERROR(iree_hal_webgpu_builder_acquire_block(builder));
   }
   *out_words = &builder->block_ptrs[builder->block_count - 1][builder->cursor];
@@ -133,7 +139,7 @@ static iree_status_t iree_hal_webgpu_builder_ensure_slot_capacity(
 // static slot. instruction_offset = subspan_offset + caller_offset.
 static iree_status_t iree_hal_webgpu_builder_resolve_ref(
     iree_hal_webgpu_builder_t* builder, iree_hal_buffer_ref_t ref,
-    uint32_t* out_slot, uint32_t* out_offset) {
+    uint32_t* out_slot, iree_device_size_t* out_offset) {
   if (!ref.buffer) {
     // Indirect reference: slot is the binding table ordinal.
     if (ref.buffer_slot >= builder->dynamic_count) {
@@ -143,7 +149,7 @@ static iree_status_t iree_hal_webgpu_builder_resolve_ref(
           ref.buffer_slot, builder->dynamic_count);
     }
     *out_slot = ref.buffer_slot;
-    *out_offset = (uint32_t)ref.offset;
+    *out_offset = ref.offset;
     return iree_ok_status();
   }
 
@@ -152,8 +158,8 @@ static iree_status_t iree_hal_webgpu_builder_resolve_ref(
       iree_hal_buffer_allocated_buffer(ref.buffer);
   iree_hal_webgpu_handle_t gpu_buffer_handle =
       iree_hal_webgpu_buffer_handle(allocated_buffer);
-  uint32_t instruction_offset =
-      (uint32_t)(iree_hal_buffer_byte_offset(ref.buffer) + ref.offset);
+  iree_device_size_t instruction_offset =
+      iree_hal_buffer_byte_offset(ref.buffer) + ref.offset;
 
   // Search the slot map for an existing entry.
   for (uint32_t i = 0; i < builder->static_slot_count; ++i) {
@@ -294,125 +300,161 @@ iree_status_t iree_hal_webgpu_builder_finalize(
 // Command methods
 //===----------------------------------------------------------------------===//
 
+static void iree_hal_webgpu_builder_store_u64(uint32_t* words, uint64_t value) {
+  words[0] = (uint32_t)value;
+  words[1] = (uint32_t)(value >> 32);
+}
+
 iree_status_t iree_hal_webgpu_builder_fill_buffer(
     iree_hal_webgpu_builder_t* builder, iree_hal_buffer_ref_t target_ref,
-    const void* pattern, iree_host_size_t pattern_length) {
-  uint32_t dst_slot = 0;
-  uint32_t dst_offset = 0;
+    const void* pattern, iree_host_size_t pattern_length,
+    const iree_hal_fill_region_t* region) {
+  uint32_t target_slot = 0;
+  iree_device_size_t target_offset = 0;
   IREE_RETURN_IF_ERROR(iree_hal_webgpu_builder_resolve_ref(
-      builder, target_ref, &dst_slot, &dst_offset));
-
-  // Replicate the 1/2/4-byte pattern to fill a uint32.
-  uint32_t pattern_u32 = 0;
-  memcpy(&pattern_u32, pattern, pattern_length);
+      builder, target_ref, &target_slot, &target_offset));
+  uint32_t pattern_word = 0;
+  memcpy(&pattern_word, pattern, pattern_length);
   if (pattern_length == 1) {
-    pattern_u32 *= 0x01010101u;
-  } else if (pattern_length == 2) {
-    pattern_u32 |= pattern_u32 << 16;
+    pattern_word *= 0x01010101u;
   }
-
-  // FILL_BUFFER is an encoder command.
+  if (pattern_length == 2) {
+    pattern_word |= pattern_word << 16;
+  }
+  const bool rectangular = !iree_hal_transfer_range_is_linear(
+      region->row_length, region->row_count, region->slice_count,
+      &region->target_strides);
+  const uint32_t size_words = 7 + (rectangular ? 10 : 0);
   IREE_RETURN_IF_ERROR(iree_hal_webgpu_builder_ensure_encoder_open(builder));
-
-  uint32_t* words;
-  IREE_RETURN_IF_ERROR(iree_hal_webgpu_builder_reserve(builder, 6, &words));
+  uint32_t* words = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_webgpu_builder_reserve(builder, size_words, &words));
   words[0] = iree_hal_webgpu_isa_header_encode(
-      IREE_HAL_WEBGPU_ISA_OP_FILL_BUFFER, /*flags=*/0, /*size_words=*/6);
-  words[1] = dst_slot;
-  words[2] = dst_offset;
-  words[3] = (uint32_t)target_ref.length;
-  words[4] = pattern_u32;
-  words[5] = (uint32_t)pattern_length;
-
+      IREE_HAL_WEBGPU_ISA_OP_FILL_BUFFER,
+      rectangular ? IREE_HAL_WEBGPU_ISA_TRANSFER_FLAG_RECTANGULAR : 0,
+      size_words);
+  words[1] = target_slot;
+  iree_hal_webgpu_builder_store_u64(words + 2, target_offset);
+  iree_hal_webgpu_builder_store_u64(
+      words + 4,
+      target_ref.length == IREE_HAL_WHOLE_BUFFER && target_ref.buffer
+          ? iree_hal_buffer_byte_length(target_ref.buffer) - target_ref.offset
+          : target_ref.length);
+  words[6] = pattern_word;
+  if (rectangular) {
+    memcpy(words + 7, region, sizeof(*region));
+  }
   return iree_ok_status();
 }
 
 iree_status_t iree_hal_webgpu_builder_update_buffer(
     iree_hal_webgpu_builder_t* builder, const void* source_buffer,
-    iree_host_size_t source_offset, iree_hal_buffer_ref_t target_ref) {
-  uint32_t dst_slot = 0;
-  uint32_t dst_offset = 0;
+    iree_host_size_t source_offset, iree_hal_buffer_ref_t target_ref,
+    const iree_hal_transfer_region_t* region) {
+  uint32_t target_slot = 0;
+  iree_device_size_t target_offset = 0;
   IREE_RETURN_IF_ERROR(iree_hal_webgpu_builder_resolve_ref(
-      builder, target_ref, &dst_slot, &dst_offset));
-
-  // UPDATE_BUFFER is a queue command — close any open encoder first.
+      builder, target_ref, &target_slot, &target_offset));
   IREE_RETURN_IF_ERROR(iree_hal_webgpu_builder_ensure_encoder_closed(builder));
-
-  // Max inline data per instruction: block capacity minus the 4-word header.
-  const uint32_t max_data_words = builder->block_word_capacity - 4;
-  const uint32_t max_data_bytes = max_data_words * 4;
-
-  const uint8_t* source_data = (const uint8_t*)source_buffer + source_offset;
-  iree_host_size_t remaining = target_ref.length;
-  uint32_t chunk_dst_offset = dst_offset;
-
-  // Split large updates across multiple instructions to fit within blocks.
-  // With 64KB blocks this only fires for nearly-max-size updates (>65520
-  // bytes).
-  while (remaining > 0) {
-    iree_host_size_t chunk_length =
-        remaining > max_data_bytes ? max_data_bytes : remaining;
-    iree_host_size_t padded_length = iree_host_align(chunk_length, 4);
-    uint32_t data_words = (uint32_t)(padded_length / 4);
-    uint32_t size_words = 4 + data_words;
-
-    // Determine alignment flag for this chunk.
-    uint32_t flags = 0;
-    if ((chunk_dst_offset % 4 == 0) && (chunk_length % 4 == 0)) {
-      flags = IREE_HAL_WEBGPU_ISA_UPDATE_FLAG_ALIGNED;
+  const bool rectangular = !iree_hal_transfer_range_is_linear(
+      region->row_length, region->row_count, region->slice_count,
+      &region->target_strides);
+  const uint32_t header_words = 5 + (rectangular ? 14 : 0);
+  const uint32_t capacity = (builder->block_word_capacity - header_words) * 4;
+  const uint64_t length = iree_hal_transfer_region_length(region);
+  uint64_t position = 0;
+  iree_status_t status = iree_ok_status();
+  while (iree_status_is_ok(status) && position < length) {
+    const uint64_t column = position % region->row_length;
+    const uint64_t row = (position / region->row_length) % region->row_count;
+    const uint64_t slice = position / (region->row_length * region->row_count);
+    iree_hal_transfer_region_t chunk = *region;
+    chunk.row_length = iree_min(region->row_length - column, capacity);
+    chunk.row_count = 1;
+    chunk.slice_count = 1;
+    if (column == 0 && chunk.row_length == region->row_length) {
+      chunk.row_count =
+          iree_min(region->row_count - row, capacity / chunk.row_length);
+      if (row == 0 && chunk.row_count == region->row_count) {
+        chunk.slice_count =
+            iree_min(region->slice_count - slice,
+                     capacity / (chunk.row_length * chunk.row_count));
+      }
     }
-
-    uint32_t* words;
-    IREE_RETURN_IF_ERROR(
-        iree_hal_webgpu_builder_reserve(builder, size_words, &words));
-    words[0] = iree_hal_webgpu_isa_header_encode(
-        IREE_HAL_WEBGPU_ISA_OP_UPDATE_BUFFER, flags, size_words);
-    words[1] = dst_slot;
-    words[2] = chunk_dst_offset;
-    words[3] = (uint32_t)chunk_length;
-
-    // Copy inline data directly into the reserved instruction words.
-    // Zero-pad the trailing bytes of the last word if not 4-byte aligned.
-    uint8_t* data_dest = (uint8_t*)&words[4];
-    memcpy(data_dest, source_data, chunk_length);
-    if (padded_length > chunk_length) {
-      memset(data_dest + chunk_length, 0, padded_length - chunk_length);
+    chunk.source_strides.row_stride = chunk.row_length;
+    chunk.source_strides.slice_stride = chunk.row_length * chunk.row_count;
+    const uint32_t chunk_length =
+        (uint32_t)iree_hal_transfer_region_length(&chunk);
+    const uint32_t size_words = header_words + (chunk_length + 3) / 4;
+    uint32_t* words = NULL;
+    status = iree_hal_webgpu_builder_reserve(builder, size_words, &words);
+    if (iree_status_is_ok(status)) {
+      words[0] = iree_hal_webgpu_isa_header_encode(
+          IREE_HAL_WEBGPU_ISA_OP_UPDATE_BUFFER,
+          rectangular ? IREE_HAL_WEBGPU_ISA_TRANSFER_FLAG_RECTANGULAR : 0,
+          size_words);
+      words[1] = target_slot;
+      iree_hal_webgpu_builder_store_u64(
+          words + 2,
+          target_offset + column +
+              (region->row_count > 1 ? row * region->target_strides.row_stride
+                                     : 0) +
+              (region->slice_count > 1
+                   ? slice * region->target_strides.slice_stride
+                   : 0));
+      words[4] = chunk_length;
+      if (rectangular) {
+        memcpy(words + 5, &chunk, sizeof(chunk));
+      }
+      uint8_t* data = (uint8_t*)(words + header_words);
+      iree_hal_transfer_gather_host(
+          (const uint8_t*)source_buffer + source_offset, region, position,
+          chunk_length, data);
+      memset(data + chunk_length, 0,
+             (size_words - header_words) * 4 - chunk_length);
+      position += chunk_length;
     }
-
-    source_data += chunk_length;
-    chunk_dst_offset += (uint32_t)chunk_length;
-    remaining -= chunk_length;
   }
-
-  return iree_ok_status();
+  return status;
 }
 
 iree_status_t iree_hal_webgpu_builder_copy_buffer(
     iree_hal_webgpu_builder_t* builder, iree_hal_buffer_ref_t source_ref,
-    iree_hal_buffer_ref_t target_ref) {
-  uint32_t src_slot = 0;
-  uint32_t src_offset = 0;
+    iree_hal_buffer_ref_t target_ref,
+    const iree_hal_transfer_region_t* region) {
+  uint32_t source_slot = 0, target_slot = 0;
+  iree_device_size_t source_offset = 0, target_offset = 0;
   IREE_RETURN_IF_ERROR(iree_hal_webgpu_builder_resolve_ref(
-      builder, source_ref, &src_slot, &src_offset));
-
-  uint32_t dst_slot = 0;
-  uint32_t dst_offset = 0;
+      builder, source_ref, &source_slot, &source_offset));
   IREE_RETURN_IF_ERROR(iree_hal_webgpu_builder_resolve_ref(
-      builder, target_ref, &dst_slot, &dst_offset));
-
-  // COPY_BUFFER is an encoder command.
+      builder, target_ref, &target_slot, &target_offset));
+  const bool rectangular = !iree_hal_transfer_range_is_linear(
+                               region->row_length, region->row_count,
+                               region->slice_count, &region->source_strides) ||
+                           !iree_hal_transfer_range_is_linear(
+                               region->row_length, region->row_count,
+                               region->slice_count, &region->target_strides);
+  const uint32_t size_words = 9 + (rectangular ? 14 : 0);
   IREE_RETURN_IF_ERROR(iree_hal_webgpu_builder_ensure_encoder_open(builder));
-
-  uint32_t* words;
-  IREE_RETURN_IF_ERROR(iree_hal_webgpu_builder_reserve(builder, 6, &words));
+  uint32_t* words = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_webgpu_builder_reserve(builder, size_words, &words));
   words[0] = iree_hal_webgpu_isa_header_encode(
-      IREE_HAL_WEBGPU_ISA_OP_COPY_BUFFER, /*flags=*/0, /*size_words=*/6);
-  words[1] = src_slot;
-  words[2] = src_offset;
-  words[3] = dst_slot;
-  words[4] = dst_offset;
-  words[5] = (uint32_t)source_ref.length;
-
+      IREE_HAL_WEBGPU_ISA_OP_COPY_BUFFER,
+      rectangular ? IREE_HAL_WEBGPU_ISA_TRANSFER_FLAG_RECTANGULAR : 0,
+      size_words);
+  words[1] = source_slot;
+  iree_hal_webgpu_builder_store_u64(words + 2, source_offset);
+  words[4] = target_slot;
+  iree_hal_webgpu_builder_store_u64(words + 5, target_offset);
+  iree_hal_webgpu_builder_store_u64(
+      words + 7,
+      target_ref.length == IREE_HAL_WHOLE_BUFFER && target_ref.buffer
+          ? iree_hal_buffer_byte_length(target_ref.buffer) - target_ref.offset
+          : target_ref.length);
+  if (rectangular) {
+    memcpy(words + 9, region, sizeof(*region));
+  }
   return iree_ok_status();
 }
 
@@ -425,14 +467,13 @@ iree_status_t iree_hal_webgpu_builder_dispatch(
   IREE_RETURN_IF_ERROR(iree_hal_webgpu_builder_ensure_encoder_open(builder));
 
   uint32_t binding_count = (uint32_t)bindings.count;
-  uint32_t size_words = 6 + binding_count * 3;
+  uint32_t size_words = 6 + binding_count * 5;
 
-  // Reserve the header. Bindings are resolved individually below and may grow
-  // the slot map, so we can't reserve the full instruction upfront (the slot
-  // map growth path allocates, and we need reserve to have completed first).
-  uint32_t* header_words;
+  // Keep the complete instruction in one block; resolving slots may grow
+  // their index, but cannot move the reserved instruction storage.
+  uint32_t* header_words = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_hal_webgpu_builder_reserve(builder, 6, &header_words));
+      iree_hal_webgpu_builder_reserve(builder, size_words, &header_words));
   header_words[0] = iree_hal_webgpu_isa_header_encode(
       IREE_HAL_WEBGPU_ISA_OP_DISPATCH, /*flags=*/0, size_words);
   header_words[1] = pipeline_handle;
@@ -445,7 +486,7 @@ iree_status_t iree_hal_webgpu_builder_dispatch(
   for (uint32_t i = 0; i < binding_count; ++i) {
     iree_hal_buffer_ref_t binding = bindings.values[i];
     uint32_t slot = 0;
-    uint32_t offset = 0;
+    iree_device_size_t offset = 0;
     if (binding.buffer) {
       IREE_RETURN_IF_ERROR(iree_hal_webgpu_builder_resolve_ref(builder, binding,
                                                                &slot, &offset));
@@ -459,14 +500,12 @@ iree_status_t iree_hal_webgpu_builder_dispatch(
             i, binding.buffer_slot, builder->dynamic_count);
       }
       slot = binding.buffer_slot;
-      offset = (uint32_t)binding.offset;
+      offset = binding.offset;
     }
-    uint32_t* binding_words;
-    IREE_RETURN_IF_ERROR(
-        iree_hal_webgpu_builder_reserve(builder, 3, &binding_words));
+    uint32_t* binding_words = header_words + 6 + i * 5;
     binding_words[0] = slot;
-    binding_words[1] = offset;
-    binding_words[2] = (uint32_t)binding.length;
+    iree_hal_webgpu_builder_store_u64(binding_words + 1, offset);
+    iree_hal_webgpu_builder_store_u64(binding_words + 3, binding.length);
   }
 
   return iree_ok_status();

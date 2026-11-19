@@ -194,12 +194,17 @@ void BM_TransitionBacking(benchmark::State& state) {
   for (uint64_t offset : {uint64_t{0}, last_offset}) {
     const uint32_t expected = 0x12345678u ^ static_cast<uint32_t>(offset);
     ++value;
-    IREE_CHECK_OK(iree_hal_queue_fill(queue, {}, {1, &ready, &value}, handle,
-                                      offset, sizeof(expected), &expected,
-                                      sizeof(expected), nullptr, 0));
+    IREE_CHECK_OK(iree_hal_queue_fill_linear(
+        queue, {}, {1, &ready, &value}, handle, offset, sizeof(expected),
+        &expected, sizeof(expected), nullptr, 0));
     IREE_CHECK_OK(iree_hal_semaphore_wait(ready, value, iree_infinite_timeout(),
                                           IREE_ASYNC_WAIT_FLAG_NONE));
     uint32_t observed = 0;
+    const iree_hal_transfer_region_t download_region = {
+        .row_length = sizeof(observed),
+        .row_count = 1,
+        .slice_count = 1,
+    };
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
@@ -207,7 +212,7 @@ void BM_TransitionBacking(benchmark::State& state) {
                 .source_buffer = handle,
                 .source_offset = offset,
                 .target = &observed,
-                .length = sizeof(observed),
+                .region = &download_region,
             },
     };
     ++value;

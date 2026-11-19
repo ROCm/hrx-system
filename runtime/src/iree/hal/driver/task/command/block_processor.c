@@ -1234,8 +1234,35 @@ static void iree_hal_cmd_execute_fill_tile(const iree_hal_cmd_fill_t* fill,
       iree_hal_cmd_transfer_tile_offset(tile);
   const iree_device_size_t tile_length =
       iree_hal_cmd_transfer_tile_length(params->length, tile);
-  iree_hal_cmd_fill_pattern(target + params->target_offset + tile_offset,
-                            tile_length, params->pattern, fill->pattern_length);
+  if (!(fill->header.flags & IREE_HAL_CMD_FLAG_RECTANGULAR)) {
+    iree_hal_cmd_fill_pattern(target + params->target_offset + tile_offset,
+                              tile_length, params->pattern,
+                              fill->pattern_length);
+    return;
+  }
+  const iree_hal_fill_region_t* region = (const void*)(fill + 1);
+  const uint64_t slice_length = region->row_length * region->row_count;
+  uint64_t slice = tile_offset / slice_length;
+  uint64_t row = (tile_offset % slice_length) / region->row_length;
+  uint64_t column = tile_offset % region->row_length;
+  const uint64_t target_row =
+      region->row_count > 1 ? region->target_strides.row_stride : 0;
+  const uint64_t target_slice =
+      region->slice_count > 1 ? region->target_strides.slice_stride : 0;
+  uint64_t remaining = tile_length;
+  while (remaining) {
+    const uint64_t part = iree_min(remaining, region->row_length - column);
+    uint8_t* target_bytes = target + params->target_offset + column +
+                            row * target_row + slice * target_slice;
+    iree_hal_cmd_fill_pattern(target_bytes, part, params->pattern,
+                              fill->pattern_length);
+    remaining -= part;
+    column = 0;
+    if (++row == region->row_count) {
+      row = 0;
+      ++slice;
+    }
+  }
 }
 
 // Executes a FILL command by claiming transfer tiles with the same epoch-tagged
@@ -1269,7 +1296,8 @@ static uint32_t iree_hal_cmd_execute_fill(const iree_hal_cmd_fill_t* fill,
   return completed;
 }
 
-static void iree_hal_cmd_execute_copy_tile(const uint8_t* source,
+static void iree_hal_cmd_execute_copy_tile(const iree_hal_cmd_copy_t* copy,
+                                           const uint8_t* source,
                                            uint8_t* target,
                                            const iree_hal_copy_params_t* params,
                                            uint32_t tile) {
@@ -1277,8 +1305,39 @@ static void iree_hal_cmd_execute_copy_tile(const uint8_t* source,
       iree_hal_cmd_transfer_tile_offset(tile);
   const iree_device_size_t tile_length =
       iree_hal_cmd_transfer_tile_length(params->length, tile);
-  memcpy(target + params->target_offset + tile_offset,
-         source + params->source_offset + tile_offset, (size_t)tile_length);
+  if (!(copy->header.flags & IREE_HAL_CMD_FLAG_RECTANGULAR)) {
+    memcpy(target + params->target_offset + tile_offset,
+           source + params->source_offset + tile_offset, (size_t)tile_length);
+    return;
+  }
+  const iree_hal_transfer_region_t* region = (const void*)(copy + 1);
+  const uint64_t slice_length = region->row_length * region->row_count;
+  uint64_t slice = tile_offset / slice_length;
+  uint64_t row = (tile_offset % slice_length) / region->row_length;
+  uint64_t column = tile_offset % region->row_length;
+  const uint64_t target_row =
+      region->row_count > 1 ? region->target_strides.row_stride : 0;
+  const uint64_t target_slice =
+      region->slice_count > 1 ? region->target_strides.slice_stride : 0;
+  const uint64_t source_row =
+      region->row_count > 1 ? region->source_strides.row_stride : 0;
+  const uint64_t source_slice =
+      region->slice_count > 1 ? region->source_strides.slice_stride : 0;
+  uint64_t remaining = tile_length;
+  while (remaining) {
+    const uint64_t part = iree_min(remaining, region->row_length - column);
+    uint8_t* target_bytes = target + params->target_offset + column +
+                            row * target_row + slice * target_slice;
+    const uint8_t* source_bytes = source + params->source_offset + column +
+                                  row * source_row + slice * source_slice;
+    memcpy(target_bytes, source_bytes, (size_t)part);
+    remaining -= part;
+    column = 0;
+    if (++row == region->row_count) {
+      row = 0;
+      ++slice;
+    }
+  }
 }
 
 // Executes a COPY command by claiming transfer tiles with the same epoch-tagged
@@ -1299,14 +1358,14 @@ static uint32_t iree_hal_cmd_execute_copy(const iree_hal_cmd_copy_t* copy,
   uint32_t completed = 0;
   if (worker_count == 1) {
     for (uint32_t tile = 0; tile < tile_count; ++tile) {
-      iree_hal_cmd_execute_copy_tile(source, target, params, tile);
+      iree_hal_cmd_execute_copy_tile(copy, source, target, params, tile);
     }
     completed = tile_count;
   } else {
     uint32_t tile = 0;
     while (iree_hal_cmd_transfer_claim_tile(tile_index, region_epoch,
                                             tile_count, &tile)) {
-      iree_hal_cmd_execute_copy_tile(source, target, params, tile);
+      iree_hal_cmd_execute_copy_tile(copy, source, target, params, tile);
       ++completed;
     }
   }
@@ -1400,8 +1459,14 @@ static uint32_t iree_hal_cmd_execute_update(const iree_hal_cmd_update_t* update,
   }
 
   uint8_t* target = (uint8_t*)binding_ptrs[update->target_binding];
-  memcpy(target + update->target_offset, update->source_data,
-         (size_t)update->length);
+  if (update->header.flags & IREE_HAL_CMD_FLAG_RECTANGULAR) {
+    const iree_hal_transfer_region_t* region = (const void*)update->source_data;
+    iree_hal_transfer_copy_host(region + 1, target + update->target_offset,
+                                region);
+  } else {
+    memcpy(target + update->target_offset, update->source_data,
+           (size_t)update->length);
+  }
 
   return tile_count;
 }

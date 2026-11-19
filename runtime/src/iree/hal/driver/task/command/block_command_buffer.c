@@ -879,13 +879,14 @@ static iree_status_t iree_hal_block_command_buffer_advise_buffer(
 }
 
 //===----------------------------------------------------------------------===//
-// iree_hal_command_buffer_fill_buffer
+// iree_hal_command_buffer_fill_buffer_linear
 //===----------------------------------------------------------------------===//
 
 static iree_status_t iree_hal_block_command_buffer_fill_buffer(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_buffer_ref_t target_ref, const void* pattern,
-    iree_host_size_t pattern_length, iree_hal_fill_flags_t flags) {
+    iree_host_size_t pattern_length, const iree_hal_fill_region_t* region,
+    iree_hal_fill_flags_t flags) {
   iree_hal_block_command_buffer_t* command_buffer =
       iree_hal_block_command_buffer_cast(base_command_buffer);
 
@@ -897,9 +898,9 @@ static iree_status_t iree_hal_block_command_buffer_fill_buffer(
   iree_hal_cmd_build_token_t token;
   IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_profile_reserve_operations(
       command_buffer, command_buffer->profile.operations.count + 1));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_cmd_build_fill(&command_buffer->builder, target_ref.length,
-                              pattern, pattern_length, &fixups, &token));
+  IREE_RETURN_IF_ERROR(iree_hal_cmd_build_fill(&command_buffer->builder, region,
+                                               pattern, pattern_length, &fixups,
+                                               &token));
 
   iree_status_t status = iree_hal_block_command_buffer_resolve_refs(
       command_buffer, 1, &target_ref, fixups);
@@ -920,7 +921,7 @@ static iree_status_t iree_hal_block_command_buffer_fill_buffer(
 static iree_status_t iree_hal_block_command_buffer_update_buffer(
     iree_hal_command_buffer_t* base_command_buffer, const void* source_buffer,
     iree_host_size_t source_offset, iree_hal_buffer_ref_t target_ref,
-    iree_hal_update_flags_t flags) {
+    const iree_hal_transfer_region_t* region, iree_hal_update_flags_t flags) {
   iree_hal_block_command_buffer_t* command_buffer =
       iree_hal_block_command_buffer_cast(base_command_buffer);
 
@@ -933,28 +934,25 @@ static iree_status_t iree_hal_block_command_buffer_update_buffer(
   // Public updates may exceed one command's inline payload. Capture disjoint
   // pieces in the existing immutable block stream; execution and retirement
   // retain the same binding and block ownership as smaller updates.
-  const iree_device_size_t piece_capacity =
-      IREE_HAL_CMD_MAX_BYTE_LENGTH -
-      offsetof(iree_hal_cmd_update_t, source_data);
+  const iree_device_size_t length = iree_hal_transfer_region_length(region);
   iree_status_t status = iree_ok_status();
   for (iree_device_size_t offset = 0;
-       offset < target_ref.length && iree_status_is_ok(status);) {
-    iree_hal_buffer_ref_t piece = target_ref;
-    piece.offset += offset;
-    piece.length = iree_min(piece_capacity, target_ref.length - offset);
+       offset < length && iree_status_is_ok(status);) {
     iree_hal_cmd_fixup_t* fixups = NULL;
     iree_hal_cmd_build_token_t token;
     status = iree_hal_cmd_build_update(&command_buffer->builder, source_buffer,
-                                       source_offset + offset, piece.length,
-                                       &fixups, &token);
+                                       source_offset, region, offset, &fixups,
+                                       &token);
     if (iree_status_is_ok(status)) {
       status = iree_hal_block_command_buffer_resolve_refs(command_buffer, 1,
-                                                          &piece, fixups);
+                                                          &target_ref, fixups);
       if (!iree_status_is_ok(status)) {
         iree_hal_cmd_build_rollback(&command_buffer->builder, token);
       }
     }
-    offset += piece.length;
+    if (iree_status_is_ok(status)) {
+      offset += ((const iree_hal_cmd_update_t*)token.command)->length;
+    }
   }
   if (iree_status_is_ok(status)) {
     iree_hal_block_command_buffer_profile_append_target(
@@ -971,7 +969,7 @@ static iree_status_t iree_hal_block_command_buffer_update_buffer(
 static iree_status_t iree_hal_block_command_buffer_copy_buffer(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_buffer_ref_t source_ref, iree_hal_buffer_ref_t target_ref,
-    iree_hal_copy_flags_t flags) {
+    const iree_hal_transfer_region_t* region, iree_hal_copy_flags_t flags) {
   iree_hal_block_command_buffer_t* command_buffer =
       iree_hal_block_command_buffer_cast(base_command_buffer);
 
@@ -987,8 +985,8 @@ static iree_status_t iree_hal_block_command_buffer_copy_buffer(
   iree_hal_cmd_build_token_t token;
   IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_profile_reserve_operations(
       command_buffer, command_buffer->profile.operations.count + 1));
-  IREE_RETURN_IF_ERROR(iree_hal_cmd_build_copy(
-      &command_buffer->builder, target_ref.length, &fixups, &token));
+  IREE_RETURN_IF_ERROR(iree_hal_cmd_build_copy(&command_buffer->builder, region,
+                                               &fixups, &token));
 
   iree_status_t status = iree_hal_block_command_buffer_resolve_refs(
       command_buffer, IREE_ARRAYSIZE(refs), refs, fixups);

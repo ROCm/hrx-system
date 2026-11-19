@@ -1300,6 +1300,7 @@ TEST(ReplayDumpTest, EmitsQueueObjectsAndTransferRanges) {
   };
   iree_hal_replay_queue_transfer_operation_payload_t operation = {
       .type = IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_UPDATE,
+      .region = {.row_length = 4, .row_count = 1, .slice_count = 1},
   };
   operation.target_ref.buffer_id = 7;
   operation.target_ref.length = 4;

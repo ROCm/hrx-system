@@ -26,9 +26,8 @@
 // total_count) resolved once at recording creation. This allows reusable
 // command buffers to pay zero cost for static bindings in steady state.
 //
-// All buffer offsets and lengths are uint32. No shipping WebGPU implementation
-// supports buffers larger than 4GB (spec minimum maxBufferSize is 256MB,
-// practical limit is 2-4GB).
+// Byte offsets, lengths, and geometry use little-endian uint64 word pairs.
+// Native shader indices are bounded at encoding by actual device limits.
 
 #ifndef IREE_HAL_DRIVER_WEBGPU_WEBGPU_ISA_H_
 #define IREE_HAL_DRIVER_WEBGPU_WEBGPU_ISA_H_
@@ -115,12 +114,6 @@ static inline uint32_t iree_hal_webgpu_isa_header_size_words(uint32_t header) {
 // Per-opcode flags
 //===----------------------------------------------------------------------===//
 
-// UPDATE_BUFFER flag: all offsets and lengths are 4-byte aligned. When set and
-// the runtime base_offset is also aligned, the processor can use
-// queue.writeBuffer() directly from wasm memory. Otherwise a staging buffer
-// and copy compute shader are required.
-#define IREE_HAL_WEBGPU_ISA_UPDATE_FLAG_ALIGNED 0x01
-
 //===----------------------------------------------------------------------===//
 // Instruction layouts
 //===----------------------------------------------------------------------===//
@@ -136,28 +129,17 @@ static inline uint32_t iree_hal_webgpu_isa_header_size_words(uint32_t header) {
 //     The effective GPU byte offset is: binding_table[slot].base_offset +
 //     offset.
 //   - For static slots, base_offset is always 0 (the instruction offset
-//   includes
-//     the full subspan offset).
+//     includes the full subspan offset).
 //   - For dynamic slots, base_offset comes from the HAL binding table entry at
 //     issue time, and the instruction offset is the caller's offset only.
 
-// UPDATE_BUFFER (0x01) — size_words = 4 + ceil(length / 4)
-//
-// Writes inline host data to a GPU buffer. The data is padded to a uint32
-// boundary in the instruction stream.
-//
-// [0] header
-// [1] dst_slot
-// [2] dst_offset
-// [3] length (max 64KB per HAL contract)
-// [4..] inline host data (padded to uint32 boundary)
-typedef struct iree_hal_webgpu_isa_update_buffer_t {
-  uint32_t header;
-  uint32_t dst_slot;
-  uint32_t dst_offset;
-  uint32_t length;
-  // uint32_t data[]; — variable-length inline data follows
-} iree_hal_webgpu_isa_update_buffer_t;
+// Transfer geometry follows the fixed command when this flag is set. UPDATE
+// and COPY use iree_hal_transfer_region_t (14 words); FILL uses
+// iree_hal_fill_region_t (10 words). Unused strides are ignored.
+#define IREE_HAL_WEBGPU_ISA_TRANSFER_FLAG_RECTANGULAR 1u
+
+// UPDATE_BUFFER: header, target slot, uint64 offset, uint32 useful length,
+// optional geometry, then packed source bytes rounded up to a whole word.
 
 // ENCODER_BEGIN (0x10) — size_words = 1
 //
@@ -174,47 +156,16 @@ typedef struct iree_hal_webgpu_isa_update_buffer_t {
 // finalize. Processor calls encoder.finish() and pushes the resulting
 // GPUCommandBuffer to a pending array.
 
-// COPY_BUFFER (0x12) — size_words = 6
-//
-// [0] header
-// [1] src_slot
-// [2] src_offset
-// [3] dst_slot
-// [4] dst_offset
-// [5] length
-//
-// Processor checks runtime alignment of (src_base + src_offset),
-// (dst_base + dst_offset), and length. If all are 4-byte aligned, uses
-// encoder.copyBufferToBuffer(). Otherwise dispatches the copy builtin shader.
-typedef struct iree_hal_webgpu_isa_copy_buffer_t {
-  uint32_t header;
-  uint32_t src_slot;
-  uint32_t src_offset;
-  uint32_t dst_slot;
-  uint32_t dst_offset;
-  uint32_t length;
-} iree_hal_webgpu_isa_copy_buffer_t;
+// COPY_BUFFER: header, source slot, uint64 source offset, target slot,
+// uint64 target offset, uint64 length, optional transfer geometry.
+// Linear aligned copies use copyBufferToBuffer; other copies share the shader.
+// UINT64_MAX length resolves against the supplied binding window.
 
-// FILL_BUFFER (0x13) — size_words = 6
-//
-// [0] header
-// [1] dst_slot
-// [2] dst_offset
-// [3] length
-// [4] pattern (pre-replicated to uint32: 1B×4, 2B×2, 4B as-is)
-// [5] pattern_length (original 1, 2, or 4 — for edge word handling)
-//
-// Always dispatches the fill builtin shader (WebGPU has no native fill).
-typedef struct iree_hal_webgpu_isa_fill_buffer_t {
-  uint32_t header;
-  uint32_t dst_slot;
-  uint32_t dst_offset;
-  uint32_t length;
-  uint32_t pattern;
-  uint32_t pattern_length;
-} iree_hal_webgpu_isa_fill_buffer_t;
+// FILL_BUFFER: header, target slot, uint64 target offset, uint64 length,
+// uint32 replicated pattern, optional fill geometry. Linear and rectangular
+// fills share the same shader body.
 
-// DISPATCH (0x15) — size_words = 6 + binding_count * 3
+// DISPATCH (0x15) — size_words = 6 + binding_count * 5
 //
 // [0] header
 // [1] pipeline_handle
@@ -223,11 +174,11 @@ typedef struct iree_hal_webgpu_isa_fill_buffer_t {
 // [4] workgroup_y
 // [5] workgroup_z
 // For each binding [i]:
-//   [6 + i*3 + 0] slot
-//   [6 + i*3 + 1] offset
-//   [6 + i*3 + 2] length
+//   [6 + i*5 + 0] slot
+//   [6 + i*5 + 1..2] uint64 offset
+//   [6 + i*5 + 3..4] uint64 length
 //
-// binding_count = (size_words - 6) / 3
+// binding_count = (size_words - 6) / 5
 //
 // Pipeline and bind group layout handles are baked at recording time from the
 // executable. The processor creates a bind group from the layout and resolved
@@ -243,11 +194,7 @@ typedef struct iree_hal_webgpu_isa_dispatch_t {
 } iree_hal_webgpu_isa_dispatch_t;
 
 // Per-binding entry within a DISPATCH instruction.
-typedef struct iree_hal_webgpu_isa_dispatch_binding_t {
-  uint32_t slot;
-  uint32_t offset;
-  uint32_t length;
-} iree_hal_webgpu_isa_dispatch_binding_t;
+// Each dispatch binding is slot, uint64 offset, uint64 length (five words).
 
 // BARRIER (0x20) — size_words = 1
 //
@@ -268,16 +215,18 @@ typedef struct iree_hal_webgpu_isa_dispatch_binding_t {
 // Binding table wire format
 //===----------------------------------------------------------------------===//
 
-// Wire format for a single binding table entry passed from wasm to JS.
-// The binding table is a flat array in wasm linear memory, 2 words per entry.
-//
-// For static entries: gpu_buffer_handle is resolved at recording creation,
-//   base_offset is 0 (instruction offsets include full subspan offset).
-// For dynamic entries: gpu_buffer_handle is resolved per issue from the HAL
-//   binding table, base_offset is the subspan offset from the HAL entry.
+// One native binding window; explicit padding fixes the wasm/native layout.
+// Static offsets are encoded in commands; dynamic offsets include the subspan
+// and the binding table entry offset. Length bounds WHOLE_BUFFER operations.
 typedef struct iree_hal_webgpu_isa_binding_table_entry_t {
+  // JS handle for the allocated GPU buffer.
   uint32_t gpu_buffer_handle;
-  uint32_t base_offset;
+  // Zeroed padding before the 64-bit fields.
+  uint32_t reserved;
+  // First accessible byte in the allocated buffer.
+  uint64_t base_offset;
+  // Accessible bytes from base_offset.
+  uint64_t length;
 } iree_hal_webgpu_isa_binding_table_entry_t;
 
 //===----------------------------------------------------------------------===//

@@ -465,17 +465,32 @@ TEST_F(BlockBuilderTest, BlockSplitOnRegionTileCountLimit) {
   for (iree_device_size_t length : {maximum_length, (iree_device_size_t)1}) {
     iree_hal_cmd_fixup_t* fixups = nullptr;
     iree_hal_cmd_build_token_t token;
-    IREE_ASSERT_OK(iree_hal_cmd_build_fill(&builder, length, &pattern, 1,
+    const iree_hal_fill_region_t region = {
+        .row_length = length,
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    IREE_ASSERT_OK(iree_hal_cmd_build_fill(&builder, &region, &pattern, 1,
                                            &fixups, &token));
   }
   iree_hal_cmd_fixup_t* fixups = nullptr;
   iree_hal_cmd_build_token_t token;
+  const iree_hal_fill_region_t fill_region = {
+      .row_length = maximum_length + 1,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  const iree_hal_transfer_region_t copy_region = {
+      .row_length = maximum_length + 1,
+      .row_count = 1,
+      .slice_count = 1,
+  };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        iree_hal_cmd_build_fill(&builder, maximum_length + 1,
+                        iree_hal_cmd_build_fill(&builder, &fill_region,
                                                 &pattern, 1, &fixups, &token));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
-      iree_hal_cmd_build_copy(&builder, maximum_length + 1, &fixups, &token));
+      iree_hal_cmd_build_copy(&builder, &copy_region, &fixups, &token));
   iree_hal_cmd_block_recording_t recording;
   IREE_ASSERT_OK(iree_hal_cmd_block_builder_end(&builder, &recording));
   ASSERT_EQ(recording.block_count, 2);

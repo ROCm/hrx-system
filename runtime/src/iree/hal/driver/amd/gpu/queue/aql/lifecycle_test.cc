@@ -125,18 +125,30 @@ class AqlLifecycleTest : public ::testing::Test {
     }
     if (partial || downloads) {
       std::array<iree_hal_transfer_operation_t, 6> operations = {};
+      std::array<iree_hal_fill_region_t, 6> fill_regions;
+      std::array<iree_hal_transfer_region_t, 6> download_regions;
       const uint32_t pattern = 0;
       for (size_t i = 0; i < references.size(); ++i) {
         references[i].buffer->memory = {
             .contract = contract_,
             .bindings = &bindings_[i],
         };
+        fill_regions[i] = iree_hal_fill_region_t{
+            .row_length = bytes_[i].size(),
+            .row_count = 1,
+            .slice_count = 1,
+        };
+        download_regions[i] = iree_hal_transfer_region_t{
+            .row_length = targets_[i].size(),
+            .row_count = 1,
+            .slice_count = 1,
+        };
         operations[i] = {
             .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
             .fill =
                 {
                     .target_buffer = references[i].buffer,
-                    .length = bytes_[i].size(),
+                    .region = &fill_regions[i],
                     .pattern = &pattern,
                     .pattern_length = sizeof(pattern),
                 },
@@ -148,7 +160,7 @@ class AqlLifecycleTest : public ::testing::Test {
                   {
                       .source_buffer = references[i].buffer,
                       .target = targets_[i].data(),
-                      .length = targets_[i].size(),
+                      .region = &download_regions[i],
                   },
           };
         }

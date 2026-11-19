@@ -17,7 +17,8 @@ uint64_t iree_hal_amd_gpu_aql_transfer_staging_length(
   }
   if (!transfer->host_completion_required) {
     if (!transfer->staging_capacity ||
-        transfer->operations[transfer->cursor.index].length <=
+        iree_hal_amd_gpu_transfer_operation_length(
+            &transfer->operations[transfer->cursor.index]) <=
             transfer->staging_capacity) {
       return length;
     }
@@ -32,12 +33,17 @@ uint64_t iree_hal_amd_gpu_aql_transfer_staging_length(
 }
 
 iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_transfer_packet(
-    uint64_t kernel, uint64_t arguments, uint64_t length, uint32_t header) {
-  const uint32_t groups = iree_hal_amd_gpu_blit_workgroup_count(length);
+    uint64_t kernel, uint64_t arguments, const uint32_t workgroup_count[3],
+    uint32_t header) {
+  const uint32_t dimensions = workgroup_count[2] > 1   ? 3
+                              : workgroup_count[1] > 1 ? 2
+                                                       : 1;
   const iree_hal_amd_gpu_aql_dispatch_t dispatch = {
-      .header = IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH | (1u << 16) | header,
+      .header =
+          IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH | (dimensions << 16) | header,
       .workgroup_size = {64, 1, 1},
-      .grid_size = {groups * 64, 1, 1},
+      .grid_size = {workgroup_count[0] * 64, workgroup_count[1],
+                    workgroup_count[2]},
       .kernel_object = kernel,
       .kernarg_address = arguments,
   };
@@ -68,34 +74,51 @@ iree_status_t iree_hal_amd_gpu_aql_transfer_prepare_chunk(
     const bool download =
         operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
     const uint64_t offset = out_chunk->next.offset;
-    iree_hal_amd_gpu_blit_arguments_t arguments = {
-        .length = operation->length - offset,
-        .pattern = operation->pattern,
-        .fill = fill,
-    };
+    const uint64_t total_length =
+        iree_hal_amd_gpu_transfer_operation_length(operation);
+    uint64_t length = total_length - offset;
     if (!copy && !fill) {
-      arguments.length = iree_min(
-          arguments.length, staging.data_length - out_chunk->staging_length);
-      if (!arguments.length) {
+      length =
+          iree_min(length, staging.data_length - out_chunk->staging_length);
+      if (!length) {
         break;
       }
     }
+    iree_hal_amd_gpu_blit_arguments_t arguments = {
+        .source = offset,
+        .target = offset,
+        .length = length,
+        .row_count = 1,
+        .slice_count = 1,
+        .groups_y = 1,
+        .groups_z = 1,
+    };
+    if (operation->rectangular) {
+      length = iree_hal_amd_gpu_blit_prepare_region(operation->region, offset,
+                                                    length, &arguments);
+    }
+    arguments.pattern = operation->pattern;
+    arguments.fill = fill;
+    uint64_t source = 0, target = 0;
     if (copy || download) {
       status = iree_hal_amd_gpu_buffer_reference_resolve(
-          &operation->source.device, &arguments.source);
-      arguments.source += offset;
+          &operation->source.device, &source);
     }
     if (!download && iree_status_is_ok(status)) {
       status = iree_hal_amd_gpu_buffer_reference_resolve(
-          &operation->target.device, &arguments.target);
-      arguments.target += offset;
+          &operation->target.device, &target);
     }
     if (iree_status_is_ok(status)) {
+      arguments.source += source;
+      arguments.target += target;
       if (!copy && !fill) {
         uint8_t* bytes = staging.data + out_chunk->staging_length;
         const uint64_t address = staging_address + out_chunk->staging_length;
         if (download) {
           arguments.target = address;
+          arguments.target_row_stride = arguments.length;
+          arguments.target_slice_stride =
+              arguments.length * arguments.row_count;
           if (!out_chunk->download.length) {
             out_chunk->download = (iree_hal_amd_gpu_download_t){
                 .source = bytes,
@@ -103,13 +126,15 @@ iree_status_t iree_hal_amd_gpu_aql_transfer_prepare_chunk(
                 .offset = offset,
             };
           }
-          out_chunk->download.length += arguments.length;
+          out_chunk->download.length += length;
         } else {
           arguments.source = address;
-          memcpy(bytes, (const uint8_t*)operation->source.host + offset,
-                 arguments.length);
+          arguments.source_row_stride = arguments.length;
+          arguments.source_slice_stride =
+              arguments.length * arguments.row_count;
+          iree_hal_amd_gpu_transfer_copy_host(operation, offset, length, bytes);
         }
-        out_chunk->staging_length += (uint32_t)arguments.length;
+        out_chunk->staging_length += (uint32_t)length;
       }
       const uint32_t argument_offset =
           out_chunk->packet_count * sizeof(arguments);
@@ -120,11 +145,14 @@ iree_status_t iree_hal_amd_gpu_aql_transfer_prepare_chunk(
         memcpy(argument_storage.data + argument_offset, &arguments,
                sizeof(arguments));
       }
+      const uint32_t workgroup_count[3] = {
+          iree_hal_amd_gpu_blit_workgroup_count(arguments.length),
+          arguments.groups_y, arguments.groups_z};
       out_chunk->packets[out_chunk->packet_count++] =
           iree_hal_amd_gpu_aql_transfer_packet(
-              kernel, argument_address + argument_offset, arguments.length, 0);
-      out_chunk->next.offset += arguments.length;
-      if (out_chunk->next.offset == operation->length) {
+              kernel, argument_address + argument_offset, workgroup_count, 0);
+      out_chunk->next.offset += length;
+      if (out_chunk->next.offset == total_length) {
         ++out_chunk->next.index;
         out_chunk->next.offset = 0;
       }

@@ -655,11 +655,11 @@ static iree_status_t iree_io_parameter_transfer_submit(
     const iree_io_parameter_transfer_t* transfer) {
   switch (transfer->type) {
     case IREE_IO_PARAMETER_TRANSFER_SPLAT:
-      return iree_hal_queue_fill(queue, waits, signals, transfer->buffer,
-                                 transfer->buffer_offset, transfer->length,
-                                 transfer->splat.pattern,
-                                 transfer->splat.pattern_length,
-                                 /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE);
+      return iree_hal_queue_fill_linear(
+          queue, waits, signals, transfer->buffer, transfer->buffer_offset,
+          transfer->length, transfer->splat.pattern,
+          transfer->splat.pattern_length,
+          /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE);
     case IREE_IO_PARAMETER_TRANSFER_READ:
       return iree_hal_queue_read_linear(
           queue, waits, signals, transfer->file.handle, transfer->file.offset,

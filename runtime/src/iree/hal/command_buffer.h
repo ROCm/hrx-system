@@ -432,7 +432,7 @@ iree_hal_command_buffer_mode_format(iree_hal_command_buffer_mode_t value,
 IREE_API_EXPORT iree_string_view_t iree_hal_command_category_format(
     iree_hal_command_category_t value, iree_bitfield_string_temp_t* out_temp);
 
-// Maximum size of any update in iree_hal_command_buffer_update_buffer.
+// Maximum size of any update in iree_hal_command_buffer_update_buffer_linear.
 // 64KB is the limit on Vulkan and we uniformly use that today across all
 // targets as to not need too much command buffer memory.
 #define IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE \
@@ -727,12 +727,39 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_advise_buffer(
     iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_ref_t buffer_ref,
     iree_hal_memory_advise_flags_t flags, uint64_t arg0, uint64_t arg1);
 
+// Fills the useful bytes of |region|; padding is unchanged. The shape and
+// pattern are captured before return. The origin, row length, and used strides
+// must be aligned to the 1/2/4-byte pattern. A one-row, one-slice WHOLE_BUFFER
+// row length uses the remaining target binding at execution.
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_fill_buffer(
+    iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_ref_t target_ref,
+    const void* pattern, iree_host_size_t pattern_length,
+    const iree_hal_fill_region_t* region, iree_hal_fill_flags_t flags);
+
+// Captures the useful source bytes of |region| before returning, then writes
+// them to the target geometry at execution. Source padding is not captured.
+// The useful byte count is at most IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE.
+// The shape is fixed at recording; the target binding may remain indirect.
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_update_buffer(
+    iree_hal_command_buffer_t* command_buffer, const void* source_buffer,
+    iree_host_size_t source_offset, iree_hal_buffer_ref_t target_ref,
+    const iree_hal_transfer_region_t* region, iree_hal_update_flags_t flags);
+
+// Copies the useful bytes of |region| between independently bounded binding
+// windows. The shape is captured before return and fixed across replay. Useful
+// writes must not alias reads or other writes; padding overlap is permitted.
+// A one-row, one-slice WHOLE_BUFFER row length uses equal remaining bindings.
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_copy_buffer(
+    iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_ref_t source_ref,
+    iree_hal_buffer_ref_t target_ref, const iree_hal_transfer_region_t* region,
+    iree_hal_copy_flags_t flags);
+
 // Fills the target buffer with the given repeating value.
 // Expects that |pattern_length| is one of 1, 2, or 4 and that the offset and
 // length are aligned to the natural alignment of the value.
 // The target buffer must be compatible with the devices owned by this
 // device queue and be allocated with IREE_HAL_BUFFER_USAGE_TRANSFER.
-IREE_API_EXPORT iree_status_t iree_hal_command_buffer_fill_buffer(
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_fill_buffer_linear(
     iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_ref_t target_ref,
     const void* pattern, iree_host_size_t pattern_length,
     iree_hal_fill_flags_t flags);
@@ -740,16 +767,14 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_fill_buffer(
 // Updates a range of the given target buffer from the source host memory.
 // The source host memory is copied immediately into the command buffer and
 // occupies command buffer space. It is strongly recommended that large buffer
-// updates are performed via iree_hal_command_buffer_copy_buffer where there is
-// the possibility of a zero-copy path.
-// The |source_buffer| may be released by the caller immediately after this
-// call returns.
-// The target range has an explicit length of at most
-// IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE; WHOLE_BUFFER cannot specify the
-// amount of host data captured during recording.
-// The |target_buffer| must be compatible with the devices owned by this
-// device queue and be allocated with IREE_HAL_BUFFER_USAGE_TRANSFER.
-IREE_API_EXPORT iree_status_t iree_hal_command_buffer_update_buffer(
+// updates are performed via iree_hal_command_buffer_copy_buffer_linear where
+// there is the possibility of a zero-copy path. The |source_buffer| may be
+// released by the caller immediately after this call returns. The target range
+// has an explicit length of at most IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE;
+// WHOLE_BUFFER cannot specify the amount of host data captured during
+// recording. The |target_buffer| must be compatible with the devices owned by
+// this device queue and be allocated with IREE_HAL_BUFFER_USAGE_TRANSFER.
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_update_buffer_linear(
     iree_hal_command_buffer_t* command_buffer, const void* source_buffer,
     iree_host_size_t source_offset, iree_hal_buffer_ref_t target_ref,
     iree_hal_update_flags_t flags);
@@ -762,7 +787,7 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_update_buffer(
 //
 // This can be used to perform device->host, host->device, and device->device
 // copies.
-IREE_API_EXPORT iree_status_t iree_hal_command_buffer_copy_buffer(
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_copy_buffer_linear(
     iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_ref_t source_ref,
     iree_hal_buffer_ref_t target_ref, iree_hal_copy_flags_t flags);
 
@@ -873,20 +898,23 @@ typedef struct iree_hal_command_buffer_vtable_t {
       iree_hal_buffer_ref_t buffer_ref, iree_hal_memory_advise_flags_t flags,
       uint64_t arg0, uint64_t arg1);
 
+  // Fixed geometry references are narrowed to their addressed spans after
+  // public validation. WHOLE_BUFFER retains dynamic remaining-range behavior.
   iree_status_t(IREE_API_PTR* fill_buffer)(
       iree_hal_command_buffer_t* command_buffer,
       iree_hal_buffer_ref_t target_ref, const void* pattern,
-      iree_host_size_t pattern_length, iree_hal_fill_flags_t flags);
+      iree_host_size_t pattern_length, const iree_hal_fill_region_t* region,
+      iree_hal_fill_flags_t flags);
 
   iree_status_t(IREE_API_PTR* update_buffer)(
       iree_hal_command_buffer_t* command_buffer, const void* source_buffer,
       iree_host_size_t source_offset, iree_hal_buffer_ref_t target_ref,
-      iree_hal_update_flags_t flags);
+      const iree_hal_transfer_region_t* region, iree_hal_update_flags_t flags);
 
   iree_status_t(IREE_API_PTR* copy_buffer)(
       iree_hal_command_buffer_t* command_buffer,
       iree_hal_buffer_ref_t source_ref, iree_hal_buffer_ref_t target_ref,
-      iree_hal_copy_flags_t flags);
+      const iree_hal_transfer_region_t* region, iree_hal_copy_flags_t flags);
 
   iree_status_t(IREE_API_PTR* dispatch)(
       iree_hal_command_buffer_t* command_buffer,

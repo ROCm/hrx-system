@@ -27,7 +27,9 @@ typedef struct iree_hal_amd_xdna_record_t {
   // Next command in recording order, or NULL at the end.
   struct iree_hal_amd_xdna_record_t* next;
   // Active command payload.
-  iree_hal_amd_xdna_record_kind_t kind;
+  uint32_t kind : 8;
+  // A transfer_region_t immediately follows the record for padded transfers.
+  uint32_t rectangular : 1;
   // Stable recording ordinal, retained for optional profile attribution.
   uint32_t ordinal;
   union {

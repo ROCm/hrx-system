@@ -14,8 +14,27 @@ iree_hal_amd_gpu_dma_transfer_emit_packet(
   // Native packet capacity and available staging are independent limits.
   uint32_t length =
       (uint32_t)iree_min(span->length - offset, encoding->max_packet_length);
-  uint64_t source = span->source_address + offset;
-  uint64_t target = span->target_address + offset;
+  uint64_t source_offset = offset, target_offset = offset;
+  uint64_t column = offset;
+  if (span->region) {
+    const iree_hal_transfer_region_t* region = span->region;
+    const uint64_t slice_length = region->row_length * region->row_count;
+    const uint64_t slice = offset / slice_length;
+    const uint64_t row = (offset % slice_length) / region->row_length;
+    column = offset % region->row_length;
+    source_offset = target_offset = column;
+    if (region->row_count > 1) {
+      source_offset += row * region->source_strides.row_stride;
+      target_offset += row * region->target_strides.row_stride;
+    }
+    if (region->slice_count > 1) {
+      source_offset += slice * region->source_strides.slice_stride;
+      target_offset += slice * region->target_strides.slice_stride;
+    }
+    length = (uint32_t)iree_min(length, region->row_length - column);
+  }
+  uint64_t source = span->source_address + source_offset;
+  uint64_t target = span->target_address + target_offset;
   const bool fill = span->type == IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
   const bool immediate = fill && !(target & 3) && length >= 4;
   const bool staged =
@@ -38,16 +57,16 @@ iree_hal_amd_gpu_dma_transfer_emit_packet(
       if (fill) {
         for (uint32_t i = 0; i < length; ++i) {
           staging.data[i] =
-              (uint8_t)(span->pattern >> (((offset + i) & 3) * 8));
+              (uint8_t)(span->pattern >> (((column + i) & 3) * 8));
         }
       } else {
-        memcpy(staging.data, span->source_bytes + offset, length);
+        memcpy(staging.data, span->source_bytes + source_offset, length);
       }
     }
   }
   uint32_t* end = words;
   if (immediate) {
-    const uint32_t shift = (uint32_t)(offset & 3) * 8;
+    const uint32_t shift = (uint32_t)(column & 3) * 8;
     const uint32_t pattern =
         shift ? (span->pattern >> shift) | (span->pattern << (32 - shift))
               : span->pattern;
@@ -82,10 +101,13 @@ iree_status_t iree_hal_amd_gpu_dma_transfer_prepare_chunk(
       break;
     }
     const uint64_t offset = out_chunk->next.offset;
+    const uint64_t total_length =
+        iree_hal_amd_gpu_transfer_operation_length(operation);
     iree_hal_amd_gpu_dma_transfer_span_t span = {
-        .length = operation->length,
+        .length = total_length,
         .pattern = operation->pattern,
         .type = operation->type,
+        .region = operation->rectangular ? operation->region : NULL,
     };
     if (operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_COPY ||
         operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD) {
@@ -125,7 +147,7 @@ iree_status_t iree_hal_amd_gpu_dma_transfer_prepare_chunk(
       out_chunk->word_count += packet.word_count;
       out_chunk->staging_length += packet.staging_length;
       out_chunk->next.offset += packet.length;
-      if (out_chunk->next.offset == operation->length) {
+      if (out_chunk->next.offset == total_length) {
         ++out_chunk->next.index;
         out_chunk->next.offset = 0;
       }

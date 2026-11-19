@@ -165,6 +165,7 @@ struct loom_serve_text_state_t {
     // Allocated entries in destinations; grown only by cold maintenance.
     uint32_t destination_capacity;
     // Reusable target/draft map uploads, at most two per participating row.
+    // Geometry follows the descriptor array in the same allocation.
     iree_hal_transfer_operation_t* uploads;
   } cache;
   // Physical commitment, separate from logical row/block ownership.

@@ -33,12 +33,12 @@ TEST_P(VulkanProfilingTest, QueueEventsRecordNativeTransferSubmissions) {
   SemaphoreList empty_wait;
   SemaphoreList fill_signal(device_, {0}, {1});
   uint32_t pattern = 0xA5A5A5A5u;
-  IREE_ASSERT_OK(iree_hal_queue_fill(
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(
       transfer_queue_, empty_wait, fill_signal, source, 0, kBufferSize,
       &pattern, sizeof(pattern), /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));
 
   SemaphoreList copy_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_copy(
+  IREE_ASSERT_OK(iree_hal_queue_copy_linear(
       transfer_queue_, fill_signal, copy_signal, source, 0, target, 0,
       kBufferSize, /*barriers=*/NULL, IREE_HAL_COPY_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(

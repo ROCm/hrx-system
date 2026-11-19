@@ -1361,9 +1361,14 @@ TEST_P(BlockProcessorTest, RemainingTransfersReuseInvocationExtents) {
     const uint32_t pattern = 0xAABBCCDDu;
     iree_hal_cmd_build_token_t fill_token;
     iree_hal_cmd_fixup_t* fill_fixup = nullptr;
-    IREE_ASSERT_OK(iree_hal_cmd_build_fill(&builder, IREE_HAL_WHOLE_BUFFER,
-                                           &pattern, pattern_length,
-                                           &fill_fixup, &fill_token));
+    const iree_hal_fill_region_t fill_region = {
+        .row_length = IREE_HAL_WHOLE_BUFFER,
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    IREE_ASSERT_OK(iree_hal_cmd_build_fill(&builder, &fill_region, &pattern,
+                                           pattern_length, &fill_fixup,
+                                           &fill_token));
     fill_fixup->host_ptr = nullptr;
     fill_fixup->flags = IREE_HAL_CMD_FIXUP_FLAG_NONE;
     fill_fixup->slot = 0;
@@ -1372,8 +1377,13 @@ TEST_P(BlockProcessorTest, RemainingTransfersReuseInvocationExtents) {
     IREE_ASSERT_OK(iree_hal_cmd_block_builder_barrier(&builder));
     iree_hal_cmd_build_token_t copy_token;
     iree_hal_cmd_fixup_t* copy_fixups = nullptr;
-    IREE_ASSERT_OK(iree_hal_cmd_build_copy(&builder, IREE_HAL_WHOLE_BUFFER,
-                                           &copy_fixups, &copy_token));
+    const iree_hal_transfer_region_t copy_region = {
+        .row_length = IREE_HAL_WHOLE_BUFFER,
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    IREE_ASSERT_OK(iree_hal_cmd_build_copy(&builder, &copy_region, &copy_fixups,
+                                           &copy_token));
     for (uint16_t i = 0; i < 2; ++i) {
       copy_fixups[i].host_ptr = nullptr;
       copy_fixups[i].flags = IREE_HAL_CMD_FIXUP_FLAG_NONE;
@@ -1418,8 +1428,13 @@ TEST_P(BlockProcessorTest, RemainingCopyRejectsUnequalBindings) {
   IREE_ASSERT_OK(iree_hal_cmd_block_builder_begin(&builder));
   iree_hal_cmd_build_token_t token;
   iree_hal_cmd_fixup_t* fixups = nullptr;
-  IREE_ASSERT_OK(iree_hal_cmd_build_copy(&builder, IREE_HAL_WHOLE_BUFFER,
-                                         &fixups, &token));
+  const iree_hal_transfer_region_t copy_region = {
+      .row_length = IREE_HAL_WHOLE_BUFFER,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  IREE_ASSERT_OK(
+      iree_hal_cmd_build_copy(&builder, &copy_region, &fixups, &token));
   for (uint16_t i = 0; i < 2; ++i) {
     fixups[i].host_ptr = nullptr;
     fixups[i].flags = IREE_HAL_CMD_FIXUP_FLAG_NONE;

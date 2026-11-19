@@ -612,16 +612,28 @@ void ExecuteIreeHalKernelWithBuffers(const IreeHalKernelExecution& execution,
       .payload_values = &upload_value,
   };
   iree_hal_transfer_operation_t upload_operations[2] = {};
+  iree_hal_transfer_region_t
+      upload_operations_regions[IREE_ARRAYSIZE(upload_operations)];
   upload_operations[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
   upload_operations[0].upload.source = input_data.data;
   upload_operations[0].upload.target_buffer = input_buffer_ptr.get();
   upload_operations[0].upload.target_offset = 0;
-  upload_operations[0].upload.length = input_data.data_length;
+  upload_operations_regions[0] = iree_hal_transfer_region_t{
+      .row_length = input_data.data_length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  upload_operations[0].upload.region = &upload_operations_regions[0];
   upload_operations[1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
   upload_operations[1].upload.source = output_data.data;
   upload_operations[1].upload.target_buffer = output_buffer_ptr.get();
   upload_operations[1].upload.target_offset = 0;
-  upload_operations[1].upload.length = output_data.data_length;
+  upload_operations_regions[1] = iree_hal_transfer_region_t{
+      .row_length = output_data.data_length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  upload_operations[1].upload.region = &upload_operations_regions[1];
   uint64_t completion_value = 0;
   iree_status_t status = iree_hal_queue_transfer(
       execution.transfer_queue, iree_hal_semaphore_list_empty(), upload_signal,
@@ -658,11 +670,11 @@ void ExecuteIreeHalKernelWithBuffers(const IreeHalKernelExecution& execution,
   };
   if (iree_status_is_ok(status)) {
     completion_value = dispatch_value;
-    status = iree_hal_queue_download(execution.transfer_queue, download_wait,
-                                     download_signal, output_buffer_ptr.get(),
-                                     /*source_offset=*/0, output_data.data,
-                                     output_data.data_length,
-                                     /*barriers=*/NULL);
+    status = iree_hal_queue_download_linear(
+        execution.transfer_queue, download_wait, download_signal,
+        output_buffer_ptr.get(),
+        /*source_offset=*/0, output_data.data, output_data.data_length,
+        /*barriers=*/NULL);
   }
   if (iree_status_is_ok(status)) {
     completion_value = download_value;
