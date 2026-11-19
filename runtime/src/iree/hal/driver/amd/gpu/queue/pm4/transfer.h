@@ -26,17 +26,19 @@ enum {
 extern const iree_hal_amd_gpu_dma_transfer_encoding_t
     iree_hal_amd_gpu_pm4_transfer_encoding;
 
-// Emits consecutive copies and rectangular fills with the resident blit.
+// Emits copies and rectangular transfers with the resident blit.
 // Capture has proved that every native slot also admits PROGRAM transfer
-// access. Each launch owns one blit ABI argument record; no payload is copied
-// by the host. Other operation types end the chunk. out_argument_length reports
-// ABI bytes independently of the chunk's zero staging length. The caller
-// publishes arguments before execution and retains them through shader
-// completion.
+// access. A chunk contains either device-only operations or staged host
+// transfers, keeping all borrowed bytes in one backing generation. Host
+// transfers place packed useful bytes after each aligned argument record.
+// Downloads end the chunk after one launch so their retirement extent stays
+// contiguous. out_argument_length includes ABI bytes and alignment padding;
+// chunk.staging_length reports useful payload bytes. Their sum is the consumed
+// storage prefix, retained through shader completion and any host scatter.
 iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
     const iree_hal_amd_gpu_transfer_t* transfer,
     const iree_hal_amd_gpu_pm4_launch_t* launch, uint32_t word_capacity,
-    iree_byte_span_t arguments, uint64_t argument_address,
+    iree_byte_span_t storage, uint64_t storage_address,
     iree_hal_amd_gpu_dma_transfer_chunk_t* out_chunk,
     uint32_t* out_argument_length);
 

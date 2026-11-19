@@ -38,7 +38,7 @@ const iree_hal_amd_gpu_dma_transfer_encoding_t
 iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
     const iree_hal_amd_gpu_transfer_t* transfer,
     const iree_hal_amd_gpu_pm4_launch_t* launch, uint32_t word_capacity,
-    iree_byte_span_t arguments, uint64_t argument_address,
+    iree_byte_span_t storage, uint64_t storage_address,
     iree_hal_amd_gpu_dma_transfer_chunk_t* out_chunk,
     uint32_t* out_argument_length) {
   out_chunk->word_count = 0;
@@ -46,22 +46,40 @@ iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
   *out_argument_length = 0;
   out_chunk->next = transfer->cursor;
   out_chunk->download = (iree_hal_amd_gpu_download_t){0};
+  const iree_hal_transfer_operation_type_t first_type =
+      transfer->operations[transfer->cursor.index].type;
+  const bool staged = first_type != IREE_HAL_TRANSFER_OPERATION_TYPE_COPY &&
+                      first_type != IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
   iree_status_t status = iree_ok_status();
   while (out_chunk->next.index < transfer->count &&
          out_chunk->word_count + 31 <= word_capacity &&
-         *out_argument_length + sizeof(iree_hal_amd_gpu_blit_arguments_t) <=
-             arguments.data_length &&
-         iree_status_is_ok(status)) {
+         !out_chunk->download.length && iree_status_is_ok(status)) {
     const iree_hal_amd_gpu_transfer_operation_t* operation =
         &transfer->operations[out_chunk->next.index];
+    const bool copy = operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
     const bool fill = operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
-    if (operation->type != IREE_HAL_TRANSFER_OPERATION_TYPE_COPY &&
-        !(fill && operation->rectangular)) {
+    const bool download =
+        operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+    if ((!copy && !operation->rectangular) || staged != (!copy && !fill)) {
+      break;
+    }
+    // A publication borrows one backing generation. Keep staged payloads
+    // beside their arguments so native rejection restores one byte cursor.
+    const uint32_t argument_offset =
+        staged ? (uint32_t)iree_align_uint64(
+                     *out_argument_length + out_chunk->staging_length, 16)
+               : *out_argument_length;
+    const uint32_t payload_offset =
+        argument_offset + sizeof(iree_hal_amd_gpu_blit_arguments_t);
+    if (payload_offset + (staged ? 1 : 0) > storage.data_length) {
       break;
     }
     const uint64_t total_length =
         iree_hal_amd_gpu_transfer_operation_length(operation);
     uint64_t length = total_length - out_chunk->next.offset;
+    if (staged) {
+      length = iree_min(length, storage.data_length - payload_offset);
+    }
     iree_hal_amd_gpu_blit_arguments_t blit_arguments = {
         .source = out_chunk->next.offset,
         .target = out_chunk->next.offset,
@@ -78,18 +96,43 @@ iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
     blit_arguments.pattern = operation->pattern;
     blit_arguments.fill = fill;
     uint64_t source = 0, target = 0;
-    if (!fill) {
+    if (copy || download) {
       status = iree_hal_amd_gpu_buffer_reference_resolve(
           &operation->source.device, &source);
     }
-    if (iree_status_is_ok(status)) {
+    if (!download && iree_status_is_ok(status)) {
       status = iree_hal_amd_gpu_buffer_reference_resolve(
           &operation->target.device, &target);
     }
     if (iree_status_is_ok(status)) {
       blit_arguments.source += source;
       blit_arguments.target += target;
-      memcpy(arguments.data + *out_argument_length, &blit_arguments,
+      if (staged) {
+        uint8_t* bytes = storage.data + payload_offset;
+        const uint64_t address = storage_address + payload_offset;
+        if (download) {
+          blit_arguments.target = address;
+          blit_arguments.target_row_stride = blit_arguments.length;
+          blit_arguments.target_slice_stride =
+              blit_arguments.length * blit_arguments.row_count;
+          // One contiguous download extent per publication: later argument
+          // records must never become bytes in the retirement scatter.
+          out_chunk->download = (iree_hal_amd_gpu_download_t){
+              .source = bytes,
+              .operation = operation,
+              .offset = out_chunk->next.offset,
+              .length = length,
+          };
+        } else {
+          blit_arguments.source = address;
+          blit_arguments.source_row_stride = blit_arguments.length;
+          blit_arguments.source_slice_stride =
+              blit_arguments.length * blit_arguments.row_count;
+          iree_hal_amd_gpu_transfer_copy_host(operation, out_chunk->next.offset,
+                                              length, bytes);
+        }
+      }
+      memcpy(storage.data + argument_offset, &blit_arguments,
              sizeof(blit_arguments));
       const uint32_t size[3] = {64, 1, 1};
       const uint32_t partial[3] = {0, 0, 0};
@@ -97,7 +140,7 @@ iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
           iree_hal_amd_gpu_blit_workgroup_count(blit_arguments.length),
           blit_arguments.groups_y, blit_arguments.groups_z};
       const iree_hal_amd_gpu_pm4_launch_inputs_t inputs = {
-          .kernarg_pointer = argument_address + *out_argument_length,
+          .kernarg_pointer = storage_address + argument_offset,
       };
       uint32_t* words = iree_hal_amd_gpu_pm4_launch_emit(
           out_chunk->words + out_chunk->word_count, launch, size, partial, 0,
@@ -105,7 +148,10 @@ iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
       words = iree_hal_amd_gpu_pm4_emit_dispatch_direct(
           words, groups, launch->dispatch_initiator);
       out_chunk->word_count = (uint32_t)(words - out_chunk->words);
-      *out_argument_length += sizeof(blit_arguments);
+      *out_argument_length = payload_offset - out_chunk->staging_length;
+      if (staged) {
+        out_chunk->staging_length += (uint32_t)length;
+      }
       out_chunk->next.offset += length;
       if (out_chunk->next.offset == total_length) {
         ++out_chunk->next.index;

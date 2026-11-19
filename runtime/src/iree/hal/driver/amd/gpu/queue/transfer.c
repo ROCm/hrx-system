@@ -259,16 +259,17 @@ iree_status_t iree_hal_amd_gpu_transfer_initialize(
           family, site, target_buffer, target_offset, &operation.target.device);
     }
     if (iree_status_is_ok(status)) {
-      if (source->type == IREE_HAL_TRANSFER_OPERATION_TYPE_COPY &&
+      if ((source->type == IREE_HAL_TRANSFER_OPERATION_TYPE_COPY ||
+           operation.rectangular) &&
           site != IREE_HAL_MEMORY_SITE_PROGRAM &&
           out_transfer->program_accessible) {
         out_transfer->program_accessible =
-            iree_hal_amd_gpu_transfer_program_accessible(
-                family, &operation.source.device,
-                IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE) &&
-            iree_hal_amd_gpu_transfer_program_accessible(
-                family, &operation.target.device,
-                IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET);
+            (!source_buffer || iree_hal_amd_gpu_transfer_program_accessible(
+                                   family, &operation.source.device,
+                                   IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE)) &&
+            (!target_buffer || iree_hal_amd_gpu_transfer_program_accessible(
+                                   family, &operation.target.device,
+                                   IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET));
       }
       iree_hal_amd_gpu_transfer_append_operation(staging_limits, &operation,
                                                  out_transfer);

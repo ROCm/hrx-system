@@ -323,27 +323,51 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
   iree_hal_amd_gpu_transfer_t* transfer = &submission->transfer;
   const bool first = !transfer->cursor.index && !transfer->cursor.offset;
   iree_hal_amd_gpu_byte_storage_t* arguments = queue->producer.arguments;
-  // Shader copies avoid CP-DMA's synchronous transfer and drain costs.
-  // Incompatible program views and rings too small for one shader argument
-  // record retain the queue path without extra backing.
   const iree_hal_amd_gpu_transfer_operation_t* operation =
       &transfer->operations[transfer->cursor.index];
+  iree_hal_amd_gpu_byte_storage_t* staging = queue->producer.transfers.current;
+  // A source fitting one admitted span needs no publication boundary. Larger
+  // uploads overlap preparation with native reads in two bounded regions.
+  // Downloads keep short retirement copies so independent work can progress.
+  const uint64_t maximum_staging_length =
+      transfer->host_completion_required
+          ? IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_DOWNLOAD_LENGTH
+          : IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_UPLOAD_LENGTH;
+  const bool overlap = transfer->host_completion_required ||
+                       (transfer->staging_capacity &&
+                        iree_hal_amd_gpu_transfer_operation_length(operation) >
+                            transfer->staging_capacity);
+  const uint64_t staging_window_length =
+      staging ? iree_min(overlap ? staging->capacity / 2 : staging->capacity,
+                         maximum_staging_length)
+              : 0;
+  const bool staged =
+      operation->type != IREE_HAL_TRANSFER_OPERATION_TYPE_COPY &&
+      operation->type != IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
+  // Shader copies avoid CP-DMA's synchronous transfer and drain costs.
+  // Staged rectangles keep their ABI and packed payload in the transfer ring,
+  // under one retirement and native rollback owner. Tiny configured rings
+  // retain DMA rather than allocating more backing just for the arguments.
   const bool program =
       transfer->program_accessible &&
-      arguments->capacity >= sizeof(iree_hal_amd_gpu_blit_arguments_t) &&
+      (staged
+           ? staging_window_length > sizeof(iree_hal_amd_gpu_blit_arguments_t)
+           : arguments->capacity >=
+                 sizeof(iree_hal_amd_gpu_blit_arguments_t)) &&
       (operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_COPY ||
-       (operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_FILL &&
-        operation->rectangular));
+       operation->rectangular);
+  const bool program_arguments = program && !staged;
   iree_hal_amd_gpu_byte_storage_t* storage =
-      program ? arguments : queue->producer.transfers.current;
-  if (!program && transfer->staging_capacity &&
+      program_arguments ? arguments : staging;
+  if (!program_arguments && transfer->staging_capacity &&
       (!storage || storage->capacity < transfer->staging_capacity)) {
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_TRANSFERS;
   }
   uint64_t offset = 0, start = 0, available = 0;
   if (storage) {
     const uint64_t completed = (uint64_t)iree_atomic_load(
-        program ? &queue->completed.arguments : &queue->completed.transfers,
+        program_arguments ? &queue->completed.arguments
+                          : &queue->completed.transfers,
         iree_memory_order_acquire);
     if (completed >= storage->end) {
       // Every byte has retired. Rebase byte zero at the monotonic end so
@@ -357,8 +381,9 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
       offset = relative & (storage->capacity - 1);
       // Payload bytes can split at the ring end, but a shader argument record
       // must be contiguous. Charge the unused tail to this next publication.
-      if (program && sizeof(iree_hal_amd_gpu_blit_arguments_t) >
-                         storage->capacity - offset) {
+      if (program &&
+          sizeof(iree_hal_amd_gpu_blit_arguments_t) + (staged ? 1 : 0) >
+              storage->capacity - offset) {
         relative += storage->capacity - offset;
         offset = 0;
       }
@@ -370,22 +395,6 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
               : iree_min(storage->capacity - used, storage->capacity - offset);
     }
   }
-  // A source fitting one admitted span needs no publication boundary. Larger
-  // uploads overlap preparation with native reads in two bounded regions.
-  // Downloads keep short retirement copies so independent work can progress.
-  const uint64_t maximum_staging_length =
-      transfer->host_completion_required
-          ? IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_DOWNLOAD_LENGTH
-          : IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_UPLOAD_LENGTH;
-  const bool overlap = transfer->host_completion_required ||
-                       (transfer->staging_capacity &&
-                        iree_hal_amd_gpu_transfer_operation_length(
-                            &transfer->operations[transfer->cursor.index]) >
-                            transfer->staging_capacity);
-  const uint64_t staging_window_length =
-      storage ? iree_min(overlap ? storage->capacity / 2 : storage->capacity,
-                         maximum_staging_length)
-              : 0;
   // Admission reserves launch capacity beyond native waits. Keep 96 words for
   // signals, retirement, notification, and alignment, leaving room for DMA
   // packets even at the maximum admitted native fan-in.
@@ -399,7 +408,8 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
                word_budget - maximum_wait_words - 96);
   const iree_byte_span_t bytes = iree_make_byte_span(
       storage ? storage->memory.contents.data + offset : NULL,
-      program ? available : iree_min(available, staging_window_length));
+      program_arguments ? available
+                        : iree_min(available, staging_window_length));
   const uint64_t address = storage ? storage->address + offset : 0;
   uint32_t argument_length = 0;
   iree_status_t status =
@@ -429,7 +439,7 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
   before.execution &= ~IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
   if (argument_length || chunk.staging_length > chunk.download.length) {
     // Host-written ABI and transport bytes need visibility even with empty
-    // payload barriers. Their storage and retirement owners are independent.
+    // payload barriers.
     before.acquire_cache_control |= queue->options.barriers.acquire;
   }
   iree_hal_amd_gpu_pm4_barrier_t after =
@@ -475,7 +485,7 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
       return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_SIGNALS;
     }
   }
-  if (queue->kernel && !program) {
+  if (queue->kernel && !program_arguments) {
     queue->kernel->rollback.storage = storage;
     queue->kernel->rollback.bytes = storage ? storage->end : 0;
   }

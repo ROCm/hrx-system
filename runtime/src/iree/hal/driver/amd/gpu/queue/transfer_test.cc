@@ -39,47 +39,100 @@ TEST(TransferTest, ProgramPromotionRequiresAnExecutingFamily) {
                              IREE_HAL_MEMORY_ACCESS_ALL,
                              IREE_HAL_BUFFER_USAGE_TRANSFER, &vtable, &buffer);
   buffer.memory = {.contract = contract, .bindings = &native};
-  const auto operations_region = iree_hal_transfer_region_t{
-      .row_length = 16,
-      .row_count = 1,
+  const iree_hal_transfer_region_t region = {
+      .row_length = 4,
+      .row_count = 2,
       .slice_count = 1,
+      .source_strides = {.row_stride = 8},
+      .target_strides = {.row_stride = 8},
   };
-  std::array<iree_hal_transfer_operation_t, 2> operations = {};
-  for (uint32_t i = 0; i < operations.size(); ++i) {
-    operations[i] = {
-        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
-        .copy =
-            {
-                .source_buffer = &buffer,
-                .source_offset = i * 16,
-                .target_buffer = &buffer,
-                .target_offset = 32 + i * 16,
-                .region = &operations_region,
-            },
-    };
-  }
-  for (iree_host_size_t count : {1u, 2u}) {
-    SCOPED_TRACE(count);
+  const iree_hal_fill_region_t fill_region = {4, 2, 1, {8, 0}};
+  std::array<uint8_t, 64> host = {};
+  const uint32_t pattern = 0;
+  const iree_hal_transfer_operation_t operations[] = {
+      {
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+          .fill =
+              {
+                  .target_buffer = &buffer,
+                  .region = &fill_region,
+                  .pattern = &pattern,
+                  .pattern_length = sizeof(pattern),
+              },
+      },
+      {
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE,
+          .update =
+              {
+                  .source_buffer = host.data(),
+                  .target_buffer = &buffer,
+                  .region = &region,
+              },
+      },
+      {
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
+          .copy =
+              {
+                  .source_buffer = &buffer,
+                  .target_buffer = &buffer,
+                  .target_offset = 32,
+                  .region = &region,
+              },
+      },
+      {
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+          .upload =
+              {
+                  .source = host.data(),
+                  .target_buffer = &buffer,
+                  .region = &region,
+              },
+      },
+      {
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+          .download =
+              {
+                  .source_buffer = &buffer,
+                  .target = host.data(),
+                  .region = &region,
+              },
+      },
+  };
+  for (const auto& operation : operations) {
+    SCOPED_TRACE(operation.type);
+    const auto required =
+        operation.type == IREE_HAL_TRANSFER_OPERATION_TYPE_COPY
+            ? IREE_HAL_BUFFER_USAGE_TRANSFER
+        : operation.type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD
+            ? IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE
+            : IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET;
     iree_hal_amd_gpu_transfer_layout_t capture_layout;
-    IREE_ASSERT_OK(iree_hal_amd_gpu_transfer_measure(count, operations.data(),
-                                                     &capture_layout));
+    IREE_ASSERT_OK(
+        iree_hal_amd_gpu_transfer_measure(1, &operation, &capture_layout));
     std::vector<uint64_t> storage((capture_layout.byte_length + 7) / 8);
     for (const bool dispatch : {false, true}) {
-      iree_hal_queue_family_spec_t spec = {};
-      spec.role_flags =
-          IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
-          (dispatch ? IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH : 0);
-      const iree_hal_queue_family_t family = {
-          .spec = &spec,
-          .memory = {.domain = &layout, .queue_scope_id = 1},
-      };
-      iree_hal_amd_gpu_transfer_t transfer;
-      iree_status_t status = iree_hal_amd_gpu_transfer_initialize(
-          &family, IREE_HAL_MEMORY_SITE_QUEUE, {}, count, operations.data(),
-          capture_layout, storage.data(), &transfer);
-      IREE_EXPECT_OK(status);
-      EXPECT_EQ(transfer.program_accessible, dispatch);
-      iree_hal_amd_gpu_transfer_deinitialize(&transfer);
+      for (iree_hal_buffer_usage_t program_usage :
+           {IREE_HAL_BUFFER_USAGE_NONE, IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
+            IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
+            IREE_HAL_BUFFER_USAGE_TRANSFER}) {
+        SCOPED_TRACE(program_usage);
+        contract->scopes[2].usage = program_usage;
+        iree_hal_queue_family_spec_t spec = {};
+        spec.role_flags =
+            IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
+            (dispatch ? IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH : 0);
+        const iree_hal_queue_family_t family = {
+            .spec = &spec,
+            .memory = {.domain = &layout, .queue_scope_id = 1},
+        };
+        iree_hal_amd_gpu_transfer_t transfer;
+        IREE_ASSERT_OK(iree_hal_amd_gpu_transfer_initialize(
+            &family, IREE_HAL_MEMORY_SITE_QUEUE, {}, 1, &operation,
+            capture_layout, storage.data(), &transfer));
+        EXPECT_EQ(transfer.program_accessible,
+                  dispatch && iree_all_bits_set(program_usage, required));
+        iree_hal_amd_gpu_transfer_deinitialize(&transfer);
+      }
     }
   }
   EXPECT_EQ(iree_atomic_ref_count_load(&buffer.resource.ref_count), 1);

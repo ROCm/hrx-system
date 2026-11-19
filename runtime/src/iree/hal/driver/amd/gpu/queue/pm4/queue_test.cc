@@ -930,6 +930,79 @@ TEST_F(KernelQueueTest, RejectionRollsBackTheBorrowedPayloadGeneration) {
   EXPECT_EQ(queue->producer.transfers.retired, nullptr);
 }
 
+TEST_F(KernelQueueTest, StagedShaderRejectionRestoresOneBackingCursor) {
+  auto buffer = Buffer(512);
+  auto failed = Semaphore();
+  iree_hal_semaphore_t* failed_handle = failed;
+  uint64_t one = 1;
+  auto* queue =
+      reinterpret_cast<iree_hal_amd_gpu_pm4_queue_t*>(queues_[0].get());
+  const std::array<uint8_t, 192> warm = {};
+  IREE_ASSERT_OK(iree_hal_queue_update_linear(
+      queues_[0], {}, {}, warm.data(), 0, buffer, 0, warm.size(), nullptr, 0));
+  iree_hal_amd_gpu_context_join_memory(&context_);
+  Publish(0);
+  ASSERT_NO_FATAL_FAILURE(Execute(0));
+  Poll(0);
+  auto* storage = queue->producer.transfers.current;
+  ASSERT_EQ(storage->capacity, 256u);
+  const uint64_t before = storage->end;
+  // Native BUSY must have an accepted command whose retirement can free
+  // capacity. Keep that command live without borrowing transfer storage.
+  const uint32_t pattern = 0;
+  IREE_ASSERT_OK(iree_hal_queue_fill_linear(queues_[0], {}, {}, buffer, 256, 16,
+                                            &pattern, sizeof(pattern), nullptr,
+                                            IREE_HAL_FILL_FLAG_NONE));
+  ASSERT_EQ(native_queues_[0].commands.size(), 2u);
+  const iree_hal_transfer_region_t region = {
+      .row_length = 17,
+      .row_count = 3,
+      .slice_count = 1,
+      .source_strides = {.row_stride = 23},
+      .target_strides = {.row_stride = 31},
+  };
+  std::array<uint8_t, 69> input;
+  input.fill(0x5B);
+  native_queues_[0].busy = true;
+  IREE_ASSERT_OK(iree_hal_queue_update(queues_[0], {},
+                                       {1, &failed_handle, &one}, input.data(),
+                                       0, buffer, 0, &region, nullptr, 0));
+  iree_hal_amd_gpu_context_join_memory(&context_);
+  Publish(0);
+  uint64_t value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(failed, &value));
+  EXPECT_EQ(value, 0u);
+  ASSERT_NE(queue->kernel->pending.byte_length, 0u);
+  EXPECT_EQ(queue->kernel->rollback.storage, storage);
+  EXPECT_EQ(queue->kernel->rollback.bytes, before);
+  EXPECT_EQ(storage->end,
+            before + sizeof(iree_hal_amd_gpu_blit_arguments_t) + 51);
+  EXPECT_EQ(queue->producer.arguments->end, 0u);
+  iree_hal_amd_gpu_blit_arguments_t arguments;
+  std::memcpy(&arguments, storage->memory.contents.data, sizeof(arguments));
+  EXPECT_EQ(arguments.source, storage->address + sizeof(arguments));
+  EXPECT_EQ(arguments.length, 17u);
+  EXPECT_EQ(arguments.row_count, 3u);
+  const std::vector<uint8_t> captured(
+      storage->memory.contents.data,
+      storage->memory.contents.data + sizeof(arguments) + 51);
+  Publish(0);
+  EXPECT_EQ(std::memcmp(captured.data(), storage->memory.contents.data,
+                        captured.size()),
+            0);
+  native_queues_[0].busy = false;
+  native_queues_[0].rejection =
+      amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
+  ASSERT_NO_FATAL_FAILURE(Execute(0));
+  Poll(0);
+  Publish(0);
+  EXPECT_EQ(storage->end, before);
+  EXPECT_EQ(queue->producer.arguments->end, 0u);
+  EXPECT_EQ(native_queues_[0].commands.size(), 2u);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        iree_hal_semaphore_query(failed, &value));
+}
+
 TEST_F(KernelQueueTest, PacketStorageSurvivesBusyAndRejectedDispatches) {
   auto* queue =
       reinterpret_cast<iree_hal_amd_gpu_pm4_queue_t*>(queues_[0].get());
