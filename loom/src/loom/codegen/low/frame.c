@@ -637,6 +637,26 @@ static bool loom_low_emission_frame_crosses_new_pressure_cliff(
       allocation->physical_extents.count);
 }
 
+// Publishes a completed local frame and repairs retained pointers to fields
+// within the frame itself. The schedule builder binds the loop nest to its CFG;
+// a by-value frame copy must rebind that relationship to the destination.
+static void loom_low_emission_frame_publish(
+    const loom_low_emission_frame_t* source,
+    loom_low_emission_frame_t* destination) {
+  *destination = *source;
+  destination->schedule.loop_nest.graph = &destination->schedule.cfg_graph;
+}
+
+// Replaces the accepted frame and its arena storage with the winning trial.
+static void loom_low_emission_frame_accept_trial(
+    const loom_low_emission_frame_t* trial, iree_arena_allocator_t* trial_arena,
+    const iree_arena_checkpoint_t* frame_checkpoint,
+    loom_low_emission_frame_t* frame) {
+  iree_arena_checkpoint_restore(frame_checkpoint);
+  iree_arena_transfer(trial_arena, frame_checkpoint->arena);
+  loom_low_emission_frame_publish(trial, frame);
+}
+
 // Retains the accepted frame while measuring a pair-replication trial. Rollback
 // restores its original operations and operands, so rejection needs no rebuild.
 static iree_status_t loom_low_emission_frame_try_pair_replication(
@@ -702,9 +722,8 @@ static iree_status_t loom_low_emission_frame_try_pair_replication(
         frame_checkpoint, repair_arena, scratch_arena, statistics);
     iree_arena_reset(scratch_arena);
   } else {
-    iree_arena_checkpoint_restore(frame_checkpoint);
-    iree_arena_transfer(scratch_arena, frame_checkpoint->arena);
-    *frame = trial;
+    loom_low_emission_frame_accept_trial(&trial, scratch_arena,
+                                         frame_checkpoint, frame);
   }
   return iree_ok_status();
 }
@@ -777,9 +796,8 @@ static iree_status_t loom_low_emission_frame_try_guarded_motion(
         status, loom_low_guarded_motion_rollback(&rewriter, &plan));
     iree_arena_reset(scratch_arena);
   } else {
-    iree_arena_checkpoint_restore(frame_checkpoint);
-    iree_arena_transfer(scratch_arena, frame_checkpoint->arena);
-    *frame = trial;
+    loom_low_emission_frame_accept_trial(&trial, scratch_arena,
+                                         frame_checkpoint, frame);
   }
   loom_rewriter_deinitialize(&rewriter);
   return status;
@@ -854,9 +872,8 @@ static iree_status_t loom_low_emission_frame_try_loop_placement(
         status, loom_low_loop_placement_rollback(&rewriter, &plan));
     iree_arena_reset(scratch_arena);
   } else {
-    iree_arena_checkpoint_restore(frame_checkpoint);
-    iree_arena_transfer(scratch_arena, frame_checkpoint->arena);
-    *frame = trial;
+    loom_low_emission_frame_accept_trial(&trial, scratch_arena,
+                                         frame_checkpoint, frame);
   }
   loom_rewriter_deinitialize(&rewriter);
   return status;
@@ -952,16 +969,6 @@ static iree_status_t loom_low_emission_frame_apply_materialization_summary(
             arena));
   }
   return iree_ok_status();
-}
-
-// Publishes a completed local frame and repairs retained pointers to fields
-// within the frame itself. The schedule builder binds the loop nest to its CFG;
-// a by-value frame copy must rebind that relationship to the destination.
-static void loom_low_emission_frame_publish(
-    const loom_low_emission_frame_t* source,
-    loom_low_emission_frame_t* destination) {
-  *destination = *source;
-  destination->schedule.loop_nest.graph = &destination->schedule.cfg_graph;
 }
 
 static iree_status_t loom_low_emission_frame_build_spill_free_impl(

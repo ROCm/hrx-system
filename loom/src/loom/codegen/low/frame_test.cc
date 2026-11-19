@@ -1201,6 +1201,7 @@ low.func.def target<test.low.core> @guarded_store(%base: reg<test.ptr>, %origin:
   EXPECT_EQ(statistics.frame_build_count, 2u);
   EXPECT_EQ(statistics.allocation_run_count, 2u);
   EXPECT_EQ(statistics.retained_location_replay_count, 1u);
+  EXPECT_EQ(frame.schedule.loop_nest.graph, &frame.schedule.cfg_graph);
 
   // Accepted motion retires the original frame. Its replacement owns the
   // effect and hazard rows consumed after trial and scheduling scratch expire.
