@@ -170,7 +170,10 @@ static iree_status_t loom_aie2p_native_intern_payload(
       .destinations = (loom_aie2p_native_payload_endpoint_t*)(payload + 1),
       .destination_count = destination_count,
       .packet = source->class_count++,
-      .distribution_only = distribution};
+      .distribution_only = distribution,
+      .sram_egress =
+          sender.tile->facts->kind == LOOM_XDNA_TILE_KIND_MEMORY &&
+          destinations[0].tile->facts->kind == LOOM_XDNA_TILE_KIND_SHIM_NOC};
   memcpy(payload->destinations, destinations,
          destination_count * sizeof(*destinations));
   source->nonlocal_class_count += !compute || cross_column;
@@ -430,15 +433,18 @@ iree_status_t loom_aie2p_native_route_payload(
   if (payload->routed) {
     return iree_ok_status();
   }
-  // All classes share this sender's physical prefix. Admit its longer paths
-  // before shorter branches fix a lane that cannot pass through an SRAM tile.
-  // Formation retains this order across classes as well as within each class;
-  // runtime packet order and each class's destination set remain unchanged.
+  // Longer paths establish lanes through SRAM before shorter classes branch
+  // from them. An SRAM sender's shim writes leave on a separate port. Placing
+  // them during northbound distribution could take the only southbound lane
+  // reachable by a subsequent control packet passing straight through SRAM.
   iree_status_t status = iree_ok_status();
   bool valid = true;
   for (loom_aie2p_native_payload_class_t* candidate = payload->source->classes;
        iree_status_is_ok(status) && valid && candidate;
        candidate = candidate->next) {
+    if (candidate->sram_egress != payload->sram_egress) {
+      continue;
+    }
     status = loom_aie2p_native_route_payload_class(context, candidate, op,
                                                    next_source, &valid);
   }
