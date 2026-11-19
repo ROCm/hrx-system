@@ -425,7 +425,9 @@ iree_status_t iree_hal_amd_gpu_code_queue_publish(
           queue, (uint32_t)(words - begin));
     }
     accepted = amdf_status_is_ok(queue->failure);
+    IREE_TRACE_ZONE_BEGIN_NAMED(z_wait, "iree_hal_amd_gpu_code_queue_wait");
     status = iree_hal_amd_gpu_code_queue_wait(queue, timeout);
+    IREE_TRACE_ZONE_END(z_wait);
     if (iree_status_is_ok(status)) {
       accepted = false;
       offset += count * 4;
