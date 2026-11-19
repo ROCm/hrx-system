@@ -218,39 +218,6 @@ iree_status_t iree_hal_streaming_direct_transfer_d2h(
       context, /*operation_count=*/1, &operation);
 }
 
-iree_status_t iree_hal_streaming_direct_transfer_d2d(
-    iree_hal_streaming_context_t* context, iree_hal_buffer_t* source_buffer,
-    iree_device_size_t source_offset, iree_hal_buffer_t* target_buffer,
-    iree_device_size_t target_offset, iree_device_size_t length) {
-  IREE_ASSERT_ARGUMENT(context);
-  IREE_ASSERT_ARGUMENT(source_buffer);
-  IREE_ASSERT_ARGUMENT(target_buffer);
-  IREE_RETURN_IF_ERROR(
-      iree_hal_buffer_validate_range(source_buffer, source_offset, length));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_buffer_validate_range(target_buffer, target_offset, length));
-
-  const iree_hal_transfer_region_t operation_region = {
-      .row_length = length,
-      .row_count = 1,
-      .slice_count = 1,
-  };
-  const iree_hal_transfer_operation_t operation = {
-      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
-      .copy =
-          {
-              .source_buffer = source_buffer,
-              .source_offset = source_offset,
-              .target_buffer = target_buffer,
-              .target_offset = target_offset,
-              .region = &operation_region,
-              .flags = IREE_HAL_COPY_FLAG_NONE,
-          },
-  };
-  return iree_hal_streaming_direct_transfer_context_and_wait(
-      context, /*operation_count=*/1, &operation);
-}
-
 iree_status_t iree_hal_streaming_direct_transfer_and_wait(
     iree_hal_streaming_stream_t* stream, iree_host_size_t operation_count,
     const iree_hal_transfer_operation_t* operations) {

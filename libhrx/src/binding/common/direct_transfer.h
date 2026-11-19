@@ -73,13 +73,6 @@ iree_status_t iree_hal_streaming_direct_transfer_on_context_and_wait(
     iree_host_size_t operation_count,
     const iree_hal_transfer_operation_t* operations);
 
-// Performs a blocking device-to-device transfer using the context's small/bulk
-// queue selection. The caller has established any preceding dependencies.
-iree_status_t iree_hal_streaming_direct_transfer_d2d(
-    iree_hal_streaming_context_t* context, iree_hal_buffer_t* source_buffer,
-    iree_device_size_t source_offset, iree_hal_buffer_t* target_buffer,
-    iree_device_size_t target_offset, iree_device_size_t length);
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

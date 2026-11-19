@@ -24,12 +24,11 @@
 
 namespace {
 
-// A transfer dependency that accepts the first row and refuses the second.
-// All accepted work uses the real task queue and its ordinary completion.
-struct RejectSecondTransferQueue {
+// A transfer dependency that rejects the complete region before acceptance.
+struct RejectTransferQueue {
   // Queue interface borrowed by the frontend context while the test runs.
   iree_hal_queue_t base;
-  // Retained native queue that performs the accepted transfer.
+  // Retained native queue supplying the wrapped family and features.
   iree_hal_queue_t* target = nullptr;
   // Number of transfer calls, written only by the compatibility worker.
   int call_count = 0;
@@ -40,7 +39,7 @@ struct RejectSecondTransferQueue {
     static const iree_hal_queue_vtable_t vtable = {
         .destroy =
             +[](iree_hal_queue_t* base) {
-              auto* queue = reinterpret_cast<RejectSecondTransferQueue*>(base);
+              auto* queue = reinterpret_cast<RejectTransferQueue*>(base);
               iree_hal_queue_release(queue->target);
             },
         .transfer =
@@ -48,14 +47,11 @@ struct RejectSecondTransferQueue {
                 iree_hal_semaphore_list_t signals, iree_host_size_t count,
                 const iree_hal_transfer_operation_t* operations,
                 const iree_hal_queue_barriers_t* barriers) {
-              auto* queue = reinterpret_cast<RejectSecondTransferQueue*>(base);
-              if (++queue->call_count == 2) {
-                return iree_make_status(
-                    IREE_STATUS_ABORTED,
-                    "transfer dependency rejected the second row");
-              }
-              return iree_hal_queue_transfer(queue->target, waits, signals,
-                                             count, operations, barriers);
+              auto* queue = reinterpret_cast<RejectTransferQueue*>(base);
+              ++queue->call_count;
+              return iree_make_status(
+                  IREE_STATUS_ABORTED,
+                  "transfer dependency rejected the region");
             },
     };
     iree_hal_queue_params_t params;
@@ -217,7 +213,7 @@ class StagedCopyTest : public ::testing::Test {
   // Context's owned native queue, restored before context teardown.
   iree_hal_queue_t* original_context_queue_ = nullptr;
   // CPU-only dependency wrapper, live until the frontend worker is joined.
-  RejectSecondTransferQueue fault_queue_ = {};
+  RejectTransferQueue fault_queue_ = {};
 };
 
 TEST_F(StagedCopyTest, GraphCopyBetweenContextsPreservesPitchesAndCompletes) {
@@ -237,7 +233,39 @@ TEST_F(StagedCopyTest, GraphCopyBetweenContextsPreservesPitchesAndCompletes) {
   }
 }
 
-TEST_F(StagedCopyTest, ContextQueueRejectionStopsRowsAndFailsDependents) {
+TEST_F(StagedCopyTest, HostVolumeKeepsPaddingAndCompletesBeforeDependents) {
+  host_source_.fill(0x5A);
+  const iree_hip_staged_copy_endpoint_t source_endpoint = {
+      .host_pointer = host_source_.data() + 1,
+      .row_pitch = 8,
+      .slice_pitch = 24,
+  };
+  LaunchCopy(DeviceEndpoint(0), source_endpoint);
+  ASSERT_FALSE(HasFatalFailure());
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  EXPECT_TRUE(dependent_ran_);
+  auto* destination = static_cast<uint8_t*>(buffers_[0]->host_ptr);
+  for (size_t i = 0; i < 64; ++i) {
+    const bool copied = (i >= 1 && i < 5) || (i >= 9 && i < 13) ||
+                        (i >= 25 && i < 29) || (i >= 33 && i < 37);
+    EXPECT_EQ(destination[i], copied ? 0x5A : 0) << i;
+  }
+}
+
+TEST_F(StagedCopyTest, LinearContextBridgeIgnoresUnusedStrides) {
+  memset(buffers_[0]->host_ptr, 0x5A, 64);
+  auto source = DeviceEndpoint(0);
+  auto target = DeviceEndpoint(1);
+  source.row_pitch = source.slice_pitch = 0;
+  target.row_pitch = target.slice_pitch = 0;
+  IREE_ASSERT_OK(iree_hip_staged_copy_3d(nullptr, &target, &source, 4, 1, 1));
+  auto* destination = static_cast<uint8_t*>(buffers_[1]->host_ptr);
+  for (size_t i = 0; i < 64; ++i) {
+    EXPECT_EQ(destination[i], i >= 1 && i < 5 ? 0x5A : 0) << i;
+  }
+}
+
+TEST_F(StagedCopyTest, ContextQueueRejectionPreservesTargetAndFailsDependents) {
   host_source_.fill(0x5A);
   original_context_queue_ = contexts_[0]->queue;
   fault_queue_.Initialize(original_context_queue_);
@@ -256,10 +284,10 @@ TEST_F(StagedCopyTest, ContextQueueRejectionStopsRowsAndFailsDependents) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
                         iree_hal_streaming_stream_synchronize(stream_));
   EXPECT_FALSE(dependent_ran_);
-  EXPECT_EQ(fault_queue_.call_count, 2);
+  EXPECT_EQ(fault_queue_.call_count, 1);
   auto* destination = static_cast<uint8_t*>(buffers_[0]->host_ptr);
   for (size_t i = 0; i < 64; ++i) {
-    EXPECT_EQ(destination[i], i >= 1 && i < 5 ? 0x5A : 0) << i;
+    EXPECT_EQ(destination[i], 0) << i;
   }
 }
 
