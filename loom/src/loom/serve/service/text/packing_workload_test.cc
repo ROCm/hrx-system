@@ -75,9 +75,10 @@ class Workload {
   Workload(size_t capacity, size_t chunk_size, std::vector<Request> requests)
       : requests_(std::move(requests)),
         progress_(requests_.size()),
-        shapes_(loom_serve_text_default_shapes(capacity, nullptr)),
+        shapes_(loom_serve_text_default_shapes(capacity, requests_.size(),
+                                               nullptr)),
         chunk_size_(chunk_size) {
-    loom_serve_text_default_shapes(capacity, shapes_.data());
+    loom_serve_text_default_shapes(capacity, requests_.size(), shapes_.data());
   }
 
   template <typename Cost>

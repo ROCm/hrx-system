@@ -31,9 +31,9 @@ TEST(TextScheduleTest, DefaultCatalogCoversTheCapacityFamily) {
   for (iree_host_size_t tokens : capacities) {
     SCOPED_TRACE(tokens);
     const iree_host_size_t count =
-        loom_serve_text_default_shapes(tokens, nullptr);
+        loom_serve_text_default_shapes(tokens, 0, nullptr);
     std::vector<loom_serve_packing_shape_t> shapes(count + 1);
-    EXPECT_EQ(loom_serve_text_default_shapes(tokens, shapes.data()), count);
+    EXPECT_EQ(loom_serve_text_default_shapes(tokens, 0, shapes.data()), count);
     ASSERT_GT(count, 0);
     EXPECT_EQ(shapes[count].token_capacity, 0);
     EXPECT_EQ(shapes[count].span_capacity, 0);
@@ -61,11 +61,39 @@ TEST(TextScheduleTest, DefaultCatalogCoversTheCapacityFamily) {
   }
 }
 
+TEST(TextScheduleTest, SessionCeilingKeepsTheFirstCoveringSpanBucket) {
+  // Both axes have a non-power-of-two terminal bucket at 17. A ceiling of
+  // three, for example, still selects the existing four-span executable.
+  constexpr iree_host_size_t tokens = 17;
+  std::vector<loom_serve_packing_shape_t> full(
+      loom_serve_text_default_shapes(tokens, 0, nullptr));
+  loom_serve_text_default_shapes(tokens, 0, full.data());
+  for (iree_host_size_t sessions = 1; sessions <= tokens + 1; ++sessions) {
+    SCOPED_TRACE(sessions);
+    std::vector<loom_serve_packing_shape_t> bounded(
+        loom_serve_text_default_shapes(tokens, sessions, nullptr));
+    ASSERT_EQ(loom_serve_text_default_shapes(tokens, sessions, bounded.data()),
+              bounded.size());
+    size_t kept = 0;
+    for (size_t i = 0; i < full.size(); ++i) {
+      if (i && full[i - 1].token_capacity == full[i].token_capacity &&
+          full[i - 1].span_capacity >= sessions) {
+        continue;
+      }
+      ASSERT_LT(kept, bounded.size());
+      EXPECT_EQ(bounded[kept].token_capacity, full[i].token_capacity);
+      EXPECT_EQ(bounded[kept].span_capacity, full[i].span_capacity);
+      ++kept;
+    }
+    EXPECT_EQ(kept, bounded.size());
+  }
+}
+
 TEST(TextScheduleTest, DefaultCatalogShrinksBothAxesWithLiveReadiness) {
   const iree_host_size_t shape_count =
-      loom_serve_text_default_shapes(512, nullptr);
+      loom_serve_text_default_shapes(512, 0, nullptr);
   std::vector<loom_serve_packing_shape_t> shapes(shape_count);
-  loom_serve_text_default_shapes(512, shapes.data());
+  loom_serve_text_default_shapes(512, 0, shapes.data());
   ASSERT_EQ(shape_count, 55);
   loom_serve_packed_span_t spans[16], scratch[16];
   for (iree_host_size_t active = 1; active <= 16; ++active) {
@@ -109,9 +137,9 @@ TEST(TextScheduleTest, DefaultCatalogShrinksBothAxesWithLiveReadiness) {
 TEST(TextScheduleTest, SameCatalogFillsWiderCohortsAsResidentsGrow) {
   const iree_host_size_t token_capacity = 128;
   const iree_host_size_t shape_count =
-      loom_serve_text_default_shapes(token_capacity, nullptr);
+      loom_serve_text_default_shapes(token_capacity, 0, nullptr);
   std::vector<loom_serve_packing_shape_t> shapes(shape_count);
-  loom_serve_text_default_shapes(token_capacity, shapes.data());
+  loom_serve_text_default_shapes(token_capacity, 0, shapes.data());
   for (iree_host_size_t residents : {1u, 4u, 17u, 65u, 100u, 129u, 257u}) {
     SCOPED_TRACE(residents);
     std::vector<loom_serve_ready_span_t> ready(residents, {1, 1});
