@@ -15,9 +15,9 @@
 extern "C" {
 #endif
 
-// Controller field containing a linear firmware address. This is an admitted
-// runtime relocation kind. The native .xdna wire ABI only defines SHIM_ADDRESS.
-enum { IREE_HAL_AMD_XDNA_RELOCATION_FIRMWARE_ADDRESS_64 = 2 };
+// Standalone controller field naming a PDI in firmware address space. Native
+// .xdna metadata defines only SHIM_ADDRESS and cannot declare this kind.
+enum { IREE_HAL_AMD_XDNA_RELOCATION_PDI_ADDRESS_64 = 2 };
 
 // A source range copied into an allocation when its backing is materialized.
 typedef struct iree_hal_amd_xdna_image_load_t {

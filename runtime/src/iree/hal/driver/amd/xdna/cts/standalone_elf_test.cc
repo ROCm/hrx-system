@@ -51,19 +51,28 @@ TEST_F(XdnaNativeTest, RunsStandaloneHelloWorld) {
 
 TEST_F(XdnaNativeTest, RunsStandaloneVectorScalarAddAcrossNativeDispatch) {
   const auto* file = iree_hal_amd_xdna_test_vector_scalar_add_create();
-  iree::Status status(
-      LoadElf(*file, IREE_SV("main:sequence"), &executable_, &function_));
+  iree::Status status(LoadElf(*file, IREE_SV("main:sequence"),
+                              &alternate_executable_, &alternate_function_));
   if (status.code() == iree::StatusCode::kIncompatible) {
-    ASSERT_EQ(executable_, nullptr);
+    ASSERT_EQ(alternate_executable_, nullptr);
     GTEST_SKIP() << status.ToString();
   }
   IREE_ASSERT_OK(status);
   iree_hal_semaphore_t* done = nullptr;
   ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&done));
+  ASSERT_NO_FATAL_FAILURE(LoadMultiply());
+  ASSERT_NO_FATAL_FAILURE(Square(3));
+  // A second live context runs on the same endpoint before the original queue
+  // takes the placement back. Queue creation cannot establish entry state.
+  struct PeerContext final : XdnaNativeSession {
+    ~PeerContext() { Close(); }
+  } peer;
+  ASSERT_NO_FATAL_FAILURE(peer.Open(endpoint_path_));
+  ASSERT_NO_FATAL_FAILURE(peer.LoadMultiply());
+  ASSERT_NO_FATAL_FAILURE(peer.Square(101));
   constexpr size_t kElementCount = 1024;
   std::array<uint32_t, kElementCount> input;
   for (uint64_t pass = 1; pass <= 2; ++pass) {
-    uint64_t value = 2 * pass - 1;
     iree_hal_buffer_t *source = nullptr, *destination = nullptr;
     ASSERT_NO_FATAL_FAILURE(MakeBuffer(sizeof(input), &source));
     ASSERT_NO_FATAL_FAILURE(MakeBuffer(sizeof(input), &destination));
@@ -74,12 +83,14 @@ TEST_F(XdnaNativeTest, RunsStandaloneVectorScalarAddAcrossNativeDispatch) {
     }
     IREE_ASSERT_OK(
         iree_hal_buffer_map_write(source, 0, input.data(), sizeof(input)));
+    ASSERT_NO_FATAL_FAILURE(Square(1000u * static_cast<uint32_t>(pass)));
+    uint64_t value = pass;
     iree_hal_buffer_ref_t bindings[] = {
         iree_hal_make_buffer_ref(source, 0, sizeof(input)),
         iree_hal_make_buffer_ref(destination, 0, sizeof(input))};
     IREE_ASSERT_OK(iree_hal_queue_dispatch(
-        queue_, {}, {1, &done, &value}, executable_, function_,
-        iree_hal_make_static_dispatch_config(1, 1, 1),
+        queue_, {}, {1, &done, &value}, alternate_executable_,
+        alternate_function_, iree_hal_make_static_dispatch_config(1, 1, 1),
         iree_const_byte_span_empty(), {IREE_ARRAYSIZE(bindings), bindings},
         nullptr, IREE_HAL_DISPATCH_FLAG_NONE));
     IREE_ASSERT_OK(iree_hal_semaphore_wait(done, value, iree_infinite_timeout(),
@@ -92,34 +103,6 @@ TEST_F(XdnaNativeTest, RunsStandaloneVectorScalarAddAcrossNativeDispatch) {
       ASSERT_EQ(readback[kElementCount + i], input[i] + 1) << i;
       ASSERT_EQ(readback[i], 0xA5A5A5A5u) << i;
       ASSERT_EQ(readback[2 * kElementCount + i], 0xA5A5A5A5u) << i;
-    }
-    if (pass == 1) {
-      // Reconfigure the same placement with a native Loom program between
-      // standalone submissions. Both formats must establish their own state.
-      ASSERT_NO_FATAL_FAILURE(LoadProgram(
-          iree_hal_amd_xdna_test_mul_i32_create(),
-          iree_hal_amd_xdna_test_mul_i32_npu4_create(), IREE_SV("mul_i32"),
-          &alternate_executable_, &alternate_function_));
-      iree_hal_buffer_ref_t native_bindings[] = {
-          iree_hal_make_buffer_ref(source, 0, kBytes),
-          iree_hal_make_buffer_ref(source, 0, kBytes),
-          iree_hal_make_buffer_ref(destination, 0, kBytes)};
-      uint64_t native_value = value + 1;
-      IREE_ASSERT_OK(iree_hal_queue_dispatch(
-          queue_, {}, {1, &done, &native_value}, alternate_executable_,
-          alternate_function_, iree_hal_make_static_dispatch_config(1, 1, 1),
-          iree_const_byte_span_empty(),
-          {IREE_ARRAYSIZE(native_bindings), native_bindings}, nullptr,
-          IREE_HAL_DISPATCH_FLAG_NONE));
-      IREE_ASSERT_OK(iree_hal_semaphore_wait(done, native_value,
-                                             iree_infinite_timeout(),
-                                             IREE_ASYNC_WAIT_FLAG_NONE));
-      std::array<uint32_t, kBytes / sizeof(uint32_t)> squares;
-      IREE_ASSERT_OK(iree_hal_buffer_map_read(destination, 0, squares.data(),
-                                              sizeof(squares)));
-      for (size_t i = 0; i < squares.size(); ++i) {
-        EXPECT_EQ(squares[i], input[i] * input[i]) << i;
-      }
     }
   }
 }
@@ -143,10 +126,15 @@ TEST_F(XdnaNativeTest, ReplaysPendingStandaloneBatchesAcrossExecutableReload) {
         iree_hal_queue_family(queue_), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
         IREE_HAL_COMMAND_CATEGORY_DISPATCH, 2, recorded.out()));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(recorded));
+    // Direct and PDI-managed commands share a native publication batch.
+    const auto initial = iree_hal_make_indirect_buffer_ref(0, 0, kBytes);
+    const iree_hal_buffer_ref_t square[] = {initial, initial, initial};
+    IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+        recorded, executable_, function_,
+        iree_hal_make_static_dispatch_config(1, 1, 1), {},
+        {IREE_ARRAYSIZE(square), square}, 0));
     for (uint32_t i = 0; i < kAdds; ++i) {
-      if (i) {
-        IREE_ASSERT_OK(BarrierBetweenDispatches(recorded));
-      }
+      IREE_ASSERT_OK(BarrierBetweenDispatches(recorded));
       const iree_hal_buffer_ref_t arguments[] = {
           iree_hal_make_indirect_buffer_ref(i % 2, 0, kVectorBytes),
           iree_hal_make_indirect_buffer_ref((i + 1) % 2, 0, kVectorBytes)};
@@ -155,14 +143,6 @@ TEST_F(XdnaNativeTest, ReplaysPendingStandaloneBatchesAcrossExecutableReload) {
           iree_hal_make_static_dispatch_config(1, 1, 1), {},
           {IREE_ARRAYSIZE(arguments), arguments}, 0));
     }
-    // Loom squares the first 16 words produced by the final FastFlow dispatch.
-    IREE_ASSERT_OK(BarrierBetweenDispatches(recorded));
-    const auto result = iree_hal_make_indirect_buffer_ref(kAdds % 2, 0, kBytes);
-    const iree_hal_buffer_ref_t square[] = {result, result, result};
-    IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
-        recorded, executable_, function_,
-        iree_hal_make_static_dispatch_config(1, 1, 1), {},
-        {IREE_ARRAYSIZE(square), square}, 0));
     IREE_ASSERT_OK(iree_hal_command_buffer_end(recorded));
 
     iree_hal_semaphore_t* start = nullptr;
@@ -213,12 +193,11 @@ TEST_F(XdnaNativeTest, ReplaysPendingStandaloneBatchesAcrossExecutableReload) {
             iree_hal_buffer_allocated_buffer(buffers[batch][slot]), 0,
             words.data(), sizeof(words)));
         for (size_t i = 0; i < kWordCount; ++i) {
-          uint32_t expected = input_word(batch, i) + kAdds;
-          if (slot != kAdds % 2) {
-            --expected;
-          } else if (i < kBytes / sizeof(uint32_t)) {
+          uint32_t expected = input_word(batch, i);
+          if (i < kBytes / sizeof(uint32_t)) {
             expected *= expected;
           }
+          expected += kAdds - (slot != kAdds % 2 ? 1 : 0);
           ASSERT_EQ(words[kWordCount + i], expected)
               << generation << "/" << batch << "/" << slot << "/" << i;
           ASSERT_EQ(words[i], 0xA5A5A5A5u);

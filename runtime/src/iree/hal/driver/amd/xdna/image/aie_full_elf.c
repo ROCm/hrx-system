@@ -145,6 +145,11 @@ static iree_status_t iree_hal_amd_aie_group(
   IREE_RETURN_IF_ERROR(
       iree_byte_sequence_read(file->source, command->offset,
                               iree_make_byte_span(header, sizeof(header))));
+  if (iree_unaligned_load_le_u32(header + 8) >
+      (command->size - sizeof(header)) / sizeof(uint32_t)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "AIE operation count exceeds the transaction");
+  }
   if (header[0] != 0 || header[1] != 1 ||
       header[2] != 4 /* XAIE_DEV_GEN_AIE2P */ ||
       header[3] != target->context.row_count ||
@@ -431,7 +436,7 @@ static void iree_hal_amd_aie_build_plan(
             (iree_xdna_elf_relocation_record_t){
                 .byte_offset = patch->offset,
                 .source_ordinal = pdi->use,
-                .kind = IREE_HAL_AMD_XDNA_RELOCATION_FIRMWARE_ADDRESS_64,
+                .kind = IREE_HAL_AMD_XDNA_RELOCATION_PDI_ADDRESS_64,
                 .maximum_value = UINT64_MAX,
                 .alignment = 1};
       } else {

@@ -4,8 +4,9 @@ The `xdna` driver runs native Loom array programs through libamdf. It owns
 device discovery, native contexts, executable storage, buffers, direct and
 recorded queue operations, and completion. The [image loader](image/README.md)
 admits native `.xdna` ELFs and applies their declared storage and binding
-contracts. On Linux AIE2P queues an experimental reader also runs standalone
-MLIR-AIE ELFs with buffer arguments through the same HAL API.
+contracts. An experimental reader runs standalone MLIR-AIE ELFs with buffer
+arguments through the same HAL API on Linux and Windows AIE2P queues that
+support PDI loads.
 [Standalone AIE executables](image/README.md#experimental-standalone-aie-executables)
 
 ## Running a Loom scenario

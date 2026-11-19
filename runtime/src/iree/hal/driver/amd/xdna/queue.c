@@ -418,6 +418,13 @@ static void iree_hal_amd_xdna_publisher_execute(
     if (!iree_status_is_ok(operation->native.publication.status)) {
       break;
     }
+    bool needs_pdi_entry = queue->needs_pdi_entry;
+    operation->native.publication.status =
+        iree_hal_amd_xdna_invocations_prepare_entry(command_count, invocations,
+                                                    commands, &needs_pdi_entry);
+    if (!iree_status_is_ok(operation->native.publication.status)) {
+      break;
+    }
     if (operation->profile) {
       iree_hal_amd_xdna_operation_profile_prepare_native(
           operation, command_count, invocations, commands);
@@ -451,6 +458,7 @@ static void iree_hal_amd_xdna_publisher_execute(
     if (!iree_status_is_ok(operation->native.publication.status)) {
       break;
     }
+    queue->needs_pdi_entry = needs_pdi_entry;
     if (operation->profile) {
       iree_hal_amd_xdna_operation_profile_accept_native(
           operation, command_count, invocations, commands);

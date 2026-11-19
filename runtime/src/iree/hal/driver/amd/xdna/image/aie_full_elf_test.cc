@@ -101,7 +101,7 @@ TEST_F(AieFullElfTest, RetainsSegmentedSourceAndDistinctResetImages) {
   uint32_t ordinals[2];
   for (uint32_t i = 0; i < 2; ++i) {
     const auto& patch = tables->relocations[entry.first_static_relocation + i];
-    EXPECT_EQ(patch.kind, IREE_HAL_AMD_XDNA_RELOCATION_FIRMWARE_ADDRESS_64);
+    EXPECT_EQ(patch.kind, IREE_HAL_AMD_XDNA_RELOCATION_PDI_ADDRESS_64);
     ordinals[i] = tables->allocation_uses[entry.first_allocation_use +
                                           patch.source_ordinal];
     const auto& allocation = tables->allocations[ordinals[i]];
@@ -183,6 +183,14 @@ TEST_F(AieFullElfTest, RejectsTruncatedDirectoryAndMissingGroupMember) {
   EXPECT_EQ(Admit().code(), StatusCode::kInvalidArgument);
   EXPECT_EQ(image_, nullptr);
   bytes_.pop_back();
+  EXPECT_EQ(Admit().code(), StatusCode::kInvalidArgument);
+  EXPECT_EQ(image_, nullptr);
+}
+
+TEST_F(AieFullElfTest, RejectsOperationCountLargerThanTheController) {
+  uint8_t* command = Section(bytes_, ".ctrltext.1");
+  ASSERT_NE(command, nullptr);
+  iree_unaligned_store_le_u32(command + 8, UINT32_MAX);
   EXPECT_EQ(Admit().code(), StatusCode::kInvalidArgument);
   EXPECT_EQ(image_, nullptr);
 }

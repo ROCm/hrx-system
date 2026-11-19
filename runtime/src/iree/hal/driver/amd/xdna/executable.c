@@ -9,6 +9,7 @@
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/driver/amd/status.h"
 #include "iree/hal/driver/amd/xdna/executable_measurement.h"
+#include "iree/hal/driver/amd/xdna/image/aie2p/empty_pdi.h"
 
 // Cold allocation plan retained in entry-relative allocation-use order.
 typedef struct iree_hal_amd_xdna_allocation_plan_t {
@@ -44,6 +45,15 @@ typedef struct iree_hal_amd_xdna_invocation_measurement_t {
   bool bindings_valid;
 } iree_hal_amd_xdna_invocation_measurement_t;
 
+// A PDI-managed entry can also follow a direct array program. In that case
+// the firmware must see a distinct empty PDI immediately before the program.
+typedef struct iree_hal_amd_xdna_pdi_entry_t {
+  // Prefixed controller in the device's command arena.
+  iree_hal_amd_xdna_command_allocation_t allocation;
+  // True when the prefixed controller has the ordinary form's binding tuple.
+  bool bindings_valid;
+} iree_hal_amd_xdna_pdi_entry_t;
+
 struct iree_hal_amd_xdna_invocation_t {
   // Borrowed function, kept alive by the submitting operation's executable.
   iree_hal_amd_xdna_function_t* function;
@@ -66,6 +76,8 @@ struct iree_hal_amd_xdna_invocation_t {
   amdf_xdna_kernel_command_t command;
   // Optional owned command copy with fixed timer instructions, allocated cold.
   iree_hal_amd_xdna_invocation_measurement_t* measurement;
+  // Alternate entry prepared at construction only for a PDI-managed function.
+  iree_hal_amd_xdna_pdi_entry_t* pdi_entry;
 };
 
 struct iree_hal_amd_xdna_function_t {
@@ -86,6 +98,8 @@ struct iree_hal_amd_xdna_function_t {
   // First invocation establishing tile state, including optional timer
   // boundaries.
   iree_xdna_elf_invocation_record_t invocation;
+  // True when the controller loads configuration from a relocated PDI address.
+  bool loads_pdi;
   // Cold sharing and publication plan, with one row per allocation use.
   iree_hal_amd_xdna_allocation_plan_t* plans;
   // Protects only invocation list links; never held across allocation/native
@@ -106,6 +120,10 @@ typedef struct iree_hal_amd_xdna_executable_t {
   iree_allocator_t host_allocator;
   // Immutable image retaining its copied source bytes.
   iree_hal_amd_xdna_image_t* image;
+  // Borrowed device arena owning the optional neutral PDI and command ranges.
+  iree_hal_amd_xdna_command_arena_t* command_arena;
+  // Empty PDI shared by all PDI-managed entries and in-flight invocations.
+  iree_hal_amd_xdna_command_allocation_t entry_pdi;
   // Process-local identity used by optional profiling sessions.
   uint64_t profile_id;
   // Number of entries in the admitted image.
@@ -182,6 +200,10 @@ static void iree_hal_amd_xdna_invocation_free(
         function->command_arena, &invocation->measurement->allocation);
     iree_allocator_free(function->host_allocator, invocation->measurement);
   }
+  if (invocation->pdi_entry) {
+    iree_hal_amd_xdna_command_arena_release(function->command_arena,
+                                            &invocation->pdi_entry->allocation);
+  }
   iree_allocator_free(function->host_allocator, invocation);
 }
 
@@ -202,8 +224,74 @@ static void iree_hal_amd_xdna_executable_destroy(iree_hal_executable_t* base) {
     }
   }
   iree_allocator_free(executable->host_allocator, executable->functions);
+  iree_hal_amd_xdna_command_arena_release(executable->command_arena,
+                                          &executable->entry_pdi);
   iree_hal_amd_xdna_image_free(executable->image);
   iree_allocator_free(executable->host_allocator, executable);
+}
+
+enum {
+  IREE_HAL_AMD_XDNA_TRANSACTION_HEADER_SIZE = 16,
+  IREE_HAL_AMD_XDNA_LOAD_PDI_SIZE = 16,
+};
+
+// Executable loading is single-threaded. Publish the neutral PDI before any
+// invocation can refer to it, including on a second export of the same image.
+static iree_status_t iree_hal_amd_xdna_executable_initialize_entry_pdi(
+    iree_hal_amd_xdna_executable_t* executable,
+    iree_hal_amd_xdna_context_t* context) {
+  const iree_file_toc_t* pdi = iree_hal_amd_xdna_aie2p_empty_pdi_create();
+  iree_hal_amd_xdna_command_allocation_t* allocation = &executable->entry_pdi;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_command_arena_allocate_range(
+      executable->command_arena, pdi->size,
+      context->target.instruction_alignment, allocation));
+  memcpy(allocation->contents.data, pdi->data, pdi->size);
+  return IREE_HAL_AMD_STATUS_FROM_AMDF(
+      context->api->host_mapping_cache_control(
+          allocation->mapping, AMDF_HOST_CACHE_OPERATION_FLUSH,
+          allocation->memory_byte_offset, pdi->size),
+      "host_mapping_cache_control(empty PDI)");
+}
+
+// Materializes the alternate entry once, after static addresses are resolved.
+// A distinct PDI address makes the following application LOAD_PDI a miss even
+// when direct commands have left array state outside firmware PDI tracking.
+static iree_status_t iree_hal_amd_xdna_invocation_initialize_pdi_entry(
+    iree_hal_amd_xdna_invocation_t* invocation) {
+  iree_hal_amd_xdna_function_t* function = invocation->function;
+  const iree_xdna_elf_invocation_record_t* range = &function->invocation;
+  const uint64_t alignment =
+      function->plans[range->allocation_use].record.alignment;
+  const uint64_t byte_length =
+      (uint64_t)range->byte_length + IREE_HAL_AMD_XDNA_LOAD_PDI_SIZE;
+  const iree_hal_amd_xdna_executable_t* executable =
+      (const iree_hal_amd_xdna_executable_t*)function->executable;
+  iree_hal_amd_xdna_command_allocation_t* allocation =
+      &invocation->pdi_entry->allocation;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_command_arena_allocate_range(
+      function->command_arena, byte_length, alignment, allocation));
+  const uint8_t* original =
+      invocation->storage[range->allocation_use].mapping.data +
+      range->byte_offset;
+  uint8_t* target = allocation->contents.data;
+  memcpy(target, original, IREE_HAL_AMD_XDNA_TRANSACTION_HEADER_SIZE);
+  iree_unaligned_store_le_u32(target + 8,
+                              iree_unaligned_load_le_u32(original + 8) + 1);
+  iree_unaligned_store_le_u32(target + 12, (uint32_t)byte_length);
+  uint8_t* load = target + IREE_HAL_AMD_XDNA_TRANSACTION_HEADER_SIZE;
+  iree_unaligned_store_le_u32(load, 8);  // XAIE_IO_LOAD_PDI.
+  iree_unaligned_store_le_u32(
+      load + 4, (uint32_t)executable->entry_pdi.contents.data_length);
+  iree_unaligned_store_le_u64(load + 8, executable->entry_pdi.device_address);
+  memcpy(load + IREE_HAL_AMD_XDNA_LOAD_PDI_SIZE,
+         original + IREE_HAL_AMD_XDNA_TRANSACTION_HEADER_SIZE,
+         range->byte_length - IREE_HAL_AMD_XDNA_TRANSACTION_HEADER_SIZE);
+  invocation->pdi_entry->bindings_valid = true;
+  return IREE_HAL_AMD_STATUS_FROM_AMDF(
+      function->context->api->host_mapping_cache_control(
+          allocation->mapping, AMDF_HOST_CACHE_OPERATION_FLUSH,
+          allocation->memory_byte_offset, allocation->contents.data_length),
+      "host_mapping_cache_control(PDI entry)");
 }
 
 // Creates storage only when the observed in-flight working set grows. Shared
@@ -216,21 +304,25 @@ static iree_status_t iree_hal_amd_xdna_invocation_allocate(
   *out_invocation = NULL;
   const uint32_t count = function->record.allocation_use_count;
   iree_host_size_t size = 0, allocations_offset = 0, storage_offset = 0;
-  iree_host_size_t binding_addresses_offset = 0;
+  iree_host_size_t binding_addresses_offset = 0, pdi_entry_offset = 0;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, IREE_STRUCT_LAYOUT(
-              sizeof(iree_hal_amd_xdna_invocation_t), &size,
-              IREE_STRUCT_FIELD_ALIGNED(
-                  count, iree_hal_amd_xdna_owned_allocation_t,
-                  iree_alignof(iree_hal_amd_xdna_owned_allocation_t),
-                  &allocations_offset),
-              IREE_STRUCT_FIELD_ALIGNED(
-                  count, iree_hal_amd_xdna_executable_storage_t,
-                  iree_alignof(iree_hal_amd_xdna_executable_storage_t),
-                  &storage_offset),
-              IREE_STRUCT_FIELD_ALIGNED(function->record.binding_count,
-                                        uint64_t, iree_alignof(uint64_t),
-                                        &binding_addresses_offset)));
+      z0,
+      IREE_STRUCT_LAYOUT(
+          sizeof(iree_hal_amd_xdna_invocation_t), &size,
+          IREE_STRUCT_FIELD_ALIGNED(
+              count, iree_hal_amd_xdna_owned_allocation_t,
+              iree_alignof(iree_hal_amd_xdna_owned_allocation_t),
+              &allocations_offset),
+          IREE_STRUCT_FIELD_ALIGNED(
+              count, iree_hal_amd_xdna_executable_storage_t,
+              iree_alignof(iree_hal_amd_xdna_executable_storage_t),
+              &storage_offset),
+          IREE_STRUCT_FIELD_ALIGNED(function->record.binding_count, uint64_t,
+                                    iree_alignof(uint64_t),
+                                    &binding_addresses_offset),
+          IREE_STRUCT_FIELD_ALIGNED(
+              function->loads_pdi, iree_hal_amd_xdna_pdi_entry_t,
+              iree_alignof(iree_hal_amd_xdna_pdi_entry_t), &pdi_entry_offset)));
   iree_hal_amd_xdna_invocation_t* invocation = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_allocator_malloc(function->host_allocator, size,
@@ -245,6 +337,11 @@ static iree_status_t iree_hal_amd_xdna_invocation_allocate(
   invocation->prepared_bindings.device_addresses =
       (uint64_t*)((uint8_t*)invocation + binding_addresses_offset);
   invocation->prepared_bindings.valid = false;
+  if (function->loads_pdi) {
+    invocation->pdi_entry =
+        (iree_hal_amd_xdna_pdi_entry_t*)((uint8_t*)invocation +
+                                         pdi_entry_offset);
+  }
   iree_status_t status = iree_ok_status();
   for (uint32_t i = 0; i < count && iree_status_is_ok(status); ++i) {
     const iree_hal_amd_xdna_allocation_plan_t* plan = &function->plans[i];
@@ -310,6 +407,9 @@ static iree_status_t iree_hal_amd_xdna_invocation_allocate(
         function->image, function->ordinal, count, invocation->storage,
         &invocation->command);
   }
+  if (iree_status_is_ok(status) && invocation->pdi_entry) {
+    status = iree_hal_amd_xdna_invocation_initialize_pdi_entry(invocation);
+  }
   if (iree_status_is_ok(status)) {
     *out_invocation = invocation;
   } else {
@@ -368,6 +468,9 @@ static iree_status_t iree_hal_amd_xdna_function_initialize(
               tables, function->record.first_static_relocation + i);
       iree_hal_amd_xdna_allocation_plan_t* destination =
           &function->plans[relocation.destination_use];
+      if (relocation.kind == IREE_HAL_AMD_XDNA_RELOCATION_PDI_ADDRESS_64) {
+        function->loads_pdi = true;
+      }
       if (destination->shared &&
           !function->plans[relocation.source_ordinal].shared) {
         destination->shared = false;
@@ -383,6 +486,19 @@ static iree_status_t iree_hal_amd_xdna_function_initialize(
         &function->plans[relocation.destination_use];
     plan->patches.begin = iree_min(plan->patches.begin, relocation.byte_offset);
     plan->patches.end = iree_max(plan->patches.end, relocation.byte_offset + 8);
+  }
+  if (function->loads_pdi) {
+    const uint64_t entry_length = (uint64_t)function->invocation.byte_length +
+                                  IREE_HAL_AMD_XDNA_LOAD_PDI_SIZE;
+    if (entry_length > UINT32_MAX ||
+        entry_length > context->device_info.instruction.maximum_byte_length) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "AIE entry exceeds the instruction length limit");
+    }
+    if (!executable->entry_pdi.memory) {
+      IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_executable_initialize_entry_pdi(
+          executable, context));
+    }
   }
   IREE_RETURN_IF_ERROR(
       iree_hal_amd_xdna_invocation_allocate(function, &function->prototype));
@@ -407,6 +523,7 @@ iree_status_t iree_hal_amd_xdna_executable_create(
   iree_hal_executable_initialize(family, &iree_hal_amd_xdna_executable_vtable,
                                  &executable->base);
   executable->host_allocator = host_allocator;
+  executable->command_arena = command_arena;
   executable->profile_id = iree_atomic_fetch_add(
       &iree_hal_amd_xdna_next_executable_id, 1, iree_memory_order_relaxed);
   iree_byte_span_t source = {NULL, params->executable_data.data_length};
@@ -734,6 +851,9 @@ iree_status_t iree_hal_amd_xdna_function_prepare(
     if (invocation->measurement) {
       invocation->measurement->bindings_valid = false;
     }
+    if (invocation->pdi_entry) {
+      invocation->pdi_entry->bindings_valid = false;
+    }
     iree_hal_amd_xdna_executable_storage_patch(
         function->image, function->ordinal, invocation->storage, bindings);
     for (uint32_t i = 0;
@@ -772,6 +892,67 @@ iree_status_t iree_hal_amd_xdna_function_prepare(
     iree_hal_amd_xdna_invocation_release(invocation);
   }
   IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+// Copies only the dynamic address fields when this form's binding tuple has
+// changed. The executable's PDI and all static controller bytes stay immutable.
+static iree_status_t iree_hal_amd_xdna_invocation_bind_pdi_entry(
+    iree_hal_amd_xdna_invocation_t* invocation) {
+  iree_hal_amd_xdna_function_t* function = invocation->function;
+  const iree_hal_amd_xdna_image_tables_t* tables =
+      iree_hal_amd_xdna_image_tables(function->image);
+  const uint32_t use = function->invocation.allocation_use;
+  const uint8_t* original = invocation->storage[use].mapping.data;
+  iree_hal_amd_xdna_command_allocation_t* allocation =
+      &invocation->pdi_entry->allocation;
+  // A standalone group owns a complete controller transaction. Its binding
+  // offsets are relative to that transaction, all in the same allocation.
+  uint8_t* shifted =
+      allocation->contents.data + IREE_HAL_AMD_XDNA_LOAD_PDI_SIZE;
+  for (uint32_t i = 0; i < function->record.dynamic_relocation_count; ++i) {
+    const iree_xdna_elf_relocation_record_t patch =
+        iree_hal_amd_xdna_image_tables_relocation(
+            tables, function->record.first_dynamic_relocation + i);
+    memcpy(shifted + patch.byte_offset, original + patch.byte_offset,
+           sizeof(uint64_t));
+  }
+  const iree_hal_amd_xdna_allocation_plan_t* plan = &function->plans[use];
+  IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
+      function->context->api->host_mapping_cache_control(
+          allocation->mapping, AMDF_HOST_CACHE_OPERATION_FLUSH,
+          allocation->memory_byte_offset + IREE_HAL_AMD_XDNA_LOAD_PDI_SIZE +
+              plan->patches.begin,
+          plan->patches.end - plan->patches.begin),
+      "host_mapping_cache_control(PDI entry bindings)"));
+  invocation->pdi_entry->bindings_valid = true;
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amd_xdna_invocations_prepare_entry(
+    uint32_t count, iree_hal_amd_xdna_invocation_t* const* invocations,
+    amdf_xdna_kernel_command_t* commands, bool* needs_pdi_entry) {
+  iree_status_t status = iree_ok_status();
+  for (uint32_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+    iree_hal_amd_xdna_invocation_t* invocation = invocations[i];
+    iree_hal_amd_xdna_pdi_entry_t* entry = invocation->pdi_entry;
+    if (entry) {
+      if (*needs_pdi_entry) {
+        if (!entry->bindings_valid) {
+          status = iree_hal_amd_xdna_invocation_bind_pdi_entry(invocation);
+        }
+        commands[i] = (amdf_xdna_kernel_command_t){
+            .memory = entry->allocation.memory,
+            .byte_offset = entry->allocation.memory_byte_offset,
+            .byte_length = invocation->command.byte_length +
+                           IREE_HAL_AMD_XDNA_LOAD_PDI_SIZE,
+        };
+      } else {
+        commands[i] = invocation->command;
+      }
+    }
+    *needs_pdi_entry = !entry;
+  }
   return status;
 }
 

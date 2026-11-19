@@ -130,7 +130,7 @@ iree_status_t iree_hal_amd_xdna_executable_storage_load(
                      relocation.byte_offset;
     const uint64_t address = storage[relocation.source_ordinal].device_address +
                              (uint64_t)relocation.addend;
-    if (relocation.kind == IREE_HAL_AMD_XDNA_RELOCATION_FIRMWARE_ADDRESS_64) {
+    if (relocation.kind == IREE_HAL_AMD_XDNA_RELOCATION_PDI_ADDRESS_64) {
       iree_unaligned_store_le_u64(field, address);
     } else {
       iree_hal_amd_xdna_executable_write_shim_address(field, address);

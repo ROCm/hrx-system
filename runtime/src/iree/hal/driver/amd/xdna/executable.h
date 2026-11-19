@@ -77,6 +77,14 @@ iree_status_t iree_hal_amd_xdna_function_prepare(
     iree_hal_amd_xdna_invocation_t** out_invocation,
     amdf_xdna_kernel_command_t* out_command);
 
+// Selects the entry form in native publication order. Direct programs leave
+// the next PDI-managed program responsible for establishing firmware state.
+// The publisher commits the resulting state only after the batch is accepted.
+// No allocation or native submission occurs here.
+iree_status_t iree_hal_amd_xdna_invocations_prepare_entry(
+    uint32_t count, iree_hal_amd_xdna_invocation_t* const* invocations,
+    amdf_xdna_kernel_command_t* commands, bool* needs_pdi_entry);
+
 // Selects a measured command for an exclusively prepared invocation. First use
 // allocates a command copy with fixed timer IDs; later uses neither allocate
 // nor patch unless the ordinary invocation's bindings changed. Native retry
