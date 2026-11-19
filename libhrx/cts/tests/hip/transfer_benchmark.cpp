@@ -1,6 +1,8 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#include <sys/mman.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -152,6 +154,7 @@ enum TransferFlags : uint32_t {
   kPitched = 1u << 1,
   kDeviceInterval = 1u << 2,
   kSynchronous = 1u << 3,
+  kFreshHostMapping = 1u << 4,
 };
 
 enum class CopyStorage {
@@ -464,8 +467,18 @@ void Download(benchmark::State& state, uint32_t flags, size_t row_width = 4096,
   const size_t source_length = source_pitch * height;
   const size_t target_length = target_pitch * height;
   const size_t allocation_length = (target_length + 4095) & ~size_t{4095};
-  auto* allocation = static_cast<uint8_t*>(
-      std::aligned_alloc(4096, allocation_length * host_count));
+  const bool fresh_host_mapping = (flags & kFreshHostMapping) != 0;
+  const auto allocate_host = [&]() -> uint8_t* {
+    if (fresh_host_mapping) {
+      void* mapping = mmap(nullptr, allocation_length, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+      Require(mapping != MAP_FAILED, "host mapping failed");
+      return static_cast<uint8_t*>(mapping);
+    }
+    return static_cast<uint8_t*>(
+        std::aligned_alloc(4096, allocation_length * host_count));
+  };
+  auto* allocation = allocate_host();
   Require(allocation != nullptr, "host allocation failed");
   std::memset(allocation, kPadding, allocation_length * host_count);
   uint8_t* target = allocation;
@@ -528,7 +541,32 @@ void Download(benchmark::State& state, uint32_t flags, size_t row_width = 4096,
     std::memset(target, kPadding, allocation_length);
   }
   target = allocation;
-  if (flags & kDeviceInterval) {
+  if (fresh_host_mapping) {
+    // Releasing the CPU mapping also removes runtime-retained GPU access.
+    // Allocation, first touch, verification, and CPU unmap are outside copy
+    // timing. Report unmap separately because a runtime may defer work to it.
+    Require(munmap(allocation, allocation_length) == 0, "host unmap failed");
+    double unmap_nanoseconds = 0;
+    for (auto _ : state) {
+      state.PauseTiming();
+      target = allocate_host();
+      std::memset(target, kPadding, allocation_length);
+      state.ResumeTiming();
+      transfer();
+      runtime.Wait();
+      state.PauseTiming();
+      verify();
+      const auto begin = std::chrono::steady_clock::now();
+      Require(munmap(target, allocation_length) == 0, "host unmap failed");
+      const auto end = std::chrono::steady_clock::now();
+      unmap_nanoseconds +=
+          std::chrono::duration<double, std::nano>(end - begin).count();
+      state.ResumeTiming();
+    }
+    allocation = nullptr;
+    state.counters["host_unmap_ns"] = benchmark::Counter(
+        unmap_nanoseconds, benchmark::Counter::kAvgIterations);
+  } else if (flags & kDeviceInterval) {
     auto create = runtime.Resolve<decltype(&hipEventCreate)>("hipEventCreate");
     auto destroy =
         runtime.Resolve<decltype(&hipEventDestroy)>("hipEventDestroy");
@@ -571,7 +609,9 @@ void Download(benchmark::State& state, uint32_t flags, size_t row_width = 4096,
     }
   }
   for (size_t i = 0;
-       i < std::min(host_count, static_cast<size_t>(state.iterations())); ++i) {
+       !fresh_host_mapping &&
+       i < std::min(host_count, static_cast<size_t>(state.iterations()));
+       ++i) {
     target = allocation + i * allocation_length;
     verify();
   }
@@ -609,6 +649,17 @@ BENCHMARK_CAPTURE(Download, PageableRotating, kDefault, 4096, 4)
     ->UseRealTime();
 BENCHMARK_CAPTURE(Download, PageableRotatingPitched, kPitched, 4096, 4)
     ->Name("HIP/Download/PageableRotatingPitched")
+    ->Apply(HostTransferSizes)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+
+BENCHMARK_CAPTURE(Download, PageableFresh, kFreshHostMapping)
+    ->Name("HIP/Download/PageableFresh")
+    ->Apply(HostTransferSizes)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+BENCHMARK_CAPTURE(Download, PageableFreshPitched, kFreshHostMapping | kPitched)
+    ->Name("HIP/Download/PageableFreshPitched")
     ->Apply(HostTransferSizes)
     ->MeasureProcessCPUTime()
     ->UseRealTime();
