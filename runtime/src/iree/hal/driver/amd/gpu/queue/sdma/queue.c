@@ -501,8 +501,8 @@ iree_status_t iree_hal_amd_gpu_sdma_queue_create(
   queue->host_allocator = host_allocator;
   queue->context = context;
   queue->options = *options;
-  queue->features = context->families[options->family_ordinal].format_features;
-  queue->encoding = iree_hal_amd_gpu_sdma_transfer_encoding(queue->features);
+  queue->encoding = iree_hal_amd_gpu_sdma_transfer_encoding(
+      context->families[options->family_ordinal].format_features);
   queue->producer.count = options->queue_count;
   queue->producer.published = (uint64_t*)(queue + 1);
   queue->producer.pending = queue->producer.published + options->queue_count;

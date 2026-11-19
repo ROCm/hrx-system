@@ -127,6 +127,7 @@ iree_runtime_cc_library(
     deps = [
         ":commands",
         "//libamdf:headers",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:dma_transfer",
     ],
 )
@@ -148,6 +149,7 @@ iree_runtime_cc_library(
     hdrs = ["program.h"],
     deps = [
         ":commands",
+        ":transfer",
         "//libamdf:headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",

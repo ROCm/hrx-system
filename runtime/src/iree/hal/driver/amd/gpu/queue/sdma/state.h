@@ -50,10 +50,8 @@ struct iree_hal_amd_gpu_sdma_queue_t {
   iree_hal_amd_gpu_sdma_queue_options_t options;
   // Sole native publisher and retirement observer, shared by all operations.
   iree_hal_amd_gpu_sdma_native_queue_t* native;
-  // Native packet writers injected into the shared transfer traversal.
+  // Native format features and packet writers shared by all queue operations.
   iree_hal_amd_gpu_dma_transfer_encoding_t encoding;
-  // Format feature row selected by native family, independent of shader ISA.
-  amdf_queue_format_features_t features;
   // Optional final-release join installed by device membership.
   struct {
     // Joins sources, captures, and native access before returning ownership.

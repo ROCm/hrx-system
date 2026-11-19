@@ -6,6 +6,7 @@
 
 #include "iree/hal/driver/amd/gpu/queue/sdma/program.h"
 
+#include "iree/hal/driver/amd/gpu/queue/sdma/transfer.h"
 #include "iree/hal/queue.h"
 
 static uint64_t iree_hal_amd_gpu_sdma_program_length(
@@ -60,6 +61,19 @@ iree_hal_amd_gpu_sdma_program_progress_t iree_hal_amd_gpu_sdma_program_emit(
     if (rectangular) {
       const iree_hal_transfer_region_t* region =
           (const void*)(program->data.data + range->region_offset);
+      if (segment->kind == IREE_HAL_AMD_GPU_SDMA_PROGRAM_COPY_REGION) {
+        const iree_hal_amd_gpu_dma_transfer_packet_t packet =
+            iree_hal_amd_gpu_sdma_transfer_emit_region(
+                program->features,
+                values[range->source_value] + range->source_offset,
+                values[range->target_value] + range->target_offset, region,
+                cursor->offset, (uint32_t)(end - output), output);
+        if (packet.length) {
+          output += packet.word_count;
+          cursor->offset += packet.length;
+          continue;
+        }
+      }
       const uint64_t row_index = cursor->offset / region->row_length;
       const uint64_t row = row_index % region->row_count;
       const uint64_t slice = row_index / region->row_count;
