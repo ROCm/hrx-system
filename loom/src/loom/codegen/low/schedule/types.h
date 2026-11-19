@@ -723,13 +723,12 @@ typedef struct loom_low_schedule_block_t {
   uint32_t issue_group_start;
   // Number of issue groups owned by this block.
   uint32_t issue_group_count;
-  // Original selection explanations owned by this block's schedule.
-  struct {
-    // First entry in the table candidate-decision array.
-    uint32_t start;
-    // Number of candidate decisions recorded for the block.
-    uint32_t count;
-  } candidate_decisions;
+  // Exclusive end of this block's rows in the block-ordered decision table.
+  uint32_t candidate_decision_end;
+  // The source-order pressure sweep observed every direct register class
+  // within its scheduling limit, including live-out values and late reads.
+  // False when that sweep or those limits were unavailable.
+  bool source_registers_fit;
 } loom_low_schedule_block_t;
 
 // Accepted resource-stall block schedules preserved by a scoped IR transform.
