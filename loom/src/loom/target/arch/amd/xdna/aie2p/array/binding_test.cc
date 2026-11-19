@@ -80,6 +80,81 @@ TEST_P(Aie2pArrayBindingTest, SingletonAxesPreserveEveryTransferredAddress) {
   }
 }
 
+TEST_P(Aie2pArrayBindingTest, WideScalarsTransferEveryNativeWord) {
+  const auto& dma =
+      loom_xdna_array_tile_kind_facts(loom_xdna_npu2_array_family(), GetParam())
+          ->dma;
+  const uint64_t maximum_wrap = (UINT64_C(1) << dma.wrap_bits) - 1;
+  // The largest contiguous row that fits one wrap, and the first row that
+  // needs separate word and element dimensions.
+  for (uint64_t columns :
+       {UINT64_C(2), maximum_wrap / 2, maximum_wrap / 2 + 1}) {
+    for (uint64_t column_stride : {1, 3}) {
+      SCOPED_TRACE(::testing::Message()
+                   << columns << " stride=" << column_stride);
+      const uint64_t row_stride = columns * column_stride + 2;
+      const loom_storage_geometry_t source = {
+          .layout_kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
+          .element_bit_count = 64,
+          .rank = 3,
+          .axes = {{2, row_stride}, {columns, column_stride}, {1, UINT64_MAX}},
+      };
+      loom_aie2p_array_binding_plan_t plan = {};
+      iree_string_view_t reason;
+      ASSERT_TRUE(
+          Resolve(source, source.rank, 2 * columns * 8, 1, &plan, &reason));
+      const bool folded = column_stride == 1 && 2 * columns <= maximum_wrap;
+      ASSERT_EQ(plan.dma_dimension_count, folded ? 2 : 3);
+      ASSERT_EQ(plan.transfer_byte_length, 2 * columns * 8);
+      EXPECT_EQ(plan.binding_span_byte_length,
+                (row_stride + (columns - 1) * column_stride + 1) * 8);
+      for (uint64_t i = 0; i < plan.transfer_byte_length / 4; ++i) {
+        uint64_t coordinate = i, word = 0;
+        for (uint8_t axis = 0; axis < plan.dma_dimension_count; ++axis) {
+          const auto dimension = plan.dma_dimensions[axis];
+          word += (dimension.wrap ? coordinate % dimension.wrap : coordinate) *
+                  dimension.step_size;
+          if (dimension.wrap) {
+            coordinate /= dimension.wrap;
+          }
+        }
+        const uint64_t element = i / 2;
+        EXPECT_EQ(word, 2 * ((element / columns) * row_stride +
+                             (element % columns) * column_stride) +
+                            i % 2);
+        EXPECT_LT(word * 4, plan.binding_span_byte_length);
+      }
+    }
+  }
+}
+
+TEST_P(Aie2pArrayBindingTest, WideWordAxisCountsAgainstTheModuleLimit) {
+  const auto* dma = &loom_xdna_array_tile_kind_facts(
+                         loom_xdna_npu2_array_family(), GetParam())
+                         ->dma;
+  loom_storage_geometry_t geometry = {
+      .layout_kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
+      .element_bit_count = 64,
+      .rank = dma->address_dimension_count,
+  };
+  for (uint8_t i = 0; i < geometry.rank; ++i) {
+    geometry.axes[i] = {2, UINT64_C(2) << (2 * (geometry.rank - 1 - i))};
+  }
+  loom_aie2p_array_binding_plan_t plan = {};
+  iree_string_view_t reason;
+  EXPECT_FALSE(
+      Resolve(geometry, geometry.rank, 8u << geometry.rank, 1, &plan, &reason));
+  EXPECT_TRUE(iree_string_view_equal(
+      reason, IREE_SV("the strided transfer requires more address dimensions "
+                      "than DMA provides")));
+  // Two contiguous outer source axes can share a dimension, even though the
+  // inner word axis must stay separate from the strided elements.
+  geometry.axes[0].element_stride = 2 * geometry.axes[1].element_stride;
+  ASSERT_TRUE(
+      Resolve(geometry, geometry.rank, 8u << geometry.rank, 1, &plan, &reason));
+  EXPECT_EQ(plan.dma_dimension_count, dma->address_dimension_count);
+}
+
 TEST_P(Aie2pArrayBindingTest, SingleCoordinateHasNoAddressDimensions) {
   const loom_storage_geometry_t geometry = {
       .layout_kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,

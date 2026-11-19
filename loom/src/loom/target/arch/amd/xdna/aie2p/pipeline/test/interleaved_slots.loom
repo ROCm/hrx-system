@@ -1,5 +1,6 @@
-// The two SRAM slots are even and odd elements. The receiver's two slots
-// occupy two of every three words. The third record reuses slot zero.
+// The two SRAM slots are even and odd 64-bit elements. The receiver's slots
+// occupy two of every three elements. Both native words travel together.
+// The third record reuses slot zero.
 aie2p.target<array> @device
 
 pipeline.def<kernel> public retain target(@device) @forward() run(%input_arg: buffer, %output_arg: buffer) {
@@ -17,51 +18,51 @@ pipeline.def<kernel> public retain target(@device) @forward() run(%input_arg: bu
   %core = pipeline.memory<workgroup>[0, 3] : pool
   %a = buffer.alloca<workgroup> pool(%sram) align(64) %source_bytes : buffer
   %b = buffer.alloca<workgroup> pool(%core) align(64) %target_bytes : buffer
-  %source_slots = buffer.view %a[%origin] : buffer -> view<2x16xi32, #encoding.layout.strided<strides=[1, 2]>>
-  %target_slots = buffer.view %b[%origin] : buffer -> view<2x16xi32, #encoding.layout.strided<strides=[1, 3]>>
-  %source = channel.bind<fifo> %source_slots, %capacity : view<2x16xi32, #encoding.layout.strided<strides=[1, 2]>>, index -> channel<tile<16xi32>>
-  %target = channel.bind<fifo> %target_slots, %capacity : view<2x16xi32, #encoding.layout.strided<strides=[1, 3]>>, index -> channel<tile<16xi32>>
+  %source_slots = buffer.view %a[%origin] : buffer -> view<2x8xi64, #encoding.layout.strided<strides=[1, 2]>>
+  %target_slots = buffer.view %b[%origin] : buffer -> view<2x8xi64, #encoding.layout.strided<strides=[1, 3]>>
+  %source = channel.bind<fifo> %source_slots, %capacity : view<2x8xi64, #encoding.layout.strided<strides=[1, 2]>>, index -> channel<tile<8xi64>>
+  %target = channel.bind<fifo> %target_slots, %capacity : view<2x8xi64, #encoding.layout.strided<strides=[1, 3]>>, index -> channel<tile<8xi64>>
   pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
     scf.for %i = [%c0 to %records step %step] {
       %at = index.scale %i, %record_bytes : index, offset -> offset
-      %external = buffer.view %input[%at] : buffer -> view<16xi32>
-      %write, %payload = channel.reserve %source : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32, #encoding.layout.strided<strides=[2]>>)
-      %transfer = kernel.async.copy %external to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32, #encoding.layout.strided<strides=[2]>> -> kernel.async.token
+      %external = buffer.view %input[%at] : buffer -> view<8xi64>
+      %write, %payload = channel.reserve %source : channel<tile<8xi64>> -> (write<tile<8xi64>>, view<8xi64, #encoding.layout.strided<strides=[2]>>)
+      %transfer = kernel.async.copy %external to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<8xi64> to view<8xi64, #encoding.layout.strided<strides=[2]>> -> kernel.async.token
       %group = kernel.async.group %transfer : kernel.async.token -> kernel.async.group
       kernel.async.wait %group {newer_groups = 0} : kernel.async.group
-      channel.publish %write : write<tile<16xi32>>
+      channel.publish %write : write<tile<8xi64>>
     }
   }
   pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
     scf.for %i = [%c0 to %records step %step] {
-      %read = channel.accept %source : channel<tile<16xi32>> -> read<tile<16xi32>>
-      %write, %payload = channel.reserve %target : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32, #encoding.layout.strided<strides=[3]>>)
-      channel.copy %read -> %write : read<tile<16xi32>>, write<tile<16xi32>>
+      %read = channel.accept %source : channel<tile<8xi64>> -> read<tile<8xi64>>
+      %write, %payload = channel.reserve %target : channel<tile<8xi64>> -> (write<tile<8xi64>>, view<8xi64, #encoding.layout.strided<strides=[3]>>)
+      channel.copy %read -> %write : read<tile<8xi64>>, write<tile<8xi64>>
     }
   }
   pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
     scf.for %i = [%c0 to %records step %step] {
-      %read, %payload = channel.acquire %target : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32, #encoding.layout.strided<strides=[3]>>)
+      %read, %payload = channel.acquire %target : channel<tile<8xi64>> -> (read<tile<8xi64>>, view<8xi64, #encoding.layout.strided<strides=[3]>>)
       %at = index.scale %i, %record_bytes : index, offset -> offset
-      %external = buffer.view %output[%at] : buffer -> view<16xi32>
-      %transfer = kernel.async.copy %payload to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32, #encoding.layout.strided<strides=[3]>> to view<16xi32> -> kernel.async.token
+      %external = buffer.view %output[%at] : buffer -> view<8xi64>
+      %transfer = kernel.async.copy %payload to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<8xi64, #encoding.layout.strided<strides=[3]>> to view<8xi64> -> kernel.async.token
       %group = kernel.async.group %transfer : kernel.async.token -> kernel.async.group
       kernel.async.wait %group {newer_groups = 0} : kernel.async.group
-      channel.release %read : read<tile<16xi32>>
+      channel.release %read : read<tile<8xi64>>
     }
   }
 }
 
 func.def @reference(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %src = buffer.view %input[%base] : buffer -> view<48xi32>
-  %dst = buffer.view %output[%base] : buffer -> view<48xi32>
+  %src = buffer.view %input[%base] : buffer -> view<24xi64>
+  %dst = buffer.view %output[%base] : buffer -> view<24xi64>
   %c0 = index.constant 0 : index
   %step = index.constant 1 : index
-  %end = index.constant 48 : index
+  %end = index.constant 24 : index
   scf.for %i = [%c0 to %end step %step] {
-    %x = view.load %src[%i] : view<48xi32> -> i32
-    view.store %x, %dst[%i] : i32, view<48xi32>
+    %x = view.load %src[%i] : view<24xi64> -> i64
+    view.store %x, %dst[%i] : i64, view<24xi64>
   }
   func.return
 }
@@ -69,10 +70,10 @@ func.def @reference(%input: buffer, %output: buffer) {
 check.scenario public @rotating_strided_records {
   check.trial[2](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
-    %input = check.generate.random.uniform seed(%seed) range(-10000 to 10000) : tensor<48xi32>
-    %output = check.generate.fill value(-1) : tensor<48xi32>
-    check.compare<@forward, @reference>(%input, %output) : (tensor<48xi32>, tensor<48xi32>) -> () {
-      check.expect.equal actual(%output) expected(%output) : tensor<48xi32>
+    %input = check.generate.random.uniform seed(%seed) range(-9007199254740991 to 9007199254740991) : tensor<24xi64>
+    %output = check.generate.fill value(-1) : tensor<24xi64>
+    check.compare<@forward, @reference>(%input, %output) : (tensor<24xi64>, tensor<24xi64>) -> () {
+      check.expect.equal actual(%output) expected(%output) : tensor<24xi64>
     }
   }
   check.return
