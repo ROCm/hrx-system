@@ -27,9 +27,11 @@ class RenderDevice:
     path: Path
     # PCI domain, bus, device and function identifying this physical card.
     pci_address: str
+    # Kernel-reported PCI vendor ID, paired with device_id for Vulkan verification.
+    vendor_id: int
     # Kernel-reported PCI product ID, used for diagnostics and identity checking.
     device_id: int
-    # Device number from the opened render node, including major and minor.
+    # Device number of the granted render node, including major and minor.
     device_number: int
 
     @property
@@ -37,23 +39,39 @@ class RenderDevice:
         return f"pci-{self.pci_address.replace(':', '_').replace('.', '_')}!"
 
 
-def open_render_device(path: Path, number: int) -> RenderDevice:
-    pci_path = (gpu_assignment.DRM_CLASS / path.name / "device").resolve(strict=True)
-    vendor_id = int((pci_path / "vendor").read_text(), 16)
-    device_id = int((pci_path / "device").read_text(), 16)
+def assigned_render_devices(pci_vendor: int | None) -> list[RenderDevice]:
+    devices = []
+    for path, number in gpu_assignment.assigned_render_nodes().items():
+        pci_path = (gpu_assignment.DRM_CLASS / path.name / "device").resolve(
+            strict=True
+        )
+        vendor_id = int((pci_path / "vendor").read_text(), 16)
+        device_id = int((pci_path / "device").read_text(), 16)
+        if pci_vendor is not None and vendor_id != pci_vendor:
+            print(
+                f"Skipping {path}: PCI {pci_path.name} {vendor_id:04x}:{device_id:04x}"
+            )
+            continue
+        devices.append(RenderDevice(path, pci_path.name, vendor_id, device_id, number))
+    if not devices:
+        raise ValueError(
+            f"No assigned render node matches PCI vendor {pci_vendor:#06x}"
+        )
+    return devices
+
+
+def open_render_device(device: RenderDevice) -> None:
     print(
-        f"Opening {path}: PCI {pci_path.name} {vendor_id:04x}:{device_id:04x}",
+        f"Opening {device.path}: PCI {device.pci_address} "
+        f"{device.vendor_id:04x}:{device.device_id:04x}",
         flush=True,
     )
-    if vendor_id != 0x1002:
-        raise ValueError(f"Assigned render node {path} is not an AMD GPU")
-    descriptor = os.open(path, os.O_RDWR | os.O_CLOEXEC)
+    descriptor = os.open(device.path, os.O_RDWR | os.O_CLOEXEC)
     try:
-        if os.fstat(descriptor).st_rdev != number:
-            raise RuntimeError(f"Render device changed while opening {path}")
+        if os.fstat(descriptor).st_rdev != device.device_number:
+            raise RuntimeError(f"Render device changed while opening {device.path}")
     finally:
         os.close(descriptor)
-    return RenderDevice(path, pci_path.name, device_id, number)
 
 
 def validate_vulkan_device(profile: dict, selected: RenderDevice) -> str:
@@ -72,8 +90,14 @@ def validate_vulkan_device(profile: dict, selected: RenderDevice) -> str:
         "VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU",
     ):
         raise RuntimeError("Vulkan device 0 is not real GPU hardware")
-    if (device["vendorID"], device["deviceID"]) != (0x1002, selected.device_id):
-        raise RuntimeError("Vulkan device 0 does not match the selected AMD PCI device")
+    if (device["vendorID"], device["deviceID"]) != (
+        selected.vendor_id,
+        selected.device_id,
+    ):
+        raise RuntimeError(
+            f"Vulkan device 0 does not match the selected PCI device "
+            f"{selected.vendor_id:04x}:{selected.device_id:04x} ({selected.path})"
+        )
     drm = properties.get("VkPhysicalDeviceDrmPropertiesEXT", {})
     if not drm.get("hasRender"):
         raise RuntimeError("Vulkan device 0 does not report a DRM render node")
@@ -88,13 +112,15 @@ def validate_vulkan_device(profile: dict, selected: RenderDevice) -> str:
     return device["deviceType"]
 
 
-def check_environment(profile_output: Path | None = None) -> None:
-    candidates = gpu_assignment.assigned_render_nodes()
+def check_environment(
+    profile_output: Path | None = None, *, pci_vendor: int | None = None
+) -> None:
+    candidates = assigned_render_devices(pci_vendor)
     # A private runtime directory keeps this headless probe independent of a
     # desktop session. The process supervisor also bounds native driver calls.
     with tempfile.TemporaryDirectory(prefix="iree-vulkan-") as temporary_dir:
-        for path, number in candidates.items():
-            candidate = open_render_device(path, number)
+        for candidate in candidates:
+            open_render_device(candidate)
             print(f"Checking Vulkan with DRI_PRIME={candidate.dri_prime}", flush=True)
             profile_path = Path(temporary_dir) / f"{candidate.path.name}.json"
             subprocess.run(
@@ -119,7 +145,6 @@ def check_environment(profile_output: Path | None = None) -> None:
                 "Multiple assigned GPUs are integrated; assign the render node for this job"
             )
     print(f"Selected {selected.path}: DRI_PRIME={selected.dri_prime}", flush=True)
-    native_identity = gpu_assignment.native_identity(selected.device_number)
     if profile_output is not None:
         profile_output.write_bytes(profile)
     # Later workflow steps receive only a selection verified by the native
@@ -127,12 +152,21 @@ def check_environment(profile_output: Path | None = None) -> None:
     if github_env := os.environ.get("GITHUB_ENV"):
         with Path(github_env).open("a") as environment_file:
             environment_file.write(f"DRI_PRIME={selected.dri_prime}\n")
-            environment_file.write(f"HAL_AMD_GPU_ASSIGNMENT={native_identity}\n")
-            environment_file.write(f"AMDF_CTS_GPU_NATIVE_IDENTITY={native_identity}\n")
+            if selected.vendor_id == 0x1002:
+                native_identity = gpu_assignment.native_identity(selected.device_number)
+                environment_file.write(f"HAL_AMD_GPU_ASSIGNMENT={native_identity}\n")
+                environment_file.write(
+                    f"AMDF_CTS_GPU_NATIVE_IDENTITY={native_identity}\n"
+                )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--pci-vendor",
+        type=lambda value: int(value, 16),
+        help="Require an assigned GPU from this PCI vendor (hexadecimal).",
+    )
     parser.add_argument(
         "--profile-output",
         type=Path,
@@ -140,7 +174,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     try:
-        check_environment(args.profile_output)
+        check_environment(args.profile_output, pci_vendor=args.pci_vendor)
     except (
         OSError,
         ValueError,

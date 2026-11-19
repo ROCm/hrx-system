@@ -138,6 +138,7 @@ jobs:
           - name: GCC / Fastbuild / AMD gfx120x Vulkan
             kind: vulkan
             command: iree-bazel-vulkan
+            pci_vendor: '0x1002'
             # External hardware pools cannot resolve the Azure Kubernetes
             # cache service. Package fanout will eventually remove these builds.
             uncached: true
@@ -394,11 +395,18 @@ jobs:
         id: vulkan_preflight
         if: matrix.kind == 'vulkan'
         timeout-minutes: 1
+        env:
+          IREE_CI_VULKAN_PCI_VENDOR: ${{ matrix.pci_vendor }}
         run: |
           printf 'started=%s\n' "$(date -u '+%F %T')" >> "$GITHUB_OUTPUT"
           evidence="$RUNNER_TEMP/vulkan-evidence-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           mkdir -p "$evidence"
-          bash .github/scripts/check_vulkan_hardware_environment.sh --profile-output "$evidence/vulkaninfo.json"
+          vendor_args=()
+          if [[ -n "$IREE_CI_VULKAN_PCI_VENDOR" ]]; then
+            vendor_args=(--pci-vendor "$IREE_CI_VULKAN_PCI_VENDOR")
+          fi
+          bash .github/scripts/check_vulkan_hardware_environment.sh \
+            "${vendor_args[@]}" --profile-output "$evidence/vulkaninfo.json"
 
       - name: Install Bazel host tools
         run: |
