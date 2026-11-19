@@ -1136,7 +1136,8 @@ typedef struct loom_value_facts_t loom_value_facts_t;
 // facts are exact.
 //
 // Writes one entry per result into |result_facts|. Single-result ops
-// write result_facts[0]. Multi-result ops fill the entire array.
+// write result_facts[0]. Multi-result ops fill the entire array. A resultless
+// op may still observe its operands, as a void call does for its callee.
 // |module| provides type access (int vs float detection, bitwidth
 // queries via loom_module_value_type). Must not mutate IR.
 // A context without a publication returns summaries under query-local facts;
