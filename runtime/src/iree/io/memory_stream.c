@@ -232,16 +232,11 @@ static iree_status_t iree_io_memory_stream_write(iree_io_stream_t* base_stream,
   IREE_ASSERT_ARGUMENT(base_stream);
   IREE_ASSERT_ARGUMENT(buffer);
   iree_io_memory_stream_t* stream = iree_io_memory_stream_cast(base_stream);
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_io_stream_validate_fixed_range(stream->offset, stream->length,
-                                              buffer_length, NULL));
+  IREE_RETURN_IF_ERROR(iree_io_stream_validate_fixed_range(
+      stream->offset, stream->length, buffer_length, NULL));
 
   memcpy(stream->contents + stream->offset, buffer, buffer_length);
   stream->offset += buffer_length;
-
-  IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
 

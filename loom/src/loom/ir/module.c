@@ -4499,23 +4499,17 @@ iree_status_t loom_module_intern_register_type(loom_module_t* module,
 
 iree_status_t loom_module_allocate_block(loom_module_t* module,
                                          loom_block_t** out_block) {
-  IREE_TRACE_ZONE_BEGIN(z0);
   loom_block_t* block = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_arena_allocate(&module->arena, sizeof(loom_block_t),
-                              (void**)&block));
-  iree_status_t status = loom_module_initialize_block(module, block);
-  if (iree_status_is_ok(status)) {
-    *out_block = block;
-  }
-  IREE_TRACE_ZONE_END(z0);
-  return status;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(&module->arena, sizeof(*block), (void**)&block));
+  IREE_RETURN_IF_ERROR(loom_module_initialize_block(module, block));
+  *out_block = block;
+  return iree_ok_status();
 }
 
 iree_status_t loom_module_allocate_region(loom_module_t* module,
                                           uint16_t block_count,
                                           loom_region_t** out_region) {
-  IREE_TRACE_ZONE_BEGIN(z0);
   loom_region_t* region = NULL;
   iree_status_t status = iree_arena_allocate(
       &module->arena, sizeof(loom_region_t), (void**)&region);
@@ -4552,7 +4546,6 @@ iree_status_t loom_module_allocate_region(loom_module_t* module,
     region->block_count = block_count;
     *out_region = region;
   }
-  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
