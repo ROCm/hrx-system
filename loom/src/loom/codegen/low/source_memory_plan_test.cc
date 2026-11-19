@@ -1130,6 +1130,74 @@ TEST_F(SourceMemoryPlanTest, RootBoundsPromiseConstrainsDynamicViewBase) {
   EXPECT_EQ(plan.access_flags, 0u);
 }
 
+TEST_F(SourceMemoryPlanTest, RootBoundsFollowTheAddressedAllocation) {
+  const auto external = DefineBufferArg();
+  const auto displacement = DefineIndexArg();
+  const auto condition = DefineArg(loom_type_scalar(LOOM_SCALAR_TYPE_I1));
+  const uint8_t bytes[40] = {};
+  loom_op_t* small = nullptr;
+  loom_op_t* large = nullptr;
+  IREE_ASSERT_OK(loom_buffer_constant_build(
+      &builder_, 0, 0, iree_make_const_byte_span(bytes, 24), loom_type_buffer(),
+      LOOM_LOCATION_UNKNOWN, &small));
+  IREE_ASSERT_OK(loom_buffer_constant_build(
+      &builder_, 0, 0, iree_make_const_byte_span(bytes, sizeof(bytes)),
+      loom_type_buffer(), LOOM_LOCATION_UNKNOWN, &large));
+  loom_op_t* selection = nullptr;
+  IREE_ASSERT_OK(loom_scf_select_build(
+      &builder_, condition, loom_buffer_constant_result(small),
+      loom_buffer_constant_result(large), loom_type_buffer(),
+      LOOM_LOCATION_UNKNOWN, &selection));
+  const auto selected = loom_scf_select_result(selection);
+  loom_op_t* alias = nullptr;
+  IREE_ASSERT_OK(loom_buffer_assume_same_root_build(
+      &builder_, external, selected, loom_type_buffer(), LOOM_LOCATION_UNKNOWN,
+      &alias));
+
+  const struct {
+    // Handle whose address supplies the view base.
+    loom_value_id_t buffer;
+    // Source promises attached to this load.
+    loom_memory_access_flags_t flags;
+    // Inclusive lower bound on the signed byte displacement.
+    int64_t minimum;
+    // Inclusive upper bound on the signed byte displacement.
+    int64_t maximum;
+  } cases[] = {
+      {selected, LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS, 0, 39},
+      {selected, 0, INT64_MIN, INT64_MAX},
+      {external, LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS, INT64_MIN, INT64_MAX},
+      {loom_buffer_assume_same_root_result(alias),
+       LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS, INT64_MIN, INT64_MAX},
+  };
+  const auto view_type = ViewType1D(LOOM_SCALAR_TYPE_I8, 1, BuildDenseLayout());
+  const int64_t indices[] = {0};
+  loom_op_t* loads[IREE_ARRAYSIZE(cases)] = {};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(cases); ++i) {
+    loom_op_t* view = nullptr;
+    IREE_ASSERT_OK(loom_buffer_view_build(&builder_, cases[i].buffer,
+                                          displacement, view_type,
+                                          LOOM_LOCATION_UNKNOWN, &view));
+    IREE_ASSERT_OK(loom_view_load_build(
+        &builder_, 0, cases[i].flags, loom_buffer_view_result(view), nullptr, 0,
+        indices, IREE_ARRAYSIZE(indices), 0, 0,
+        loom_type_scalar(LOOM_SCALAR_TYPE_I8), LOOM_LOCATION_UNKNOWN,
+        &loads[i]));
+  }
+  loom_value_fact_table_t facts = {};
+  ComputeFacts(&facts);
+  for (size_t i = 0; i < IREE_ARRAYSIZE(cases); ++i) {
+    SCOPED_TRACE(i);
+    loom_low_source_memory_access_plan_t plan = {};
+    loom_low_source_memory_access_diagnostic_t diagnostic = {};
+    ASSERT_TRUE(BuildPlan(&facts, loads[i], &plan, &diagnostic));
+    const auto offset = loom_low_source_memory_dynamic_offset_facts(
+        &plan, plan.static_byte_offset);
+    EXPECT_EQ(offset.range_lo, cases[i].minimum);
+    EXPECT_EQ(offset.range_hi, cases[i].maximum);
+  }
+}
+
 TEST_F(SourceMemoryPlanTest, DynamicDenseLoadPreservesWidePowerOfTwoStride) {
   loom_value_id_t buffer = DefineBufferArg();
   loom_value_id_t raw_element = DefineIndexArg();

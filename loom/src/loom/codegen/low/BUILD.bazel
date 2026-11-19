@@ -1230,6 +1230,7 @@ loom_cc_test(
         "//loom/src/loom/analysis:symbolic_expr",
         "//loom/src/loom/analysis:view_regions",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/cfg",
         "//loom/src/loom/ops/encoding",
