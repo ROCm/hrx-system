@@ -59,6 +59,17 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "backing_plan",
+    srcs = ["backing_plan.c"],
+    hdrs = ["backing_plan.h"],
+    deps = [
+        ":backing_pages",
+        "//loom/src/loom/util:adaptive_sort",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "memory_geometry",
     srcs = ["memory_geometry.c"],
     hdrs = ["memory_geometry.h"],
@@ -76,6 +87,7 @@ loom_cc_library(
     deps = [
         ":backing_directory",
         ":backing_pages",
+        ":backing_plan",
         ":memory_geometry",
         "//loom/src/loom/runtime:wake",
         "//loom/src/loom/runtime/storage:statistics",

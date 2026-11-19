@@ -366,6 +366,8 @@ typedef struct loom_runtime_memory_commit_t {
   iree_host_size_t range_count;
   // Exclusive last selected mapping index in the final descriptor.
   iree_host_size_t last_mapping;
+  // Contiguous selections in first-visit order for the captured operation.
+  iree_host_size_t selection_count;
   // Exact number of distinct selected missing mappings.
   iree_host_size_t mapping_count;
   // Exact additional backing, excluding all already accepted ownership.
