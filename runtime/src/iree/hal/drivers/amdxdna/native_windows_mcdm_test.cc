@@ -233,24 +233,6 @@ TEST(NativeWindowsMcdmBufferTest, DefersOnlyContextOwnedCommandStorage) {
       IREE_HAL_AMDXDNA_NATIVE_BUFFER_TYPE_CONTROL_PARAMETER));
 }
 
-TEST(NativeWindowsMcdmPdiTest, MatchesOnlyEqualInBoundsApertureContent) {
-  const uint8_t aperture[] = {0x10, 0x20, 0x30, 0x40, 0x50};
-  const uint8_t equal_pdi[] = {0x20, 0x30, 0x40};
-  const uint8_t different_pdi[] = {0x20, 0x31, 0x40};
-  EXPECT_TRUE(iree_hal_amdxdna_native_windows_pdi_content_matches(
-      aperture, std::size(aperture), /*allocation_offset=*/1,
-      /*allocation_size=*/3, equal_pdi, std::size(equal_pdi)));
-  EXPECT_FALSE(iree_hal_amdxdna_native_windows_pdi_content_matches(
-      aperture, std::size(aperture), /*allocation_offset=*/1,
-      /*allocation_size=*/3, different_pdi, std::size(different_pdi)));
-  EXPECT_FALSE(iree_hal_amdxdna_native_windows_pdi_content_matches(
-      aperture, std::size(aperture), /*allocation_offset=*/4,
-      /*allocation_size=*/3, equal_pdi, std::size(equal_pdi)));
-  EXPECT_FALSE(iree_hal_amdxdna_native_windows_pdi_content_matches(
-      aperture, std::size(aperture), /*allocation_offset=*/1,
-      /*allocation_size=*/2, equal_pdi, std::size(equal_pdi)));
-}
-
 TEST(NativeWindowsMcdmControlParameterTest,
      ReusesOnlyWithinThePreparingContext) {
   int first_context = 0;

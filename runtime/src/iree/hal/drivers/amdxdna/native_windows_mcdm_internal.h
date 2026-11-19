@@ -126,12 +126,6 @@ uint32_t iree_hal_amdxdna_native_windows_hardware_context_cache_capacity(
     uint32_t virtual_context_budget,
     const iree_hal_amdxdna_native_windows_driver_identity_t* identity);
 
-// Compares a candidate PDI with an existing command-aperture allocation while
-// rejecting ranges outside the mapped aperture.
-bool iree_hal_amdxdna_native_windows_pdi_content_matches(
-    const uint8_t* aperture, size_t aperture_size, size_t allocation_offset,
-    size_t allocation_size, const uint8_t* pdi, size_t pdi_size);
-
 typedef enum iree_hal_amdxdna_native_windows_context_ownership_t {
   IREE_HAL_AMDXDNA_NATIVE_WINDOWS_CONTEXT_OWNERSHIP_PREPARE = 0,
   IREE_HAL_AMDXDNA_NATIVE_WINDOWS_CONTEXT_OWNERSHIP_REUSE = 1,

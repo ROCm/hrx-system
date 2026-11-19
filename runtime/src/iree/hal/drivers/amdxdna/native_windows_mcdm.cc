@@ -555,7 +555,7 @@ struct PathBActiveCodeRange {
 struct PathBPdiAllocation {
   uint64_t aperture_offset = 0;
   uint64_t size = 0;
-  std::vector<iree_hal_amdxdna_native_buffer_t*> buffers;
+  iree_hal_amdxdna_native_buffer_t* buffer = nullptr;
 };
 
 struct iree_hal_amdxdna_native_context_t {
@@ -572,10 +572,11 @@ struct iree_hal_amdxdna_native_context_t {
       pathb_persistent_code_commands;
   std::vector<iree_hal_amdxdna_native_buffer_t*>
       pathb_control_parameter_buffers;
-  // Immutable PDI images realized in this context's instruction aperture.
-  // Entries are matched by size and content, so executable reloads reuse the
-  // same allocation. Buffer references reclaim slots when the final executable
-  // using an image is destroyed.
+  // Immutable PDI images realized in this context's instruction aperture, one
+  // per buffer. Never shared by content: the firmware skips a load_pdi of the
+  // address it loaded last, so identical images (such as the two empty PDIs a
+  // multi-design ELF alternates between to reset the array) need distinct
+  // addresses. Buffer references reclaim slots when the buffer is destroyed.
   std::vector<PathBPdiAllocation> pathb_pdi_allocations;
   uint64_t pathb_chain_aperture_generation = 1;
   size_t pathb_chain_code_cursor = 0;
@@ -685,15 +686,6 @@ size_t iree_hal_amdxdna_native_windows_code_slot_high_watermark(
     --slot_capacity;
   }
   return slot_capacity;
-}
-
-bool iree_hal_amdxdna_native_windows_pdi_content_matches(
-    const uint8_t* aperture, size_t aperture_size, size_t allocation_offset,
-    size_t allocation_size, const uint8_t* pdi, size_t pdi_size) {
-  return aperture && pdi && allocation_size == pdi_size &&
-         allocation_offset <= aperture_size &&
-         allocation_size <= aperture_size - allocation_offset &&
-         std::memcmp(aperture + allocation_offset, pdi, pdi_size) == 0;
 }
 
 iree_hal_amdxdna_native_windows_context_ownership_t
@@ -2874,22 +2866,6 @@ iree_status_t materialize_deferred_pdi_buffer(
       return iree_ok_status();
     }
   }
-  for (PathBPdiAllocation& allocation : context->pathb_pdi_allocations) {
-    if (iree_hal_amdxdna_native_windows_pdi_content_matches(
-            aperture_base,
-            static_cast<size_t>(context->command_aperture.gpu_va_size),
-            static_cast<size_t>(allocation.aperture_offset),
-            static_cast<size_t>(allocation.size), buffer->deferred_storage,
-            static_cast<size_t>(buffer->buffer.size))) {
-      allocation.buffers.push_back(buffer);
-      buffer->pathb_pdi_references.push_back(
-          PathBPdiReference{context, allocation.aperture_offset});
-      *out_address = context->command_aperture.protocol_gpu_va +
-                     allocation.aperture_offset;
-      return iree_ok_status();
-    }
-  }
-
   const uint64_t required_slot_count_u64 =
       (buffer->buffer.size + slot_size - 1) / slot_size;
   if (IREE_UNLIKELY(required_slot_count_u64 >
@@ -2940,7 +2916,7 @@ iree_status_t materialize_deferred_pdi_buffer(
   PathBPdiAllocation allocation;
   allocation.aperture_offset = aperture_offset;
   allocation.size = buffer->buffer.size;
-  allocation.buffers.push_back(buffer);
+  allocation.buffer = buffer;
   context->pathb_pdi_allocations.push_back(std::move(allocation));
   buffer->pathb_pdi_references.push_back(
       PathBPdiReference{context, aperture_offset});
@@ -3495,15 +3471,13 @@ void iree_hal_amdxdna_native_context_destroy(
   }
   context->pathb_control_parameter_buffers.clear();
   for (PathBPdiAllocation& allocation : context->pathb_pdi_allocations) {
-    for (iree_hal_amdxdna_native_buffer_t* buffer : allocation.buffers) {
-      auto& references = buffer->pathb_pdi_references;
-      references.erase(
-          std::remove_if(references.begin(), references.end(),
-                         [context](const PathBPdiReference& reference) {
-                           return reference.context == context;
-                         }),
-          references.end());
-    }
+    auto& references = allocation.buffer->pathb_pdi_references;
+    references.erase(
+        std::remove_if(references.begin(), references.end(),
+                       [context](const PathBPdiReference& reference) {
+                         return reference.context == context;
+                       }),
+        references.end());
   }
   context->pathb_pdi_allocations.clear();
   if (kmt_alive) {
@@ -3560,31 +3534,25 @@ void iree_hal_amdxdna_native_buffer_destroy(
           });
       IREE_ASSERT(allocation != context->pathb_pdi_allocations.end());
       if (allocation == context->pathb_pdi_allocations.end()) continue;
-      auto& buffers = allocation->buffers;
-      const auto buffer_it = std::find(buffers.begin(), buffers.end(), buffer);
-      IREE_ASSERT(buffer_it != buffers.end());
-      if (buffer_it != buffers.end()) buffers.erase(buffer_it);
-      if (buffers.empty()) {
-        const uint64_t slot_size = context->pathb_persistent_code_slot_size;
-        const size_t first_slot =
-            static_cast<size_t>((allocation->aperture_offset -
-                                 context->command_aperture.code_offset) /
-                                slot_size);
-        const size_t slot_count =
-            static_cast<size_t>((allocation->size + slot_size - 1) / slot_size);
-        const bool released =
-            iree_hal_amdxdna_native_windows_release_code_slots(
-                context->pathb_persistent_code_slots_in_use.data(),
-                context->pathb_persistent_code_slots_in_use.size(), first_slot,
-                slot_count);
-        IREE_ASSERT(released);
-        context->pathb_pdi_allocations.erase(allocation);
-        context->pathb_persistent_code_bytes =
-            iree_hal_amdxdna_native_windows_code_slot_high_watermark(
-                context->pathb_persistent_code_slots_in_use.data(),
-                context->pathb_persistent_code_slots_in_use.size()) *
-            slot_size;
-      }
+      IREE_ASSERT(allocation->buffer == buffer);
+      const uint64_t slot_size = context->pathb_persistent_code_slot_size;
+      const size_t first_slot =
+          static_cast<size_t>((allocation->aperture_offset -
+                               context->command_aperture.code_offset) /
+                              slot_size);
+      const size_t slot_count =
+          static_cast<size_t>((allocation->size + slot_size - 1) / slot_size);
+      const bool released = iree_hal_amdxdna_native_windows_release_code_slots(
+          context->pathb_persistent_code_slots_in_use.data(),
+          context->pathb_persistent_code_slots_in_use.size(), first_slot,
+          slot_count);
+      IREE_ASSERT(released);
+      context->pathb_pdi_allocations.erase(allocation);
+      context->pathb_persistent_code_bytes =
+          iree_hal_amdxdna_native_windows_code_slot_high_watermark(
+              context->pathb_persistent_code_slots_in_use.data(),
+              context->pathb_persistent_code_slots_in_use.size()) *
+          slot_size;
     }
     buffer->pathb_pdi_references.clear();
   }
