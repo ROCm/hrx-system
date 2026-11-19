@@ -47,6 +47,8 @@ struct InjectedFlushQueue {
   std::atomic<int> injected_execute_count = 0;
   // Number of transfer batches accepted by the target queue.
   std::atomic<int> accepted_transfer_count = 0;
+  // Number of native operations, independent of the number of copied rows.
+  std::atomic<int> accepted_operation_count = 0;
   // Optional observer notified after the real queue accepts a transfer.
   std::binary_semaphore* transfer_accepted = nullptr;
   // Borrowed source of the observed upload, published through the observer.
@@ -146,6 +148,8 @@ iree_status_t InjectedFlushQueueTransfer(
                               operation_count, operations, barriers);
   if (iree_status_is_ok(status)) {
     queue->accepted_transfer_count.fetch_add(1, std::memory_order_acq_rel);
+    queue->accepted_operation_count.fetch_add(operation_count,
+                                              std::memory_order_acq_rel);
     queue->accepted_wait_semaphore =
         waits.count ? waits.semaphores[0] : nullptr;
     queue->accepted_wait_value = waits.count ? waits.payload_values[0] : 0;
@@ -544,12 +548,18 @@ TEST_F(CpuStreamingMemoryTest,
   const std::array<uint8_t, kSize> source = {1, 2,  3,  4,  5,  6,  7,  8,
                                              9, 10, 11, 12, 13, 14, 15, 16};
   std::memset(host_buffer_->host_ptr, 0xcd, kSize);
-  IREE_ASSERT_OK(iree_hal_streaming_memcpy_host_to_device_2d(
-      context_, device_pointer_, /*dst_pitch=*/8, source.data(),
-      /*src_pitch=*/8, /*width=*/4, /*height=*/2, stream_));
-  IREE_ASSERT_OK(iree_hal_streaming_memcpy_device_to_host_2d(
-      context_, host_buffer_->host_ptr, /*dst_pitch=*/8, device_pointer_,
-      /*src_pitch=*/8, /*width=*/4, /*height=*/2, stream_));
+  const iree_hal_transfer_region_t region = {
+      .row_length = 4,
+      .row_count = 2,
+      .slice_count = 1,
+      .source_strides = {8, 0},
+      .target_strides = {8, 0},
+  };
+  IREE_ASSERT_OK(iree_hal_streaming_memcpy_host_to_device_resolved(
+      context_, {buffer_, 0}, source.data(), {}, &region, stream_));
+  IREE_ASSERT_OK(iree_hal_streaming_memcpy_device_to_host_resolved(
+      context_, host_buffer_->host_ptr, {host_buffer_, 0}, {buffer_, 0},
+      &region, stream_));
   IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
   const auto* destination = static_cast<const uint8_t*>(host_buffer_->host_ptr);
   for (size_t i = 0; i < kSize; ++i) {
@@ -1183,10 +1193,20 @@ TEST_F(CpuStreamingMemoryTest,
   for (void* destination : destinations) {
     IREE_ASSERT_OK(iree_hal_streaming_memcpy_device_to_host(
         context_, destination, device_pointer_, kSourceSize, stream_));
-    IREE_ASSERT_OK(iree_hal_streaming_memcpy_device_to_host_2d(
+    iree_hal_streaming_buffer_ref_t destination_ref;
+    IREE_ASSERT_OK(iree_hal_streaming_memory_lookup_range(
+        context_, reinterpret_cast<uintptr_t>(destination) + kSourceSize,
+        kSourceSize, &destination_ref));
+    const iree_hal_transfer_region_t region = {
+        .row_length = 4,
+        .row_count = 2,
+        .slice_count = 1,
+        .source_strides = {8, 0},
+        .target_strides = {8, 0},
+    };
+    IREE_ASSERT_OK(iree_hal_streaming_memcpy_device_to_host_resolved(
         context_, static_cast<uint8_t*>(destination) + kSourceSize,
-        /*dst_pitch=*/8, device_pointer_, /*src_pitch=*/8, /*width=*/4,
-        /*height=*/2, stream_));
+        destination_ref, {buffer_, 0}, &region, stream_));
     // The stream's unsatisfied wait proves these APIs did not wait for their
     // copies or modify the destination on their calling thread.
     for (size_t i = 0; i < kDestinationSize; ++i) {
@@ -1507,14 +1527,35 @@ TEST_F(CpuStreamingMemoryTest, RegisteredPitchedCopiesSubmitOneBatchPerCall) {
 
   // Every operation remains pending at this point. A later operation must
   // depend on its producer through the stream timeline, not submission order.
-  IREE_EXPECT_OK(iree_hal_streaming_memcpy_host_to_device_2d(
-      context_, device_pointer_, 12, host, 8, kWidth, kHeight, stream_));
-  IREE_EXPECT_OK(iree_hal_streaming_memcpy_device_to_device_2d(
-      context_, device_pointer_ + 64, 9, device_pointer_, 12, kWidth, kHeight,
+  const iree_hal_transfer_region_t upload = {
+      .row_length = kWidth,
+      .row_count = kHeight,
+      .slice_count = 1,
+      .source_strides = {8, 0},
+      .target_strides = {12, 0},
+  };
+  const iree_hal_transfer_region_t copy = {
+      .row_length = kWidth,
+      .row_count = kHeight,
+      .slice_count = 1,
+      .source_strides = {12, 0},
+      .target_strides = {9, 0},
+  };
+  const iree_hal_transfer_region_t download = {
+      .row_length = kWidth,
+      .row_count = kHeight,
+      .slice_count = 1,
+      .source_strides = {9, 0},
+      .target_strides = {8, 0},
+  };
+  IREE_EXPECT_OK(iree_hal_streaming_memcpy_host_to_device_resolved(
+      context_, {buffer_, 0}, host, {host_buffer_, 0}, &upload, stream_));
+  IREE_EXPECT_OK(iree_hal_streaming_memcpy_device_to_device_resolved(
+      context_, {buffer_, 64}, {buffer_, 0}, &copy, stream_));
+  IREE_EXPECT_OK(iree_hal_streaming_memcpy_device_to_host_resolved(
+      context_, host + 32, {host_buffer_, 32}, {buffer_, 64}, &download,
       stream_));
-  IREE_EXPECT_OK(iree_hal_streaming_memcpy_device_to_host_2d(
-      context_, host + 32, 8, device_pointer_ + 64, 9, kWidth, kHeight,
-      stream_));
+  EXPECT_EQ(3, queue.accepted_operation_count.load());
   EXPECT_EQ(3, queue.accepted_transfer_count.load());
   EXPECT_EQ(0, queue.injected_execute_count.load());
   EXPECT_EQ(nullptr, stream_->command_buffer);
@@ -1533,32 +1574,6 @@ TEST_F(CpuStreamingMemoryTest, RegisteredPitchedCopiesSubmitOneBatchPerCall) {
   iree_hal_queue_retain(original_queue);
   iree_hal_queue_release(ReplaceStreamQueue(stream_, original_queue));
   iree_hal_semaphore_release(gate);
-}
-
-TEST_F(CpuStreamingMemoryTest, PitchedCopyRejectsAllRowsBeforeQueueAcceptance) {
-  constexpr iree_device_size_t kAllocationSize = 16;
-  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
-      context_, kAllocationSize, IREE_HAL_STREAMING_MEMORY_FLAG_NONE,
-      &buffer_));
-  device_pointer_ = iree_hal_streaming_buffer_device_pointer(buffer_);
-  ASSERT_NE(nullptr, buffer_->host_ptr);
-
-  const std::array<uint8_t, kAllocationSize> initial = {
-      1, 2, 3, 4, 21, 22, 23, 24, 41, 42, 43, 44, 61, 62, 63, 64};
-  std::memcpy(buffer_->host_ptr, initial.data(), initial.size());
-
-  // Row zero is disjoint, but row one overlaps itself. Whole-batch validation
-  // rejects both rows without publishing a new stream point.
-  const uint64_t pending_before = stream_->pending_value;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_streaming_memcpy_device_to_device_2d(
-          context_, device_pointer_ + 4, /*dst_pitch=*/4, device_pointer_,
-          /*src_pitch=*/8, /*width=*/4, /*height=*/2, stream_));
-
-  const auto* contents = static_cast<const uint8_t*>(buffer_->host_ptr);
-  EXPECT_EQ(pending_before, stream_->pending_value);
-  EXPECT_EQ(0, std::memcmp(contents, initial.data(), initial.size()));
 }
 
 TEST_F(CpuStreamingMemoryTest,
@@ -1593,9 +1608,15 @@ TEST_F(CpuStreamingMemoryTest,
   std::atomic<bool> copy_returned = false;
   std::atomic<iree_status_code_t> copy_status_code = IREE_STATUS_UNKNOWN;
   std::thread copy_thread([&] {
-    iree_status_t status = iree_hal_streaming_memcpy_device_to_device_2d(
-        context_, device_pointer_ + 4, /*dst_pitch=*/8, device_pointer_,
-        /*src_pitch=*/8, /*width=*/4, /*height=*/2, stream_);
+    const iree_hal_transfer_region_t region = {
+        .row_length = 4,
+        .row_count = 2,
+        .slice_count = 1,
+        .source_strides = {8, 0},
+        .target_strides = {8, 0},
+    };
+    iree_status_t status = iree_hal_streaming_memcpy_device_to_device_resolved(
+        context_, {buffer_, 4}, {buffer_, 0}, &region, stream_);
     copy_status_code.store(iree_status_code(status), std::memory_order_release);
     iree_status_ignore(status);
     copy_returned.store(true, std::memory_order_release);

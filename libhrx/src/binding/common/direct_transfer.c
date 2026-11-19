@@ -44,7 +44,7 @@ static iree_status_t iree_hal_streaming_direct_transfer_queue(
 
 // Synchronous context copies share staging with ordinary stream copies. Their
 // caller has already established any ordering required with preceding work.
-static iree_status_t iree_hal_streaming_direct_transfer_context_and_wait(
+iree_status_t iree_hal_streaming_direct_transfer_context_and_wait(
     iree_hal_streaming_context_t* context, iree_host_size_t operation_count,
     const iree_hal_transfer_operation_t* operations) {
   iree_hal_queue_t* queue = context->queue;

@@ -33,6 +33,13 @@ iree_status_t iree_hal_streaming_direct_transfer_enqueue(
     iree_hal_streaming_stream_t* stream, iree_host_size_t operation_count,
     const iree_hal_transfer_operation_t* operations);
 
+// Completes checked operations on the owning context's small/bulk queue.
+// The caller has established preceding dependencies. Host bytes remain borrowed
+// through return; geometry is captured by the HAL at submission.
+iree_status_t iree_hal_streaming_direct_transfer_context_and_wait(
+    iree_hal_streaming_context_t* context, iree_host_size_t operation_count,
+    const iree_hal_transfer_operation_t* operations);
+
 // Performs a blocking host-to-device transfer using the context's small/bulk
 // queue selection. The caller has established any preceding dependencies.
 iree_status_t iree_hal_streaming_direct_transfer_h2d(

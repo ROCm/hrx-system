@@ -484,7 +484,8 @@ iree_status_t iree_hal_streaming_memcpy_device_to_device(
 iree_status_t iree_hal_streaming_memcpy_host_to_device_resolved(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_buffer_ref_t dst_ref, const void* src,
-    iree_hal_streaming_buffer_ref_t src_ref, iree_device_size_t size,
+    iree_hal_streaming_buffer_ref_t src_ref,
+    const iree_hal_transfer_region_t* region,
     iree_hal_streaming_stream_t* stream);
 
 // Downloads a checked source to either the registered |dst_ref| or pageable
@@ -492,7 +493,8 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device_resolved(
 iree_status_t iree_hal_streaming_memcpy_device_to_host_resolved(
     iree_hal_streaming_context_t* context, void* dst,
     iree_hal_streaming_buffer_ref_t dst_ref,
-    iree_hal_streaming_buffer_ref_t src_ref, iree_device_size_t size,
+    iree_hal_streaming_buffer_ref_t src_ref,
+    const iree_hal_transfer_region_t* region,
     iree_hal_streaming_stream_t* stream);
 
 // Copies checked device references belonging to |context|. Same ordering and
@@ -501,7 +503,8 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host_resolved(
 iree_status_t iree_hal_streaming_memcpy_device_to_device_resolved(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_buffer_ref_t dst_ref,
-    iree_hal_streaming_buffer_ref_t src_ref, iree_device_size_t size,
+    iree_hal_streaming_buffer_ref_t src_ref,
+    const iree_hal_transfer_region_t* region,
     iree_hal_streaming_stream_t* stream);
 
 typedef struct iree_hal_streaming_memory_range_request_t {
@@ -544,33 +547,6 @@ iree_status_t iree_hal_streaming_memory_lookup_ranges_retain_for_context(
 iree_status_t iree_hal_streaming_memory_allocate_host_staging(
     iree_hal_streaming_context_t* context, iree_host_size_t size,
     iree_hal_streaming_buffer_t** out_buffer);
-
-// Enqueues registered H2D rows in one stream-ordered transfer batch.
-// Unregistered sources are snapshotted while recording before returning.
-iree_status_t iree_hal_streaming_memcpy_host_to_device_2d(
-    iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
-    iree_device_size_t dst_pitch, const void* src, iree_device_size_t src_pitch,
-    iree_device_size_t width, iree_host_size_t height,
-    iree_hal_streaming_stream_t* stream);
-
-// Copies a pitched D2H region. Registered host destinations use asynchronous
-// copies into the destination buffer with one system visibility boundary.
-// Unregistered host destinations complete on the caller through one
-// stream-ordered transfer batch.
-iree_status_t iree_hal_streaming_memcpy_device_to_host_2d(
-    iree_hal_streaming_context_t* context, void* dst,
-    iree_device_size_t dst_pitch, iree_hal_streaming_deviceptr_t src,
-    iree_device_size_t src_pitch, iree_device_size_t width,
-    iree_host_size_t height, iree_hal_streaming_stream_t* stream);
-
-// Enqueues a pitched D2D copy as one stream-ordered transfer batch. Every row
-// is validated before acceptance. A post-accept flush error joins the batch
-// before returning.
-iree_status_t iree_hal_streaming_memcpy_device_to_device_2d(
-    iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
-    iree_device_size_t dst_pitch, iree_hal_streaming_deviceptr_t src,
-    iree_device_size_t src_pitch, iree_device_size_t width,
-    iree_host_size_t height, iree_hal_streaming_stream_t* stream);
 
 // Registers an HRX virtual-address reservation in the streaming pointer table.
 // Exposes |logical_size| bytes, excluding any native page-alignment padding.
