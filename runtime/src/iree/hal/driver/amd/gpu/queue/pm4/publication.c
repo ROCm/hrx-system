@@ -349,9 +349,16 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
       storage->begin = start;
       available = storage->capacity;
     } else {
-      const uint64_t relative =
+      uint64_t relative =
           iree_align_uint64(storage->end - storage->begin, program ? 32 : 8);
       offset = relative & (storage->capacity - 1);
+      // Payload bytes can split at the ring end, but a shader argument record
+      // must be contiguous. Charge the unused tail to this next publication.
+      if (program && sizeof(iree_hal_amd_gpu_blit_arguments_t) >
+                         storage->capacity - offset) {
+        relative += storage->capacity - offset;
+        offset = 0;
+      }
       start = storage->begin + relative;
       const uint64_t used = start - iree_max(completed, storage->begin);
       available =

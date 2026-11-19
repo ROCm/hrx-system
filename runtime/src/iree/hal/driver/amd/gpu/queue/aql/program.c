@@ -256,6 +256,10 @@ amdf_status_t iree_hal_amd_gpu_aql_program_emit(
                         : program->fixup_offset +
                               (uint64_t)program->fixup_count *
                                   sizeof(iree_hal_amd_gpu_fixup_t),
+          .row_count = 1,
+          .slice_count = 1,
+          .groups_y = 1,
+          .groups_z = 1,
       };
       prefix[count++] = iree_hal_amd_gpu_aql_program_dispatch(
           pool->blit, argument_address, 256);

@@ -730,6 +730,10 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_transfer(
         .length = length == IREE_HAL_WHOLE_BUFFER ? 0 : length,
         .pattern = pattern,
         .fill = !copy && !update,
+        .row_count = 1,
+        .slice_count = 1,
+        .groups_y = 1,
+        .groups_z = 1,
     };
     if (copy || update) {
       IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(

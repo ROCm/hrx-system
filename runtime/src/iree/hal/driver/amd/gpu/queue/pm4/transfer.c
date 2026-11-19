@@ -59,6 +59,10 @@ iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
     }
     iree_hal_amd_gpu_blit_arguments_t blit_arguments = {
         .length = operation->length - out_chunk->next.offset,
+        .row_count = 1,
+        .slice_count = 1,
+        .groups_y = 1,
+        .groups_z = 1,
     };
     status = iree_hal_amd_gpu_buffer_reference_resolve(
         &operation->source.device, &blit_arguments.source);

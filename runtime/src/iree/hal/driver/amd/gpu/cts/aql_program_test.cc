@@ -199,6 +199,10 @@ TEST_P(AqlProgramTest, ResidentFixupsAndIndirectPairsSurviveRingWrap) {
       .target = control_address_ + 512,
       .length = 12,
       .fill = 1,
+      .row_count = 1,
+      .slice_count = 1,
+      .groups_y = 1,
+      .groups_z = 1,
   };
   const uint32_t counts_offset = append_data(counts);
   fixups.push_back({counts_offset + 24, 3, 0});
@@ -206,7 +210,14 @@ TEST_P(AqlProgramTest, ResidentFixupsAndIndirectPairsSurviveRingWrap) {
       Dispatch(pool_.blit, 0, 1, IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_AGENT),
       counts_offset);
   for (uint32_t i = 0; i < output_count; ++i) {
-    const iree_hal_amd_gpu_blit_arguments_t fill = {.length = 4, .fill = 1};
+    const iree_hal_amd_gpu_blit_arguments_t fill = {
+        .length = 4,
+        .fill = 1,
+        .row_count = 1,
+        .slice_count = 1,
+        .groups_y = 1,
+        .groups_z = 1,
+    };
     const uint32_t arguments = append_data(fill);
     pointer(arguments + 8, 1, i * 4);
     fixups.push_back({arguments + 24, 2, i});
@@ -266,6 +277,10 @@ TEST_P(AqlProgramTest, ResidentFixupsAndIndirectPairsSurviveRingWrap) {
         .target = instance_->address,
         .length = program_.fixup_offset +
                   program_.fixup_count * sizeof(iree_hal_amd_gpu_fixup_t),
+        .row_count = 1,
+        .slice_count = 1,
+        .groups_y = 1,
+        .groups_z = 1,
     };
     const iree_hal_amd_gpu_fixup_arguments_t apply = {
         .entries = source.fixups,
@@ -274,7 +289,7 @@ TEST_P(AqlProgramTest, ResidentFixupsAndIndirectPairsSurviveRingWrap) {
         .entry_count = program_.fixup_count,
     };
     std::memcpy(control_.contents.data + 64, &copy, sizeof(copy));
-    std::memcpy(control_.contents.data + 96, &apply, sizeof(apply));
+    std::memcpy(control_.contents.data + 144, &apply, sizeof(apply));
     uint32_t offset = 0;
     for (uint32_t count : blocks) {
       const uint32_t initialize = offset == 0 && !instance_->initialized;
@@ -293,7 +308,7 @@ TEST_P(AqlProgramTest, ResidentFixupsAndIndirectPairsSurviveRingWrap) {
           .first = static_cast<uint32_t>(first) & (ring_.capacity - 1),
           .packet_count = count,
       };
-      std::memcpy(control_.contents.data + 128, &materialize,
+      std::memcpy(control_.contents.data + 176, &materialize,
                   sizeof(materialize));
       signal_->value = 1;
       if (initialize) {
@@ -305,14 +320,14 @@ TEST_P(AqlProgramTest, ResidentFixupsAndIndirectPairsSurviveRingWrap) {
       }
       if (patch) {
         Write(position++,
-              Dispatch(pool_.fixup, control_address_ + 96,
+              Dispatch(pool_.fixup, control_address_ + 144,
                        (program_.fixup_count + 63) / 64,
                        IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
                            IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM |
                            IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_AGENT));
       }
       Write(position++, iree_hal_amd_gpu_aql_materialize_packet(
-                            pool_.materialize, control_address_ + 128,
+                            pool_.materialize, control_address_ + 176,
                             IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
                                 IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM));
       // These count slots are written exclusively by the executing kernel.
@@ -359,6 +374,10 @@ TEST_P(AqlProgramTest, TaggedCompletionsCaptureAndElideAcrossRingWrap) {
         .length = 4,
         .pattern = 100 + i,
         .fill = 1,
+        .row_count = 1,
+        .slice_count = 1,
+        .groups_y = 1,
+        .groups_z = 1,
     };
     std::memcpy(control_.contents.data + 256 + i * sizeof(fill), &fill,
                 sizeof(fill));

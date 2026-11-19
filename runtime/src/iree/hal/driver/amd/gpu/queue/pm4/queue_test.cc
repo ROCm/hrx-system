@@ -466,6 +466,9 @@ class KernelQueueTest : public MemoryBackendTest {
         switch ((words[cursor] >> 8) & 255) {
           case 0x10:
             break;    // NOP padding.
+          case 0x76:  // SET_SH_REG for a captured builtin launch.
+          case 0x15:  // DISPATCH_DIRECT; native CTS checks shader output.
+            break;
           case 0x37:  // WRITE_DATA to the native retirement record.
             std::memcpy(reinterpret_cast<void*>(address(2)), words + cursor + 4,
                         (length - 4) * 4);
@@ -810,6 +813,48 @@ TEST_F(KernelQueueTest, RetiredTransferStorageReusesItsFullCapacity) {
   ASSERT_NO_FATAL_FAILURE(Execute(0));
   Poll(0);
   EXPECT_EQ(Read(buffer, expected.size()), expected);
+}
+
+TEST_F(KernelQueueTest, ShaderCopyArgumentsWrapPastShortTail) {
+  auto buffer = Buffer(8);
+  auto* queue =
+      reinterpret_cast<iree_hal_amd_gpu_pm4_queue_t*>(queues_[0].get());
+  auto* storage = queue->producer.arguments;
+  const uint64_t capacity = storage->capacity;
+  constexpr uint64_t kArgumentLength =
+      sizeof(iree_hal_amd_gpu_blit_arguments_t);
+  uint64_t previous_end = 0;
+  bool wrapped = false;
+  for (uint32_t i = 0; i < 96; ++i) {
+    SCOPED_TRACE(i);
+    IREE_ASSERT_OK(iree_hal_queue_copy(queues_[0], {}, {}, buffer, 4, buffer, 0,
+                                       4, nullptr, IREE_HAL_COPY_FLAG_NONE));
+    Publish(0);
+    ASSERT_EQ(native_queues_[0].commands.size(), i + 1);
+    ASSERT_EQ(queue->producer.arguments, storage);
+    const uint64_t end = storage->end - storage->begin;
+    ASSERT_GE(end, kArgumentLength);
+    const uint64_t offset = (end - kArgumentLength) & (capacity - 1);
+    EXPECT_LE(offset + kArgumentLength, capacity);
+    wrapped |= end / capacity > previous_end / capacity;
+    previous_end = end;
+    iree_hal_amd_gpu_blit_arguments_t arguments;
+    std::memcpy(&arguments, storage->memory.contents.data + offset,
+                sizeof(arguments));
+    EXPECT_EQ(arguments.source, arguments.target + 4);
+    EXPECT_EQ(arguments.length, 4u);
+    EXPECT_EQ(arguments.row_count, 1u);
+    EXPECT_EQ(arguments.slice_count, 1u);
+    // Keep the newest command live so the storage cannot reset to byte zero.
+    if (i != 0) {
+      ASSERT_NO_FATAL_FAILURE(Execute(0, 1));
+      Poll(0);
+    }
+  }
+  ASSERT_NO_FATAL_FAILURE(Execute(0));
+  Poll(0);
+  EXPECT_TRUE(wrapped);
+  EXPECT_EQ(queue->producer.arguments->capacity, capacity);
 }
 
 TEST_F(KernelQueueTest, RejectionRollsBackTheBorrowedPayloadGeneration) {

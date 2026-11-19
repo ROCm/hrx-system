@@ -237,6 +237,10 @@ uint32_t* iree_hal_amd_gpu_pm4_program_emit(
           .source = source.address,
           .target = instance->address,
           .length = length,
+          .row_count = 1,
+          .slice_count = 1,
+          .groups_y = 1,
+          .groups_z = 1,
       };
       words = iree_hal_amd_gpu_pm4_blit_emit(
           words, &pool->blit,

@@ -46,10 +46,11 @@ TEST_P(BlitTest, EmbeddedInstructionsAndDescriptorMatchSource) {
   ASSERT_EQ(image_.relocation_count, 0u);
   ASSERT_EQ(image_.import_count, 0u);
   const auto& metadata = image_.metadata.kernels[0];
-  EXPECT_EQ(metadata.kernarg_segment_size, 32u);
+  EXPECT_EQ(metadata.kernarg_segment_size,
+            sizeof(iree_hal_amd_gpu_blit_arguments_t));
   EXPECT_EQ(metadata.private_segment_fixed_size, 0u);
   EXPECT_EQ(metadata.group_segment_fixed_size, 0u);
-  ASSERT_EQ(metadata.argument_count, 5u);
+  ASSERT_EQ(metadata.argument_count, 13u);
   for (size_t i = 0; i < 3; ++i) {
     EXPECT_EQ(metadata.arguments[i].offset, i * 8);
     EXPECT_EQ(metadata.arguments[i].size, 8u);
@@ -58,6 +59,14 @@ TEST_P(BlitTest, EmbeddedInstructionsAndDescriptorMatchSource) {
   EXPECT_EQ(metadata.arguments[3].size, 4u);
   EXPECT_EQ(metadata.arguments[4].offset, 28u);
   EXPECT_EQ(metadata.arguments[4].size, 4u);
+  for (size_t i = 5; i < 9; ++i) {
+    EXPECT_EQ(metadata.arguments[i].offset, 32 + (i - 5) * 8);
+    EXPECT_EQ(metadata.arguments[i].size, 8u);
+  }
+  for (size_t i = 9; i < 13; ++i) {
+    EXPECT_EQ(metadata.arguments[i].offset, 64 + (i - 9) * 4);
+    EXPECT_EQ(metadata.arguments[i].size, 4u);
+  }
   iree_const_byte_span_t code;
   iree_hal_amd_gpu_image_kernel_t descriptor;
   IREE_ASSERT_OK(iree_hal_amd_gpu_blit_program_query(image_.target.version,

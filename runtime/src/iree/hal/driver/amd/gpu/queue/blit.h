@@ -14,22 +14,39 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Resident-transfer arguments. Byte ranges may be unaligned. Native address
-// admission bounds length below the signed offset limit; source is ignored for
-// fills. Every invocation overwrites all consumed fields before dispatch.
+// Resident-transfer arguments. Rows may be unaligned; their padding is never
+// accessed. Native address admission bounds displacements below the signed
+// offset limit. A linear transfer has one row and slice with zero strides.
+// Every invocation overwrites all consumed fields before dispatch.
 typedef struct iree_hal_amd_gpu_blit_arguments_t {
   // Native source byte zero, unused for fills.
   uint64_t source;
   // Native destination byte zero.
   uint64_t target;
-  // Complete nonoverlapping extent, in bytes; zero is a no-op.
+  // Useful bytes per row; zero is a no-op.
   uint64_t length;
-  // Four repeating bytes, beginning at target byte zero.
+  // Four repeating bytes, beginning at each target row's byte zero.
   uint32_t pattern;
   // Zero copies; one fills with pattern.
   uint32_t fill;
+  // Byte displacement between source rows; unused for fills or one row.
+  uint64_t source_row_stride;
+  // Byte displacement between source slices; unused for fills or one slice.
+  uint64_t source_slice_stride;
+  // Byte displacement between target rows; unused for one row.
+  uint64_t target_row_stride;
+  // Byte displacement between target slices; unused for one slice.
+  uint64_t target_slice_stride;
+  // Rows in this native chunk; zero is a no-op.
+  uint32_t row_count;
+  // Slices in this native chunk; zero is a no-op.
+  uint32_t slice_count;
+  // Launched workgroups along Y, used as the row iteration step.
+  uint32_t groups_y;
+  // Launched workgroups along Z, used as the slice iteration step.
+  uint32_t groups_z;
 } iree_hal_amd_gpu_blit_arguments_t;
-static_assert(sizeof(iree_hal_amd_gpu_blit_arguments_t) == 32,
+static_assert(sizeof(iree_hal_amd_gpu_blit_arguments_t) == 80,
               "blit arguments match the compiled ABI");
 
 // Each 64-lane group covers 1024 bytes per iteration. Small ranges need only

@@ -439,11 +439,11 @@ TEST(TransferBatchTest, ProgramCopiesRespectPacketArgumentsAndOperationBounds) {
     IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_launch_initialize(
         target, 0, &kernel, UINT64_C(0x123456780000), &launch));
     for (uint32_t word_capacity : {0u, 30u, 31u, 61u, 62u, 224u}) {
-      for (size_t byte_capacity : {0u, 31u, 32u, 63u, 64u, 96u}) {
+      for (size_t byte_capacity : {0u, 79u, 80u, 159u, 160u, 240u}) {
         SCOPED_TRACE(::testing::Message() << target.major << '.' << target.minor
                                           << " words=" << word_capacity
                                           << " bytes=" << byte_capacity);
-        std::array<uint8_t, 98> bytes;
+        std::array<uint8_t, 242> bytes;
         bytes.fill(0xCC);
         iree_hal_amd_gpu_dma_transfer_chunk_t chunk;
         std::memset(&chunk, 0xA5, sizeof(chunk));
@@ -453,9 +453,11 @@ TEST(TransferBatchTest, ProgramCopiesRespectPacketArgumentsAndOperationBounds) {
             iree_make_byte_span(bytes.data() + 1, byte_capacity),
             UINT64_C(0xABCDEF010020), &chunk, &argument_length));
         const size_t count = std::min(
-            {size_t{2}, size_t{word_capacity / 31}, byte_capacity / 32});
+            {size_t{2}, size_t{word_capacity / 31},
+             byte_capacity / sizeof(iree_hal_amd_gpu_blit_arguments_t)});
         EXPECT_EQ(chunk.word_count, count * 31);
-        EXPECT_EQ(argument_length, count * 32);
+        EXPECT_EQ(argument_length,
+                  count * sizeof(iree_hal_amd_gpu_blit_arguments_t));
         EXPECT_EQ(chunk.staging_length, 0u);
         EXPECT_EQ(chunk.next.index, count);
         EXPECT_EQ(chunk.next.offset, count ? 0u : 3u);
@@ -487,7 +489,8 @@ TEST(TransferBatchTest, ProgramCopiesRespectPacketArgumentsAndOperationBounds) {
               1,
               0xC0027602,
               0x240,
-              0xEF010020u + static_cast<uint32_t>(i * 32),
+              0xEF010020u + static_cast<uint32_t>(
+                                i * sizeof(iree_hal_amd_gpu_blit_arguments_t)),
               0xABCD,
               0xC0031502,
               i ? 2u : 256u,
@@ -499,7 +502,10 @@ TEST(TransferBatchTest, ProgramCopiesRespectPacketArgumentsAndOperationBounds) {
                                           chunk.words + (i + 1) * 31),
                     std::vector<uint32_t>(expected.begin(), expected.end()));
           iree_hal_amd_gpu_blit_arguments_t arguments;
-          std::memcpy(&arguments, bytes.data() + 1 + i * 32, sizeof(arguments));
+          std::memcpy(
+              &arguments,
+              bytes.data() + 1 + i * sizeof(iree_hal_amd_gpu_blit_arguments_t),
+              sizeof(arguments));
           const uint64_t offset = i ? 0 : 3;
           EXPECT_EQ(arguments.source, UINT64_C(0x123500000000) + offset);
           EXPECT_EQ(arguments.target, UINT64_C(0x567800000020) +
@@ -508,9 +514,15 @@ TEST(TransferBatchTest, ProgramCopiesRespectPacketArgumentsAndOperationBounds) {
           EXPECT_EQ(arguments.length, operations[i].length - offset);
           EXPECT_EQ(arguments.pattern, 0u);
           EXPECT_EQ(arguments.fill, 0u);
+          EXPECT_EQ(arguments.row_count, 1u);
+          EXPECT_EQ(arguments.slice_count, 1u);
+          EXPECT_EQ(arguments.groups_y, 1u);
+          EXPECT_EQ(arguments.groups_z, 1u);
         }
-        EXPECT_TRUE(std::all_of(bytes.begin() + 1 + count * 32, bytes.end(),
-                                [](uint8_t byte) { return byte == 0xCC; }));
+        EXPECT_TRUE(std::all_of(
+            bytes.begin() + 1 +
+                count * sizeof(iree_hal_amd_gpu_blit_arguments_t),
+            bytes.end(), [](uint8_t byte) { return byte == 0xCC; }));
         EXPECT_TRUE(
             std::all_of(chunk.words + count * 31,
                         chunk.words + IREE_HAL_AMD_GPU_DMA_TRANSFER_MAX_WORDS,

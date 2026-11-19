@@ -669,17 +669,20 @@ TEST_P(AqlSubmissionTest, FileCopiesJoinFailureAndRetirement) {
   constexpr uint32_t kPacketCapacity =
       IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_PACKETS;
   for (iree_host_size_t first = 0; first < count; first += kPacketCapacity) {
-    std::array<uint64_t, 4 * kPacketCapacity> arguments;
+    std::array<iree_hal_amd_gpu_blit_arguments_t, kPacketCapacity> arguments;
     iree_hal_amd_gpu_aql_transfer_chunk_t chunk;
     IREE_ASSERT_OK(iree_hal_amd_gpu_aql_transfer_prepare_chunk(
         &submission->transfer.capture, 0x2000, kPacketCapacity,
         iree_make_byte_span(arguments.data(), sizeof(arguments)), 0x3000, false,
         iree_byte_span_empty(), 0, &chunk));
     for (iree_host_size_t i = 0; i < kPacketCapacity; ++i) {
-      EXPECT_EQ(arguments[i * 4 + 0], 0x123456789u);
-      EXPECT_EQ(arguments[i * 4 + 1], 0x987654321u);
-      EXPECT_EQ(arguments[i * 4 + 2], 2u * 1024 * 1024);
-      EXPECT_EQ(arguments[i * 4 + 3], 0u);
+      EXPECT_EQ(arguments[i].source, 0x123456789u);
+      EXPECT_EQ(arguments[i].target, 0x987654321u);
+      EXPECT_EQ(arguments[i].length, 2u * 1024 * 1024);
+      EXPECT_EQ(arguments[i].pattern, 0u);
+      EXPECT_EQ(arguments[i].fill, 0u);
+      EXPECT_EQ(arguments[i].row_count, 1u);
+      EXPECT_EQ(arguments[i].slice_count, 1u);
     }
     EXPECT_EQ(chunk.packet_count, kPacketCapacity);
     EXPECT_EQ(chunk.argument_length, sizeof(arguments));

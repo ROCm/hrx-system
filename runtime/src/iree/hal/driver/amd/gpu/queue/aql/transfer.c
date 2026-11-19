@@ -72,6 +72,10 @@ iree_status_t iree_hal_amd_gpu_aql_transfer_prepare_chunk(
         .length = operation->length - offset,
         .pattern = operation->pattern,
         .fill = fill,
+        .row_count = 1,
+        .slice_count = 1,
+        .groups_y = 1,
+        .groups_z = 1,
     };
     if (!copy && !fill) {
       arguments.length = iree_min(

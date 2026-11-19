@@ -28,7 +28,7 @@ extern const iree_hal_amd_gpu_dma_transfer_encoding_t
 
 // Emits consecutive COPY operations with the resident blit kernel. Capture
 // has proved that every native slot also admits PROGRAM transfer access.
-// Each launch owns one 32-byte ABI argument record; no payload is copied by the
+// Each launch owns one blit ABI argument record; no payload is copied by the
 // host. Other operation types end the chunk. out_argument_length reports ABI
 // bytes independently of the chunk's zero staging length. The caller publishes
 // arguments before execution and retains them through shader completion.
