@@ -77,6 +77,54 @@ Add the installation prefix to `CMAKE_PREFIX_PATH`. The
 [package examples](build_tools/cmake/package_smoke/) exercise the installed C
 and C++ interfaces.
 
+## Copy, fill, and update geometry
+
+The native API carries a complete rectangle or volume through queues, streams,
+and graphs. `hrx_transfer_region_t` describes useful bytes per row, row and slice
+counts, and independent source and destination strides. All offsets and strides
+are in bytes. For example, this records a 32-row copy between differently padded
+buffers:
+
+```c
+#include <hrx_runtime.h>
+
+hrx_status_t copy_tile(hrx_stream_t stream, hrx_buffer_t source,
+                       size_t source_offset, hrx_buffer_t target,
+                       size_t target_offset) {
+  const hrx_transfer_region_t region = {
+      .row_length = 1024,
+      .row_count = 32,
+      .slice_count = 1,
+      .source_strides = {.row_stride = 1088},
+      .target_strides = {.row_stride = 1152},
+  };
+  return hrx_stream_copy_buffer(stream, source, source_offset, target,
+                                target_offset, &region);
+}
+```
+
+Only the 1,024 useful bytes in each row are copied; destination padding is
+preserved. Each buffer must cover its complete strided span from the supplied
+offset. Zero strides are literal zero displacements, not a request for packed
+storage. A dimension with a count of one ignores its stride. Copies have
+`memcpy` overlap rules for the useful bytes.
+
+Geometry is captured before the call returns; buffer contents are consumed when
+the operation executes. Streams order their operations and batch recorded work
+until `hrx_stream_flush` or `hrx_stream_synchronize`. Direct `hrx_queue_copy`
+calls take the same geometry with explicit wait/signal semaphores; call order
+alone does not establish dependencies. The `_linear` helpers describe a single
+row through these same APIs.
+
+`hrx_fill_region_t` describes the destination of a fill. Its origin, row length,
+and used strides must align to the 1-, 2-, or 4-byte pattern. Stream updates
+capture up to 65,536 useful source bytes before returning, without storing row
+padding. Larger host transfers use `hrx_stream_copy_h2d` or
+`hrx_stream_copy_d2h`; their host storage remains borrowed until completion.
+An upload source remains live and unmodified, and a download destination remains
+live and inaccessible until that completion. Applications retain the buffers,
+their backing storage, and their pools for all queued uses.
+
 ## Run HIP applications
 
 On Linux, the public package includes `lib/libamdhip64.so`. Preload it to route
@@ -99,6 +147,25 @@ synchronization. `hipDeviceScheduleYield` performs a bounded observation period
 before blocking; `hipDeviceScheduleBlockingSync` blocks directly. These flags
 govern host synchronization. Event synchronization independently follows
 `hipEventBlockingSync`.
+
+### Host transfers
+
+For recurring host/device traffic, `hipHostRegister` registers application-owned
+host storage, while `hipHostMalloc` allocates registered host storage. Reusing
+these ranges amortizes registration and allows copies to use the device-visible
+backing directly. The application keeps the storage and registration live until
+all queued uses complete. Application-owned storage is unregistered with
+`hipHostUnregister` before it is freed; `hipHostFree` releases host allocations
+created by HIP.
+
+Ordinary pageable host memory is also supported. A copy does not turn that
+memory into a persistent implicit GPU registration. Transfers may use staging
+or a qualified CPU mapping of the device allocation. Large pageable uploads and
+pageable downloads can block inside an `Async` call; small uploads may capture
+the source bytes before returning. Event or stream completion establishes when
+the application can reuse the source or read the destination. The
+[transfer measurements](cts/README.md#transfer-measurements) separate pageable
+and explicitly registered memory so that these different costs remain visible.
 
 ## Release artifacts
 
