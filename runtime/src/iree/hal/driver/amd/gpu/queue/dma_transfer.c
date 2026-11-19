@@ -124,13 +124,22 @@ iree_status_t iree_hal_amd_gpu_dma_transfer_prepare_chunk(
     if (iree_status_is_ok(status)) {
       uint8_t* data =
           staging.data ? staging.data + out_chunk->staging_length : NULL;
-      const iree_hal_amd_gpu_dma_transfer_packet_t packet =
-          iree_hal_amd_gpu_dma_transfer_emit_packet(
-              encoding, &span, offset,
-              iree_make_byte_span(
-                  data, staging.data_length - out_chunk->staging_length),
-              staging_address + out_chunk->staging_length,
-              out_chunk->words + out_chunk->word_count);
+      iree_hal_amd_gpu_dma_transfer_packet_t packet = {0};
+      if (span.type == IREE_HAL_TRANSFER_OPERATION_TYPE_COPY && span.region &&
+          encoding->copy_region) {
+        packet = encoding->copy_region(
+            encoding->features, span.source_address, span.target_address,
+            span.region, offset, word_capacity - out_chunk->word_count,
+            out_chunk->words + out_chunk->word_count);
+      }
+      if (!packet.length) {
+        packet = iree_hal_amd_gpu_dma_transfer_emit_packet(
+            encoding, &span, offset,
+            iree_make_byte_span(
+                data, staging.data_length - out_chunk->staging_length),
+            staging_address + out_chunk->staging_length,
+            out_chunk->words + out_chunk->word_count);
+      }
       if (!packet.length) {
         break;
       }

@@ -155,6 +155,7 @@ enum TransferFlags : uint32_t {
   kDeviceInterval = 1u << 2,
   kSynchronous = 1u << 3,
   kFreshHostMapping = 1u << 4,
+  kHostInterval = 1u << 5,
 };
 
 enum class CopyStorage {
@@ -444,6 +445,70 @@ GEOMETRY_VARIANT(GraphFill, true, true);
 #undef GEOMETRY_VARIANT
 #undef GEOMETRY_CASE
 
+// Enclose one asynchronous transfer in device events. The interval includes
+// any gap between commands; host_ns also includes event submission and the
+// final stream wait, but excludes querying the completed event timestamps.
+template <typename Enqueue>
+void MeasureDeviceInterval(benchmark::State& state, Enqueue enqueue) {
+  auto& runtime = Runtime();
+  auto create = runtime.Resolve<decltype(&hipEventCreate)>("hipEventCreate");
+  auto destroy = runtime.Resolve<decltype(&hipEventDestroy)>("hipEventDestroy");
+  auto record = runtime.Resolve<decltype(&hipEventRecord)>("hipEventRecord");
+  auto elapsed =
+      runtime.Resolve<decltype(&hipEventElapsedTime)>("hipEventElapsedTime");
+  hipEvent_t begin = nullptr, end = nullptr;
+  Check(create(&begin));
+  Check(create(&end));
+  const auto transfer = [&] {
+    Check(record(begin, runtime.stream()));
+    enqueue();
+    Check(record(end, runtime.stream()));
+    runtime.Wait();
+  };
+  transfer();
+  double host_nanoseconds = 0;
+  for (auto _ : state) {
+    const auto start = std::chrono::steady_clock::now();
+    transfer();
+    const auto finish = std::chrono::steady_clock::now();
+    float milliseconds = 0;
+    Check(elapsed(&milliseconds, begin, end));
+    Require(milliseconds > 0, "device event interval did not advance");
+    state.SetIterationTime(static_cast<double>(milliseconds) * 1e-3);
+    host_nanoseconds +=
+        std::chrono::duration<double, std::nano>(finish - start).count();
+  }
+  Check(destroy(end));
+  Check(destroy(begin));
+  state.counters["host_ns"] =
+      benchmark::Counter(host_nanoseconds, benchmark::Counter::kAvgIterations);
+}
+
+// Split ordinary copy completion into submission and waiting, without adding
+// device events or changing the queue dependency sequence. Separate rows keep
+// the three host clock reads out of the ordinary completed-transfer benchmark.
+template <typename Enqueue>
+void MeasureHostInterval(benchmark::State& state, Enqueue enqueue) {
+  auto& runtime = Runtime();
+  double submit_nanoseconds = 0;
+  double wait_nanoseconds = 0;
+  for (auto _ : state) {
+    const auto begin = std::chrono::steady_clock::now();
+    enqueue();
+    const auto submitted = std::chrono::steady_clock::now();
+    runtime.Wait();
+    const auto completed = std::chrono::steady_clock::now();
+    submit_nanoseconds +=
+        std::chrono::duration<double, std::nano>(submitted - begin).count();
+    wait_nanoseconds +=
+        std::chrono::duration<double, std::nano>(completed - submitted).count();
+  }
+  state.counters["submit_ns"] = benchmark::Counter(
+      submit_nanoseconds, benchmark::Counter::kAvgIterations);
+  state.counters["wait_ns"] =
+      benchmark::Counter(wait_nanoseconds, benchmark::Counter::kAvgIterations);
+}
+
 // Cover publication-window and bulk-queue boundaries on both sides. The row
 // sizes divide each extent so pitched cases move the same useful byte count.
 void HostTransferSizes(benchmark::internal::Benchmark* benchmark) {
@@ -567,38 +632,9 @@ void Download(benchmark::State& state, uint32_t flags, size_t row_width = 4096,
     state.counters["host_unmap_ns"] = benchmark::Counter(
         unmap_nanoseconds, benchmark::Counter::kAvgIterations);
   } else if (flags & kDeviceInterval) {
-    auto create = runtime.Resolve<decltype(&hipEventCreate)>("hipEventCreate");
-    auto destroy =
-        runtime.Resolve<decltype(&hipEventDestroy)>("hipEventDestroy");
-    auto record = runtime.Resolve<decltype(&hipEventRecord)>("hipEventRecord");
-    auto elapsed =
-        runtime.Resolve<decltype(&hipEventElapsedTime)>("hipEventElapsedTime");
-    hipEvent_t begin = nullptr, end = nullptr;
-    Check(create(&begin));
-    Check(create(&end));
-    const auto enqueue = [&] {
-      Check(record(begin, runtime.stream()));
-      transfer();
-      Check(record(end, runtime.stream()));
-      runtime.Wait();
-    };
-    enqueue();
-    double host_nanoseconds = 0;
-    for (auto _ : state) {
-      const auto start = std::chrono::steady_clock::now();
-      enqueue();
-      const auto finish = std::chrono::steady_clock::now();
-      float milliseconds = 0;
-      Check(elapsed(&milliseconds, begin, end));
-      Require(milliseconds > 0, "device event interval did not advance");
-      state.SetIterationTime(static_cast<double>(milliseconds) * 1e-3);
-      host_nanoseconds +=
-          std::chrono::duration<double, std::nano>(finish - start).count();
-    }
-    Check(destroy(end));
-    Check(destroy(begin));
-    state.counters["host_ns"] = benchmark::Counter(
-        host_nanoseconds, benchmark::Counter::kAvgIterations);
+    MeasureDeviceInterval(state, transfer);
+  } else if (flags & kHostInterval) {
+    MeasureHostInterval(state, transfer);
   } else {
     size_t host_index = 0;
     for (auto _ : state) {
@@ -673,7 +709,9 @@ BENCHMARK_CAPTURE(Download, PageableFreshPitched, kFreshHostMapping | kPitched)
   BENCHMARK_CAPTURE(Download, name##DeviceInterval, (flags) | kDeviceInterval, \
                     width)                                                     \
       ->Name("HIP/DownloadDeviceInterval/" #name)                              \
-      ->Arg(64 * 1024 * 1024)                                                  \
+      ->RangeMultiplier(4)                                                     \
+      ->Range(4096, 64 * 1024 * 1024)                                          \
+      ->MeasureProcessCPUTime()                                                \
       ->UseManualTime()
 DOWNLOAD_INTERVAL_CASE(RegisteredContiguous, kRegistered, 0);
 DOWNLOAD_INTERVAL_CASE(RegisteredPitched4K, kRegistered | kPitched, 4096);
@@ -689,16 +727,27 @@ DOWNLOAD_INTERVAL_CASE(PageablePitched1M, kPitched, 1024 * 1024);
 DOWNLOAD_INTERVAL_CASE(PageablePitched4M, kPitched, 4 * 1024 * 1024);
 #undef DOWNLOAD_INTERVAL_CASE
 
+#define DOWNLOAD_HOST_INTERVAL_CASE(name, flags)                           \
+  BENCHMARK_CAPTURE(Download, name##HostInterval, (flags) | kHostInterval) \
+      ->Name("HIP/DownloadHostInterval/" #name)                            \
+      ->Apply(HostTransferSizes)                                           \
+      ->MeasureProcessCPUTime()                                            \
+      ->UseRealTime()
+DOWNLOAD_HOST_INTERVAL_CASE(RegisteredContiguous, kRegistered);
+DOWNLOAD_HOST_INTERVAL_CASE(RegisteredPitched, kRegistered | kPitched);
+#undef DOWNLOAD_HOST_INTERVAL_CASE
+
 // A blocking HIP completion owns the borrowed upload bytes until return. Use
 // persistent host ranges so steady-state measurements include no application
 // allocation, registration, or validation work. Rotating ranges have distinct
 // contents, allowing readback to identify the last submitted source.
-void Upload(benchmark::State& state, uint32_t flags, size_t host_count = 1) {
+void Upload(benchmark::State& state, uint32_t flags, size_t host_count = 1,
+            size_t row_width = 4096) {
   auto& runtime = Runtime();
   const bool registered = (flags & kRegistered) != 0;
   const bool pitched = (flags & kPitched) != 0;
   const size_t length = state.range(0);
-  const size_t width = pitched ? std::min(size_t{4096}, length) : length;
+  const size_t width = pitched ? std::min(row_width, length) : length;
   const size_t height = length / width;
   const size_t source_pitch = width + (pitched ? 64 : 0);
   const size_t target_pitch = width + (pitched ? 128 : 0);
@@ -732,25 +781,35 @@ void Upload(benchmark::State& state, uint32_t flags, size_t host_count = 1) {
       runtime.Resolve<decltype(&hipMemcpy2DAsync)>("hipMemcpy2DAsync");
   const auto copy_synchronous =
       runtime.Resolve<decltype(&hipMemcpy)>("hipMemcpy");
-  const auto transfer = [&] {
+  const auto enqueue = [&] {
     if ((flags & kSynchronous) != 0) {
       Check(copy_synchronous(target, source, length, hipMemcpyHostToDevice));
     } else if (pitched) {
       Check(copy_2d(target, target_pitch, source, source_pitch, width, height,
                     hipMemcpyHostToDevice, runtime.stream()));
-      runtime.Wait();
     } else {
       Check(copy(target, source, length, hipMemcpyHostToDevice,
                  runtime.stream()));
+    }
+  };
+  const auto transfer = [&] {
+    enqueue();
+    if (!(flags & kSynchronous)) {
       runtime.Wait();
     }
   };
   transfer();
-  size_t host_index = 0;
-  for (auto _ : state) {
-    source = allocation + host_index * allocation_length;
-    transfer();
-    host_index = (host_index + 1) % host_count;
+  if (flags & kDeviceInterval) {
+    MeasureDeviceInterval(state, enqueue);
+  } else if (flags & kHostInterval) {
+    MeasureHostInterval(state, enqueue);
+  } else {
+    size_t host_index = 0;
+    for (auto _ : state) {
+      source = allocation + host_index * allocation_length;
+      transfer();
+      host_index = (host_index + 1) % host_count;
+    }
   }
 
   // Reuse the input allocation for readback after all measured uploads finish.
@@ -830,6 +889,50 @@ BENCHMARK_CAPTURE(Upload, SynchronousPageable, kSynchronous)
 UPLOAD_PITCHED_CASE(PageablePitched, kDefault);
 UPLOAD_PITCHED_CASE(RegisteredPitched, kRegistered);
 #undef UPLOAD_PITCHED_CASE
+
+#define UPLOAD_INTERVAL_CASE(name, flags, width)                             \
+  BENCHMARK_CAPTURE(Upload, name##DeviceInterval, (flags) | kDeviceInterval, \
+                    1, width)                                                \
+      ->Name("HIP/UploadDeviceInterval/" #name)                              \
+      ->RangeMultiplier(4)                                                   \
+      ->Range(4096, 64 * 1024 * 1024)                                        \
+      ->MeasureProcessCPUTime()                                              \
+      ->UseManualTime()
+UPLOAD_INTERVAL_CASE(RegisteredContiguous, kRegistered, 0);
+UPLOAD_INTERVAL_CASE(RegisteredPitched4K, kRegistered | kPitched, 4096);
+UPLOAD_INTERVAL_CASE(RegisteredPitched64K, kRegistered | kPitched, 65536);
+UPLOAD_INTERVAL_CASE(RegisteredPitched1M, kRegistered | kPitched, 1024 * 1024);
+UPLOAD_INTERVAL_CASE(RegisteredPitched4M, kRegistered | kPitched,
+                     4 * 1024 * 1024);
+#undef UPLOAD_INTERVAL_CASE
+
+#define UPLOAD_HOST_INTERVAL_CASE(name, flags)                           \
+  BENCHMARK_CAPTURE(Upload, name##HostInterval, (flags) | kHostInterval) \
+      ->Name("HIP/UploadHostInterval/" #name)                            \
+      ->Apply(HostTransferSizes)                                         \
+      ->MeasureProcessCPUTime()                                          \
+      ->UseRealTime()
+UPLOAD_HOST_INTERVAL_CASE(RegisteredContiguous, kRegistered);
+UPLOAD_HOST_INTERVAL_CASE(RegisteredPitched, kRegistered | kPitched);
+#undef UPLOAD_HOST_INTERVAL_CASE
+
+// Reusing one source can keep its CPU cache lines resident for every GPU read.
+// Rotating explicitly registered sources also covers uploads from a working
+// set larger than the cache, without including registration in copy timing.
+#define REGISTERED_ROTATING_UPLOAD_CASE(name, flags, count)               \
+  BENCHMARK_CAPTURE(Upload, name##Rotating##count, kRegistered | (flags), \
+                    count)                                                \
+      ->Name("HIP/Upload/Registered" #name "Rotating" #count)             \
+      ->Arg(4096)                                                         \
+      ->Arg(1024 * 1024)                                                  \
+      ->Arg(4 * 1024 * 1024)                                              \
+      ->MeasureProcessCPUTime()                                           \
+      ->UseRealTime()
+REGISTERED_ROTATING_UPLOAD_CASE(Contiguous, kDefault, 4);
+REGISTERED_ROTATING_UPLOAD_CASE(Contiguous, kDefault, 16);
+REGISTERED_ROTATING_UPLOAD_CASE(Pitched, kPitched, 4);
+REGISTERED_ROTATING_UPLOAD_CASE(Pitched, kPitched, 16);
+#undef REGISTERED_ROTATING_UPLOAD_CASE
 
 // Separate the host cost of preparing/uploading the source from the GPU's
 // subsequent read cost. Repeated reads expose cache-resident throughput;

@@ -437,6 +437,60 @@ TEST_F(CommandBufferTest, CapturedUpdatesAndNaturalFillEdgesPreserveAllBytes) {
   iree_hal_amd_gpu_program_cancel(storage, instance);
 }
 
+TEST_F(CommandBufferTest, NativeRectanglesResumeWithIndependentBindings) {
+  constexpr uint64_t kCapacity = 2 * 1024 * 1024;
+  auto* source = MakeBuffer(UINT64_C(0x123400000000), kCapacity);
+  auto* target = MakeBuffer(UINT64_C(0x567800000000), kCapacity);
+  ASSERT_NO_FATAL_FAILURE(
+      Begin(2, AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT));
+  iree_hal_transfer_region_t region = {
+      .row_length = 16,
+      .row_count = 16385,
+      .slice_count = 1,
+      .source_strides = {32, 0},
+      .target_strides = {48, 0},
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+      recording_, iree_hal_make_indirect_buffer_ref(0, 0, kCapacity - 64),
+      iree_hal_make_indirect_buffer_ref(1, 0, kCapacity - 64), &region, 0));
+  region = {};
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(recording_));
+  for (uint64_t binding_offset : {0u, 64u}) {
+    const iree_hal_buffer_binding_t bindings[] = {
+        {&source->base, binding_offset, kCapacity - 64},
+        {&target->base, binding_offset, kCapacity - 64},
+    };
+    Invocation invocation;
+    IREE_ASSERT_OK(invocation.Initialize(recording_, {2, bindings}));
+    IREE_ASSERT_OK(invocation.Resolve(0));
+    std::array<uint32_t, 15> words;
+    words.fill(0x95d3c7a1);
+    uint32_t word_count = 0;
+    const auto* program =
+        iree_hal_amd_gpu_sdma_command_buffer_program(recording_);
+    EXPECT_EQ(iree_hal_amd_gpu_sdma_program_emit(
+                  program, invocation.value.values, &invocation.cursor, 13,
+                  words.data() + 1, &word_count),
+              IREE_HAL_AMD_GPU_SDMA_PROGRAM_MORE);
+    ASSERT_EQ(word_count, 13u);
+    EXPECT_EQ((std::vector<uint32_t>{words.begin() + 1, words.end() - 1}),
+              (std::vector<uint32_t>{
+                  0x80000401, static_cast<uint32_t>(binding_offset), 0x1234, 0,
+                  0x2000, 0, static_cast<uint32_t>(binding_offset), 0x5678, 0,
+                  0x4000, 0, 0x3fff0000, 0}));
+    EXPECT_EQ(invocation.cursor.offset, 16u * 16384);
+    EXPECT_EQ(words.front(), 0x95d3c7a1u);
+    EXPECT_EQ(words.back(), 0x95d3c7a1u);
+    iree_hal_amd_gpu_sdma_program_progress_t progress;
+    EXPECT_EQ(Emit(invocation, &progress),
+              (std::vector<uint32_t>{
+                  1, 15, 0, static_cast<uint32_t>(binding_offset + 32 * 16384),
+                  0x1234, static_cast<uint32_t>(binding_offset + 48 * 16384),
+                  0x5678}));
+    EXPECT_EQ(progress, IREE_HAL_AMD_GPU_SDMA_PROGRAM_END);
+  }
+}
+
 TEST_F(CommandBufferTest, RectanglesCaptureAndScatterOnlyUsefulBytes) {
   std::vector<uint8_t> source_data(2048, 0x19);
   std::vector<uint8_t> target_data(4096, 0x23);

@@ -13,15 +13,24 @@
 extern "C" {
 #endif
 
-// Cold native packet selection. Both encoders consume qualified ranges and
-// return the exclusive command end. Staging, captured ownership, and download
-// retirement are independent of the packet protocol.
+typedef struct iree_hal_amd_gpu_dma_transfer_packet_t {
+  // Native command extent written by the packet encoder, in DWORDs.
+  uint32_t word_count;
+  // Useful bytes covered by the packet; zero means no packet was emitted.
+  uint32_t length;
+  // Staging bytes owned through this packet's DMA completion.
+  uint32_t staging_length;
+} iree_hal_amd_gpu_dma_transfer_packet_t;
+
+// Queue-owned native packet selection. Encoders consume qualified ranges;
+// staging, captured ownership, and download retirement are independent of the
+// packet protocol.
 typedef struct iree_hal_amd_gpu_dma_transfer_encoding_t {
   // Native format features captured by the queue family.
   uint64_t features;
   // Maximum payload extent in a single copy or fill packet, in bytes.
   uint32_t max_packet_length;
-  // Maximum command extent emitted by either encoder, in DWORDs.
+  // Maximum command extent for a linear copy or fill, in DWORDs.
   uint32_t max_packet_words;
   // Writes one nonempty native copy packet without accessing payload bytes.
   uint32_t* (*copy)(uint32_t* words, uint64_t features, uint64_t source,
@@ -29,6 +38,12 @@ typedef struct iree_hal_amd_gpu_dma_transfer_encoding_t {
   // Writes one nonempty DWORD-aligned fill packet with a repeated DWORD.
   uint32_t* (*fill)(uint32_t* words, uint64_t features, uint64_t target,
                     uint32_t length, uint32_t pattern);
+  // Optional native rectangle encoder. A zero result leaves storage untouched
+  // and requests exact linear packets for this geometry or command capacity.
+  iree_hal_amd_gpu_dma_transfer_packet_t (*copy_region)(
+      uint64_t features, uint64_t source, uint64_t target,
+      const iree_hal_transfer_region_t* region, uint64_t offset,
+      uint32_t word_capacity, uint32_t* words);
 } iree_hal_amd_gpu_dma_transfer_encoding_t;
 
 // Bounded CPU command preparation, independent of logical payload length.
@@ -54,15 +69,6 @@ typedef struct iree_hal_amd_gpu_dma_transfer_span_t {
   // Optional rectangle geometry borrowed through packet emission.
   const iree_hal_transfer_region_t* region;
 } iree_hal_amd_gpu_dma_transfer_span_t;
-
-typedef struct iree_hal_amd_gpu_dma_transfer_packet_t {
-  // Native command extent written by the packet encoder, in DWORDs.
-  uint32_t word_count;
-  // Bytes covered by the emitted native packet; zero means no capacity.
-  uint32_t length;
-  // Staging bytes owned through this packet's DMA completion.
-  uint32_t staging_length;
-} iree_hal_amd_gpu_dma_transfer_packet_t;
 
 // Emits one packet from a nonempty remaining span. Only host-source transfers
 // and narrow fill edges write staging. Device copies and aligned fills never

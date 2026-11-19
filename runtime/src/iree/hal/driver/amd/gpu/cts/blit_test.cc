@@ -24,7 +24,19 @@ class BlitTest
     : public GpuNativeTest,
       public ::testing::WithParamInterface<amdf_queue_command_type_t> {
  protected:
-  amdf_queue_command_type_t command_type() const override { return GetParam(); }
+  amdf_queue_command_type_t command_type() const override {
+    return GetParam() == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA
+               ? AMDF_QUEUE_COMMAND_TYPE_UNKNOWN
+               : GetParam();
+  }
+
+  void Create() {
+    GpuNativeTest::Create();
+    if (!HasFatalFailure() && !IsSkipped() &&
+        GetParam() == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA) {
+      AcquireTransferQueues();
+    }
+  }
 };
 
 TEST_P(BlitTest, ExactRangesAcrossVectorGroupAndGridBoundaries) {
@@ -51,7 +63,7 @@ TEST_P(BlitTest, ExactRangesAcrossVectorGroupAndGridBoundaries) {
       pool, iree_hal_make_pool_reservation_request(kCapacity, 16),
       iree_infinite_timeout(), buffer.out()));
 
-  // Whole-range bindings exercise the shader for every size, including empty
+  // Whole-range bindings exercise each protocol for every size, including empty
   // ranges and extents that require a second grid iteration. The same three
   // resident recordings serve every invocation without allocation churn.
   const std::array<uint8_t, 4> pattern = {0x17, 0x53, 0xB9, 0xED};
@@ -180,7 +192,7 @@ TEST_P(BlitTest, ExactRangesAcrossVectorGroupAndGridBoundaries) {
   }
 }
 
-TEST_P(BlitTest, RecordedRectanglesCaptureBytesAndReplayBindings) {
+TEST_P(BlitTest, DirectAndRecordedRectanglesPreserveBytesAndBindings) {
   Create();
   if (HasFatalFailure() || IsSkipped()) {
     return;
@@ -241,9 +253,11 @@ TEST_P(BlitTest, RecordedRectanglesCaptureBytesAndReplayBindings) {
   for (size_t width : {size_t{37}, size_t{256}}) {
     SCOPED_TRACE(width);
     auto strides = [&](size_t padding) {
+      const size_t pitch =
+          width == 256 ? (width + padding + 3) & ~size_t{3} : width + padding;
       return iree_hal_transfer_strides_t{
-          .row_stride = width + padding,
-          .slice_stride = (width + padding) * kRows + 24,
+          .row_stride = pitch,
+          .slice_stride = pitch * kRows + 24,
       };
     };
     iree_hal_transfer_region_t update = {
@@ -260,6 +274,7 @@ TEST_P(BlitTest, RecordedRectanglesCaptureBytesAndReplayBindings) {
         .source_strides = strides(3),
         .target_strides = strides(17),
     };
+    const auto direct_copy = copy;
     iree_hal_fill_region_t fill = {
         .row_length = width,
         .row_count = kRows,
@@ -334,6 +349,27 @@ TEST_P(BlitTest, RecordedRectanglesCaptureBytesAndReplayBindings) {
           std::mismatch(expected.begin(), expected.end(), actual.begin());
       ASSERT_EQ(static_cast<size_t>(mismatch.first - expected.begin()),
                 kCapacity);
+      // Clear the copied window, then restore it with the direct queue API.
+      // The host joins only the final download; both queue paths must preserve
+      // the same bytes, padding, and cross-queue visibility.
+      const uint8_t cleared = 0xCC;
+      next = submitted + 1;
+      IREE_ASSERT_OK(iree_hal_queue_fill_linear(
+          queues_[0], {1, &semaphore, &submitted}, {1, &semaphore, &next},
+          buffer, kWindow, kWindow, &cleared, sizeof(cleared), nullptr, 0));
+      submitted = next++;
+      IREE_ASSERT_OK(iree_hal_queue_copy(
+          queues_[0], {1, &semaphore, &submitted}, {1, &semaphore, &next},
+          buffer, 7, buffer, kWindow + 19, &direct_copy, nullptr, 0));
+      submitted = next++;
+      IREE_ASSERT_OK(iree_hal_queue_download_linear(
+          queues_[1], {1, &semaphore, &submitted}, {1, &semaphore, &next},
+          buffer, 0, actual.data(), kCapacity, nullptr));
+      submitted = next;
+      IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, submitted,
+                                             iree_infinite_timeout(),
+                                             IREE_ASYNC_WAIT_FLAG_NONE));
+      EXPECT_EQ(actual, expected);
     }
   }
 }
@@ -341,9 +377,12 @@ TEST_P(BlitTest, RecordedRectanglesCaptureBytesAndReplayBindings) {
 INSTANTIATE_TEST_SUITE_P(
     Protocol, BlitTest,
     ::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
-                      AMDF_QUEUE_COMMAND_TYPE_GPU_AQL),
+                      AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
+                      AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA),
     [](const ::testing::TestParamInfo<amdf_queue_command_type_t>& info) {
-      return info.param == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL ? "Aql" : "Pm4";
+      return info.param == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA  ? "Sdma"
+             : info.param == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL ? "Aql"
+                                                             : "Pm4";
     });
 
 }  // namespace

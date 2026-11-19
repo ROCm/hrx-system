@@ -415,7 +415,7 @@ static iree_status_t iree_hal_amd_gpu_sdma_emit(
               break;
             }
             words = iree_hal_amd_gpu_sdma_emit_wait(
-                words, queue->features,
+                words, queue->encoding.features,
                 signal->device_address +
                     queue->options.signal_layout.value_offset,
                 1u - queue->options.signal_layout.pending_value);
@@ -461,7 +461,7 @@ static iree_status_t iree_hal_amd_gpu_sdma_emit(
                 operation->execute.initialize_length - next->initialize_offset,
                 IREE_HAL_AMD_GPU_SDMA_MAX_PACKET_LENGTH);
             words = iree_hal_amd_gpu_sdma_emit_copy(
-                words, queue->features,
+                words, queue->encoding.features,
                 operation->execute.source_address + next->initialize_offset,
                 operation->execute.instance->address + next->initialize_offset,
                 length);
@@ -540,10 +540,10 @@ static iree_status_t iree_hal_amd_gpu_sdma_emit(
                 &operation->timestamp, &target);
             if (iree_status_is_ok(status)) {
               words = iree_hal_amd_gpu_sdma_emit_timestamp(
-                  words, queue->features, staging_address);
+                  words, queue->encoding.features, staging_address);
               *words++ = 0;
               words = iree_hal_amd_gpu_sdma_emit_copy(
-                  words, queue->features, staging_address, target, 8);
+                  words, queue->encoding.features, staging_address, target, 8);
               next->phase = IREE_HAL_AMD_GPU_SDMA_PHASE_AFTER;
             }
             break;
@@ -560,7 +560,7 @@ static iree_status_t iree_hal_amd_gpu_sdma_emit(
             break;
           }
           words = iree_hal_amd_gpu_sdma_emit_fence(
-              words, queue->features,
+              words, queue->encoding.features,
               operation->signal->device_address +
                   queue->options.signal_layout.value_offset,
               1u - queue->options.signal_layout.pending_value);

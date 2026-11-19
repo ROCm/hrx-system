@@ -14,6 +14,18 @@
 extern "C" {
 #endif
 
+// Emits one native rectangle covering a useful-byte prefix starting at offset.
+// Addresses name the original admitted region origins. Feature-selected native
+// geometry and UINT32_MAX useful bytes bound the prefix; no cursor or ownership
+// changes occur here. A partial row, an unrepresentable pitch/width, or less
+// than thirteen DWORDs of capacity returns zero without writing. The caller
+// then uses its ordinary linear packet path. Padding is never copied.
+iree_hal_amd_gpu_dma_transfer_packet_t
+iree_hal_amd_gpu_sdma_transfer_emit_region(
+    amdf_queue_format_features_t features, uint64_t source, uint64_t target,
+    const iree_hal_transfer_region_t* region, uint64_t offset,
+    uint32_t word_capacity, uint32_t* words);
+
 // Captures SDMA packet encoding independently of staging and payload ownership.
 iree_hal_amd_gpu_dma_transfer_encoding_t
 iree_hal_amd_gpu_sdma_transfer_encoding(amdf_queue_format_features_t features);
