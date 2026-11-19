@@ -210,7 +210,7 @@ TEST(TransferTest,
         std::array<uint8_t, 32> staging;
         staging.fill(0xDD);
         iree_hal_amd_gpu_transfer_operation_t operation = {
-            .type = type,
+            .type = static_cast<uint32_t>(type),
             .rectangular = true,
             .source = {.host = source.data() + 1},
             .target = {.host = target.data() + 1},

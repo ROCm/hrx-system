@@ -282,7 +282,7 @@ TEST_F(AqlTransferTest, RectanglesUseOneGridAndPackHostStaging) {
                         type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
     const bool download = type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
     iree_hal_amd_gpu_transfer_operation_t operation = {
-        .type = type,
+        .type = static_cast<uint32_t>(type),
         .rectangular = true,
         .pattern = 0xA5A5A5A5,
         .source = Device(16),
@@ -341,7 +341,7 @@ TEST_F(AqlTransferTest, HostRangesRespectCursorAndStagingCapacity) {
     std::array<uint8_t, 8> target = {};
     const bool download = type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
     iree_hal_amd_gpu_transfer_operation_t operation = {
-        .type = type,
+        .type = static_cast<uint32_t>(type),
         .length = source.size(),
     };
     if (download) {

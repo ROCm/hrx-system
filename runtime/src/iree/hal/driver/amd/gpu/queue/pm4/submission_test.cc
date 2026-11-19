@@ -807,7 +807,7 @@ TEST_P(SubmissionTest, FileCopiesPreserveShaderAndCommandProcessorVisibility) {
       SCOPED_TRACE(type);
       uint8_t bytes[8] = {};
       iree_hal_amd_gpu_transfer_operation_t operation = {
-          .type = type,
+          .type = static_cast<uint32_t>(type),
           .length = sizeof(bytes),
       };
       if (type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD) {

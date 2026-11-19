@@ -209,7 +209,7 @@ TEST(TransferBatchTest, HostTransfersUseAvailableStagingInOnePacket) {
     std::fill(staging.begin(), staging.end(), 0xCC);
     const bool download = type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
     iree_hal_amd_gpu_transfer_operation_t operation = {
-        .type = type,
+        .type = static_cast<uint32_t>(type),
         .length = host.size(),
     };
     auto& device = download ? operation.source.device : operation.target.device;
@@ -583,7 +583,7 @@ TEST(TransferBatchTest, ProgramRectanglesKeepOneLaunchForCopyAndFill) {
                     IREE_HAL_TRANSFER_OPERATION_TYPE_FILL}) {
     SCOPED_TRACE(type);
     iree_hal_amd_gpu_transfer_operation_t operation = {
-        .type = type,
+        .type = static_cast<uint32_t>(type),
         .rectangular = true,
         .pattern = 0xA5A5A5A5,
         .region = &region,
@@ -652,7 +652,7 @@ TEST(TransferBatchTest, StagedRectanglesPreserveEveryPartialWindow) {
         .target_strides = {23, 83},
     };
     iree_hal_amd_gpu_transfer_operation_t operation = {
-        .type = type,
+        .type = static_cast<uint32_t>(type),
         .rectangular = true,
         .region = &region,
     };
