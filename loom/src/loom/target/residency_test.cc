@@ -332,6 +332,47 @@ TEST_F(ResidencyTest, CappedOverridesRespectAllDirectAndDerivedLimits) {
   }
 }
 
+TEST_F(ResidencyTest, CliffFreeMemberStillContributesToItsSharedPool) {
+  const loom_target_residency_cliff_range_t ranges[] = {
+      {.start = 0, .count = 0}, {.start = 0, .count = 3}};
+  auto model = kModel;
+  model.direct_resources.cliffs = &kDirectResourceCliffs[2];
+  model.direct_resources.cliff_count = 3;
+  model.direct_resources.cliff_ranges = ranges;
+  const auto view = loom_target_residency_view(&model, 3);
+  const uint32_t empty[] = {0, 0};
+  const uint32_t used[] = {10, 0};
+  EXPECT_EQ(loom_target_residency_evaluate_tier_with_direct_resource_override(
+                view, empty, /*direct_resource_id=*/0, /*override_units=*/10),
+            2u);
+  EXPECT_TRUE(loom_target_residency_any_resource_tier_decreases(
+      view, empty, used, IREE_ARRAYSIZE(used)));
+
+  auto pool = kDerivedResources[0];
+  pool.cliff_count = 0;
+  auto model_without_pool_cliffs = model;
+  model_without_pool_cliffs.derived_resources.resources = &pool;
+  model_without_pool_cliffs.derived_resources.cliff_count = 0;
+  model_without_pool_cliffs.derived_resources.cliffs = nullptr;
+  const auto direct_only =
+      loom_target_residency_view(&model_without_pool_cliffs, 3);
+  EXPECT_EQ(loom_target_residency_evaluate_tier(direct_only, used,
+                                                IREE_ARRAYSIZE(used)),
+            3u);
+  EXPECT_FALSE(loom_target_residency_any_resource_tier_decreases(
+      direct_only, empty, used, IREE_ARRAYSIZE(used)));
+  EXPECT_EQ(
+      loom_target_residency_evaluate_tier_with_direct_resource_override(
+          direct_only, empty, /*direct_resource_id=*/1, /*override_units=*/11),
+      0u);
+  const uint64_t report_units[] = {10, 0};
+  loom_target_residency_query_t query;
+  IREE_ASSERT_OK(loom_target_residency_query(
+      &model_without_pool_cliffs, report_units, IREE_ARRAYSIZE(report_units),
+      &arena_, &query));
+  EXPECT_EQ(query.resources[2].units, 12u);
+}
+
 TEST_F(ResidencyTest, UnavailableModelIsExplicit) {
   loom_target_residency_query_t query;
   IREE_ASSERT_OK(
