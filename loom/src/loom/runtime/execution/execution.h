@@ -160,8 +160,10 @@ iree_status_t loom_runtime_execution_dispatch(
     iree_hal_executable_function_t function, iree_hal_dispatch_config_t config,
     iree_hal_buffer_ref_list_t bindings, uint64_t* out_value);
 
-// Enqueues transfers on the same dependency chain. Host payload memory remains
-// borrowed through completion of the returned value, including error cleanup.
+// Enqueues one transfer batch on the work timeline. UPDATE captures its source
+// before return. Small control batches also capture UPLOAD sources. Callers
+// supplying UPLOAD keep the source readable through completion to admit bulk
+// borrowing. DOWNLOAD destinations remain borrowed through completion.
 iree_status_t loom_runtime_execution_transfer(
     loom_runtime_execution_t* execution, iree_host_size_t operation_count,
     const iree_hal_transfer_operation_t* operations, uint64_t* out_value);

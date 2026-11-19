@@ -224,6 +224,8 @@ TEST_F(SnapshotTest, CaptureAndRestoreMayGroupTheSameLogicalBytesDifferently) {
   IREE_ASSERT_OK(loom_runtime_snapshot_capture(
       execution, roots.size(), roots.data(), 1, &contiguous,
       iree_allocator_system(), &snapshot));
+  IREE_ASSERT_OK(loom_runtime_execution_wait(
+      execution, loom_runtime_execution_frontier(execution).values[0]));
   IREE_ASSERT_OK(loom_runtime_snapshot_restore(
       snapshot, execution, roots.size(), roots.data(),
       IREE_ARRAYSIZE(fragmented), fragmented));
@@ -234,6 +236,8 @@ TEST_F(SnapshotTest, CaptureAndRestoreMayGroupTheSameLogicalBytesDifferently) {
       execution, roots.size(), roots.data(), IREE_ARRAYSIZE(fragmented),
       fragmented, iree_allocator_system(), &snapshot));
   const loom_runtime_snapshot_range_t restored = {0, 0, sizeof(expected)};
+  IREE_ASSERT_OK(loom_runtime_execution_wait(
+      execution, loom_runtime_execution_frontier(execution).values[0]));
   IREE_ASSERT_OK(loom_runtime_snapshot_restore(
       snapshot, execution, roots.size(), roots.data(), 1, &restored));
   std::array<uint32_t, 6> observed = {};
