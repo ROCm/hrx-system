@@ -182,7 +182,7 @@ def test_buffer_scalar_capture_preserves_all_result_leases(target: str) -> None:
             assert lease.release_class_id == _COUNTER_VMEM_LOAD
             assert lease.flags == (
                 StorageLeaseFlag.STARTS_AT_ISSUE,
-                StorageLeaseFlag.RELEASE_BEFORE_BOUNDARY,
+                StorageLeaseFlag.MAY_CARRY_ACROSS_BOUNDARY,
                 StorageLeaseFlag.RELEASE_FOR_PRESSURE,
             )
 

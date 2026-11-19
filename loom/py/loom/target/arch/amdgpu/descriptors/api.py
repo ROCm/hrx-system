@@ -1177,9 +1177,8 @@ _AMDGPU_STORAGE_LEASE_FLAGS = (
     StorageLeaseFlag.STARTS_AT_ISSUE,
     StorageLeaseFlag.MAY_CARRY_ACROSS_BOUNDARY,
 )
-_AMDGPU_PRESSURE_STORAGE_LEASE_FLAGS = (
-    StorageLeaseFlag.STARTS_AT_ISSUE,
-    StorageLeaseFlag.RELEASE_BEFORE_BOUNDARY,
+_AMDGPU_RESULT_STORAGE_LEASE_FLAGS = (
+    *_AMDGPU_STORAGE_LEASE_FLAGS,
     StorageLeaseFlag.RELEASE_FOR_PRESSURE,
 )
 
@@ -1327,7 +1326,7 @@ def _amdgpu_descriptor_storage_leases(
                     release_reason_name=(
                         _AMDGPU_WAIT_PLAN_REASON_READ_RESULT_REUSE_NAME
                     ),
-                    flags=_AMDGPU_PRESSURE_STORAGE_LEASE_FLAGS,
+                    flags=_AMDGPU_RESULT_STORAGE_LEASE_FLAGS,
                 )
             )
     # Memory completion owns result storage, not address inputs. Supported native

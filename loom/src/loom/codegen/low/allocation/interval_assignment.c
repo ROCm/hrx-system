@@ -523,7 +523,7 @@ static iree_status_t loom_low_allocation_interval_assignment_record_failure(
             state->context->target_constraints,
             capacity->descriptor_reg_class_id, capacity->location_kind, base,
             interval->unit_count) ||
-        loom_low_allocation_storage_lease_state_conflicts(
+        loom_low_allocation_storage_lease_state_find_conflict(
             state->context->storage_leases,
             state->context->target->descriptor_set, state->context->liveness,
             &candidate, /*ignored_value_ids=*/NULL,
@@ -950,7 +950,7 @@ loom_low_allocation_interval_assignment_try_relocate_independent_assignment(
             state->context->target_constraints,
             candidate.descriptor_reg_class_id, candidate.location_kind,
             candidate.location_base, candidate.location_count) ||
-        loom_low_allocation_storage_lease_state_conflicts(
+        loom_low_allocation_storage_lease_state_find_conflict(
             state->context->storage_leases,
             state->context->target->descriptor_set, state->context->liveness,
             &candidate, /*ignored_value_ids=*/NULL,

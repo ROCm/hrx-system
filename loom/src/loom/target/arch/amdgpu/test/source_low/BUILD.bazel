@@ -76,6 +76,7 @@ _AMDGPU_ARTIFACT_CHECK_TESTS = [
     "low_vopd_schedule.loom-test",
     "low_wait_completed_result.loom-test",
     "low_wait_completion.loom-test",
+    "low_wait_conditional_result.loom-test",
     "low_wait_continuous_pipeline.loom-test",
     "low_wait_incoming_completion.loom-test",
     "low_wait_incoming_suffix.loom-test",

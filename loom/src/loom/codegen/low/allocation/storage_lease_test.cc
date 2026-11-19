@@ -792,8 +792,8 @@ class LowAllocationStorageIdentityTest : public LowAllocationStorageLeaseTest {
       const loom_low_descriptor_set_t* descriptor_set,
       const loom_low_allocation_assignment_t& candidate,
       bool expected_conflict) {
-    EXPECT_EQ(expected_conflict,
-              loom_low_allocation_storage_lease_state_conflicts(
+    EXPECT_EQ(expected_conflict ? &scenario->lease_record : nullptr,
+              loom_low_allocation_storage_lease_state_find_conflict(
                   &scenario->state, descriptor_set, &scenario->liveness,
                   &candidate, /*ignored_value_ids=*/nullptr,
                   /*ignored_value_count=*/0,
@@ -801,8 +801,8 @@ class LowAllocationStorageIdentityTest : public LowAllocationStorageLeaseTest {
     loom_low_allocation_storage_lease_unit_index_t* unit_index =
         scenario->state.unit_index;
     scenario->state.unit_index = nullptr;
-    EXPECT_EQ(expected_conflict,
-              loom_low_allocation_storage_lease_state_conflicts(
+    EXPECT_EQ(expected_conflict ? &scenario->lease_record : nullptr,
+              loom_low_allocation_storage_lease_state_find_conflict(
                   &scenario->state, descriptor_set, &scenario->liveness,
                   &candidate, /*ignored_value_ids=*/nullptr,
                   /*ignored_value_count=*/0,
@@ -1217,7 +1217,7 @@ TEST_F(LowAllocationStorageIdentityTest, RequiresExactExplicitRegisterViews) {
                  /*location_base=*/0, /*location_count=*/1);
   candidate.unit_count = 1;
   candidate.unit_point_start = scenario.unit_values[1].unit_point_start;
-  EXPECT_FALSE(loom_low_allocation_storage_lease_state_conflicts(
+  EXPECT_FALSE(loom_low_allocation_storage_lease_state_find_conflict(
       &scenario.state, &descriptor_set, &scenario.liveness, &candidate,
       /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0,
       LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
@@ -1226,7 +1226,7 @@ TEST_F(LowAllocationStorageIdentityTest, RequiresExactExplicitRegisterViews) {
   // Matching content roots cannot make that partial physical overlap exact.
   candidate.descriptor_reg_class_id = 1;
   candidate.location_base = 1;
-  EXPECT_TRUE(loom_low_allocation_storage_lease_state_conflicts(
+  EXPECT_TRUE(loom_low_allocation_storage_lease_state_find_conflict(
       &scenario.state, &descriptor_set, &scenario.liveness, &candidate,
       /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0,
       LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
@@ -1236,7 +1236,7 @@ TEST_F(LowAllocationStorageIdentityTest, RequiresExactExplicitRegisterViews) {
   candidate.unit_point_start = scenario.unit_values[2].unit_point_start;
   candidate.descriptor_reg_class_id = 0;
   candidate.location_base = 0;
-  EXPECT_TRUE(loom_low_allocation_storage_lease_state_conflicts(
+  EXPECT_TRUE(loom_low_allocation_storage_lease_state_find_conflict(
       &scenario.state, &descriptor_set, &scenario.liveness, &candidate,
       /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0,
       LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
@@ -1244,19 +1244,19 @@ TEST_F(LowAllocationStorageIdentityTest, RequiresExactExplicitRegisterViews) {
   // An empty candidate unit does not occupy its explicit register. Restoring
   // demand must conflict even though the leased source's SSA lifetime ended.
   scenario.unit_liveness.end_points[candidate.unit_point_start] = 1;
-  EXPECT_FALSE(loom_low_allocation_storage_lease_state_conflicts(
+  EXPECT_FALSE(loom_low_allocation_storage_lease_state_find_conflict(
       &scenario.state, &descriptor_set, &scenario.liveness, &candidate,
       /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0,
       LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
   scenario.unit_liveness.end_points[candidate.unit_point_start] = 2;
-  EXPECT_TRUE(loom_low_allocation_storage_lease_state_conflicts(
+  EXPECT_TRUE(loom_low_allocation_storage_lease_state_find_conflict(
       &scenario.state, &descriptor_set, &scenario.liveness, &candidate,
       /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0,
       LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
 
   // The other wide register occupies disjoint atomic storage.
   candidate.location_base = 2;
-  EXPECT_FALSE(loom_low_allocation_storage_lease_state_conflicts(
+  EXPECT_FALSE(loom_low_allocation_storage_lease_state_find_conflict(
       &scenario.state, &descriptor_set, &scenario.liveness, &candidate,
       /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0,
       LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
@@ -1498,7 +1498,7 @@ TEST_P(LowAllocationStorageLeaseReleasePointTest,
     // Reserving storage before issue does not move the candidate's write.
     auto early_reservation = candidate;
     early_reservation.start_point = 0;
-    EXPECT_FALSE(loom_low_allocation_storage_lease_state_conflicts(
+    EXPECT_FALSE(loom_low_allocation_storage_lease_state_find_conflict(
         &state, &descriptor_set, &liveness, &early_reservation, nullptr, 0,
         LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED));
   }
@@ -1537,13 +1537,13 @@ TEST_P(LowAllocationStorageLeaseReleasePointTest,
     EXPECT_EQ(lease->end_point, 9u);
   }
 
-  EXPECT_TRUE(loom_low_allocation_storage_lease_state_conflicts(
+  EXPECT_TRUE(loom_low_allocation_storage_lease_state_find_conflict(
       &state, &descriptor_set, &liveness, &candidate,
       /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0,
       LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
   const bool maps_to_packet = point.packet_index != UINT32_MAX;
-  EXPECT_EQ(!maps_to_packet,
-            loom_low_allocation_storage_lease_state_conflicts(
+  EXPECT_EQ(maps_to_packet ? nullptr : &records[0],
+            loom_low_allocation_storage_lease_state_find_conflict(
                 &state, &descriptor_set, &liveness, &candidate,
                 /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0,
                 LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED));
@@ -1699,13 +1699,13 @@ TEST_F(LowAllocationStorageLeaseTest,
   for (bool indexed : {true, false}) {
     SCOPED_TRACE(indexed);
     state.unit_index = indexed ? index : nullptr;
-    EXPECT_FALSE(loom_low_allocation_storage_lease_state_conflicts(
+    EXPECT_FALSE(loom_low_allocation_storage_lease_state_find_conflict(
         &state, &descriptor_set, &liveness, &at_issue, nullptr, 0,
         LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
     auto after_issue = at_issue;
     after_issue.start_point = 1;
     after_issue.end_point = 2;
-    EXPECT_TRUE(loom_low_allocation_storage_lease_state_conflicts(
+    EXPECT_TRUE(loom_low_allocation_storage_lease_state_find_conflict(
         &state, &descriptor_set, &liveness, &after_issue, nullptr, 0,
         LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
   }
@@ -1717,7 +1717,7 @@ TEST_F(LowAllocationStorageLeaseTest,
       /*value_id=*/value_ids[1], /*descriptor_reg_class_id=*/0,
       /*start_point=*/3, /*end_point=*/4, /*location_base=*/11,
       /*location_count=*/1);
-  EXPECT_TRUE(loom_low_allocation_storage_lease_state_conflicts(
+  EXPECT_TRUE(loom_low_allocation_storage_lease_state_find_conflict(
       &state, &descriptor_set, &liveness, &before_bound,
       /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0,
       LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
@@ -1727,7 +1727,7 @@ TEST_F(LowAllocationStorageLeaseTest,
       /*value_id=*/value_ids[1], /*descriptor_reg_class_id=*/0,
       /*start_point=*/4, /*end_point=*/5, /*location_base=*/11,
       /*location_count=*/1);
-  EXPECT_FALSE(loom_low_allocation_storage_lease_state_conflicts(
+  EXPECT_FALSE(loom_low_allocation_storage_lease_state_find_conflict(
       &state, &descriptor_set, &liveness, &at_bound,
       /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0,
       LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
@@ -1862,7 +1862,7 @@ TEST_F(LowAllocationStorageLeaseTest,
                                   /*location_base=*/11, /*location_count=*/1);
       candidate.liveness_segments = {0, 2};
       candidate.unit_count = 1;
-      EXPECT_FALSE(loom_low_allocation_storage_lease_state_conflicts(
+      EXPECT_FALSE(loom_low_allocation_storage_lease_state_find_conflict(
           &state, &descriptor_set, &liveness, &candidate, nullptr, 0,
           LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
       IREE_ASSERT_OK(
@@ -1875,15 +1875,15 @@ TEST_F(LowAllocationStorageLeaseTest,
       // Incomplete storage segments retain the conservative interval. A real
       // overlapping segment also remains a conflict for either lease kind.
       candidate.liveness_segments = {};
-      EXPECT_TRUE(loom_low_allocation_storage_lease_state_conflicts(
+      EXPECT_TRUE(loom_low_allocation_storage_lease_state_find_conflict(
           &state, &descriptor_set, &liveness, &candidate, nullptr, 0,
           LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
       candidate.liveness_segments = {2, 1};
-      EXPECT_TRUE(loom_low_allocation_storage_lease_state_conflicts(
+      EXPECT_TRUE(loom_low_allocation_storage_lease_state_find_conflict(
           &state, &descriptor_set, &liveness, &candidate, nullptr, 0,
           LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
       candidate.location_base = 12;
-      EXPECT_FALSE(loom_low_allocation_storage_lease_state_conflicts(
+      EXPECT_FALSE(loom_low_allocation_storage_lease_state_find_conflict(
           &state, &descriptor_set, &liveness, &candidate, nullptr, 0,
           LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
     }

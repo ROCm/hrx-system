@@ -103,11 +103,12 @@ iree_status_t loom_low_allocation_storage_lease_state_initialize(
     iree_arena_allocator_t* decision_arena,
     loom_low_allocation_storage_lease_state_t* out_state);
 
-// Returns true when |candidate| conflicts with materialized storage leases
-// under |policy|. Per-unit demand excludes unmaterialized storage; complete
-// candidate storage segments additionally exclude lifetime holes. A candidate
-// with an invalid value ID has no structural-content identity to preserve.
-bool loom_low_allocation_storage_lease_state_conflicts(
+// Returns a conflicting lease record for |candidate| under |policy|, or NULL.
+// Per-unit demand excludes unmaterialized storage, and candidate storage
+// segments exclude lifetime holes. A candidate with an invalid value ID has
+// no structural-content identity to preserve.
+const loom_low_storage_lease_record_t*
+loom_low_allocation_storage_lease_state_find_conflict(
     const loom_low_allocation_storage_lease_state_t* state,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_liveness_analysis_t* liveness,

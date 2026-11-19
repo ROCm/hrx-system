@@ -779,7 +779,7 @@ static bool loom_low_allocation_loop_edge_relocation_candidate_target_conflicts(
     // Semantic handoff does not release asynchronous ownership. Keep every
     // lease, including the counterpart's, and intersect its full lifetime
     // with each member's retained storage segments.
-    if (loom_low_allocation_storage_lease_state_conflicts(
+    if (loom_low_allocation_storage_lease_state_find_conflict(
             context->storage_leases, context->descriptor_set, context->liveness,
             &assignment, /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0,
             LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN)) {
@@ -1099,7 +1099,7 @@ static bool loom_low_allocation_loop_edge_relocation_eviction_location_is_legal(
           context->target_constraints, assignment.descriptor_reg_class_id,
           assignment.location_kind, assignment.location_base,
           assignment.location_count) ||
-      loom_low_allocation_storage_lease_state_conflicts(
+      loom_low_allocation_storage_lease_state_find_conflict(
           context->storage_leases, context->descriptor_set, context->liveness,
           &assignment, /*ignored_value_ids=*/NULL,
           /*ignored_value_count=*/0,
