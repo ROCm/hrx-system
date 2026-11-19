@@ -18,7 +18,7 @@ typedef struct loom_aie2p_code_transport_sender_t {
   uint16_t engine;
   // Loaders sharing the queue, each with at most one incomplete request.
   uint8_t worker_count;
-  // Private hardware-command suffix available to this column's load requests.
+  // Admitted downward carrier available to this column's load requests.
   loom_aie2p_array_route_sharing_t commands;
   // Complete code-write packets share one column-wide delivery carrier.
   loom_aie2p_array_route_sharing_t delivery;
@@ -57,19 +57,18 @@ iree_status_t loom_aie2p_code_transport_initialize(
         &plan->routing, 0, 0, (loom_xdna_tile_coordinate_t){column, memory_row},
         LOOM_AIE2P_ARRAY_ROUTE_CARRIER_HARDWARE_COMMAND, &sender->delivery));
     sender->command_packets = path->packets;
-    if (!path->count) {
-      continue;
-    }
     if (path->sharing.domain) {
       sender->commands = path->sharing;
-    } else {
+    } else if (path->count) {
       IREE_RETURN_IF_ERROR(loom_aie2p_array_route_sharing_initialize(
           &plan->routing, path->first, path->count,
           (loom_xdna_tile_coordinate_t){column, memory_row},
           LOOM_AIE2P_ARRAY_ROUTE_CARRIER_HARDWARE_COMMAND, &sender->commands));
     }
-    sender->command_packets =
-        path->packets | plan->control_sources[path->source].packet_mask;
+    if (path->count) {
+      sender->command_packets |=
+          plan->control_sources[path->source].packet_mask;
+    }
   }
   return iree_ok_status();
 }
@@ -132,8 +131,11 @@ static bool loom_aie2p_code_transport_route(
   }
   if (commands && commands->used && source.port == LOOM_XDNA_STREAM_PORT_CORE) {
     plan->control_sources[source_index].destination = UINT32_MAX;
-    plan->control_sources[plan->control_paths[source.coordinate.column].source]
-        .destination = UINT32_MAX;
+    const loom_aie2p_native_control_path_t* path =
+        &plan->control_paths[source.coordinate.column];
+    if (path->count) {
+      plan->control_sources[path->source].destination = UINT32_MAX;
+    }
   }
   for (iree_host_size_t i = first; i < plan->routing.route_count; ++i) {
     plan->routes[i] = (loom_aie2p_native_route_t){

@@ -300,6 +300,53 @@ TEST_P(Aie2pSharingTest, UnusedCandidateDoesNotChangePacketOrQueuePolicy) {
   }
 }
 
+TEST_P(Aie2pSharingTest, CodeLoadingRetainsOnlyCommittedMemoryTileCarriers) {
+  ASSERT_NO_FATAL_FAILURE(Prepare(true));
+  auto* delivery = context_.deliveries[receiver_index_];
+  const uint8_t shim = loom_aie2p_native_delivery_packet(
+      delivery, 0, &tiles_[0], LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, 3);
+  const uint8_t memory = loom_aie2p_native_delivery_packet(
+      delivery, 0, &tiles_[1], LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, 4);
+  std::vector<loom_aie2p_native_control_path_t> paths(
+      context_.family->column_count);
+  std::vector<uint8_t> preferred(tiles_.size(), UINT8_MAX);
+  loom_aie2p_execution_plan_t plan = {
+      .column_command_packets = preferred.data(),
+      .control_paths = paths.data(),
+  };
+  paths[0].packets = 1u;
+  preferred[1] = shim;
+  loom_aie2p_native_retain_code_carriers(&context_, &plan);
+  EXPECT_EQ(paths[0].sharing.domain, 0u);
+  EXPECT_EQ(preferred[1], shim);
+
+  // A private suffix has its own namespace even when a granted path also
+  // descends this column.
+  delivery->sharing.used = true;
+  paths[0].count = 1;
+  loom_aie2p_native_retain_code_carriers(&context_, &plan);
+  EXPECT_EQ(paths[0].sharing.domain, 0u);
+  EXPECT_EQ(preferred[1], shim);
+
+  paths[0].count = 0;
+  loom_aie2p_native_retain_code_carriers(&context_, &plan);
+  if (receiver_index_ == 1) {
+    EXPECT_EQ(paths[0].sharing.domain, delivery->sharing.domain);
+    EXPECT_EQ(paths[0].sharing.carrier,
+              LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD);
+    EXPECT_EQ(paths[0].packets, 1u | (1u << shim) | (1u << memory));
+    EXPECT_EQ(preferred[1], UINT8_MAX);
+
+    preferred[1] = memory;
+    loom_aie2p_native_retain_code_carriers(&context_, &plan);
+    EXPECT_EQ(preferred[1], memory);
+  } else {
+    EXPECT_EQ(paths[0].sharing.domain, 0u);
+    EXPECT_EQ(paths[0].packets, 1u);
+    EXPECT_EQ(preferred[1], shim);
+  }
+}
+
 TEST_P(Aie2pSharingTest, UsedPathAdmitsExactlyOneRecordPerReceiverGrant) {
   ASSERT_NO_FATAL_FAILURE(Prepare(true));
   auto* delivery = context_.deliveries[receiver_index_];

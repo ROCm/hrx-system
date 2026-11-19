@@ -10,6 +10,16 @@
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/payload.h"
 
+static bool loom_aie2p_native_delivery_accepts(
+    const loom_aie2p_native_delivery_t* delivery, uint8_t packet,
+    const loom_aie2p_native_tile_t* tile, loom_xdna_stream_port_t port,
+    uint8_t channel) {
+  return !delivery->packets[packet].tile ||
+         (delivery->packets[packet].tile == tile &&
+          delivery->packets[packet].port == port &&
+          delivery->packets[packet].channel == channel);
+}
+
 uint8_t loom_aie2p_native_delivery_packet(
     loom_aie2p_native_delivery_t* delivery, uint32_t occupied,
     const loom_aie2p_native_tile_t* tile, loom_xdna_stream_port_t port,
@@ -25,14 +35,12 @@ uint8_t loom_aie2p_native_delivery_packet(
                                : iree_math_count_trailing_zeros_u32(available);
     preferred = UINT8_MAX;
     available &= ~(UINT32_C(1) << packet);
-    if (delivery && delivery->packets[packet].tile) {
-      if (delivery->packets[packet].tile != tile ||
-          delivery->packets[packet].port != port ||
-          delivery->packets[packet].channel != channel) {
+    if (delivery) {
+      if (!loom_aie2p_native_delivery_accepts(delivery, packet, tile, port,
+                                              channel)) {
         continue;
       }
-    }
-    if (delivery) {
+      delivery->command_packets |= UINT32_C(1) << packet;
       delivery->packets[packet].tile = tile;
       delivery->packets[packet].port = port;
       delivery->packets[packet].channel = channel;
@@ -222,6 +230,38 @@ void loom_aie2p_native_commit_sharing(loom_aie2p_native_context_t* context) {
     for (iree_host_size_t j = payload->route_first;
          j < payload->route_first + payload->route_count; ++j) {
       context->routes[j].packet = payload_packet;
+    }
+  }
+}
+
+void loom_aie2p_native_retain_code_carriers(
+    const loom_aie2p_native_context_t* context,
+    loom_aie2p_execution_plan_t* plan) {
+  if (!context->deliveries) {
+    return;
+  }
+  const uint16_t memory_row = loom_xdna_array_tile_kind_facts(
+                                  context->family, LOOM_XDNA_TILE_KIND_MEMORY)
+                                  ->first_row;
+  for (uint16_t column = 0; column < context->family->column_count; ++column) {
+    const iree_host_size_t index = loom_xdna_array_physical_tile_index(
+        context->family, (loom_xdna_tile_coordinate_t){column, memory_row});
+    const loom_aie2p_native_delivery_t* delivery = context->deliveries[index];
+    loom_aie2p_native_control_path_t* path = &plan->control_paths[column];
+    if (path->count || !delivery || !delivery->sharing.used) {
+      continue;
+    }
+    path->sharing = delivery->sharing;
+    path->packets |= delivery->command_packets;
+    // A private sender may already address SRAM with an ID that names a
+    // different terminal on this wire. Its installed route keeps that ID;
+    // new loaders must choose one compatible with the whole shared path.
+    uint8_t* preferred = &plan->column_command_packets[index];
+    if (*preferred != UINT8_MAX &&
+        !loom_aie2p_native_delivery_accepts(
+            delivery, *preferred, &context->tiles[index],
+            LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0)) {
+      *preferred = UINT8_MAX;
     }
   }
 }

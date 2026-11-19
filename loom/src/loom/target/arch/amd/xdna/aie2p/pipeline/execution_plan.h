@@ -32,17 +32,17 @@ typedef struct loom_aie2p_native_control_source_t {
   uint32_t register_packet_mask;
 } loom_aie2p_native_control_source_t;
 
-// A private downward command path through its column's SRAM tile. Hardware
-// register commands retire independently of payload consumers. Late senders
-// can share the retained interval with identities naming terminal tiles.
+// A downward command path through its column's SRAM tile. Code loading
+// can use a private command suffix or an already framed, receiver-granted
+// payload carrier. Both own the packet identities visible on their lanes.
 typedef struct loom_aie2p_native_control_path_t {
   // First edge in the original physical route inventory.
   iree_host_size_t first;
-  // Number of edges; zero means that no eligible path was selected.
+  // Edge count of the private command suffix; zero for a granted carrier.
   iree_host_size_t count;
-  // Original control source owning the path's packet namespace.
+  // Original private control source when the suffix has edges.
   uint32_t source;
-  // Complete register-command carrier shared by admitted core senders.
+  // Admitted sharing domain; zero before a private suffix acquires one.
   loom_aie2p_array_route_sharing_t sharing;
   // Outgoing core packet identities reserved across the column, including
   // collective branches that may traverse a shared command prefix.
@@ -196,7 +196,7 @@ typedef struct loom_aie2p_execution_plan_t {
   // Same-column register-command packet per destination tile, or UINT8_MAX.
   // Replies and cross-column commands retain their separate namespaces.
   uint8_t* column_command_packets;
-  // Longest private downward hardware-command suffix per physical column.
+  // Downward hardware-command carrier available to each column's loaders.
   loom_aie2p_native_control_path_t* control_paths;
   // Admitted switch register banks in first-use order.
   loom_aie2p_native_switch_t* switches;
