@@ -96,6 +96,43 @@ TEST(IndexSetTest, MembershipAndCyclicSelectionMatchOrderedSet) {
   }
 }
 
+TEST(IndexSetTest, RangeInsertionPreservesNeighborsAndSummaries) {
+  for (uint32_t capacity : {1u, 65u, 4097u, 262145u}) {
+    const auto layout = loom_index_set_calculate_layout(capacity);
+    for (uint32_t first : {0u, 1u, 63u, 64u, 4095u, capacity - 1}) {
+      if (first >= capacity) {
+        continue;
+      }
+      for (uint32_t length : {0u, 1u, 2u, 64u, 4096u, capacity - first}) {
+        length = std::min(length, capacity - first);
+        SCOPED_TRACE(::testing::Message()
+                     << capacity << ":" << first << ":" << length);
+        std::vector<uint64_t> words(layout.word_count, 0);
+        std::set<uint32_t> members;
+        for (uint32_t neighbor : {0u, capacity - 1}) {
+          if (neighbor < first || neighbor >= first + length) {
+            loom_index_set_insert(&layout, words.data(), neighbor);
+            members.insert(neighbor);
+          }
+        }
+        loom_index_set_insert_range(&layout, words.data(), first, length);
+        loom_index_set_insert_range(&layout, words.data(), first, length);
+        for (uint32_t index = first; index < first + length; ++index) {
+          members.insert(index);
+        }
+        EXPECT_EQ(loom_index_set_select(&layout, words.data(), 0),
+                  members.empty() ? LOOM_INDEX_SET_NONE : *members.begin());
+        for (uint32_t index : members) {
+          EXPECT_EQ(loom_index_set_select(&layout, words.data(), index), index);
+          loom_index_set_erase(&layout, words.data(), index);
+        }
+        EXPECT_TRUE(std::all_of(words.begin(), words.end(),
+                                [](uint64_t word) { return word == 0; }));
+      }
+    }
+  }
+}
+
 TEST(IndexSetTest, SharedLayoutKeepsAdjacentSetsIndependent) {
   const auto layout = loom_index_set_calculate_layout(129);
   std::vector<uint64_t> words(3 * layout.word_count, 0);
@@ -112,6 +149,31 @@ TEST(IndexSetTest, SharedLayoutKeepsAdjacentSetsIndependent) {
   EXPECT_EQ(
       loom_index_set_select(&layout, words.data() + 2 * layout.word_count, 0),
       128u);
+  loom_index_set_clear(&layout, words.data());
+  loom_index_set_clear(&layout, words.data());
+  EXPECT_EQ(loom_index_set_select(&layout, words.data(), 0),
+            LOOM_INDEX_SET_NONE);
+  EXPECT_EQ(
+      loom_index_set_select(&layout, words.data() + 2 * layout.word_count, 0),
+      128u);
+}
+
+TEST(IndexSetTest, ClearingSparseAndDenseSetsRetiresEverySummary) {
+  for (uint32_t capacity : {0u, 1u, 64u, 65u, 4097u, 262145u}) {
+    const auto layout = loom_index_set_calculate_layout(capacity);
+    std::vector<uint64_t> words(layout.word_count, 0);
+    loom_index_set_clear(&layout, words.data());
+    for (uint32_t index = 0; index < capacity; index += 4096) {
+      loom_index_set_insert(&layout, words.data(), index);
+    }
+    loom_index_set_clear(&layout, words.data());
+    EXPECT_TRUE(std::all_of(words.begin(), words.end(),
+                            [](uint64_t word) { return word == 0; }));
+    loom_index_set_insert_range(&layout, words.data(), 0, capacity);
+    loom_index_set_clear(&layout, words.data());
+    EXPECT_TRUE(std::all_of(words.begin(), words.end(),
+                            [](uint64_t word) { return word == 0; }));
+  }
 }
 
 }  // namespace

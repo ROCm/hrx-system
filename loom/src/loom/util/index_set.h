@@ -46,9 +46,20 @@ loom_index_set_layout_t loom_index_set_calculate_layout(uint32_t capacity);
 bool loom_index_set_insert(const loom_index_set_layout_t* layout,
                            uint64_t* words, uint32_t index);
 
+// Inserts an in-domain interval [first, first + count). Work is proportional
+// to its membership words, not its member count. Empty intervals do nothing.
+void loom_index_set_insert_range(const loom_index_set_layout_t* layout,
+                                 uint64_t* words, uint32_t first,
+                                 uint32_t count);
+
 // Erases an in-domain index, including one that is not currently a member.
 void loom_index_set_erase(const loom_index_set_layout_t* layout,
                           uint64_t* words, uint32_t index);
+
+// Clears nonempty leaf words and their summaries. Work follows occupied words;
+// clearing an empty set takes constant time regardless of its domain size.
+void loom_index_set_clear(const loom_index_set_layout_t* layout,
+                          uint64_t* words);
 
 // Selects the first member at or after start, wrapping to the lowest member
 // when none follows start. Returns NONE for an empty set. start is in-domain,

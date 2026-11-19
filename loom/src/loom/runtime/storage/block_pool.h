@@ -18,22 +18,18 @@ extern "C" {
 // geometry, logical mappings, admission credit and execution retirement belong
 // to the caller. Warm ownership changes allocate no host or device memory.
 typedef struct loom_runtime_block_pool_t {
-  // Allocator owning the growable free-ID, reference, and membership arrays.
+  // Allocator owning the growable references and membership arrays.
   iree_allocator_t host_allocator;
   // Total number of physical block IDs in this pool.
   uint32_t capacity;
-  // Number of unowned IDs at the front of free_blocks.
+  // Number of unowned IDs available for acquisition.
   uint32_t available;
-  // Free-stack prefix already examined by the backing owner. The remaining
-  // suffix contains final releases not yet acknowledged by that owner.
-  uint32_t examined;
-  // Free-ID stack; acquired entries beyond available are not read.
-  uint32_t* free_blocks;
-  // References per ID; zero denotes an ID on the free stack. Borrows backing.
+  // References per ID; zero denotes an unowned ID. Owns the coallocation.
   uint32_t* references;
-  // Owned-ID membership summary, stored immediately after references. Updated
-  // only when references cross zero; it does not imply physical residency.
+  // Shared layout for owned, free, preferred, preferred-free, and released IDs.
   loom_index_set_layout_t membership;
+  // Indexed ownership and placement facts, coallocated after references.
+  uint64_t* sets;
 } loom_runtime_block_pool_t;
 
 // Creates capacity IDs in [0, capacity), allocating nothing for zero capacity.
@@ -67,16 +63,15 @@ void loom_runtime_block_pool_retain(loom_runtime_block_pool_t* pool,
 void loom_runtime_block_pool_release(loom_runtime_block_pool_t* pool,
                                      uint32_t count, const uint32_t* blocks);
 
-// Borrows unexamined free IDs until the next mutation. Reacquisition removes
-// an ID from this suffix; shared releases produce no entry. Cold free-stack
-// reordering may conservatively include other free IDs. The owner establishes
-// safe physical coverage before acknowledging, independently of logical IDs.
-uint32_t loom_runtime_block_pool_released(const loom_runtime_block_pool_t* pool,
-                                          const uint32_t** out_blocks);
+// First unexamined released ID at or after first, or UINT32_MAX. Reacquisition
+// removes a release; shared releases produce none. The owner establishes safe
+// physical coverage before acknowledging, independently of logical IDs.
+uint32_t loom_runtime_block_pool_find_released(
+    const loom_runtime_block_pool_t* pool, uint32_t first);
 
-// Records successful examination of the current release suffix. Deferred or
-// failed maintenance leaves it pending; no pool mutation may occur between
-// borrowing the suffix and acknowledging its completed examination.
+// Records successful capture of the current releases. Deferred or failed
+// capture leaves them pending; the owner excludes mutations while capturing.
+// Empty release sets take constant time regardless of logical capacity.
 void loom_runtime_block_pool_acknowledge_releases(
     loom_runtime_block_pool_t* pool);
 
@@ -90,14 +85,13 @@ bool loom_runtime_block_pool_any_owned(const loom_runtime_block_pool_t* pool,
 uint32_t loom_runtime_block_pool_find_owned(
     const loom_runtime_block_pool_t* pool, uint32_t first, uint32_t count);
 
-// Cold placement maintenance: moves preferred free IDs to the acquisition end
-// of the stack without changing any owned ID or reference. Visits each free ID
-// once and allocates nothing. Relative free-ID order is unspecified afterward.
-// If releases are pending, reordering makes every free ID unexamined.
-void loom_runtime_block_pool_prioritize(loom_runtime_block_pool_t* pool,
-                                        bool (*preferred)(void* user_data,
-                                                          uint32_t block),
-                                        void* user_data);
+// Retains producer-established placement preference independently of ownership.
+// Preferred free IDs are acquired first; other free-ID order is unspecified.
+// Updating one ID never scans the pool or allocates.
+void loom_runtime_block_pool_set_preferred(loom_runtime_block_pool_t* pool,
+                                           uint32_t block, bool preferred);
+bool loom_runtime_block_pool_is_preferred(const loom_runtime_block_pool_t* pool,
+                                          uint32_t block);
 
 static inline bool loom_runtime_block_pool_is_shared(
     const loom_runtime_block_pool_t* pool, uint32_t block) {

@@ -162,26 +162,46 @@ TEST_F(MemoryMappingTest, ContiguousRunKeepsIndependentPageOwnership) {
       pool, geometry, 4 * page, 256, &statistics[0], &first));
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
       pool, geometry, 2 * page, 256, &statistics[1], &second));
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, 4 * page));
+  const loom_runtime_memory_range_t range = {first, 0, 4 * page};
+  loom_runtime_memory_operation_t* operation = nullptr;
+  loom_runtime_memory_admission_t admission;
+  IREE_ASSERT_OK(loom_runtime_memory_pool_commit_async(
+      pool, 1, &range, nullptr, 0, &admission, &operation));
+  ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
+  const auto bound = AwaitOperation(operation);
+  IREE_ASSERT_OK(loom_runtime_memory_operation_query_status(operation));
   auto observations = mapping_queue.WaitForMappings(1);
   ASSERT_EQ(observations[0].updates.size(), 1u);
   const auto original = observations[0].updates[0];
   EXPECT_EQ(original.operation, IREE_HAL_MEMORY_MAPPING_OPERATION_BIND);
   EXPECT_EQ(original.target_range.byte_offset, 0u);
   EXPECT_EQ(original.target_range.byte_length, 4 * page);
+  ASSERT_EQ(loom_runtime_memory_operation_mapping_count(operation), 1u);
+  iree_hal_buffer_binding_t changed;
+  EXPECT_EQ(loom_runtime_memory_operation_mapping(operation, 0, &changed),
+            IREE_HAL_MEMORY_MAPPING_OPERATION_BIND);
+  EXPECT_EQ(changed.buffer, original.target);
+  EXPECT_EQ(changed.offset, original.target_range.byte_offset);
+  EXPECT_EQ(changed.length, original.target_range.byte_length);
   RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0x11223344);
   RoundTrip(loom_runtime_virtual_buffer_handle(first), 2 * page, 0x55667788);
 
   // Releasing alternate pages splits the unmap without widening ownership.
   const loom_runtime_memory_range_t releases[] = {{first, page, page},
                                                   {first, 3 * page, page}};
-  loom_runtime_memory_operation_t* operation = nullptr;
+  // Repeating an already-backed commitment has no physical changes.
+  IREE_ASSERT_OK(loom_runtime_memory_pool_commit_async(
+      pool, 1, &range, nullptr, 0, &admission, &operation));
+  ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
+  EXPECT_EQ(operation, nullptr);
+  EXPECT_EQ(loom_runtime_memory_operation_mapping_count(operation), 0u);
   IREE_ASSERT_OK(loom_runtime_memory_pool_trim_async(
       pool, IREE_ARRAYSIZE(releases), releases, nullptr, 0, &operation));
   const auto completed = AwaitOperation(operation);
   IREE_ASSERT_OK(loom_runtime_memory_operation_query_status(operation));
   observations = mapping_queue.WaitForMappings(2);
   ASSERT_EQ(observations[1].updates.size(), 2u);
+  ASSERT_EQ(loom_runtime_memory_operation_mapping_count(operation), 2u);
   for (size_t i = 0; i < 2; ++i) {
     const auto& update = observations[1].updates[i];
     EXPECT_EQ(update.operation, IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND);
@@ -190,6 +210,11 @@ TEST_F(MemoryMappingTest, ContiguousRunKeepsIndependentPageOwnership) {
     EXPECT_EQ(update.previous_source, original.source);
     EXPECT_EQ(update.previous_source_offset,
               original.source_offset + (2 * i + 1) * page);
+    EXPECT_EQ(loom_runtime_memory_operation_mapping(operation, i, &changed),
+              IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND);
+    EXPECT_EQ(changed.buffer, update.target);
+    EXPECT_EQ(changed.offset, update.target_range.byte_offset);
+    EXPECT_EQ(changed.length, update.target_range.byte_length);
   }
   EXPECT_EQ(statistics[0].committed_bytes, 2 * page);
 
@@ -309,6 +334,9 @@ TEST_F(MemoryMappingTest, GrowthRebindsRunsWithoutCopyingOrFillingHoles) {
       first, 9 * page, nullptr, 0, &operation));
   const auto completed = AwaitOperation(operation);
   IREE_ASSERT_OK(loom_runtime_memory_operation_query_status(operation));
+  // Rebinding the same storage into a larger address reservation preserves
+  // logical backing; its retired old target is not a placement change.
+  EXPECT_EQ(loom_runtime_memory_operation_mapping_count(operation), 0u);
   const auto observations = mapping_queue.WaitForMappings(4);
   const auto& attached = observations[2].updates;
   const auto& detached = observations[3].updates;

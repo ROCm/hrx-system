@@ -43,13 +43,6 @@ typedef enum loom_serve_text_trim_phase_e {
   LOOM_SERVICE_TEXT_TRIM_RELEASE,
 } loom_serve_text_trim_phase_t;
 
-enum loom_serve_text_trim_flag_bits_e {
-  // Mapping/geometry changes, new IDs, or abandoned placement require free-ID
-  // ordering to be refreshed before the next admission retry.
-  LOOM_SERVE_TEXT_TRIM_FLAG_PLACEMENT_PENDING = 1u << 0,
-};
-typedef uint32_t loom_serve_text_trim_flags_t;
-
 typedef struct loom_serve_text_state_t loom_serve_text_state_t;
 typedef struct loom_serve_text_backing_t loom_serve_text_backing_t;
 
@@ -205,8 +198,6 @@ struct loom_serve_text_state_t {
     struct {
       // Action admitted after successful readiness of the preceding phase.
       loom_serve_text_trim_phase_t phase;
-      // Cold maintenance invalidated by its producer, retained until complete.
-      loom_serve_text_trim_flags_t flags;
       // State-local release counter before this maintenance cut.
       uint64_t released_before;
     } trim;
@@ -281,6 +272,18 @@ void loom_serve_text_state_backing_checkpoint_changed(
 // Joins an already-successful native frontier before reusing its operation
 // slot. The serialized owner has observed the model's successful readiness.
 void loom_serve_text_state_complete_backing(loom_serve_text_state_t* state);
+
+// Retains logical placement facts for the successfully published native edits.
+// The operation remains borrowed; the serialized caller owns its completion.
+void loom_serve_text_state_backing_update(
+    loom_serve_text_state_t* state,
+    const loom_runtime_memory_operation_t* operation);
+
+// Initializes placement for newly introduced logical IDs. Existing IDs retain
+// their facts because source resize preserves recurrent and cache geometry.
+void loom_serve_text_state_backing_extend(loom_serve_text_state_t* state,
+                                          uint32_t previous_cache_capacity,
+                                          uint32_t previous_recurrent_capacity);
 
 // Moves a validated enlarged source layout into retired state. Existing
 // private views, recurrent slots, and cache planes retain their byte offsets.

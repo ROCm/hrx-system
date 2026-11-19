@@ -70,9 +70,20 @@ iree_status_t loom_serve_text_submit_trim(loom_serve_text_service_t* service) {
   }
   loom_serve_text_observe(service, "trim");
   service->pool.trim.start_time = iree_time_now();
+  const loom_runtime_execution_frontier_t previous =
+      service->completion.frontier;
   IREE_RETURN_IF_ERROR(loom_serve_text_model_submit_trim(
       service->model, &service->pool.trim.result,
       &service->completion.frontier));
+  // The owner already consumed this frontier. Empty maintenance needs no
+  // asynchronous wait, callback, or extra scheduler turn to consume it again.
+  const loom_runtime_execution_frontier_t next = service->completion.frontier;
+  if (previous.semaphores[0] == next.semaphores[0] &&
+      previous.semaphores[1] == next.semaphores[1] &&
+      previous.values[0] == next.values[0] &&
+      previous.values[1] == next.values[1]) {
+    return loom_serve_text_complete_trim(service);
+  }
   return loom_serve_text_await_work(service, TEXT_WORK_TRIM);
 }
 

@@ -177,6 +177,8 @@ struct loom_runtime_memory_operation_t {
   iree_hal_semaphore_list_t allocation_waits;
   // Mapping runs in trailing storage, independent of logical edit ownership.
   iree_hal_memory_mapping_t* mappings;
+  // Number of native mapping runs produced by the latest mapping stage.
+  iree_host_size_t mapping_count;
   // Owned predecessor mapping references, at most one per edited reservation.
   iree_hal_semaphore_list_t mapping_waits;
   // Borrowed pool outliving the operation and every reservation.
@@ -1359,6 +1361,7 @@ static iree_host_size_t loom_runtime_memory_operation_build_mappings(
             operation->releasing ? result->physical_offset : 0,
     };
   }
+  operation->mapping_count = count;
   return count;
 }
 
@@ -1992,6 +1995,21 @@ void loom_runtime_memory_operation_await(
 iree_status_t loom_runtime_memory_operation_query_status(
     const loom_runtime_memory_operation_t* operation) {
   return operation ? iree_status_clone(operation->status) : iree_ok_status();
+}
+
+iree_host_size_t loom_runtime_memory_operation_mapping_count(
+    const loom_runtime_memory_operation_t* operation) {
+  return operation && !operation->growing ? operation->mapping_count : 0;
+}
+
+iree_hal_memory_mapping_operation_t loom_runtime_memory_operation_mapping(
+    const loom_runtime_memory_operation_t* operation, iree_host_size_t index,
+    iree_hal_buffer_binding_t* out_range) {
+  const iree_hal_memory_mapping_t* mapping = &operation->mappings[index];
+  *out_range = (iree_hal_buffer_binding_t){mapping->target,
+                                           mapping->target_range.byte_offset,
+                                           mapping->target_range.byte_length};
+  return mapping->operation;
 }
 
 iree_hal_buffer_binding_t loom_runtime_memory_operation_backing(

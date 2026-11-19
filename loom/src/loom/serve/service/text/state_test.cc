@@ -7,6 +7,7 @@
 #include "loom/serve/service/text/state.h"
 
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "iree/testing/gtest.h"
@@ -494,6 +495,36 @@ TEST_P(TextStateTest, FinalReleasesRespectOverlappingPlanesAndPrivatePages) {
     if (!elastic) {
       return;
     }
+    for (uint32_t block = 0; block < state.cache.pool.capacity; ++block) {
+      bool backed = true;
+      for (size_t region = 0; region < state.storage.region_count; ++region) {
+        const auto& layout = state.storage.regions[region];
+        auto* buffer = state.memory.buffers[layout.allocation];
+        if (!buffer) {
+          continue;
+        }
+        for (size_t plane = 0; plane < layout.blocks.count; ++plane) {
+          backed &= loom_runtime_virtual_buffer_is_backed(
+              buffer,
+              layout.blocks.origin + plane * layout.blocks.stride +
+                  block * layout.blocks.block_bytes,
+              layout.blocks.block_bytes);
+        }
+      }
+      EXPECT_EQ(loom_runtime_block_pool_is_preferred(&state.cache.pool, block),
+                backed)
+          << "cache ID " << block;
+    }
+    for (uint32_t slot = 0; slot < state.recurrent.pool.capacity; ++slot) {
+      EXPECT_EQ(
+          loom_runtime_block_pool_is_preferred(&state.recurrent.pool, slot),
+          loom_runtime_virtual_buffer_is_backed(
+              state.memory.buffers[1],
+              state.storage.recurrent.origin +
+                  slot * state.storage.recurrent.stride,
+              state.storage.recurrent.length))
+          << "recurrent ID " << slot;
+    }
     const uint64_t limit = iree_hal_buffer_byte_length(state.row_arena);
     for (uint64_t offset = 0; offset < limit; offset += page) {
       bool owned = false;
@@ -581,8 +612,14 @@ TEST_P(TextStateTest, UnchangedBackingPreservesFreePlacement) {
   // change must preserve their established reuse order, including after a
   // continuation that only borrows the row's already-admitted storage.
   const auto free_ids = [](const loom_runtime_block_pool_t& pool) {
-    return std::vector<uint32_t>(pool.free_blocks,
-                                 pool.free_blocks + pool.available);
+    std::vector<std::pair<uint32_t, bool>> result;
+    for (uint32_t block = 0; block < pool.capacity; ++block) {
+      if (!pool.references[block]) {
+        result.emplace_back(block,
+                            loom_runtime_block_pool_is_preferred(&pool, block));
+      }
+    }
+    return result;
   };
   const auto recurrent = free_ids(state.recurrent.pool);
   const auto cache = free_ids(state.cache.pool);
@@ -595,7 +632,13 @@ TEST_P(TextStateTest, UnchangedBackingPreservesFreePlacement) {
     IREE_ASSERT_OK(loom_runtime_execution_drain(execution));
     loom_serve_text_state_row_complete_reserve(row);
     loom_serve_text_state_row_release_reservation(row);
+    const auto frontier = loom_runtime_execution_frontier(execution);
+    const auto backing_value = state.memory.backing.value;
     ASSERT_NO_FATAL_FAILURE(Trim());
+    const auto after = loom_runtime_execution_frontier(execution);
+    EXPECT_EQ(after.values[0], frontier.values[0]);
+    EXPECT_EQ(after.values[1], frontier.values[1]);
+    EXPECT_EQ(state.memory.backing.value, backing_value);
     EXPECT_EQ(free_ids(state.recurrent.pool), recurrent);
     EXPECT_EQ(free_ids(state.cache.pool), cache);
     EXPECT_EQ(state.memory.statistics.committed_bytes, committed);

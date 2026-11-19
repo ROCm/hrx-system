@@ -15,6 +15,16 @@
 
 namespace {
 
+std::set<uint32_t> Released(const loom_runtime_block_pool_t& pool) {
+  std::set<uint32_t> result;
+  for (uint32_t block = loom_runtime_block_pool_find_released(&pool, 0);
+       block != UINT32_MAX;
+       block = loom_runtime_block_pool_find_released(&pool, block + 1)) {
+    result.insert(block);
+  }
+  return result;
+}
+
 TEST(BlockPoolTest, EmptyPoolHasNoOwnership) {
   loom_runtime_block_pool_t pool;
   IREE_ASSERT_OK(
@@ -23,15 +33,15 @@ TEST(BlockPoolTest, EmptyPoolHasNoOwnership) {
   EXPECT_EQ(pool.available, 0u);
   EXPECT_EQ(pool.references, nullptr);
   EXPECT_FALSE(loom_runtime_block_pool_any_owned(&pool, 0, 0));
-  const uint32_t* released = nullptr;
-  EXPECT_EQ(loom_runtime_block_pool_released(&pool, &released), 0u);
-  EXPECT_EQ(released, nullptr);
+  EXPECT_EQ(Released(pool).size(), 0u);
   loom_runtime_block_pool_acknowledge_releases(&pool);
   loom_runtime_block_pool_acquire(&pool, 0, nullptr);
   loom_runtime_block_pool_retain(&pool, 0, nullptr);
   loom_runtime_block_pool_release(&pool, 0, nullptr);
   EXPECT_EQ(loom_runtime_block_pool_plan_compaction(&pool, nullptr), 0u);
   loom_runtime_block_pool_commit_compaction(&pool, nullptr);
+  EXPECT_EQ(pool.references, nullptr);
+  EXPECT_EQ(pool.sets, nullptr);
   loom_runtime_block_pool_deinitialize(&pool);
 }
 
@@ -52,8 +62,8 @@ TEST(BlockPoolTest, InterleavedGrowthAndRetiredSuffixReuse) {
   // both rows' retained prefixes remain live and unchanged.
   loom_runtime_block_pool_release(&pool, 2, first + 2);
   loom_runtime_block_pool_acquire(&pool, 2, second + 2);
-  EXPECT_EQ(second[2], first[3]);
-  EXPECT_EQ(second[3], first[2]);
+  EXPECT_EQ((std::set<uint32_t>{second[2], second[3]}),
+            (std::set<uint32_t>{first[2], first[3]}));
   EXPECT_EQ(second[0], 1u);
   EXPECT_EQ(second[1], 2u);
   const std::set<uint32_t> owned = {first[0],  first[1],  second[0],
@@ -76,7 +86,7 @@ TEST(BlockPoolTest, WarmReuseKeepsBackingAndHandlesEmptyExtents) {
   loom_runtime_block_pool_t pool;
   IREE_ASSERT_OK(
       loom_runtime_block_pool_initialize(1, iree_allocator_system(), &pool));
-  uint32_t* const backing = pool.free_blocks;
+  uint32_t* const backing = pool.references;
   uint32_t block = 0;
   for (int i = 0; i < 1000; ++i) {
     loom_runtime_block_pool_acquire(&pool, 0, nullptr);
@@ -86,12 +96,12 @@ TEST(BlockPoolTest, WarmReuseKeepsBackingAndHandlesEmptyExtents) {
     EXPECT_EQ(pool.available, 0u);
     loom_runtime_block_pool_release(&pool, 1, &block);
     EXPECT_EQ(pool.available, 1u);
-    EXPECT_EQ(pool.free_blocks, backing);
+    EXPECT_EQ(pool.references, backing);
   }
   loom_runtime_block_pool_deinitialize(&pool);
 }
 
-TEST(BlockPoolTest, ReleaseSuffixFollowsSharingRollbackAndReacquisition) {
+TEST(BlockPoolTest, ReleasesFollowSharingRollbackAndReacquisition) {
   loom_runtime_block_pool_t pool;
   IREE_ASSERT_OK(
       loom_runtime_block_pool_initialize(8, iree_allocator_system(), &pool));
@@ -99,25 +109,22 @@ TEST(BlockPoolTest, ReleaseSuffixFollowsSharingRollbackAndReacquisition) {
   loom_runtime_block_pool_acquire(&pool, 4, blocks);
   loom_runtime_block_pool_retain(&pool, 1, blocks);
   loom_runtime_block_pool_release(&pool, 4, blocks);
-  const uint32_t* released = nullptr;
-  EXPECT_EQ(loom_runtime_block_pool_released(&pool, &released), 3u);
-  EXPECT_EQ(std::set<uint32_t>(released, released + 3),
-            (std::set<uint32_t>{1, 2, 3}));
+  EXPECT_EQ(Released(pool).size(), 3u);
+  EXPECT_EQ(Released(pool), (std::set<uint32_t>{1, 2, 3}));
   EXPECT_TRUE(loom_runtime_block_pool_any_owned(&pool, 0, 1));
   EXPECT_FALSE(loom_runtime_block_pool_any_owned(&pool, 1, 7));
 
   // Retry before successful maintenance must observe the same candidates.
-  EXPECT_EQ(loom_runtime_block_pool_released(&pool, &released), 3u);
+  EXPECT_EQ(Released(pool).size(), 3u);
   uint32_t replacement = 0;
   loom_runtime_block_pool_acquire(&pool, 1, &replacement);
-  EXPECT_EQ(replacement, 3u);
-  EXPECT_EQ(loom_runtime_block_pool_released(&pool, &released), 2u);
+  EXPECT_EQ(replacement, 1u);
+  EXPECT_EQ(Released(pool).size(), 2u);
   IREE_ASSERT_OK(loom_runtime_block_pool_grow(&pool, 129));
-  EXPECT_EQ(loom_runtime_block_pool_released(&pool, &released), 2u);
-  EXPECT_EQ(std::set<uint32_t>(released, released + 2),
-            (std::set<uint32_t>{1, 2}));
+  EXPECT_EQ(Released(pool).size(), 2u);
+  EXPECT_EQ(Released(pool), (std::set<uint32_t>{2, 3}));
   loom_runtime_block_pool_acknowledge_releases(&pool);
-  EXPECT_EQ(loom_runtime_block_pool_released(&pool, &released), 0u);
+  EXPECT_EQ(Released(pool).size(), 0u);
 
   // A denied tentative acquisition rolls back IDs into the same release set.
   uint32_t tentative[3] = {};
@@ -125,12 +132,11 @@ TEST(BlockPoolTest, ReleaseSuffixFollowsSharingRollbackAndReacquisition) {
   for (size_t i = 3; i; --i) {
     loom_runtime_block_pool_release(&pool, 1, &tentative[i - 1]);
   }
-  EXPECT_EQ(loom_runtime_block_pool_released(&pool, &released), 3u);
-  EXPECT_EQ(std::set<uint32_t>(released, released + 3),
-            std::set<uint32_t>(tentative, tentative + 3));
+  EXPECT_EQ(Released(pool).size(), 3u);
+  EXPECT_EQ(Released(pool), std::set<uint32_t>(tentative, tentative + 3));
   loom_runtime_block_pool_release(&pool, 1, blocks);
   loom_runtime_block_pool_release(&pool, 1, &replacement);
-  EXPECT_EQ(loom_runtime_block_pool_released(&pool, &released), 5u);
+  EXPECT_EQ(Released(pool).size(), 5u);
   EXPECT_FALSE(loom_runtime_block_pool_any_owned(&pool, 0, pool.capacity));
   loom_runtime_block_pool_deinitialize(&pool);
 }
@@ -143,11 +149,13 @@ TEST(BlockPoolTest, GrowthPreservesMembershipAcrossSummaryLevels) {
       loom_runtime_block_pool_t pool;
       IREE_ASSERT_OK(loom_runtime_block_pool_initialize(
           initial, iree_allocator_system(), &pool));
+      EXPECT_EQ(reinterpret_cast<uintptr_t>(pool.sets) % alignof(uint64_t), 0u);
       std::vector<uint32_t> blocks(initial);
       loom_runtime_block_pool_acquire(&pool, initial, blocks.data());
       const uint32_t retained = occupied ? 1 : 0;
       loom_runtime_block_pool_release(&pool, initial - retained, blocks.data());
       IREE_ASSERT_OK(loom_runtime_block_pool_grow(&pool, 262145));
+      EXPECT_EQ(reinterpret_cast<uintptr_t>(pool.sets) % alignof(uint64_t), 0u);
       EXPECT_EQ(loom_runtime_block_pool_any_owned(&pool, 0, initial), occupied);
       EXPECT_FALSE(
           loom_runtime_block_pool_any_owned(&pool, initial, 262145 - initial));
@@ -187,9 +195,8 @@ TEST(BlockPoolTest, FailedGrowthPreservesOwnershipAndPendingReleases) {
                         loom_runtime_block_pool_grow(&pool, 4097));
   EXPECT_EQ(pool.capacity, 8u);
   EXPECT_EQ(pool.available, 6u);
-  const uint32_t* released = nullptr;
-  ASSERT_EQ(loom_runtime_block_pool_released(&pool, &released), 1u);
-  EXPECT_EQ(released[0], blocks[1]);
+  ASSERT_EQ(Released(pool).size(), 1u);
+  EXPECT_EQ(*Released(pool).begin(), blocks[1]);
   EXPECT_TRUE(loom_runtime_block_pool_any_owned(&pool, 0, 1));
   EXPECT_FALSE(loom_runtime_block_pool_any_owned(&pool, 1, 1));
   EXPECT_TRUE(loom_runtime_block_pool_any_owned(&pool, 2, 1));
@@ -223,9 +230,9 @@ TEST(BlockPoolTest, CapacityGrowthPreservesSharedIdsAndFreeOrder) {
   EXPECT_EQ(unique.size(), free.size());
   EXPECT_EQ(unique.count(held[1]), 0u);
   EXPECT_EQ(unique.count(held[2]), 0u);
-  auto* backing = pool.free_blocks;
+  auto* backing = pool.references;
   IREE_ASSERT_OK(loom_runtime_block_pool_grow(&pool, 129));
-  EXPECT_EQ(backing, pool.free_blocks);
+  EXPECT_EQ(backing, pool.references);
   loom_runtime_block_pool_deinitialize(&pool);
 }
 
@@ -268,7 +275,7 @@ TEST(BlockPoolTest, SharedOwnersSurviveCompactionAndLastRelease) {
   loom_runtime_block_pool_deinitialize(&pool);
 }
 
-TEST(BlockPoolTest, ColdPlacementPrefersFreeBackedIdsWithoutChangingOwners) {
+TEST(BlockPoolTest, PlacementFactsPreferFreeBackedIdsWithoutChangingOwners) {
   for (uint32_t mask = 0; mask < 256; ++mask) {
     SCOPED_TRACE(mask);
     loom_runtime_block_pool_t pool;
@@ -282,28 +289,19 @@ TEST(BlockPoolTest, ColdPlacementPrefersFreeBackedIdsWithoutChangingOwners) {
     for (uint32_t block : {0, 1, 3, 4, 6, 7}) {
       loom_runtime_block_pool_release(&pool, 1, &block);
     }
-    struct Preference {
-      // Source-provided backing membership, independent of logical ownership.
-      uint32_t mask;
-      // Each free ID must be visited once, with no owned IDs examined.
-      uint32_t visited = 0;
-    } preference = {mask};
-    const auto preferred = [](void* self, uint32_t block) {
-      auto* preference = static_cast<Preference*>(self);
-      EXPECT_EQ(preference->visited & (1u << block), 0u);
-      preference->visited |= 1u << block;
-      return (preference->mask & (1u << block)) != 0;
-    };
-    loom_runtime_block_pool_prioritize(&pool, preferred, &preference);
-    EXPECT_EQ(preference.visited, 0xdbu);
-    const uint32_t* released = nullptr;
-    EXPECT_EQ(loom_runtime_block_pool_released(&pool, &released), 6u);
-    EXPECT_EQ(std::set<uint32_t>(released, released + 6),
-              (std::set<uint32_t>{0, 1, 3, 4, 6, 7}));
+    // Preference is established while IDs may be owned. Changes preserve the
+    // exact pending release set instead of invalidating every free ID.
+    for (uint32_t block = 0; block < 8; ++block) {
+      loom_runtime_block_pool_set_preferred(&pool, block,
+                                            (mask & (1u << block)) != 0);
+    }
+    EXPECT_EQ(Released(pool), (std::set<uint32_t>{0, 1, 3, 4, 6, 7}));
     loom_runtime_block_pool_acknowledge_releases(&pool);
-    preference.visited = 0;
-    loom_runtime_block_pool_prioritize(&pool, preferred, &preference);
-    EXPECT_EQ(loom_runtime_block_pool_released(&pool, &released), 0u);
+    for (uint32_t block = 0; block < 8; ++block) {
+      loom_runtime_block_pool_set_preferred(&pool, block,
+                                            (mask & (1u << block)) != 0);
+    }
+    EXPECT_TRUE(Released(pool).empty());
     EXPECT_EQ(pool.references[2], 2u);
     EXPECT_EQ(pool.references[5], 1u);
     loom_runtime_block_pool_acquire(&pool, 6, blocks.data());
@@ -315,7 +313,6 @@ TEST(BlockPoolTest, ColdPlacementPrefersFreeBackedIdsWithoutChangingOwners) {
       EXPECT_FALSE(unbacked && preferred);
       unbacked |= !preferred;
     }
-    loom_runtime_block_pool_prioritize(&pool, nullptr, nullptr);
     loom_runtime_block_pool_deinitialize(&pool);
   }
 }
@@ -377,9 +374,7 @@ TEST(BlockPoolTest, CompactionMovesOnlyIntoDisjointFreeSlots) {
                   count != 0 && first < occupied.size() ? first : UINT32_MAX);
       }
     }
-    const uint32_t* released = nullptr;
-    EXPECT_EQ(loom_runtime_block_pool_released(&pool, &released),
-              pool.available);
+    EXPECT_EQ(Released(pool).size(), pool.available);
     const uint32_t available = pool.available;
     loom_runtime_block_pool_acquire(&pool, available, blocks.data());
     for (uint32_t i = 0; i < available; ++i) {
