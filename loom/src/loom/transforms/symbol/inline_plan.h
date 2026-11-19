@@ -108,6 +108,8 @@ typedef struct loom_inline_symbol_info_t {
   uint8_t body_has_workgroup_storage : 1;
   // Cached Low-body blocker plus one; zero means the body is not inventoried.
   uint8_t body_preflight;
+  // Cached definition transfer eligibility; zero until the first query.
+  uint8_t definition_transfer;
 } loom_inline_symbol_info_t;
 
 typedef struct loom_inline_profitability_symbol_t {

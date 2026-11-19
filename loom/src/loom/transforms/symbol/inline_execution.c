@@ -25,44 +25,23 @@
 #include "loom/target/function_version.h"
 #include "loom/transforms/symbol/inline_plan.h"
 
-static bool loom_inline_symbol_is_transferable(const loom_module_t* module,
-                                               const loom_symbol_t* symbol) {
-  if (!symbol || !symbol->defining_op) {
-    return false;
-  }
-  if (iree_any_bit_set(symbol->flags,
-                       LOOM_SYMBOL_FLAG_PUBLIC | LOOM_SYMBOL_FLAG_RETAIN)) {
-    return false;
-  }
-  if (!loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_FUNC_LIKE)) {
-    return false;
-  }
-
-  loom_func_like_t function = loom_func_like_cast(module, symbol->defining_op);
-  if (!loom_func_like_isa(function)) {
-    return false;
-  }
-  return loom_func_like_is_module_internal(function);
-}
-
 //===----------------------------------------------------------------------===//
 // Execution planning
 //===----------------------------------------------------------------------===//
 
-bool loom_inline_symbol_can_transfer_after_removing(
-    const loom_inline_callables_plan_t* state, loom_symbol_id_t symbol_id,
-    uint32_t planned_call_removals) {
-  if (symbol_id >= state->module->symbols.count) {
-    return false;
-  }
+enum {
+  LOOM_INLINE_TRANSFER_UNKNOWN = 0,
+  LOOM_INLINE_TRANSFER_PINNED,
+  LOOM_INLINE_TRANSFER_ALLOWED,
+};
+
+static bool loom_inline_can_transfer_definition(
+    const loom_inline_callables_plan_t* state, loom_symbol_id_t symbol_id) {
   const loom_inline_symbol_info_t* info = &state->symbols[symbol_id];
-  if (info->incoming_call_count != planned_call_removals) {
-    return false;
-  }
-  if (info->incoming_non_call_ref_count != 0) {
-    return false;
-  }
-  if (!loom_inline_symbol_is_transferable(state->module, info->symbol)) {
+  if (iree_any_bit_set(info->symbol->flags,
+                       LOOM_SYMBOL_FLAG_PUBLIC | LOOM_SYMBOL_FLAG_RETAIN) ||
+      !loom_symbol_implements(info->symbol, LOOM_SYMBOL_INTERFACE_FUNC_LIKE) ||
+      !loom_func_like_is_module_internal(info->function)) {
     return false;
   }
   const loom_function_version_t* version =
@@ -81,6 +60,26 @@ bool loom_inline_symbol_can_transfer_after_removing(
     return false;
   }
   return loom_func_like_body(info->function) != NULL;
+}
+
+bool loom_inline_symbol_can_transfer_after_removing(
+    loom_inline_callables_plan_t* state, loom_symbol_id_t symbol_id,
+    uint32_t planned_call_removals) {
+  if (symbol_id >= state->module->symbols.count) {
+    return false;
+  }
+  loom_inline_symbol_info_t* info = &state->symbols[symbol_id];
+  if (info->incoming_call_count != planned_call_removals ||
+      info->incoming_non_call_ref_count != 0) {
+    return false;
+  }
+  if (info->definition_transfer == LOOM_INLINE_TRANSFER_UNKNOWN) {
+    info->definition_transfer =
+        loom_inline_can_transfer_definition(state, symbol_id)
+            ? LOOM_INLINE_TRANSFER_ALLOWED
+            : LOOM_INLINE_TRANSFER_PINNED;
+  }
+  return info->definition_transfer == LOOM_INLINE_TRANSFER_ALLOWED;
 }
 
 static iree_status_t loom_inline_select_transfer_actions(
