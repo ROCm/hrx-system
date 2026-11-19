@@ -124,19 +124,23 @@ static iree_status_t hrx_command_record_fill(
   if (!fill->target.length) {
     return iree_ok_status();
   }
-  if (!fill->strided) {
+  if (!fill->stride_count) {
     return iree_hal_command_buffer_fill_buffer_linear(
         command_buffer, fill->target, &fill->pattern, fill->pattern_size,
         fill->flags);
   }
-  const hrx_command_fill_strided_t* strided = (const void*)fill;
-  const iree_hal_fill_region_t region = {
+  const hrx_command_fill_rows_t* rows = (const void*)fill;
+  iree_hal_fill_region_t region = {
       .row_length = fill->target.length,
-      .row_count = strided->row_count,
-      .slice_count = strided->slice_count,
-      .target_strides = {strided->target_row_stride,
-                         strided->target_slice_stride},
+      .row_count = rows->row_count,
+      .slice_count = 1,
+      .target_strides = {rows->target_row_stride, 0},
   };
+  if (fill->stride_count == 2) {
+    const hrx_command_fill_slices_t* slices = (const void*)fill;
+    region.slice_count = slices->slice_count;
+    region.target_strides.slice_stride = slices->target_slice_stride;
+  }
   iree_hal_buffer_ref_t target = fill->target;
   target.length = iree_hal_transfer_range_length(
       region.row_length, region.row_count, region.slice_count,

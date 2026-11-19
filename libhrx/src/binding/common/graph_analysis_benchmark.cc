@@ -121,7 +121,7 @@ struct BindingGraph {
     node->type = type;
     node->dependency_offset = NodeSize(type);
     if (type == kNodeType) {
-      iree_hal_streaming_graph_node_memset(node)->command.command.kind =
+      iree_hal_streaming_graph_node_memset(node)->command.fill.command.kind =
           HRX_COMMAND_FILL;
     }
   }

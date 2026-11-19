@@ -223,15 +223,12 @@ typedef struct iree_hal_streaming_graph_memcpy_node_attrs_t {
 } iree_hal_streaming_graph_memcpy_node_attrs_t;
 
 typedef struct iree_hal_streaming_graph_memset_node_attrs_t {
-  // Resolved fill with its exact byte range.
-  hrx_command_fill_t command;
+  // Resolved fill; target.length is the byte width and row_count is HIP height.
+  hrx_command_fill_rows_t command;
   // HIP destination pointer used for parameter query APIs.
   void* hip_dst;
-  // HIP width in elements.
-  iree_device_size_t hip_width;
-  // HIP height in rows.
-  iree_device_size_t hip_height;
-  // HIP pitch in bytes.
+  // Original HIP pitch, preserving an implicit packed pitch of zero for
+  // queries.
   iree_device_size_t hip_pitch;
 } iree_hal_streaming_graph_memset_node_attrs_t;
 

@@ -364,19 +364,22 @@ TEST_F(CommandRecordingTest,
 }
 
 TEST_F(CommandRecordingTest, StridedFillRecordsOneOperation) {
-  hrx_command_fill_strided_t fill = {
-      .fill =
+  hrx_command_fill_slices_t fill = {
+      .rows =
           {
-              .command = {HRX_COMMAND_FILL},
-              .pattern_size = 4,
-              .strided = true,
-              .pattern = 0x52A13C78u,
-              .target =
-                  iree_hal_make_buffer_ref(target_.get()->hal_buffer, 8, 8),
+              .fill =
+                  {
+                      .command = {HRX_COMMAND_FILL},
+                      .pattern_size = 4,
+                      .stride_count = 2,
+                      .pattern = 0x52A13C78u,
+                      .target = iree_hal_make_buffer_ref(
+                          target_.get()->hal_buffer, 8, 8),
+                  },
+              .row_count = 3,
+              .target_row_stride = 16,
           },
-      .row_count = 3,
       .slice_count = 2,
-      .target_row_stride = 16,
       .target_slice_stride = 64,
   };
   void* sources[] = {&fill};

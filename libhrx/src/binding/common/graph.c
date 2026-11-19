@@ -1743,16 +1743,18 @@ iree_status_t iree_hal_streaming_graph_add_fill_ptr_node(
   // Copy memset data.
   iree_hal_streaming_graph_memset_node_attrs_t* attrs =
       iree_hal_streaming_graph_node_memset(node);
-  attrs->command = (hrx_command_fill_t){
-      .command.kind = HRX_COMMAND_FILL,
-      .target =
-          iree_hal_streaming_convert_range_buffer_ref(dst_ref, total_size),
-      .pattern = pattern,
-      .pattern_size = (uint8_t)pattern_size,
+  attrs->command = (hrx_command_fill_rows_t){
+      .fill =
+          {
+              .command.kind = HRX_COMMAND_FILL,
+              .target = iree_hal_streaming_convert_range_buffer_ref(dst_ref,
+                                                                    total_size),
+              .pattern = pattern,
+              .pattern_size = (uint8_t)pattern_size,
+          },
+      .row_count = 1,
   };
   attrs->hip_dst = (void*)dst;
-  attrs->hip_width = count;
-  attrs->hip_height = 1;
   attrs->hip_pitch = 0;
 
   iree_status_t status = iree_hal_streaming_graph_add_node(graph, node);

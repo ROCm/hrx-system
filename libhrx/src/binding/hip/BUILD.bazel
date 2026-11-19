@@ -799,7 +799,10 @@ hrx_cc_test(
     name = "hip_graph_memory_api_test",
     srcs = [
         "api.h",
+        "hip_graph_geometry_api_test.cc",
         "hip_graph_memory_api_test.cc",
+        "hip_graph_memory_test.cc",
+        "hip_graph_memory_test.h",
     ],
     data = [":amdhip64"],
     env = {

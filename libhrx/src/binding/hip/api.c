@@ -10206,6 +10206,21 @@ HIPAPI hipError_t hipMemcpyAtoA(hipArray_t dstArray, size_t dstOffset,
   HIP_RETURN_ERROR(result);
 }
 
+// Both explicit and captured HIP fills carry their useful rectangle to the
+// shared recorder. Raw pitch is retained only for public parameter queries.
+static void iree_hip_graph_set_memset_geometry(
+    iree_hal_streaming_graph_node_t* node, iree_device_size_t width,
+    iree_device_size_t height, iree_device_size_t pitch) {
+  iree_hal_streaming_graph_memset_node_attrs_t* attrs =
+      iree_hal_streaming_graph_node_memset(node);
+  attrs->command.fill.target.length = width * attrs->command.fill.pattern_size;
+  attrs->command.fill.stride_count = height > 1 ? 1 : 0;
+  attrs->command.row_count = height;
+  attrs->command.target_row_stride =
+      pitch ? pitch : attrs->command.fill.target.length;
+  attrs->hip_pitch = pitch;
+}
+
 typedef struct iree_hip_capture_memset_2d_t {
   void* dst;
   uint32_t value;
@@ -10229,12 +10244,8 @@ static iree_status_t iree_hip_capture_record_memset_2d(
   if (iree_status_is_ok(status)) {
     iree_hal_streaming_graph_node_memset((*out_terminal_node))->hip_dst =
         capture->dst;
-    iree_hal_streaming_graph_node_memset((*out_terminal_node))->hip_width =
-        capture->width;
-    iree_hal_streaming_graph_node_memset((*out_terminal_node))->hip_height =
-        capture->height;
-    iree_hal_streaming_graph_node_memset((*out_terminal_node))->hip_pitch =
-        capture->pitch;
+    iree_hip_graph_set_memset_geometry(*out_terminal_node, capture->width,
+                                       capture->height, capture->pitch);
   }
   return status;
 }
@@ -20692,7 +20703,9 @@ HIPAPI hipError_t hipGraphAddMemsetNode(hipGraphNode_t* pGraphNode,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   const size_t pitch = params->pitch ? params->pitch : row_bytes;
-  if (params->height > 1 && pitch < row_bytes) {
+  if ((uintptr_t)params->dst % params->elementSize != 0 ||
+      (params->height > 1 &&
+       (pitch < row_bytes || pitch % params->elementSize != 0))) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
@@ -20716,9 +20729,8 @@ HIPAPI hipError_t hipGraphAddMemsetNode(hipGraphNode_t* pGraphNode,
           params->elementSize, memset_count, &node),
       hipErrorInvalidValue);
   iree_hal_streaming_graph_node_memset(node)->hip_dst = params->dst;
-  iree_hal_streaming_graph_node_memset(node)->hip_width = params->width;
-  iree_hal_streaming_graph_node_memset(node)->hip_height = params->height;
-  iree_hal_streaming_graph_node_memset(node)->hip_pitch = params->pitch;
+  iree_hip_graph_set_memset_geometry(node, params->width, params->height,
+                                     params->pitch);
 
   *pGraphNode = (hipGraphNode_t)node;
   IREE_TRACE_ZONE_END(z0);
@@ -22312,14 +22324,8 @@ static bool iree_hip_graph_node_is_active(
 
 static hipError_t iree_hip_graph_validate_memset_params(
     iree_hal_streaming_context_t* context, const hipMemsetParams* params,
-    iree_hal_streaming_buffer_ref_t* out_dst_ref,
-    iree_device_size_t* out_element_count) {
-  if (out_dst_ref) {
-    memset(out_dst_ref, 0, sizeof(*out_dst_ref));
-  }
-  if (out_element_count) {
-    *out_element_count = 0;
-  }
+    iree_hal_streaming_buffer_ref_t* out_dst_ref) {
+  *out_dst_ref = (iree_hal_streaming_buffer_ref_t){0};
   if (!context || !params || !params->dst || params->width == 0 ||
       params->height == 0 ||
       (params->elementSize != 1 && params->elementSize != 2 &&
@@ -22333,7 +22339,9 @@ static hipError_t iree_hip_graph_validate_memset_params(
     return hipErrorInvalidValue;
   }
   const size_t pitch = params->pitch ? params->pitch : row_bytes;
-  if (params->height > 1 && pitch < row_bytes) {
+  if ((uintptr_t)params->dst % params->elementSize != 0 ||
+      (params->height > 1 &&
+       (pitch < row_bytes || pitch % params->elementSize != 0))) {
     return hipErrorInvalidValue;
   }
 
@@ -22342,11 +22350,9 @@ static hipError_t iree_hip_graph_validate_memset_params(
   iree_host_size_t total_size = 0;
   if (IREE_UNLIKELY(
           !iree_host_size_checked_mul(leading_rows, pitch, &leading_size) ||
-          !iree_host_size_checked_add(leading_size, row_bytes, &total_size) ||
-          total_size % params->elementSize != 0)) {
+          !iree_host_size_checked_add(leading_size, row_bytes, &total_size))) {
     return hipErrorInvalidValue;
   }
-  const iree_host_size_t element_count = total_size / params->elementSize;
 
   iree_hal_streaming_buffer_ref_t dst_ref;
   iree_status_t status = iree_hal_streaming_memory_lookup_range(
@@ -22356,13 +22362,24 @@ static hipError_t iree_hip_graph_validate_memset_params(
     iree_status_ignore(status);
     return hipErrorInvalidValue;
   }
-  if (out_dst_ref) {
-    *out_dst_ref = dst_ref;
-  }
-  if (out_element_count) {
-    *out_element_count = element_count;
-  }
+  *out_dst_ref = dst_ref;
   return hipSuccess;
+}
+
+// Applies the endpoint and geometry already established at public admission.
+static void iree_hip_graph_apply_memset_node_params(
+    iree_hal_streaming_graph_node_t* node, const hipMemsetParams* params,
+    iree_hal_streaming_buffer_ref_t dst_ref) {
+  iree_hal_streaming_graph_memset_node_attrs_t* attrs =
+      iree_hal_streaming_graph_node_memset(node);
+  attrs->command.fill.target =
+      iree_hal_make_buffer_ref(dst_ref.buffer->buffer, dst_ref.offset,
+                               params->width * params->elementSize);
+  attrs->command.fill.pattern = params->value;
+  attrs->command.fill.pattern_size = (uint8_t)params->elementSize;
+  attrs->hip_dst = params->dst;
+  iree_hip_graph_set_memset_geometry(node, params->width, params->height,
+                                     params->pitch);
 }
 
 static hipError_t iree_hip_graph_set_memset_node_params(
@@ -22372,24 +22389,12 @@ static hipError_t iree_hip_graph_set_memset_node_params(
     return hipErrorInvalidValue;
   }
   iree_hal_streaming_buffer_ref_t dst_ref;
-  iree_device_size_t element_count = 0;
   hipError_t result = iree_hip_graph_validate_memset_params(
-      node->graph->context, params, &dst_ref, &element_count);
-  if (result != hipSuccess) {
-    return result;
+      node->graph->context, params, &dst_ref);
+  if (result == hipSuccess) {
+    iree_hip_graph_apply_memset_node_params(node, params, dst_ref);
   }
-
-  iree_hal_streaming_graph_node_memset(node)->command.target =
-      iree_hal_make_buffer_ref(dst_ref.buffer->buffer, dst_ref.offset,
-                               element_count * params->elementSize);
-  iree_hal_streaming_graph_node_memset(node)->command.pattern = params->value;
-  iree_hal_streaming_graph_node_memset(node)->command.pattern_size =
-      (uint8_t)params->elementSize;
-  iree_hal_streaming_graph_node_memset(node)->hip_dst = params->dst;
-  iree_hal_streaming_graph_node_memset(node)->hip_width = params->width;
-  iree_hal_streaming_graph_node_memset(node)->hip_height = params->height;
-  iree_hal_streaming_graph_node_memset(node)->hip_pitch = params->pitch;
-  return hipSuccess;
+  return result;
 }
 
 typedef struct iree_hip_graph_memcpy_node_update_t {
@@ -23320,10 +23325,9 @@ HIPAPI hipError_t hipGraphExecMemsetNodeSetParams(hipGraphExec_t graphExec,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   iree_hal_streaming_buffer_ref_t dst_ref;
-  iree_device_size_t element_count = 0;
   result = iree_hip_graph_validate_memset_params(
       stream_node->graph->context, (const hipMemsetParams*)pNodeParams,
-      &dst_ref, &element_count);
+      &dst_ref);
   if (result != hipSuccess) {
     iree_hal_streaming_graph_exec_end_edit(exec, &edit);
     iree_hal_streaming_graph_exec_release(exec);
@@ -23331,17 +23335,15 @@ HIPAPI hipError_t hipGraphExecMemsetNodeSetParams(hipGraphExec_t graphExec,
   }
   const hipMemsetParams* params = (const hipMemsetParams*)pNodeParams;
   const bool old_is_2d =
-      iree_hal_streaming_graph_node_memset(stream_node)->hip_height != 1;
+      iree_hal_streaming_graph_node_memset(stream_node)->command.row_count != 1;
   const bool new_is_2d = params->height != 1;
   if (old_is_2d || new_is_2d) {
     if (iree_hal_streaming_graph_node_memset(stream_node)
-                ->command.pattern_size != params->elementSize ||
+                ->command.fill.pattern_size != params->elementSize ||
         iree_hal_streaming_graph_node_memset(stream_node)
-                ->command.target.length !=
-            element_count * params->elementSize ||
-        iree_hal_streaming_graph_node_memset(stream_node)->hip_width !=
-            params->width ||
-        iree_hal_streaming_graph_node_memset(stream_node)->hip_height !=
+                ->command.fill.target.length !=
+            params->width * params->elementSize ||
+        iree_hal_streaming_graph_node_memset(stream_node)->command.row_count !=
             params->height ||
         iree_hal_streaming_graph_node_memset(stream_node)->hip_pitch !=
             params->pitch) {
@@ -23352,13 +23354,7 @@ HIPAPI hipError_t hipGraphExecMemsetNodeSetParams(hipGraphExec_t graphExec,
   }
   iree_hal_streaming_graph_memset_node_attrs_t old_attrs =
       (*iree_hal_streaming_graph_node_memset(stream_node));
-  result = iree_hip_graph_set_memset_node_params(stream_node, params);
-  if (result != hipSuccess) {
-    (*iree_hal_streaming_graph_node_memset(stream_node)) = old_attrs;
-    iree_hal_streaming_graph_exec_end_edit(exec, &edit);
-    iree_hal_streaming_graph_exec_release(exec);
-    HIP_RETURN_ERROR(result);
-  }
+  iree_hip_graph_apply_memset_node_params(stream_node, params, dst_ref);
   result = iree_hip_graph_exec_rebuild(exec, &edit);
   if (result != hipSuccess) {
     (*iree_hal_streaming_graph_node_memset(stream_node)) = old_attrs;
@@ -24131,11 +24127,12 @@ HIPAPI hipError_t hipGraphMemsetNodeGetParams(hipGraphNode_t node,
   iree_hal_streaming_graph_memset_node_attrs_t* memset_attrs =
       iree_hal_streaming_graph_node_memset(stream_node);
   params->dst = memset_attrs->hip_dst;
-  params->elementSize = memset_attrs->command.pattern_size;
-  params->height = memset_attrs->hip_height;
+  params->elementSize = memset_attrs->command.fill.pattern_size;
+  params->height = memset_attrs->command.row_count;
   params->pitch = memset_attrs->hip_pitch;
-  params->value = memset_attrs->command.pattern;
-  params->width = memset_attrs->hip_width;
+  params->value = memset_attrs->command.fill.pattern;
+  params->width =
+      memset_attrs->command.fill.target.length / params->elementSize;
   HIP_RETURN_ERROR(hipSuccess);
 }
 

@@ -421,8 +421,11 @@ static hrx_status_t hrx_graph_add_fill_buffer_node_internal(
       region->row_length, region->row_count, region->slice_count,
       &region->target_strides);
   hrx_graph_node_s* node = NULL;
+  const uint8_t stride_count = linear ? 0 : (region->slice_count > 1 ? 2 : 1);
   const uint32_t payload_size =
-      linear ? sizeof(hrx_command_fill_t) : sizeof(hrx_command_fill_strided_t);
+      !stride_count ? sizeof(hrx_command_fill_t)
+                    : (stride_count == 1 ? sizeof(hrx_command_fill_rows_t)
+                                         : sizeof(hrx_command_fill_slices_t));
   iree_status_t allocation_status = hrx_graph_allocate_node(
       graph->arena_allocator, payload_size, deps, dep_count, 0, &node, NULL);
   if (!iree_status_is_ok(allocation_status)) {
@@ -433,7 +436,7 @@ static hrx_status_t hrx_graph_add_fill_buffer_node_internal(
   *fill = (hrx_command_fill_t){
       .command.kind = HRX_COMMAND_FILL,
       .pattern_size = (uint8_t)attrs->pattern_size,
-      .strided = !linear,
+      .stride_count = stride_count,
       .pattern = attrs->pattern,
       .target = iree_hal_make_buffer_ref(
           attrs->dst.buffer->hal_buffer, attrs->dst.offset,
@@ -441,11 +444,14 @@ static hrx_status_t hrx_graph_add_fill_buffer_node_internal(
                  : region->row_length),
   };
   if (!linear) {
-    hrx_command_fill_strided_t* strided = (void*)fill;
-    strided->row_count = region->row_count;
-    strided->slice_count = region->slice_count;
-    strided->target_row_stride = region->target_strides.row_stride;
-    strided->target_slice_stride = region->target_strides.slice_stride;
+    hrx_command_fill_rows_t* rows = (void*)fill;
+    rows->row_count = region->row_count;
+    rows->target_row_stride = region->target_strides.row_stride;
+    if (stride_count == 2) {
+      hrx_command_fill_slices_t* slices = (void*)fill;
+      slices->slice_count = region->slice_count;
+      slices->target_slice_stride = region->target_strides.slice_stride;
+    }
   }
   iree_status_t status = hrx_graph_capture_buffer(graph, attrs->dst.buffer);
   if (iree_status_is_ok(status)) {
