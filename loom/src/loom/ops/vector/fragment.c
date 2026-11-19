@@ -169,6 +169,25 @@ bool loom_vector_fragment_fact_query_source_storage_schema(
                                                                 out_schema);
 }
 
+bool loom_vector_facts_query_payload_storage_schema(
+    const loom_fact_context_t* context, loom_value_facts_t facts,
+    loom_value_fact_storage_schema_t* out_schema) {
+  if (facts.extension_id == LOOM_VALUE_FACT_EXTENSION_ID_NONE) {
+    return false;
+  }
+  loom_value_fact_encoding_summary_t summary;
+  if (loom_value_facts_query_encoding_summary(context, facts, &summary)) {
+    *out_schema = summary.storage_schema;
+    return !loom_value_fact_encoded_operand_schema_is_unknown(
+        out_schema->encoded_operand);
+  }
+  loom_vector_fragment_fact_t fragment;
+  return loom_vector_fragment_fact_query_value_facts(context, facts,
+                                                     &fragment) &&
+         loom_vector_fragment_fact_query_payload_storage_schema(fragment,
+                                                                out_schema);
+}
+
 bool loom_vector_fragment_parameter_view_resolve(
     const loom_module_t* module, loom_value_slice_t parameter_values,
     loom_named_attr_slice_t parameter_names,

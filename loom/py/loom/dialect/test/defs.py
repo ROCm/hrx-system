@@ -1014,16 +1014,16 @@ test_fact_encoding_operand_field = Op(
     "test.fact_encoding_operand_field",
     group=test_ops,
     doc=(
-        "Exposes an encoded-operand storage-schema summary field as an i64 "
-        "constant. Supported fields are element_format, payload_packing, "
-        "scale_topology, scale_format, secondary_scale_format, affine, "
+        "Exposes a storage-schema summary field on an encoding or its packed "
+        "payload as an i64 constant. Supported fields are element_format, "
+        "payload_packing, scale_topology, scale_format, secondary_scale_format, affine, "
         "rounding, codebook, sparsity, sparsity_group_elements, "
         "sparsity_group_nonzero_elements, payload_registers, "
         "payload_elements, scale_group_elements, scale_group_rank, "
         "scale_group_dim0 through scale_group_dim3, scale_operands, "
         "zero_scale_fallback, and static_spec."
     ),
-    operands=[Operand("value", ANY_ENCODING)],
+    operands=[Operand("value", ANY)],
     attrs=[AttrDef("field", "string", doc="Encoded operand field to inspect.")],
     results=[Result("result", INTEGER)],
     traits=[PURE],

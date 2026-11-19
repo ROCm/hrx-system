@@ -352,6 +352,10 @@ typedef struct loom_value_fact_storage_schema_t {
   loom_value_fact_encoded_operand_schema_t encoded_operand;
 } loom_value_fact_storage_schema_t;
 
+// Compares the encoded operand properties and exact static schema identity.
+bool loom_value_fact_storage_schema_equal(loom_value_fact_storage_schema_t lhs,
+                                          loom_value_fact_storage_schema_t rhs);
+
 // Returns true when encoded operand schemas are byte-identical. Encoded schema
 // records are fixed-width descriptors and must be zero-initialized before
 // population so padding never participates in equality.

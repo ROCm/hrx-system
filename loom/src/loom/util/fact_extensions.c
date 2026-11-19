@@ -302,7 +302,7 @@ bool loom_value_fact_encoded_operand_schema_sparsity_is_complete(
   return nonzero_element_count > 0 && nonzero_element_count < element_count;
 }
 
-static bool loom_value_fact_storage_schema_equal(
+bool loom_value_fact_storage_schema_equal(
     loom_value_fact_storage_schema_t lhs,
     loom_value_fact_storage_schema_t rhs) {
   return lhs.static_spec_encoding_id == rhs.static_spec_encoding_id &&
