@@ -6,7 +6,7 @@
 
 #include "iree/hal/driver/amd/xdna/image/aie2p/npu2.h"
 
-// Image execution contracts shared by compatible NPU2 devices.
+// Maps endpoint identities to the profile IDs serialized in native Loom ELFs.
 static const struct {
   // Exact passive endpoint key, independent of native platform transport.
   iree_string_view_t target_id;
@@ -33,11 +33,6 @@ iree_status_t iree_hal_amd_xdna_aie2p_npu2_target_initialize(
           iree_hal_amd_xdna_aie2p_npu2_profiles[i].device_profile_id;
       break;
     }
-  }
-  if (device_profile_id == 0) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "no NPU2 image target for '%.*s'",
-                            (int)target_id.size, target_id.data);
   }
   if (context_column_count == 0 || context_column_count > 8) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,

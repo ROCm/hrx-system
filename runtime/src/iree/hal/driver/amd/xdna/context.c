@@ -116,6 +116,10 @@ static iree_status_t iree_hal_amd_xdna_context_open(
       context->xdna->endpoint_query_info(context->endpoint,
                                          &context->endpoint_info),
       "xdna.endpoint_query_info"));
+  if (context->endpoint_info.architecture != AMDF_XDNA_ARCHITECTURE_AIE2P) {
+    return iree_make_status(IREE_STATUS_INCOMPATIBLE,
+                            "XDNA executable loading requires AIE2P");
+  }
   IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_aie2p_npu2_target_initialize(
       iree_make_cstring_view(context->endpoint_info.target_id), column_count,
       &context->target));

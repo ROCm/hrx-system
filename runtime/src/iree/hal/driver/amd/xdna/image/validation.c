@@ -351,6 +351,7 @@ iree_status_t iree_hal_amd_xdna_image_validate(
           IREE_XDNA_ELF_AIE2P_FLAGS ||
       header->target_generation != IREE_XDNA_TARGET_GENERATION_AIE2P ||
       header->native_encoding != IREE_XDNA_ELF_NATIVE_TRANSACTION_0_1 ||
+      !target->identity.device_profile_id ||
       header->device_profile_revision !=
           target->identity.device_profile_revision ||
       header->device_profile_id != target->identity.device_profile_id ||

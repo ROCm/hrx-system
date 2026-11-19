@@ -7,6 +7,7 @@
 #include <cstring>
 #include <vector>
 
+#include "iree/hal/driver/amd/xdna/image/aie2p/npu2.h"
 #include "iree/hal/driver/amd/xdna/image/image.h"
 #include "iree/hal/driver/amd/xdna/image/testdata/aie/full_elf_42.h"
 #include "iree/hal/driver/amd/xdna/image/testing/image_fixture.h"
@@ -17,7 +18,6 @@ namespace {
 
 using iree::Status;
 using iree::StatusCode;
-using iree::hal::amd::xdna::testing::MakeImageTarget;
 using iree::hal::amd::xdna::testing::MakeOwnedByteSequence;
 
 // Test edits use the producer's named sections. Only called on the original
@@ -41,7 +41,10 @@ uint8_t* Section(std::vector<uint8_t>& bytes, const char* name) {
 class AieFullElfTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    target_ = MakeImageTarget();
+    // This producer targets the AIE2P architecture and carries no Loom
+    // execution-profile ID. Exercise the loader on an unlisted endpoint.
+    IREE_ASSERT_OK(iree_hal_amd_xdna_aie2p_npu2_target_initialize(
+        IREE_SV("amd.xdna.unlisted"), 1, &target_));
     target_.supports_load_pdi = true;
     // The first file uses a single PDI. The second can reinitialize a
     // placement.
