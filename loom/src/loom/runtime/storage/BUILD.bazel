@@ -41,7 +41,11 @@ loom_cc_library(
     srcs = ["backing_directory.c"],
     hdrs = ["backing_directory.h"],
     visibility = ["//visibility:private"],
-    deps = ["//runtime/src/iree/base"],
+    deps = [
+        ":backing_pages",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
 )
 
 loom_cc_library(
@@ -59,6 +63,17 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "backing_plan",
+    srcs = ["backing_plan.c"],
+    hdrs = ["backing_plan.h"],
+    deps = [
+        ":backing_pages",
+        "//loom/src/loom/util:adaptive_sort",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "memory_geometry",
     srcs = ["memory_geometry.c"],
     hdrs = ["memory_geometry.h"],
@@ -70,12 +85,17 @@ loom_cc_library(
 
 loom_cc_library(
     name = "memory",
-    srcs = ["memory.c"],
+    srcs = [
+        "memory.c",
+        "memory_reservation.c",
+        "memory_reservation.h",
+    ],
     hdrs = ["memory.h"],
     visibility = ["//visibility:public"],
     deps = [
         ":backing_directory",
         ":backing_pages",
+        ":backing_plan",
         ":memory_geometry",
         "//loom/src/loom/runtime:wake",
         "//loom/src/loom/runtime/storage:statistics",

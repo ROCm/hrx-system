@@ -310,10 +310,11 @@ void loom_runtime_virtual_buffer_select_backing(
     loom_runtime_virtual_buffer_t* buffer, iree_device_size_t offset,
     iree_device_size_t length);
 
-// Visits selected whole mappings once, in unspecified order, and clears all
-// marks even if a visitor fails. The visitor may allocate host query scratch,
-// but cannot mutate backing or reenter admission. Accepted pending and failed
-// mappings remain selected until their physical ownership actually retires.
+// Visits the selected pages once as disjoint byte ranges in unspecified order.
+// Adjacent pages may share a callback. Clears all marks even if a visitor
+// fails. The visitor may allocate host query scratch, but cannot mutate backing
+// or reenter admission. Accepted pending and failed mappings remain selected
+// until their physical ownership actually retires.
 iree_status_t loom_runtime_virtual_buffer_visit_backing(
     loom_runtime_virtual_buffer_t* buffer,
     iree_status_t (*visitor)(void* user_data, iree_device_size_t offset,
@@ -366,6 +367,8 @@ typedef struct loom_runtime_memory_commit_t {
   iree_host_size_t range_count;
   // Exclusive last selected mapping index in the final descriptor.
   iree_host_size_t last_mapping;
+  // Contiguous selections in first-visit order for the captured operation.
+  iree_host_size_t selection_count;
   // Exact number of distinct selected missing mappings.
   iree_host_size_t mapping_count;
   // Exact additional backing, excluding all already accepted ownership.

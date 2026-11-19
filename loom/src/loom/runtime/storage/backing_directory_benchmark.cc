@@ -17,10 +17,11 @@ static std::vector<iree_host_size_t> Populate(
   indexes.reserve(count);
   for (iree_host_size_t i = 0; i < count; ++i) {
     const iree_host_size_t index = i * 17;
-    loom_runtime_backing_entry_t* entry = nullptr;
-    IREE_CHECK_OK(
-        loom_runtime_backing_directory_insert(directory, index, &entry));
-    entry->in_flight = true;
+    loom_runtime_backing_group_t* entry = nullptr;
+    IREE_CHECK_OK(loom_runtime_backing_directory_insert(
+        directory, index / LOOM_RUNTIME_BACKING_GROUP_SIZE, &entry));
+    entry->in_flight |= UINT64_C(1)
+                        << (index % LOOM_RUNTIME_BACKING_GROUP_SIZE);
     indexes.push_back(index);
   }
   return indexes;
@@ -35,16 +36,19 @@ static void BM_MarkResidentSlots(benchmark::State& state) {
   const auto indexes = Populate(state.range(0), &directory);
   for (auto _ : state) {
     for (const iree_host_size_t index : indexes) {
-      loom_runtime_backing_entry_t* entry = nullptr;
-      IREE_CHECK_OK(
-          loom_runtime_backing_directory_insert(&directory, index, &entry));
+      loom_runtime_backing_group_t* entry = nullptr;
+      IREE_CHECK_OK(loom_runtime_backing_directory_insert(
+          &directory, index / LOOM_RUNTIME_BACKING_GROUP_SIZE, &entry));
       benchmark::DoNotOptimize(entry);
-      entry->counted = true;
+      entry->selected |= UINT64_C(1)
+                         << (index % LOOM_RUNTIME_BACKING_GROUP_SIZE);
     }
     for (const iree_host_size_t index : indexes) {
-      auto* entry = loom_runtime_backing_directory_find(&directory, index);
+      auto* entry = loom_runtime_backing_directory_find(
+          &directory, index / LOOM_RUNTIME_BACKING_GROUP_SIZE);
       benchmark::DoNotOptimize(entry);
-      entry->counted = false;
+      entry->selected &=
+          ~(UINT64_C(1) << (index % LOOM_RUNTIME_BACKING_GROUP_SIZE));
     }
   }
   state.SetItemsProcessed(state.iterations() * indexes.size());
@@ -63,14 +67,20 @@ static void BM_DeniedSparseGrowth(benchmark::State& state) {
   const iree_host_size_t missing_origin = state.range(0) * 17 + 1;
   for (auto _ : state) {
     for (iree_host_size_t i = 0; i < missing_count; ++i) {
-      loom_runtime_backing_entry_t* entry = nullptr;
+      const iree_host_size_t index = missing_origin + i * 17;
+      loom_runtime_backing_group_t* entry = nullptr;
       IREE_CHECK_OK(loom_runtime_backing_directory_insert(
-          &directory, missing_origin + i * 17, &entry));
+          &directory, index / LOOM_RUNTIME_BACKING_GROUP_SIZE, &entry));
+      entry->pending_commit |= UINT64_C(1)
+                               << (index % LOOM_RUNTIME_BACKING_GROUP_SIZE);
     }
     for (iree_host_size_t i = 0; i < missing_count; ++i) {
+      const iree_host_size_t index = missing_origin + i * 17;
       auto* entry = loom_runtime_backing_directory_find(
-          &directory, missing_origin + i * 17);
-      loom_runtime_backing_directory_remove(&directory, entry);
+          &directory, index / LOOM_RUNTIME_BACKING_GROUP_SIZE);
+      entry->pending_commit &=
+          ~(UINT64_C(1) << (index % LOOM_RUNTIME_BACKING_GROUP_SIZE));
+      loom_runtime_backing_directory_prune(&directory, entry);
     }
     IREE_CHECK_OK(loom_runtime_backing_directory_shrink(&directory));
   }

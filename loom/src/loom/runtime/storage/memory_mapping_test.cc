@@ -29,12 +29,17 @@ class MemoryMappingTest : public loom_runtime::testing::memory::MemoryTest {
 TEST_F(MemoryMappingTest, PendingMappingDefersOnlyIntersectingCommitments) {
   const auto geometry = loom_runtime_pool_state_geometry(storage_owner);
   const uint64_t page = geometry.mapping_size;
+  // The selected prefix crosses into the group containing the pending edit.
+  // A ready page in that same group remains independently usable.
+  const uint64_t changing_offset = 64 * page;
+  const uint64_t ready_offset = changing_offset + 2 * page;
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
-      pool, geometry, 4 * page, 256, &statistics[0], &first));
+      pool, geometry, ready_offset + page, 256, &statistics[0], &first));
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(pool, geometry, page, 256,
                                                       &statistics[1], &second));
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, page));
-  RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, ready_offset, page));
+  RoundTrip(loom_runtime_virtual_buffer_handle(first), ready_offset,
+            0x12345678);
 
   for (bool unmap : {false, true}) {
     SCOPED_TRACE(unmap ? "pending unmap" : "pending bind");
@@ -57,7 +62,7 @@ TEST_F(MemoryMappingTest, PendingMappingDefersOnlyIntersectingCommitments) {
         semaphore, release_gate);
     mapping_queue.ClearMappings();
     mapping_queue.gate_next_mapping = semaphore;
-    const loom_runtime_memory_range_t changing = {first, 2 * page, page};
+    const loom_runtime_memory_range_t changing = {first, changing_offset, page};
     loom_runtime_memory_admission_t admission;
     loom_runtime_memory_operation_t* operation = nullptr;
     if (unmap) {
@@ -73,18 +78,19 @@ TEST_F(MemoryMappingTest, PendingMappingDefersOnlyIntersectingCommitments) {
     EXPECT_FALSE(loom_runtime_memory_operation_is_complete(pending.get()));
 
     // Ready data in the same reservation neither waits nor submits a mapping.
-    const loom_runtime_memory_range_t ready = {first, 0, page};
+    const loom_runtime_memory_range_t ready = {first, ready_offset, page};
     IREE_ASSERT_OK(loom_runtime_memory_pool_commit_async(
         pool, 1, &ready, nullptr, 0, &admission, &operation));
     EXPECT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
     EXPECT_EQ(operation, nullptr);
-    CheckRetained(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
+    CheckRetained(loom_runtime_virtual_buffer_handle(first), ready_offset,
+                  0x12345678);
     EXPECT_FALSE(loom_runtime_memory_operation_is_complete(pending.get()));
 
     // A partially selected prefix spans both descriptors and buffers. Overlap
     // must cancel it before pressure, allocation, or native submission.
-    const loom_runtime_memory_range_t ranges[] = {{second, 0, page},
-                                                  {first, page, 3 * page}};
+    const loom_runtime_memory_range_t ranges[] = {
+        {second, 0, page}, {first, changing_offset - page, 3 * page}};
     const auto before = loom_runtime_memory_pool_statistics(pool);
     loom_runtime_memory_commit_t prepared = {};
     IREE_ASSERT_OK(loom_runtime_memory_pool_prepare_commit(
@@ -117,13 +123,17 @@ TEST_F(MemoryMappingTest, PendingMappingDefersOnlyIntersectingCommitments) {
     ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
     const auto completed = AwaitOperation(operation);
     IREE_ASSERT_OK(loom_runtime_memory_operation_query_status(operation));
-    RoundTrip(loom_runtime_virtual_buffer_handle(first), page, 0x87654321);
+    RoundTrip(loom_runtime_virtual_buffer_handle(first), changing_offset - page,
+              0x87654321);
     RoundTrip(loom_runtime_virtual_buffer_handle(second), 0, 0xabcdef01);
-    CheckRetained(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
+    CheckRetained(loom_runtime_virtual_buffer_handle(first), ready_offset,
+                  0x12345678);
 
     // Leave the changing page bound for the next iteration's unmap.
     const loom_runtime_memory_range_t releases[] = {
-        {first, page, page}, {first, 3 * page, page}, {second, 0, page}};
+        {first, changing_offset - page, page},
+        {first, changing_offset + page, page},
+        {second, 0, page}};
     IREE_ASSERT_OK(loom_runtime_memory_pool_trim_async(
         pool, IREE_ARRAYSIZE(releases), releases, nullptr, 0, &operation));
     const auto trimmed = AwaitOperation(operation);
@@ -257,6 +267,81 @@ TEST_F(MemoryMappingTest, ColdGrowthPacksAlignedRunsBeforeExistingHoles) {
   IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
   EXPECT_EQ(loom_runtime_memory_pool_statistics(pool).committed_bytes, parent);
   CheckRetained(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
+}
+
+TEST_F(MemoryMappingTest, PackedClaimStopsAtLivePagesInsideOneParent) {
+  const auto geometry = loom_runtime_pool_state_geometry(storage_owner);
+  const uint64_t page = geometry.mapping_size;
+  const uint64_t parent = geometry.backing_size;
+  ASSERT_GE(parent, 8 * page);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool, geometry, parent, geometry.granularity, &statistics[0], &first));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, parent));
+  RoundTrip(loom_runtime_virtual_buffer_handle(first), 3 * page, 0x12345678);
+  IREE_ASSERT_OK(Trim(first, page, 2 * page));
+  IREE_ASSERT_OK(Trim(first, 4 * page, 3 * page));
+  mapping_queue.ClearMappings();
+
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool, geometry, 5 * page, geometry.granularity, &statistics[1], &second));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(second, 0, 5 * page));
+  const auto mappings = mapping_queue.WaitForMappings(1)[0].updates;
+  ASSERT_EQ(mappings.size(), 2u);
+  EXPECT_EQ(mappings[0].source, mappings[1].source);
+  EXPECT_EQ(mappings[0].target_range.byte_offset, 0u);
+  EXPECT_EQ(mappings[0].target_range.byte_length, 2 * page);
+  EXPECT_EQ(mappings[0].source_offset, page);
+  EXPECT_EQ(mappings[1].target_range.byte_offset, 2 * page);
+  EXPECT_EQ(mappings[1].target_range.byte_length, 3 * page);
+  EXPECT_EQ(mappings[1].source_offset, 4 * page);
+  RoundTrip(loom_runtime_virtual_buffer_handle(second), 2 * page, 0xaabbccdd);
+  CheckRetained(loom_runtime_virtual_buffer_handle(first), 3 * page,
+                0x12345678);
+}
+
+TEST_F(MemoryMappingTest, FailedCaptureReturnsEveryFragmentBeforeRetry) {
+  const auto geometry = loom_runtime_pool_state_geometry(storage_owner);
+  const uint64_t page = geometry.mapping_size;
+  const uint64_t parent = geometry.backing_size;
+  ASSERT_GE(parent, 8 * page);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool, geometry, parent, geometry.granularity, &statistics[0], &first));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, parent));
+  RoundTrip(loom_runtime_virtual_buffer_handle(first), 3 * page, 0x12345678);
+  for (uint64_t index : {2u, 4u, 6u}) {
+    IREE_ASSERT_OK(Trim(first, index * page, page));
+  }
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool, geometry, 3 * page, geometry.granularity, &statistics[1], &second));
+  const loom_runtime_memory_range_t range = {second, 0, 3 * page};
+  loom_runtime_memory_admission_t admission;
+  loom_runtime_memory_commit_t commit;
+  IREE_ASSERT_OK(loom_runtime_memory_pool_prepare_commit(pool, 1, &range,
+                                                         &admission, &commit));
+  ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
+
+  // The last fragment forces the captured run array to grow. All prior leases
+  // and the most recently claimed slot must return to their original parent.
+  native.FailNextAllocation(IREE_ALLOCATOR_COMMAND_REALLOC);
+  loom_runtime_memory_operation_t* operation = nullptr;
+  IREE_ASSERT_OK(loom_runtime_memory_pool_commit_prepared_async(
+      pool, &commit, {}, nullptr, 0, &admission, &operation));
+  const auto completed = AwaitOperation(operation);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_runtime_memory_operation_query_status(operation));
+  EXPECT_EQ(statistics[1].committed_bytes, 0u);
+  EXPECT_EQ(statistics[1].pending_bytes, 0u);
+
+  mapping_queue.ClearMappings();
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(second, 0, 3 * page));
+  const auto mappings = mapping_queue.WaitForMappings(1)[0].updates;
+  ASSERT_EQ(mappings.size(), 3u);
+  for (size_t i = 0; i < mappings.size(); ++i) {
+    EXPECT_EQ(mappings[i].source, mappings[0].source);
+    EXPECT_EQ(mappings[i].source_offset, (2 + 2 * i) * page);
+  }
+  CheckRetained(loom_runtime_virtual_buffer_handle(first), 3 * page,
+                0x12345678);
 }
 
 TEST_F(MemoryMappingTest, ContiguousRunKeepsIndependentPageOwnership) {

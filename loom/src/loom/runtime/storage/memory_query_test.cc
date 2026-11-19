@@ -117,18 +117,21 @@ TEST_F(MemoryTest, FailedPreparedCommitAllocationLeavesRetryIntact) {
 TEST_F(MemoryTest, FailedCancellationShrinkClearsSelectionAndKeepsLiveData) {
   const auto geometry = loom_runtime_pool_state_geometry(storage_owner);
   const uint64_t page = geometry.mapping_size;
+  // Spread the rejected selection over enough directory words to require
+  // compaction when only the original page survives.
+  constexpr uint64_t kPages = 1024;
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
-      pool, geometry, 33 * page, 256, &statistics[0], &first));
+      pool, geometry, kPages * page, 256, &statistics[0], &first));
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, page));
   RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
 
-  const loom_runtime_memory_range_t range = {first, 0, 33 * page};
+  const loom_runtime_memory_range_t range = {first, 0, kPages * page};
   loom_runtime_memory_admission_t admission;
   loom_runtime_memory_commit_t prepared = {};
   IREE_ASSERT_OK(loom_runtime_memory_pool_prepare_commit(
       pool, 1, &range, &admission, &prepared));
   ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
-  EXPECT_EQ(prepared.mapping_count, 32u);
+  EXPECT_EQ(prepared.mapping_count, kPages - 1);
   native.FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                         loom_runtime_memory_pool_cancel_commit(&prepared));
@@ -141,8 +144,9 @@ TEST_F(MemoryTest, FailedCancellationShrinkClearsSelectionAndKeepsLiveData) {
   IREE_ASSERT_OK(loom_runtime_memory_pool_prepare_commit(
       pool, 1, &range, &admission, &prepared));
   ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
-  EXPECT_EQ(prepared.mapping_count, 32u);
-  EXPECT_EQ(loom_runtime_memory_demand_total(prepared.demand), 32 * page);
+  EXPECT_EQ(prepared.mapping_count, kPages - 1);
+  EXPECT_EQ(loom_runtime_memory_demand_total(prepared.demand),
+            (kPages - 1) * page);
   IREE_ASSERT_OK(loom_runtime_memory_pool_cancel_commit(&prepared));
 }
 
