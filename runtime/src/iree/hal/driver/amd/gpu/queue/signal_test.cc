@@ -165,6 +165,9 @@ TEST(SignalTest, AliasesRetainPhysicalStorageAndIndependentFrontiers) {
   iree_hal_amd_gpu_signal_join_frontier(alias, second.size(), second.data());
   EXPECT_EQ(first, (std::array<uint64_t, 2>{7, 3}));
   EXPECT_EQ(second, (std::array<uint64_t, 2>{8, 3}));
+  EXPECT_EQ(iree_hal_amd_gpu_signal_frontier_epoch(physical, 0), 7u);
+  EXPECT_EQ(iree_hal_amd_gpu_signal_frontier_epoch(alias, 0), 8u);
+  EXPECT_EQ(iree_hal_amd_gpu_signal_frontier_epoch(alias, 2), 0u);
   iree_hal_amd_gpu_signal_retain(alias);
   iree_hal_amd_gpu_signal_retire(physical, IREE_STATUS_OK);
   iree_hal_amd_gpu_signal_release(physical);
@@ -191,6 +194,23 @@ TEST(SignalTest, AliasesRetainPhysicalStorageAndIndependentFrontiers) {
   EXPECT_EQ(storage.values[1], 9u);
   iree_hal_amd_gpu_signal_release(reused_alias);
   iree_hal_amd_gpu_signal_release(reused_physical);
+}
+
+TEST(SignalTest, ChainedAliasesReleaseIntermediateSlotsIndependently) {
+  Storage<3> storage;
+  auto* physical = iree_hal_amd_gpu_signal_pool_try_acquire(&storage.pool, 0);
+  auto* middle =
+      iree_hal_amd_gpu_signal_pool_try_acquire_alias(&storage.pool, physical);
+  auto* last =
+      iree_hal_amd_gpu_signal_pool_try_acquire_alias(&storage.pool, middle);
+  iree_hal_amd_gpu_signal_release(physical);
+  iree_hal_amd_gpu_signal_release(middle);
+  auto* reused = iree_hal_amd_gpu_signal_pool_try_acquire(&storage.pool, 9);
+  EXPECT_EQ(reused, middle);
+  EXPECT_EQ(last->completion, physical);
+  EXPECT_EQ(*last->host_value, 0u);
+  iree_hal_amd_gpu_signal_release(last);
+  iree_hal_amd_gpu_signal_release(reused);
 }
 
 TEST(SignalTest, ReturnedOlderBlockIsImmediatelyAvailable) {

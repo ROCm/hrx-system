@@ -330,6 +330,47 @@ void iree_hal_amd_gpu_pm4_queue_notify_failure(iree_hal_queue_t* base) {
 static void iree_hal_amd_gpu_pm4_allocation_ready(void* user_data,
                                                   iree_status_t status);
 
+// A retained wait on the last local publication covers the queue prefix.
+// Other live waits must name the same physical cell. Folding a foreign wait
+// would falsely publish it as joined on this FIFO and could let a subsequent
+// local compute barrier elide its device wait.
+static bool iree_hal_amd_gpu_pm4_allocation_completion(
+    const iree_hal_amd_gpu_pm4_queue_t* queue,
+    const iree_hal_amd_gpu_pm4_submission_t* submission, uint64_t position,
+    iree_hal_amd_gpu_signal_t** out_completion) {
+  *out_completion = NULL;
+  if (!queue->kernel || queue->options.feedback ||
+      iree_hal_amd_gpu_allocation_requires_host_wait(
+          submission->allocation.operation)) {
+    return false;
+  }
+  bool covers_prefix = false;
+  for (iree_host_size_t i = 0; i < submission->wait_count; ++i) {
+    iree_hal_amd_gpu_signal_t* signal = submission->waits[i].signal;
+    if (!signal) {
+      continue;
+    }
+    iree_status_code_t code;
+    if (iree_hal_amd_gpu_signal_query_retirement(signal, &code)) {
+      if (code != IREE_STATUS_OK) {
+        return false;
+      }
+      continue;
+    }
+    if (signal->block->pool != &queue->options.signals->pool ||
+        (*out_completion &&
+         (*out_completion)->device_address != signal->device_address)) {
+      return false;
+    }
+    *out_completion = signal;
+    covers_prefix |= iree_hal_amd_gpu_signal_frontier_epoch(
+                         signal, queue->options.queue_ordinal) == position;
+  }
+  return covers_prefix ||
+         position == (uint64_t)iree_atomic_load(&queue->completed.count,
+                                                iree_memory_order_acquire);
+}
+
 // Publishes an owned capture. Immediate retirement may free it before return.
 static iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish(
     iree_hal_amd_gpu_pm4_queue_t* queue,
@@ -399,6 +440,12 @@ static iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish(
     }
     iree_atomic_fetch_sub(&queue->pending.host_owners, 1,
                           iree_memory_order_release);
+    iree_hal_amd_gpu_signal_t* completion = NULL;
+    if (iree_hal_amd_gpu_pm4_allocation_completion(queue, submission, position,
+                                                   &completion)) {
+      return iree_hal_amd_gpu_pm4_publish_allocation(queue, submission,
+                                                     position, completion);
+    }
   }
   if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER) {
     return iree_hal_amd_gpu_pm4_publish_transfer(queue, submission, position);
@@ -1224,25 +1271,24 @@ static bool iree_hal_amd_gpu_pm4_retire(
   const uint64_t initial = position;
   bool waiting_for_producer = false;
   for (; position != limit; ++position) {
-    if (queue->kernel &&
-        queue->kernel->points[position & queue->retirement.capacity_mask] >
-            native_retired) {
+    const uint64_t slot = position & queue->retirement.capacity_mask;
+    const uint64_t native_point =
+        queue->kernel ? queue->kernel->points[slot] : 0;
+    if (native_point > native_retired) {
       *out_wait = (iree_hal_amd_gpu_completion_wait_t){
           .address = queue->kernel->progress,
           .value = (int64_t)native_retired,
           .is_64_bit = true,
           .pending = true};
-      const amdf_status_t status = iree_hal_amd_gpu_pm4_kmq_storage_arm(
-          queue->kernel,
-          queue->kernel->points[position & queue->retirement.capacity_mask]);
+      const amdf_status_t status =
+          iree_hal_amd_gpu_pm4_kmq_storage_arm(queue->kernel, native_point);
       if (!amdf_status_is_ok(status)) {
         iree_hal_amd_gpu_pm4_fail_native(queue, status,
                                          "kernel_queue_request_notification");
       }
       break;
     }
-    iree_hal_amd_gpu_pm4_retirement_t* action =
-        &queue->issued[position & queue->retirement.capacity_mask].action;
+    iree_hal_amd_gpu_pm4_retirement_t* action = &queue->issued[slot].action;
     iree_hal_amd_gpu_pm4_submission_t* submission =
         iree_hal_amd_gpu_pm4_retirement_submission(action);
     const bool terminal = iree_hal_amd_gpu_pm4_retirement_is_terminal(action);
@@ -1259,7 +1305,8 @@ static bool iree_hal_amd_gpu_pm4_retire(
         };
         break;
       }
-    } else if (!iree_hal_amd_gpu_pm4_retirement_poll(&queue->retirement,
+    } else if ((!queue->kernel || native_point) &&
+               !iree_hal_amd_gpu_pm4_retirement_poll(&queue->retirement,
                                                      position)) {
       break;
     }

@@ -60,7 +60,17 @@ static uint32_t* iree_hal_amd_gpu_pm4_wait_emit(
   return words;
 }
 
-// Native acceptance is irrevocable here. Finish every capture access before
+static bool iree_hal_amd_gpu_pm4_needs_native_signal(
+    iree_hal_semaphore_list_t signals) {
+  for (iree_host_size_t i = 0; i < signals.count; ++i) {
+    if (iree_hal_amd_gpu_semaphore_isa(signals.semaphores[i])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Acceptance is irrevocable here. Finish every capture access before
 // exposing the retirement record, transferring the final publication reference
 // directly to completion. Only a piece with an unpublished suffix needs another
 // reference. No capture access follows count publication or native
@@ -168,6 +178,34 @@ iree_hal_amd_gpu_pm4_publish_accepted(
   }
   return terminal ? IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED
                   : IREE_HAL_AMD_GPU_PM4_PUBLICATION_MORE;
+}
+
+iree_hal_amd_gpu_pm4_publication_result_t
+iree_hal_amd_gpu_pm4_publish_allocation(
+    iree_hal_amd_gpu_pm4_queue_t* queue,
+    iree_hal_amd_gpu_pm4_submission_t* submission, uint64_t position,
+    iree_hal_amd_gpu_signal_t* completion) {
+  if (iree_hal_amd_gpu_pm4_needs_native_signal(submission->signals)) {
+    iree_hal_amd_gpu_signal_pool_t* pool = &queue->options.signals->pool;
+    submission->signal =
+        completion
+            ? iree_hal_amd_gpu_signal_pool_try_acquire_alias(pool, completion)
+            : iree_hal_amd_gpu_signal_pool_try_acquire(pool, 1);
+    if (!submission->signal) {
+      return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_SIGNALS;
+    }
+  }
+  // Retirement drains the prior native prefix before this slot and checks the
+  // captured producer outcomes. No command bytes or kernel point are consumed.
+  const uint64_t slot = position & queue->retirement.capacity_mask;
+  queue->kernel->points[slot] = 0;
+  queue->issued[slot].action = (iree_hal_amd_gpu_pm4_retirement_t){
+      .tagged_submission = (uintptr_t)submission | 1u,
+      .consumed_words = queue->producer.ring.reserved_words,
+      .consumed_arguments = queue->producer.arguments->end,
+  };
+  return iree_hal_amd_gpu_pm4_publish_accepted(queue, submission, position,
+                                               true);
 }
 
 // The exclusive publisher keeps one prepared, unaccepted KERNEL piece. Native
@@ -394,14 +432,9 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
   if (chunk.download.length) {
     after.release_cache_control |= queue->options.barriers.release;
   }
-  bool native_signal = false;
-  for (iree_host_size_t i = 0;
-       terminal && !transfer->host_completion_required &&
-       i < submission->signals.count;
-       ++i) {
-    native_signal |=
-        iree_hal_amd_gpu_semaphore_isa(submission->signals.semaphores[i]);
-  }
+  const bool native_signal =
+      terminal && !transfer->host_completion_required &&
+      iree_hal_amd_gpu_pm4_needs_native_signal(submission->signals);
   const iree_hal_amd_gpu_signal_pool_t* joined_pool =
       iree_hal_amd_gpu_pm4_joined_signal_pool(queue, before);
   const uint32_t wait_words =
@@ -539,11 +572,8 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
       queue->kernel != NULL);
   const uint32_t prefix_words =
       submission->native_wait_count * 7 + scratch_words + program_words - 4;
-  bool native_signal = false;
-  for (iree_host_size_t i = 0; i < submission->signals.count; ++i) {
-    native_signal |=
-        iree_hal_amd_gpu_semaphore_isa(submission->signals.semaphores[i]);
-  }
+  const bool native_signal =
+      iree_hal_amd_gpu_pm4_needs_native_signal(submission->signals);
   const iree_hal_amd_gpu_pm4_barrier_t after = {
       .release_cache_control =
           sample_length ? queue->options.barriers.release : 0,
@@ -752,11 +782,8 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_dispatch(
                                 indirect_copy_count)
                           : 5)
                : 0;
-  bool native_signal = false;
-  for (iree_host_size_t i = 0; i < request->signals.count; ++i) {
-    native_signal |=
-        iree_hal_amd_gpu_semaphore_isa(request->signals.semaphores[i]);
-  }
+  const bool native_signal =
+      iree_hal_amd_gpu_pm4_needs_native_signal(request->signals);
   const uint32_t scratch_words = iree_hal_amd_gpu_pm4_scratch_word_count(
       &queue->producer.scratch, scratch_required, queue->kernel != NULL);
   const iree_hal_amd_gpu_signal_pool_t* joined_pool =
@@ -998,11 +1025,8 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_control(
   // Every earlier publication joins its own DMA before leaving the CP.
   before.execution &= ~IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
   after.execution &= ~IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
-  bool native_signal = false;
-  for (iree_host_size_t i = 0; i < submission->signals.count; ++i) {
-    native_signal |=
-        iree_hal_amd_gpu_semaphore_isa(submission->signals.semaphores[i]);
-  }
+  const bool native_signal =
+      iree_hal_amd_gpu_pm4_needs_native_signal(submission->signals);
   const iree_hal_amd_gpu_signal_pool_t* joined_pool =
       iree_hal_amd_gpu_pm4_joined_signal_pool(queue, before);
   const uint32_t wait_words = iree_hal_amd_gpu_pm4_wait_word_count(

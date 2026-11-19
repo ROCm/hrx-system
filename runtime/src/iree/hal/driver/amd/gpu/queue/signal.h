@@ -225,9 +225,9 @@ bool iree_hal_amd_gpu_signal_pool_has_available(
 iree_hal_amd_gpu_signal_t* iree_hal_amd_gpu_signal_pool_try_acquire(
     iree_hal_amd_gpu_signal_pool_t* pool, uint64_t initial_value);
 
-// Acquires independent logical ownership of a physical completion. The producer
-// keeps that completion unpublished until this operation has been encoded into
-// the same ordered run. The alias retains the physical cell for native readers.
+// Acquires an independent logical signal backed by the same physical cell.
+// The publisher proves that cell covers the operation before exposing the
+// alias. Its frontier and host retirement belong to the new logical producer.
 iree_hal_amd_gpu_signal_t* iree_hal_amd_gpu_signal_pool_try_acquire_alias(
     iree_hal_amd_gpu_signal_pool_t* pool,
     iree_hal_amd_gpu_signal_t* completion);
@@ -239,6 +239,11 @@ iree_hal_amd_gpu_signal_t* iree_hal_amd_gpu_signal_pool_try_acquire_alias(
 // immutable snapshot, even after the producer queue advances or disappears.
 void iree_hal_amd_gpu_signal_publish_frontier(iree_hal_amd_gpu_signal_t* signal,
                                               const uint64_t* frontier);
+
+// Returns the named coordinate of the retained producer's immutable frontier.
+// Coordinates added after its publication have epoch zero.
+uint64_t iree_hal_amd_gpu_signal_frontier_epoch(
+    const iree_hal_amd_gpu_signal_t* signal, uint32_t queue_ordinal);
 
 // Joins the retained producer's immutable snapshot into an invocation's
 // candidate frontier of queue_count entries. Cold membership expansion can

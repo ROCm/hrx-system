@@ -16,7 +16,7 @@ extern "C" {
 struct iree_hal_amd_gpu_pm4_queue_t;
 
 // A publication either transfers its admitted ownership or retains a precise
-// unmet resource demand. Only native acceptance grants retirement ownership.
+// unmet resource demand. Accepted work transfers to the retirement owner.
 typedef enum iree_hal_amd_gpu_pm4_publication_result_e {
   IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED,
   IREE_HAL_AMD_GPU_PM4_PUBLICATION_MORE,
@@ -78,6 +78,15 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
 iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_control(
     struct iree_hal_amd_gpu_pm4_queue_t* queue,
     iree_hal_amd_gpu_pm4_submission_t* submission, uint64_t position);
+
+// Publishes prepared pool ownership with its own frontier and host outcome.
+// The retained local completion covers all native work, or is NULL when the
+// queue and waits have already retired. Neither case needs a kernel command.
+iree_hal_amd_gpu_pm4_publication_result_t
+iree_hal_amd_gpu_pm4_publish_allocation(
+    struct iree_hal_amd_gpu_pm4_queue_t* queue,
+    iree_hal_amd_gpu_pm4_submission_t* submission, uint64_t position,
+    iree_hal_amd_gpu_signal_t* completion);
 
 // Retries exactly the prepared KERNEL piece. BUSY preserves its bytes and
 // borrows; rejection rolls back unpublished storage and consumes the capture.
