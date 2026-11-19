@@ -2719,44 +2719,54 @@ iree_status_t iree_hal_streaming_memory_memset(
         z0, lookup_status, "resolving `dst` buffer ref %p", (void*)dst);
   }
 
-  if ((dst_ref.buffer->memory_kind == IREE_HAL_STREAMING_MEMORY_KIND_MANAGED) &&
+  const iree_hal_fill_region_t region = {
+      .row_length = length,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  iree_status_t status = iree_hal_streaming_memory_memset_resolved(
+      dst_ref, pattern, pattern_length, &region, stream);
+  iree_hal_streaming_context_release(owner_context);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+iree_status_t iree_hal_streaming_memory_memset_resolved(
+    iree_hal_streaming_buffer_ref_t dst_ref, const void* pattern,
+    iree_host_size_t pattern_length, const iree_hal_fill_region_t* region,
+    iree_hal_streaming_stream_t* stream) {
+  if ((dst_ref.buffer->memory_kind == IREE_HAL_STREAMING_MEMORY_KIND_MANAGED ||
+       !dst_ref.buffer->buffer) &&
       dst_ref.buffer->host_ptr) {
-    iree_status_t sync_status = iree_hal_streaming_stream_synchronize(stream);
-    if (!iree_status_is_ok(sync_status)) {
-      iree_hal_streaming_context_release(owner_context);
-      IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, sync_status);
+    // Host writes participate in stream order even when this registration has
+    // no native buffer. The caller's storage remains borrowed until return.
+    IREE_RETURN_IF_ERROR(iree_hal_streaming_stream_synchronize(stream));
+    uint8_t* base = (uint8_t*)dst_ref.buffer->host_ptr + dst_ref.offset;
+    for (uint64_t slice = 0; slice < region->slice_count; ++slice) {
+      for (uint64_t row = 0; row < region->row_count; ++row) {
+        iree_hal_streaming_repeat_pattern(
+            base + slice * region->target_strides.slice_stride +
+                row * region->target_strides.row_stride,
+            region->row_length, pattern, pattern_length);
+      }
     }
-    uint8_t* dest = (uint8_t*)dst_ref.buffer->host_ptr + dst_ref.offset;
-    iree_hal_streaming_repeat_pattern(dest, length, pattern, pattern_length);
-    iree_hal_streaming_context_release(owner_context);
-    IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
-
-  // Fallback for imported host memory that could not be represented as a HAL
-  // buffer.
   if (!dst_ref.buffer->buffer) {
-    if (dst_ref.buffer->host_ptr) {
-      uint8_t* dest = (uint8_t*)dst_ref.buffer->host_ptr + dst_ref.offset;
-      iree_hal_streaming_repeat_pattern(dest, length, pattern, pattern_length);
-      iree_hal_streaming_context_release(owner_context);
-      IREE_TRACE_ZONE_END(z0);
-      return iree_ok_status();
-    }
-    iree_hal_streaming_context_release(owner_context);
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                             "no buffer available for memset"));
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "no buffer available for memset");
   }
 
+  const iree_device_size_t span = iree_hal_transfer_range_length(
+      region->row_length, region->row_count, region->slice_count,
+      &region->target_strides);
+  const iree_hal_buffer_ref_t target_ref =
+      iree_hal_streaming_convert_range_buffer_ref(dst_ref, span);
   iree_slim_mutex_lock(&stream->mutex);
   iree_status_t status = iree_hal_streaming_stream_begin_locked(stream);
-
-  iree_hal_buffer_ref_t target_ref =
-      iree_hal_streaming_convert_range_buffer_ref(dst_ref, length);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_command_buffer_fill_buffer_linear(
-        stream->command_buffer, target_ref, pattern, pattern_length,
+    status = iree_hal_command_buffer_fill_buffer(
+        stream->command_buffer, target_ref, pattern, pattern_length, region,
         IREE_HAL_FILL_FLAG_NONE);
   }
   if (iree_status_is_ok(status)) {
@@ -2764,11 +2774,7 @@ iree_status_t iree_hal_streaming_memory_memset(
         stream->command_buffer, IREE_HAL_BARRIER_FLAG_NONE);
   }
   iree_slim_mutex_unlock(&stream->mutex);
-  iree_hal_streaming_context_release(owner_context);
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
-
-  IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  return status;
 }
 
 static iree_status_t iree_hal_streaming_enqueue_buffer_copy(

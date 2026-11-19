@@ -57,6 +57,7 @@ void HipGraphMemoryApiTest::SetUpTestSuite() {
   RESOLVE(set_fill, "hipGraphMemsetNodeSetParams");
   RESOLVE(set_executable_fill, "hipGraphExecMemsetNodeSetParams");
   RESOLVE(fill_2d_async, "hipMemset2DAsync");
+  RESOLVE(fill_3d_async, "hipMemset3DAsync");
   RESOLVE(add_empty, "hipGraphAddEmptyNode");
   RESOLVE(set_copy, "hipGraphMemcpyNodeSetParams1D");
   RESOLVE(set_executable_copy, "hipGraphExecMemcpyNodeSetParams1D");

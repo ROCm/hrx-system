@@ -159,4 +159,83 @@ TEST_F(HipGraphMemoryApiTest, CapturedPitchedFillLeavesPaddingUntouched) {
   }
 }
 
+TEST_F(HipGraphMemoryApiTest, ImmediateFillsPreserveRowAndSlicePadding) {
+  ASSERT_EQ(hipSuccess, api_.allocate(&device_, source_.size()));
+  for (bool volume : {false, true}) {
+    SCOPED_TRACE(volume);
+    source_.fill(0xCD);
+    EXPECT_EQ(hipSuccess,
+              api_.copy_async(device_, source_.data(), source_.size(),
+                              hipMemcpyHostToDevice, stream_));
+    if (volume) {
+      const hipPitchedPtr target = {static_cast<uint8_t*>(device_) + 3, 7, 7,
+                                    3};
+      EXPECT_EQ(hipSuccess,
+                api_.fill_3d_async(target, 0xA5, {3, 2, 2}, stream_));
+    } else {
+      EXPECT_EQ(hipSuccess,
+                api_.fill_2d_async(static_cast<uint8_t*>(device_) + 3, 13, 0xA5,
+                                   7, 3, stream_));
+    }
+    EXPECT_EQ(hipSuccess,
+              api_.copy_async(destination_.data(), device_, destination_.size(),
+                              hipMemcpyDeviceToHost, stream_));
+    ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
+    auto expected = source_;
+    for (size_t slice = 0; slice < (volume ? 2u : 1u); ++slice) {
+      for (size_t row = 0; row < (volume ? 2u : 3u); ++row) {
+        for (size_t column = 0; column < (volume ? 3u : 7u); ++column) {
+          expected[3 + slice * 21 + row * (volume ? 7 : 13) + column] = 0xA5;
+        }
+      }
+    }
+    EXPECT_EQ(destination_, expected);
+  }
+}
+
+TEST_F(HipGraphMemoryApiTest, CapturedVolumeFillPreservesPublicSliceNodes) {
+  ASSERT_EQ(hipSuccess, api_.allocate(&device_, source_.size()));
+  ASSERT_EQ(hipSuccess,
+            api_.begin_capture_to_graph(stream_, graph_, nullptr, nullptr, 0,
+                                        hipStreamCaptureModeGlobal));
+  const hipPitchedPtr target = {static_cast<uint8_t*>(device_) + 3, 7, 7, 3};
+  EXPECT_EQ(hipSuccess, api_.fill_3d_async(target, 0xA5, {3, 2, 2}, stream_));
+  hipGraph_t captured = nullptr;
+  ASSERT_EQ(hipSuccess, api_.end_capture(stream_, &captured));
+  ASSERT_EQ(captured, graph_);
+  std::array<hipGraphNode_t, 2> nodes = {};
+  size_t count = nodes.size();
+  ASSERT_EQ(hipSuccess, api_.get_nodes(graph_, nodes.data(), &count));
+  ASSERT_EQ(count, nodes.size());
+  for (auto node : nodes) {
+    hipMemsetParams params = {};
+    ASSERT_EQ(hipSuccess, api_.get_fill(node, &params));
+    EXPECT_EQ(params.width, 3u);
+    EXPECT_EQ(params.height, 2u);
+    EXPECT_EQ(params.pitch, 7u);
+    EXPECT_TRUE(params.dst == target.ptr ||
+                params.dst == static_cast<uint8_t*>(target.ptr) + 21);
+  }
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
+  for (int iteration = 0; iteration < 2; ++iteration) {
+    source_.fill(0x35);
+    ASSERT_EQ(hipSuccess, api_.copy(device_, source_.data(), source_.size(),
+                                    hipMemcpyHostToDevice));
+    Replay();
+    ASSERT_FALSE(HasFatalFailure());
+    ASSERT_EQ(hipSuccess,
+              api_.copy(destination_.data(), device_, destination_.size(),
+                        hipMemcpyDeviceToHost));
+    auto expected = source_;
+    for (size_t slice = 0; slice < 2; ++slice) {
+      for (size_t row = 0; row < 2; ++row) {
+        for (size_t column = 0; column < 3; ++column) {
+          expected[3 + slice * 21 + row * 7 + column] = 0xA5;
+        }
+      }
+    }
+    EXPECT_EQ(destination_, expected);
+  }
+}
+
 }  // namespace

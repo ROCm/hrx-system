@@ -91,6 +91,8 @@ struct HipGraphApi {
   decltype(&hipGraphExecMemsetNodeSetParams) set_executable_fill = nullptr;
   // Records or submits a pitched byte fill.
   decltype(&hipMemset2DAsync) fill_2d_async = nullptr;
+  // Records or submits a byte fill with independent row and slice strides.
+  decltype(&hipMemset3DAsync) fill_3d_async = nullptr;
   // Adds an explicit join after a set of independent operations.
   decltype(&hipGraphAddEmptyNode) add_empty = nullptr;
   // Updates a template's contiguous copy parameters.
