@@ -37,21 +37,31 @@ iree_status_t loom_target_specialize_module(
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_module_t** inout_module, uint32_t* out_error_count);
 
+// Specializes and binds an exclusively owned, unpublished module. A failed
+// working module is discarded by its owner. Uses caller scratch for target
+// facts and records the durable target definitions directly in |module|.
+iree_status_t loom_target_specialize_module_in_place(
+    const loom_target_environment_t* environment, loom_module_t* module,
+    loom_target_specialization_request_list_t requests,
+    loom_target_declaration_binding_list_t bindings,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    uint32_t* out_error_count);
+
 // Specializes every declaration-targeted function and every kernel entry in
-// |*inout_module| to |target_profile|.
+// |module| to |target_profile|.
 //
 // This is the homogeneous deployment-product form of
-// loom_target_specialize_module. A non-kernel function opts into the invocation
-// profile by carrying an authored target reference that still resolves to
-// target.decl; targetless functions remain neutral and concrete target records
-// retain their authored context. Request rows are derived from verified
-// compiler-owned IR and remain private to the call.
+// loom_target_specialize_module_in_place. A non-kernel function opts into the
+// invocation profile by carrying an authored target reference that still
+// resolves to target.decl; targetless functions remain neutral and concrete
+// target records retain their authored context. Request rows are derived from
+// verified compiler-owned IR and remain private to the call.
 iree_status_t loom_target_specialize_module_deployment_entries(
     const loom_target_environment_t* environment,
     const loom_target_profile_t* target_profile,
     iree_diagnostic_emitter_t diagnostic_emitter,
-    iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
-    loom_module_t** inout_module, uint32_t* out_error_count);
+    iree_arena_block_pool_t* block_pool, loom_module_t* module,
+    uint32_t* out_error_count);
 
 // Specializes the deployment entries needed to normalize a command program.
 //
@@ -66,8 +76,8 @@ iree_status_t loom_target_specialize_module_command_projection_entries(
     const loom_target_environment_t* environment,
     const loom_target_profile_t* target_profile,
     iree_diagnostic_emitter_t diagnostic_emitter,
-    iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
-    loom_module_t** inout_module, uint32_t* out_error_count);
+    iree_arena_block_pool_t* block_pool, loom_module_t* module,
+    uint32_t* out_error_count);
 
 // Validates live command-projection kernel entries against |target_profile|.
 //

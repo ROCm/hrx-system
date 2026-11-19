@@ -500,6 +500,12 @@ func.def public @right() {
   EXPECT_TRUE(iree_string_view_equal(
       FunctionTargetName(projected.get(), IREE_SV("right")),
       IREE_SV("__loom_target_context_0_0")));
+
+  const loom_op_t* left = FindFunction(source.get(), IREE_SV("left")).op;
+  IREE_ASSERT_OK(loom_target_function_versions_bind_module(
+      source.get(), &specialization.function_versions.list, &version_arena_));
+  EXPECT_EQ(FindFunction(source.get(), IREE_SV("left")).op, left);
+  EXPECT_EQ(Print(source.get()), Print(projected.get()));
 }
 
 TEST_F(TargetFunctionVersionProjectionTest,
@@ -718,6 +724,11 @@ func.def public target(@exact) @witness() {
   EXPECT_TRUE(iree_string_view_equal(
       FunctionTargetName(projected.get(), IREE_SV("witness")),
       IREE_SV("exact")));
+
+  IREE_ASSERT_OK(loom_target_function_versions_bind_module(
+      source.get(), &versions, &version_arena_));
+  EXPECT_EQ(source->symbols.count, projected->symbols.count);
+  EXPECT_EQ(Print(source.get()), Print(projected.get()));
 }
 
 TEST_F(TargetFunctionVersionProjectionTest,

@@ -15,48 +15,6 @@
 #include "loom/target/function_version_projection.h"
 #include "loom/target/profile.h"
 
-static iree_status_t loom_target_specialize_module_with_arena(
-    const loom_target_environment_t* environment,
-    loom_target_specialization_request_list_t requests,
-    loom_target_declaration_binding_list_t bindings,
-    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
-    iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
-    loom_module_t** inout_module, uint32_t* out_error_count) {
-  IREE_ASSERT_ARGUMENT(environment);
-  IREE_ASSERT_ARGUMENT(arena);
-  IREE_ASSERT_ARGUMENT(block_pool);
-  IREE_ASSERT_ARGUMENT(inout_module);
-  IREE_ASSERT_ARGUMENT(*inout_module);
-  IREE_ASSERT_ARGUMENT(out_error_count);
-  *out_error_count = 0;
-
-  loom_function_version_owner_t function_versions;
-  loom_function_version_owner_initialize(arena, &function_versions);
-  uint32_t error_count = 0;
-  iree_status_t status = loom_target_specialize_functions(
-      environment, *inout_module, requests, bindings, diagnostic_emitter,
-      &function_versions, &error_count);
-  if (iree_status_is_ok(status)) {
-    *out_error_count = error_count;
-  }
-
-  loom_module_t* projected_module = NULL;
-  if (iree_status_is_ok(status) && error_count == 0 &&
-      function_versions.list.count != 0) {
-    status = loom_target_function_versions_project_module(
-        *inout_module, &function_versions.list, block_pool, allocator, NULL,
-        &projected_module);
-  }
-  if (iree_status_is_ok(status) && projected_module != NULL) {
-    loom_module_free(*inout_module);
-    *inout_module = projected_module;
-    projected_module = NULL;
-  }
-
-  loom_module_free(projected_module);
-  return status;
-}
-
 iree_status_t loom_target_specialize_module(
     const loom_target_environment_t* environment,
     loom_target_specialization_request_list_t requests,
@@ -66,11 +24,42 @@ iree_status_t loom_target_specialize_module(
     loom_module_t** inout_module, uint32_t* out_error_count) {
   iree_arena_allocator_t arena;
   iree_arena_initialize(block_pool, &arena);
-  iree_status_t status = loom_target_specialize_module_with_arena(
-      environment, requests, bindings, diagnostic_emitter, &arena, block_pool,
-      allocator, inout_module, out_error_count);
+  loom_function_version_owner_t versions;
+  loom_function_version_owner_initialize(&arena, &versions);
+  iree_status_t status = loom_target_specialize_functions(
+      environment, *inout_module, requests, bindings, diagnostic_emitter,
+      &versions, out_error_count);
+  if (iree_status_is_ok(status) && *out_error_count == 0 &&
+      versions.list.count != 0) {
+    loom_module_t* projected_module = NULL;
+    status = loom_target_function_versions_project_module(
+        *inout_module, &versions.list, block_pool, allocator, NULL,
+        &projected_module);
+    if (iree_status_is_ok(status)) {
+      loom_module_free(*inout_module);
+      *inout_module = projected_module;
+    }
+  }
   iree_arena_deinitialize(&arena);
   return status;
+}
+
+iree_status_t loom_target_specialize_module_in_place(
+    const loom_target_environment_t* environment, loom_module_t* module,
+    loom_target_specialization_request_list_t requests,
+    loom_target_declaration_binding_list_t bindings,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    uint32_t* out_error_count) {
+  loom_function_version_owner_t versions;
+  loom_function_version_owner_initialize(arena, &versions);
+  IREE_RETURN_IF_ERROR(loom_target_specialize_functions(
+      environment, module, requests, bindings, diagnostic_emitter, &versions,
+      out_error_count));
+  if (*out_error_count != 0 || versions.list.count == 0) {
+    return iree_ok_status();
+  }
+  return loom_target_function_versions_bind_module(module, &versions.list,
+                                                   arena);
 }
 
 static bool loom_target_deployment_function_uses_profile(
@@ -158,13 +147,12 @@ loom_target_specialize_module_deployment_entries_with_policy(
     const loom_target_profile_t* target_profile,
     loom_target_deployment_specialization_policy_t policy,
     iree_diagnostic_emitter_t diagnostic_emitter,
-    iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
-    loom_module_t** inout_module, uint32_t* out_error_count) {
+    iree_arena_block_pool_t* block_pool, loom_module_t* module,
+    uint32_t* out_error_count) {
   IREE_ASSERT_ARGUMENT(environment);
   IREE_ASSERT_ARGUMENT(target_profile);
   IREE_ASSERT_ARGUMENT(block_pool);
-  IREE_ASSERT_ARGUMENT(inout_module);
-  IREE_ASSERT_ARGUMENT(*inout_module);
+  IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(out_error_count);
   *out_error_count = 0;
 
@@ -182,14 +170,14 @@ loom_target_specialize_module_deployment_entries_with_policy(
 
   iree_host_size_t request_count = 0;
   loom_op_t* op = NULL;
-  loom_block_for_each_op(loom_module_block(*inout_module), op) {
+  loom_block_for_each_op(loom_module_block(module), op) {
     if (!iree_status_is_ok(status)) {
       break;
     }
     bool should_specialize = false;
     status = loom_target_deployment_function_should_specialize(
-        *inout_module, loom_func_like_cast(*inout_module, op), policy,
-        profile_facts, &symbol_facts, &should_specialize);
+        module, loom_func_like_cast(module, op), policy, profile_facts,
+        &symbol_facts, &should_specialize);
     request_count += should_specialize ? 1u : 0u;
   }
 
@@ -200,11 +188,11 @@ loom_target_specialize_module_deployment_entries_with_policy(
   }
   if (iree_status_is_ok(status) && request_count != 0) {
     iree_host_size_t request_ordinal = 0;
-    loom_block_for_each_op(loom_module_block(*inout_module), op) {
+    loom_block_for_each_op(loom_module_block(module), op) {
       bool should_specialize = false;
       status = loom_target_deployment_function_should_specialize(
-          *inout_module, loom_func_like_cast(*inout_module, op), policy,
-          profile_facts, &symbol_facts, &should_specialize);
+          module, loom_func_like_cast(module, op), policy, profile_facts,
+          &symbol_facts, &should_specialize);
       if (!iree_status_is_ok(status)) {
         break;
       }
@@ -213,21 +201,21 @@ loom_target_specialize_module_deployment_entries_with_policy(
       }
       requests[request_ordinal++] = (loom_target_specialization_request_t){
           .function_ref =
-              loom_func_like_callee(loom_func_like_cast(*inout_module, op)),
+              loom_func_like_callee(loom_func_like_cast(module, op)),
           .target_profile = target_profile,
       };
     }
     IREE_ASSERT(!iree_status_is_ok(status) || request_ordinal == request_count);
   }
   if (iree_status_is_ok(status) && request_count != 0) {
-    status = loom_target_specialize_module_with_arena(
-        environment,
+    status = loom_target_specialize_module_in_place(
+        environment, module,
         (loom_target_specialization_request_list_t){
             .values = requests,
             .count = request_count,
         },
         (loom_target_declaration_binding_list_t){0}, diagnostic_emitter, &arena,
-        block_pool, allocator, inout_module, out_error_count);
+        out_error_count);
   }
   iree_arena_deinitialize(&arena);
   return status;
@@ -237,24 +225,24 @@ iree_status_t loom_target_specialize_module_deployment_entries(
     const loom_target_environment_t* environment,
     const loom_target_profile_t* target_profile,
     iree_diagnostic_emitter_t diagnostic_emitter,
-    iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
-    loom_module_t** inout_module, uint32_t* out_error_count) {
+    iree_arena_block_pool_t* block_pool, loom_module_t* module,
+    uint32_t* out_error_count) {
   return loom_target_specialize_module_deployment_entries_with_policy(
       environment, target_profile,
       LOOM_TARGET_DEPLOYMENT_SPECIALIZATION_POLICY_STRICT, diagnostic_emitter,
-      block_pool, allocator, inout_module, out_error_count);
+      block_pool, module, out_error_count);
 }
 
 iree_status_t loom_target_specialize_module_command_projection_entries(
     const loom_target_environment_t* environment,
     const loom_target_profile_t* target_profile,
     iree_diagnostic_emitter_t diagnostic_emitter,
-    iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
-    loom_module_t** inout_module, uint32_t* out_error_count) {
+    iree_arena_block_pool_t* block_pool, loom_module_t* module,
+    uint32_t* out_error_count) {
   return loom_target_specialize_module_deployment_entries_with_policy(
       environment, target_profile,
       LOOM_TARGET_DEPLOYMENT_SPECIALIZATION_POLICY_COMMAND_PROJECTION,
-      diagnostic_emitter, block_pool, allocator, inout_module, out_error_count);
+      diagnostic_emitter, block_pool, module, out_error_count);
 }
 
 iree_status_t loom_target_validate_module_deployment_kernel_entry_refs(

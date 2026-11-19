@@ -929,9 +929,12 @@ TEST_P(KernelRequestProducerTest,
       auto environment = MaterializationEnvironment();
       environment.block_pool = &pool;
       environment.allocator = allocator;
+      iree_arena_allocator_t source_arena;
+      iree_arena_initialize(&pool, &source_arena);
       loom_kernel_request_preparation_t* preparation = nullptr;
-      iree_status_t status = loom_kernel_request_preparation_allocate(
-          index.get(), &environment, source_ordinal, &preparation);
+      iree_status_t status = loom_kernel_request_preparation_build(
+          index.get(), &environment, source_ordinal, &source_arena,
+          &preparation);
       const bool complete = iree_status_is_ok(status);
       if (!complete) {
         EXPECT_TRUE(iree_status_is_resource_exhausted(status));
@@ -939,7 +942,8 @@ TEST_P(KernelRequestProducerTest,
         EXPECT_EQ(allocations.attempts, fail_at + 1);
         iree_status_ignore(status);
       }
-      loom_kernel_request_preparation_free(preparation);
+      loom_kernel_request_preparation_deinitialize(preparation);
+      iree_arena_deinitialize(&source_arena);
       iree_arena_block_pool_deinitialize(&pool);
       EXPECT_EQ(allocations.live, 0u);
       if (complete) {
