@@ -228,6 +228,8 @@ TEST_F(ModuleTypeUsesTest, RepeatedSharedChildrenHaveOneDependency) {
   EXPECT_EQ(Dependencies(carrier), std::vector<loom_value_id_t>{width_});
   CheckEdges(1);
   loom_module_drop_value_type_uses(module_, carrier);
+  EXPECT_EQ(loom_type_dependencies_declared(&module_->type_uses, carrier),
+            singleton);
   EXPECT_TRUE(Dependencies(carrier).empty());
   EXPECT_TRUE(Users(width_).empty());
   IREE_ASSERT_OK(loom_module_refresh_value_type_uses(module_, carrier));
@@ -360,6 +362,14 @@ TEST_F(ModuleTypeUsesTest, ForwardProvidersAndHighIdsRemainDeclared) {
   auto right = Intern(Matrix(8, UINT32_MAX - 1));
   auto root = Pair(left, right);
   const auto carrier = AddArgument(loom_type_table_get(&module_->types, root));
+  const auto declared =
+      loom_type_dependencies_declared(&module_->type_uses, carrier);
+  EXPECT_TRUE(loom_type_dependencies_contains(&module_->type_uses, declared,
+                                              UINT32_MAX - 1));
+  EXPECT_EQ(loom_type_dependencies_declared(&module_->type_uses, width_), 0u);
+  EXPECT_EQ(loom_type_dependencies_declared(&module_->type_uses,
+                                            LOOM_VALUE_ID_INVALID),
+            0u);
   EXPECT_EQ(Dependencies(carrier), std::vector<loom_value_id_t>{width_});
   for (int i = 0; i < 3; ++i) {
     AddArgument(loom_type_scalar(LOOM_SCALAR_TYPE_INDEX));

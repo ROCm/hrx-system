@@ -1112,6 +1112,17 @@ void loom_type_dependencies_drop(loom_type_use_table_t* table,
   }
 }
 
+loom_type_dependency_id_t loom_type_dependencies_declared(
+    const loom_type_use_table_t* table, loom_value_id_t value_id) {
+  if (value_id >= table->value_table->count) {
+    return 0;
+  }
+  const uint32_t carrier =
+      loom_value_table_const_type_use_heads(table->value_table, value_id)
+          ->carrier;
+  return carrier ? loom_dependency_carrier(table->index, carrier)->declared : 0;
+}
+
 bool loom_type_dependencies_has_users(const loom_type_use_table_t* table,
                                       loom_value_id_t value_id) {
   if (value_id >= table->value_table->count) {

@@ -263,6 +263,12 @@ iree_status_t loom_type_dependencies_recompute(loom_type_use_table_t* table);
 void loom_type_dependencies_drop(loom_type_use_table_t* table,
                                  loom_value_id_t value_id);
 
+// Returns the declared dependencies of a constructed value's type. Dropping
+// its active uses leaves this set intact. An unavailable value or a type
+// with no SSA references has the empty set (zero).
+loom_type_dependency_id_t loom_type_dependencies_declared(
+    const loom_type_use_table_t* table, loom_value_id_t value_id);
+
 // Constant-time active ownership query. Out-of-range values have no users.
 bool loom_type_dependencies_has_users(const loom_type_use_table_t* table,
                                       loom_value_id_t value_id);
