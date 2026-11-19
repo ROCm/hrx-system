@@ -11,14 +11,13 @@
 
 #include "iree/base/byte_sequence.h"
 #include "iree/hal/driver/amd/xdna/image/aie2p/target.h"
-#include "iree/hal/driver/amd/xdna/image/directory.h"
 #include "iree/hal/driver/amd/xdna/image/tables.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Owns compact metadata and the structural directory retaining image source.
+// Owns compact metadata and retains the image source.
 // The image is immutable and can be queried concurrently. Loaded native backing
 // and all indirectly referenced resources remain owned by the caller.
 typedef struct iree_hal_amd_xdna_image_t iree_hal_amd_xdna_image_t;
@@ -37,9 +36,13 @@ void iree_hal_amd_xdna_image_free(iree_hal_amd_xdna_image_t* image);
 const iree_hal_amd_xdna_image_tables_t* iree_hal_amd_xdna_image_tables(
     const iree_hal_amd_xdna_image_t* image);
 
-// Borrows the structural load directory for the lifetime of the image.
-const iree_hal_amd_xdna_image_directory_t* iree_hal_amd_xdna_image_directory(
-    const iree_hal_amd_xdna_image_t* image);
+// Loads the initialized ranges of an admitted allocation into caller-owned
+// backing. |target| must cover the byte length of |allocation_ordinal|. Gaps
+// retain their contents and explicit zero-fill ranges are cleared. A source
+// read failure can leave the allocation partially loaded.
+iree_status_t iree_hal_amd_xdna_image_load_allocation(
+    const iree_hal_amd_xdna_image_t* image, uint32_t allocation_ordinal,
+    uint8_t* target);
 
 // Resolves an exact public export name to its dense entry ordinal.
 iree_status_t iree_hal_amd_xdna_image_find_entry(

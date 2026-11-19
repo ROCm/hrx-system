@@ -6,6 +6,9 @@
 
 #include "iree/hal/driver/amd/xdna/image/image.h"
 
+#include <string.h>
+
+#include "iree/hal/driver/amd/xdna/image/directory.h"
 #include "iree/hal/driver/amd/xdna/image/validation.h"
 
 struct iree_hal_amd_xdna_image_t {
@@ -89,9 +92,24 @@ const iree_hal_amd_xdna_image_tables_t* iree_hal_amd_xdna_image_tables(
   return &image->tables;
 }
 
-const iree_hal_amd_xdna_image_directory_t* iree_hal_amd_xdna_image_directory(
-    const iree_hal_amd_xdna_image_t* image) {
-  return image->directory;
+iree_status_t iree_hal_amd_xdna_image_load_allocation(
+    const iree_hal_amd_xdna_image_t* image, uint32_t allocation_ordinal,
+    uint8_t* target) {
+  const iree_xdna_elf_allocation_record_t allocation =
+      iree_hal_amd_xdna_image_tables_allocation(&image->tables,
+                                                allocation_ordinal);
+  for (uint32_t i = 0; i < allocation.load_count; ++i) {
+    const iree_hal_amd_xdna_image_program_header_t* load =
+        iree_hal_amd_xdna_image_directory_program_header(
+            image->directory, allocation.first_load + i);
+    uint8_t* destination = target + load->virtual_address;
+    const iree_host_size_t length = (iree_host_size_t)load->file_range.length;
+    IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_image_directory_read_source_range(
+        image->directory, load->file_range,
+        iree_make_byte_span(destination, length)));
+    memset(destination + length, 0, load->memory_size - length);
+  }
+  return iree_ok_status();
 }
 
 iree_status_t iree_hal_amd_xdna_image_find_entry(
