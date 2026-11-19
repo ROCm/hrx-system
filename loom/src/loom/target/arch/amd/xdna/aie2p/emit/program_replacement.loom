@@ -144,9 +144,14 @@ pipeline.def<kernel> public retain target(@device) @strand_replacement() run(%ou
   }
   pipeline.serial {
     pipeline.compose @initialize(%storage) : (buffer)
-    pipeline.compose @phase_a(%storage, %incoming) : (buffer, channel<tile<16xi32>>)
-    pipeline.compose @phase_b(%storage, %incoming) : (buffer, channel<tile<16xi32>>)
-    pipeline.compose @phase_a(%storage, %incoming) : (buffer, channel<tile<16xi32>>)
+    %visits = index.constant 2 : index
+    scf.for %visit = [%begin to %visits step %step] {
+      pipeline.compose @phase_a(%storage, %incoming) : (buffer, channel<tile<16xi32>>)
+      %first = index.cmp eq, %visit, %begin : index
+      scf.if %first {
+        pipeline.compose @phase_b(%storage, %incoming) : (buffer, channel<tile<16xi32>>)
+      }
+    }
     pipeline.compose @record(%storage, %outgoing, %output) : (buffer, channel<tile<320xi32>>, buffer)
   }
 }

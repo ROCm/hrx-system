@@ -553,6 +553,7 @@ loom_cc_library(
         "//loom/src/loom/analysis:source_storage_packing",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/analysis/pipeline:entries",
+        "//loom/src/loom/analysis/pipeline:lifetime_coalescing",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:function_model",

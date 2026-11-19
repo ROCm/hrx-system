@@ -29,6 +29,9 @@ typedef struct loom_aie2p_program_layout_group_t {
 typedef struct loom_aie2p_program_layout_t {
   // Complete detached program with independently relocatable code sections.
   loom_aie2p_program_object_t program;
+  // Source construction to code lifetime, shared by every tile in the scope.
+  // NULL preserves the original construction lifetimes.
+  const iree_host_size_t* code_owners;
   // Dense code group for each function in the program's retained input order.
   iree_host_size_t* function_groups;
   // Root group first, then other reached construction owners in ordinal order.
