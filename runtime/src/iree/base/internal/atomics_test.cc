@@ -11,7 +11,17 @@
 
 #include "iree/testing/gtest.h"
 
+// The MSVC C implementation differs from C++ std::atomic. Compile its checks
+// as C and run them in this same executable.
+extern "C" int iree_atomic_test_c_loads(void);
+
 namespace {
+
+TEST(AtomicC, ReadOnlyAndMutableLoads) {
+  const int failed_line = iree_atomic_test_c_loads();
+  EXPECT_EQ(failed_line, 0)
+      << "C load check failed at atomics_c_test.c:" << failed_line;
+}
 
 // NOTE: these tests are just to ensure we correctly compile the macros across
 // our supported toolchains: they don't verify that the memory semantics are
