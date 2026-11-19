@@ -307,7 +307,10 @@ class DistributionPathTest
     cohort.destination_count = receivers + (repeat_first ? 1 : 0);
     cohort.admissions = packet ? 1 : records;
     cohort.transfers = packet ? 1 : records;
-    cohort.release = packet ? &release_ : nullptr;
+    cohort.release =
+        packet && !source_workers_[Worker(stream)].transport.copy_stream
+            ? &release_
+            : nullptr;
     batches_[stream].copy_count = cohort.destination_count;
     batches_[stream].replays = packet ? 0 : 1;
     for (size_t i = 0; i < cohort.destination_count; ++i) {
@@ -747,6 +750,66 @@ TEST_P(DistributionPathTest, PacketVisitsPreserveSenderFraming) {
   workers_[Producer(0)].channels.remote_count = 1;
   IREE_ASSERT_OK(loom_aie2p_native_prepare_sharing(&context_, &realization_));
   EXPECT_EQ(context_.deliveries[pools_[1] - context_.tiles], nullptr);
+}
+
+TEST_P(DistributionPathTest, IndependentPacketsVisitLogicalRecordElements) {
+  // The middle word between each two source elements belongs to another slot.
+  struct {
+    // Bound FIFO geometry shared by both rotations.
+    loom_pipeline_channel_geometry_t record;
+    // The one strided payload axis retained immediately after the geometry.
+    loom_storage_geometry_axis_t axis;
+  } geometry = {
+      .record =
+          {
+              .slot_bit_stride = 32,
+              .record_element_count = 16,
+              .record_bit_span = 31 * 32,
+              .element_bit_count = 32,
+              .slots_disjoint = true,
+              .strided_record_rank = 1,
+          },
+      .axis = {.extent = 16, .element_stride = 2},
+  };
+  sources_[0].capacity = 2;
+  sources_[0].geometry = &geometry.record;
+  channels_[0].record_dense = false;
+  channels_[0].record_byte_length = 31 * sizeof(uint32_t);
+  channels_[0].byte_stride = sizeof(uint32_t);
+  const loom_pipeline_transport_copy_stream_t stream = {
+      .source = &sources_[0].identity,
+      .copies = copies_[0].data(),
+      .copy_count = 1,
+      .records = 1,
+      .repetitions = 2,
+      .scope = UINT16_MAX,
+  };
+  source_workers_[Worker(0)].transport.copy_stream = &stream;
+  ASSERT_NE(Form(0, 2, 1, true), nullptr);
+  PlanPayloads();
+  const auto* distribution = Select(0);
+  ASSERT_NE(distribution, nullptr);
+  const auto& sequence = distribution->sender.sequence;
+  const auto* layout = pools_[0]->memory_layout;
+  const auto step =
+      pools_[0]->facts->kind == LOOM_XDNA_TILE_KIND_MEMORY
+          ? LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_DMA_BD_WORD2_D0_STEP_SIZE
+          : LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_BD_WORD2_D0_STEP_SIZE;
+  ASSERT_EQ(sequence.descriptor_count, 2);
+  for (uint32_t slot = 0; slot < 2; ++slot) {
+    const auto* words = sequence.words[slot];
+    EXPECT_EQ(
+        words[0] & loom_xdna_register_field_encode(layout->descriptor_base, -1),
+        loom_xdna_register_field_encode(layout->descriptor_base, 16));
+    EXPECT_EQ(words[2] & loom_xdna_register_field_encode(step, -1),
+              loom_xdna_register_field_encode(step, 1));
+    EXPECT_EQ(words[layout->address_word] &
+                  loom_xdna_register_field_encode(layout->address, -1),
+              loom_xdna_register_field_encode(
+                  layout->address,
+                  (layout->local_address_base + slot * sizeof(uint32_t)) >>
+                      pools_[0]->facts->dma.address_encoding_shift));
+  }
 }
 
 TEST_P(DistributionPathTest, RetainedReceiversOwnTheCompleteReplayBudget) {

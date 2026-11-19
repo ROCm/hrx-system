@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/analysis/storage_geometry.h"
 #include "loom/error/error_catalog.h"
 #include "loom/error/parameter.h"
@@ -30,24 +31,73 @@ static iree_status_t loom_pipeline_resources_reject(
   return iree_diagnostic_emit(diagnostic_emitter, &emission);
 }
 
-static bool loom_pipeline_resources_channel_geometry(
+// A slot can occupy the gaps between another slot's rows. Smaller strides
+// bound the payload within one strip. Larger strides place the strips at
+// multiples of their common period. Rotating every slot within that period
+// preserves ownership even when complete record envelopes intersect.
+static bool loom_pipeline_channel_slots_disjoint(
+    const loom_storage_geometry_t* storage, uint64_t capacity,
+    uint64_t record_element_span) {
+  const uint64_t slot_stride = storage->axes[0].element_stride;
+  if (capacity == 1 || slot_stride >= record_element_span) {
+    return true;
+  }
+  if (!slot_stride) {
+    return false;
+  }
+  uint64_t strip_span = 1;
+  uint64_t period = 0;
+  for (uint8_t i = 1; i < storage->rank; ++i) {
+    const loom_storage_geometry_axis_t axis = storage->axes[i];
+    if (axis.extent <= 1) {
+      continue;
+    }
+    if (axis.element_stride < slot_stride) {
+      // The complete record envelope already bounds this partial sum.
+      strip_span += (axis.extent - 1) * axis.element_stride;
+    } else {
+      period = iree_math_gcd_u64(period, axis.element_stride);
+    }
+  }
+  return strip_span <= slot_stride && strip_span <= period &&
+         capacity - 1 <= (period - strip_span) / slot_stride;
+}
+
+static iree_status_t loom_pipeline_resources_channel_geometry(
     const loom_fact_context_t* facts, const loom_module_t* module,
-    loom_type_t storage_type, loom_pipeline_channel_geometry_t* out_geometry) {
+    loom_type_t storage_type, uint64_t capacity, iree_arena_allocator_t* arena,
+    const loom_pipeline_channel_geometry_t** out_geometry) {
+  *out_geometry = NULL;
   loom_storage_geometry_t storage;
   loom_storage_geometry_span_t record;
+  uint64_t slot_bit_stride = 0, record_bit_span = 0;
   if (!loom_storage_geometry_query(facts, module, storage_type, &storage) ||
       !loom_storage_geometry_measure(&storage, 1, &record) ||
       !iree_checked_mul_u64(storage.axes[0].element_stride,
-                            storage.element_bit_count,
-                            &out_geometry->slot_bit_stride) ||
+                            storage.element_bit_count, &slot_bit_stride) ||
       !iree_checked_mul_u64(record.element_span, storage.element_bit_count,
-                            &out_geometry->record_bit_span)) {
-    return false;
+                            &record_bit_span)) {
+    return iree_ok_status();
   }
-  out_geometry->record_element_count = record.element_count;
-  out_geometry->element_bit_count = storage.element_bit_count;
-  out_geometry->record_dense = record.dense;
-  return true;
+  const uint8_t rank = record.dense ? 0 : storage.rank - 1;
+  const iree_host_size_t axis_bytes = rank * sizeof(storage.axes[0]);
+  loom_pipeline_channel_geometry_t* geometry;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      arena, sizeof(*geometry) + axis_bytes, (void**)&geometry));
+  *geometry = (loom_pipeline_channel_geometry_t){
+      .slot_bit_stride = slot_bit_stride,
+      .record_element_count = record.element_count,
+      .record_bit_span = record_bit_span,
+      .element_bit_count = storage.element_bit_count,
+      .record_dense = record.dense,
+      .slots_disjoint = loom_pipeline_channel_slots_disjoint(
+          &storage, capacity, record.element_span),
+      .strided_record_rank = rank};
+  if (rank) {
+    memcpy(geometry + 1, storage.axes + 1, axis_bytes);
+  }
+  *out_geometry = geometry;
+  return iree_ok_status();
 }
 
 static bool loom_pipeline_resources_coordinate(
@@ -345,17 +395,10 @@ iree_status_t loom_pipeline_resources_build(
             diagnostic_emitter);
       }
       channel.capacity = (uint64_t)capacity;
-      loom_pipeline_channel_geometry_t geometry;
-      if (loom_pipeline_resources_channel_geometry(
-              &facts->context, module,
-              loom_module_value_type(module, loom_channel_bind_storage(op)),
-              &geometry)) {
-        loom_pipeline_channel_geometry_t* retained = NULL;
-        IREE_RETURN_IF_ERROR(
-            iree_arena_allocate(arena, sizeof(*retained), (void**)&retained));
-        *retained = geometry;
-        channel.geometry = retained;
-      }
+      IREE_RETURN_IF_ERROR(loom_pipeline_resources_channel_geometry(
+          &facts->context, module,
+          loom_module_value_type(module, loom_channel_bind_storage(op)),
+          channel.capacity, arena, &channel.geometry));
       if (resources.channel_count == channel_capacity) {
         IREE_RETURN_IF_ERROR(iree_arena_grow_array(
             arena, resources.channel_count, resources.channel_count + 1,
