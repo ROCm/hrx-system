@@ -251,7 +251,10 @@ iree_status_t loom_serve_text_state_backing_initialize(
     iree_allocator_free(state->host_allocator, previous);
   }
   state->memory.index = backing;
-  state->flags |= LOOM_SERVE_TEXT_STATE_FLAG_COMPACTION_PENDING;
+  if (state->memory.statistics.committed_bytes ||
+      state->memory.statistics.pending_bytes) {
+    state->flags |= LOOM_SERVE_TEXT_STATE_FLAG_COMPACTION_PENDING;
+  }
   return iree_ok_status();
 }
 

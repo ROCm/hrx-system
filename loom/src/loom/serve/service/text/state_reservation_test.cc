@@ -101,13 +101,24 @@ TEST_F(TextStateReservationTest, PreparationOwnsIdsWithoutSubmittingOrMapping) {
   reservation_ = nullptr;
   EXPECT_EQ(state_.cache.pool.available, state_.cache.pool.capacity);
   EXPECT_EQ(state_.recurrent.pool.available, recurrent);
+  EXPECT_FALSE(loom_serve_text_state_needs_compaction(&state_));
+  EXPECT_FALSE(loom_serve_text_state_prepare_reclaim(&state_));
 
-  // Cancellation returns the plan's IDs in acquisition order; an immediate
-  // request can use the full pool with no stale continuation ownership.
+  // The next request can use the full pool.
   ASSERT_NO_FATAL_FAILURE(Reserve(0, 96));
   EXPECT_EQ(row->reserved_extent, 96u);
   EXPECT_GE(state_.cache.pool.capacity, 24u);
   EXPECT_EQ(state_.cache.pool.available, state_.cache.pool.capacity - 24);
+
+  // A later cancellation must preserve the obligation to return the backing
+  // of the previously installed row, including the IDs it just borrowed.
+  loom_serve_text_state_row_reset(row);
+  IREE_ASSERT_OK(loom_serve_text_state_row_prepare_reserve(
+      row, LOOM_SERVE_TEXT_RESERVE_FRESH, nullptr, 16, &reservation_));
+  loom_serve_text_state_reservation_free(reservation_);
+  reservation_ = nullptr;
+  EXPECT_EQ(loom_serve_text_state_prepare_reclaim(&state_),
+            state_.memory.pool != nullptr);
 }
 
 TEST_F(TextStateReservationTest, UnchangedContinuationBorrowsItsInstalledMap) {
