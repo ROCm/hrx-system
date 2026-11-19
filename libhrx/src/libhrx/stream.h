@@ -26,10 +26,11 @@ typedef struct hrx_stream_s {
   hrx_semaphore_t semaphore;
   // Last reserved point, including externally published work.
   uint64_t timepoint;
-  // Owned one-shot recording, or NULL between batches.
+  // Owned one-shot recording with at least one accepted command.
   iree_hal_command_buffer_t* pending_cb;
-  // Whether |pending_cb| contains work that must be flushed.
-  bool has_pending_work;
+  // A leading full barrier waiting for a command or a standalone flush.
+  // Mutually exclusive with an accepted recording.
+  bool pending_full_barrier;
   // Creation flags supplied by the caller.
   uint32_t flags;
 } hrx_stream_s;

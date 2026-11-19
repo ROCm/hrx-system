@@ -189,9 +189,11 @@ void HrxLoader::load(const std::string& path) {
   LOAD(stream_get_semaphore);
   LOAD(stream_get_device);
   LOAD(stream_get_timeline_position);
+  LOAD(stream_advance_timeline);
   LOAD(stream_wait_on);
   LOAD(stream_dispatch);
   LOAD(stream_barrier);
+  LOAD(stream_flush_with_barrier);
 
   LOAD(event_create);
   LOAD(event_retain);

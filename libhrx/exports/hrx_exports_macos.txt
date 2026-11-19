@@ -81,6 +81,7 @@ _hrx_queue_dispatch
 _hrx_stream_dispatch
 _hrx_queue_host_call
 _hrx_stream_barrier
+_hrx_stream_flush_with_barrier
 _hrx_executable_load_data
 _hrx_executable_load_file
 _hrx_executable_retain

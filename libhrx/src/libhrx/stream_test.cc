@@ -149,6 +149,46 @@ TEST_F(StreamTest, SharedQueuePreservesExplicitStreamDependencies) {
   RunProducerConsumer(true);
 }
 
+TEST_F(StreamTest, FullBarrierStaysPendingUntilFlushOrFinalRelease) {
+  hrx::runtime::stream_ptr stream;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_create(
+      hrx_device_get_queue(device_, 0, 0), 0, stream.for_output())));
+  hrx_timeline_point_t point;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_stream_get_timeline_position(stream.get(), &point)));
+  auto semaphore = hrx::runtime::semaphore_ptr::borrow(point.semaphore);
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_barrier(stream.get(), nullptr)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_barrier(stream.get(), nullptr)));
+  EXPECT_EQ(stream.get()->pending_cb, nullptr);
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_wait(stream.get())));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_stream_get_timeline_position(stream.get(), &point)));
+  EXPECT_EQ(point.value, 0u);
+
+  // Neither a failed first recording nor a rejected direct submission can
+  // consume the pending barrier or publish a point.
+  const hrx_barrier_t invalid = {.flags = UINT64_MAX};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      hrx_status_to_iree(hrx_stream_barrier(stream.get(), &invalid)));
+  EXPECT_EQ(stream.get()->pending_cb, nullptr);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        hrx_status_to_iree(hrx_stream_flush_with_barrier(
+                            stream.get(), &invalid)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_flush(stream.get())));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_flush(stream.get())));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_stream_get_timeline_position(stream.get(), &point)));
+  EXPECT_EQ(point.value, 1u);
+
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_barrier(stream.get(), nullptr)));
+  stream.reset();
+  uint64_t completed = 0;
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_semaphore_query(semaphore.get(), &completed)));
+  EXPECT_EQ(completed, 2u);
+}
+
 TEST_F(StreamTest, InvalidCreationClearsOutput) {
   hrx_stream_t stream = reinterpret_cast<hrx_stream_t>(uintptr_t{1});
   IREE_EXPECT_STATUS_IS(

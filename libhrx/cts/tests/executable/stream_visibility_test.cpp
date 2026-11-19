@@ -218,6 +218,66 @@ TEST_CASE_METHOD(StreamVisibilityTest,
 }
 
 TEST_CASE_METHOD(StreamVisibilityTest,
+                 "A terminal barrier publishes writes on the stream timeline",
+                 "[stream][visibility]") {
+  Initialize();
+  InitializeInput(1);
+  hrx_stream_t stream = streams_[0];
+  constexpr uint32_t pattern = 0x16A2BD7Cu;
+  expected_.fill(pattern);
+  const hrx_buffer_barrier_t range = {
+      .source_scope = HRX_ACCESS_SCOPE_TRANSFER_WRITE,
+      .target_scope = HRX_ACCESS_SCOPE_HOST_READ,
+      .buffer_ref = {buffers_[2], 0, kByteLength},
+  };
+  const hrx_barrier_t barrier = {
+      .source_stage_mask = HRX_EXECUTION_STAGE_TRANSFER,
+      .target_stage_mask = HRX_EXECUTION_STAGE_HOST,
+      .buffer_barrier_count = 1,
+      .buffer_barriers = &range,
+  };
+  const bool immediate = GENERATE(false, true);
+  if (immediate) {
+    // The direct producer signals completion without a payload release.
+    hrx_timeline_point_t point;
+    REQUIRE_OK(hrx().stream_get_timeline_position(stream, &point));
+    REQUIRE(point.value == 0);
+    uint64_t written = 1;
+    const hrx_semaphore_list_t signals = {&point.semaphore, &written, 1};
+    const hrx_barrier_list_t empty = {};
+    const hrx_queue_barriers_t bare = {&empty, &empty};
+    REQUIRE_OK(hrx().queue_fill(hrx().stream_get_queue(stream), nullptr,
+                                &signals, buffers_[2], 0, kByteLength, &pattern,
+                                sizeof(pattern), &bare));
+    REQUIRE_OK(hrx().stream_advance_timeline(stream, &point.value));
+    REQUIRE(point.value == written);
+  } else {
+    // A leading barrier and a following payload share the recording.
+    REQUIRE_OK(hrx().stream_barrier(stream, nullptr));
+    REQUIRE_OK(hrx().stream_fill_buffer(stream, buffers_[2], 0, kByteLength,
+                                        &pattern, sizeof(pattern)));
+  }
+  hrx_timeline_point_t before;
+  REQUIRE_OK(hrx().stream_get_timeline_position(stream, &before));
+  REQUIRE(before.value == (immediate ? 1u : 0u));
+  SECTION("Deferred full barrier") {
+    REQUIRE_OK(hrx().stream_barrier(stream, nullptr));
+    REQUIRE_OK(hrx().stream_flush(stream));
+  }
+  SECTION("Full barrier at flush") {
+    REQUIRE_OK(hrx().stream_barrier(stream, nullptr));
+    REQUIRE_OK(hrx().stream_flush_with_barrier(stream, nullptr));
+  }
+  SECTION("Explicit terminal range") {
+    REQUIRE_OK(hrx().stream_flush_with_barrier(stream, &barrier));
+  }
+  hrx_timeline_point_t after;
+  REQUIRE_OK(hrx().stream_get_timeline_position(stream, &after));
+  REQUIRE(after.value == before.value + 1);
+  Observe(stream, Observation::kWait);
+}
+
+TEST_CASE_METHOD(StreamVisibilityTest,
                  "Stream event hands dispatch data to another queue",
                  "[stream][visibility][event]") {
   Initialize();
