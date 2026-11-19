@@ -1,0 +1,30 @@
+// RUN: with-checks emit source-low @alternate target=amd.xdna.aie2p:amd.xdna.strix.17f0_10 output=module
+
+// Three writes visit byte offsets 0, 12, and 0. One subtraction advances the
+// write cursor even though a record's byte length is not a power of two.
+pipeline.def<kernel> public @alternate() run() {
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %bytes = index.constant 24 : offset
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %storage = buffer.alloca<workgroup> pool(%memory) align(4) %bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x3xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<2x3xi32>, index -> channel<tile<3xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %begin = index.constant 0 : index
+    %end = index.constant 3 : index
+    %step = index.constant 1 : index
+    scf.for %i = [%begin to %end step %step] {
+      %write, %destination = channel.reserve %records : channel<tile<3xi32>> -> (write<tile<3xi32>>, view<3xi32>)
+      %value = index.cast %i : index to i32
+      view.store %value, %destination[0] : i32, view<3xi32>
+      channel.publish %write : write<tile<3xi32>>
+      %read, %source = channel.acquire %records : channel<tile<3xi32>> -> (read<tile<3xi32>>, view<3xi32>)
+      channel.release %read : read<tile<3xi32>>
+    }
+  }
+}
+
+// ----
+CHECK-COUNT-1: * = sub *, %write
+CHECK-NOT: * = sel.nez *
