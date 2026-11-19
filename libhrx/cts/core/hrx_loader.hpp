@@ -186,14 +186,21 @@ class HrxLoader {
   decltype(&hrx_buffer_get_size) buffer_get_size;
 
   // Host/device transfers.
+  decltype(&hrx_synchronous_h2d) synchronous_h2d;
   decltype(&hrx_synchronous_h2d_linear) synchronous_h2d_linear;
+  decltype(&hrx_synchronous_d2h) synchronous_d2h;
   decltype(&hrx_synchronous_d2h_linear) synchronous_d2h_linear;
+  decltype(&hrx_stream_copy_h2d) stream_copy_h2d;
   decltype(&hrx_stream_copy_h2d_linear) stream_copy_h2d_linear;
+  decltype(&hrx_stream_copy_d2h) stream_copy_d2h;
   decltype(&hrx_stream_copy_d2h_linear) stream_copy_d2h_linear;
 
   // Stream ops.
+  decltype(&hrx_stream_fill_buffer) stream_fill_buffer;
   decltype(&hrx_stream_fill_buffer_linear) stream_fill_buffer_linear;
+  decltype(&hrx_stream_copy_buffer) stream_copy_buffer;
   decltype(&hrx_stream_copy_buffer_linear) stream_copy_buffer_linear;
+  decltype(&hrx_stream_update_buffer) stream_update_buffer;
   decltype(&hrx_stream_update_buffer_linear) stream_update_buffer_linear;
 
   // Direct executables.
@@ -207,7 +214,9 @@ class HrxLoader {
       executable_lookup_export_by_name;
 
   // Queue ops.
+  decltype(&hrx_queue_fill) queue_fill;
   decltype(&hrx_queue_fill_linear) queue_fill_linear;
+  decltype(&hrx_queue_copy) queue_copy;
   decltype(&hrx_queue_copy_linear) queue_copy_linear;
   decltype(&hrx_queue_barrier) queue_barrier;
   decltype(&hrx_queue_dispatch) queue_dispatch;

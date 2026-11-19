@@ -10,6 +10,7 @@
 
 #include "barrier.h"
 #include "hrx_internal.h"
+#include "transfer.h"
 
 // Acquire the preceding stream point before the device sequence and release
 // its writes before signaling the next point. Both submission paths use the
@@ -407,27 +408,91 @@ hrx_status_t hrx_stream_wait_on(hrx_stream_t stream,
 // Stream operations (record into pending CB)
 //===----------------------------------------------------------------------===//
 
-hrx_status_t hrx_stream_fill_buffer_linear(hrx_stream_t stream,
-                                           hrx_buffer_t buffer, size_t offset,
-                                           size_t size, const void* pattern,
-                                           size_t pattern_size) {
-  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_fill_buffer_linear");
-  HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
-  if (!stream || !buffer || !pattern) {
+hrx_status_t hrx_stream_fill_buffer(hrx_stream_t stream, hrx_buffer_t buffer,
+                                    size_t offset, const void* pattern,
+                                    size_t pattern_size,
+                                    const hrx_fill_region_t* region) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_fill_buffer");
+  if (!stream || !buffer || !pattern || !region) {
     HRX_RETURN_AND_END_ZONE(
         z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "stream, buffer, or pattern is NULL"));
+                            "stream, buffer, pattern, or region is NULL"));
   }
-
+  const iree_hal_fill_region_t hal_region = hrx_fill_region_to_hal(region);
+  if (!iree_hal_transfer_range_fits(offset, region->row_length,
+                                    region->row_count, region->slice_count,
+                                    &hal_region.target_strides, buffer->size)) {
+    HRX_RETURN_AND_END_ZONE(z0, hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                                                "fill exceeds buffer size"));
+  }
+  HRX_TRACE_ZONE_APPEND_BYTES(
+      z0, region->row_length * region->row_count * region->slice_count);
   iree_hal_buffer_ref_t target_ref = iree_hal_make_buffer_ref(
-      buffer->hal_buffer, (iree_device_size_t)offset, (iree_device_size_t)size);
+      buffer->hal_buffer, offset,
+      iree_hal_transfer_range_length(region->row_length, region->row_count,
+                                     region->slice_count,
+                                     &hal_region.target_strides));
   iree_hal_command_buffer_t* command_buffer = NULL;
   iree_status_t iree_status = hrx_stream_prepare_recording(
       stream, IREE_HAL_COMMAND_CATEGORY_TRANSFER, &command_buffer);
   if (iree_status_is_ok(iree_status)) {
-    iree_status = iree_hal_command_buffer_fill_buffer_linear(
+    iree_status = iree_hal_command_buffer_fill_buffer(
         command_buffer, target_ref, pattern, (iree_host_size_t)pattern_size,
-        /*flags=*/0);
+        &hal_region, /*flags=*/0);
+  }
+  hrx_stream_finish_command(stream, command_buffer,
+                            iree_status_is_ok(iree_status));
+  HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(iree_status));
+}
+
+hrx_status_t hrx_stream_fill_buffer_linear(hrx_stream_t stream,
+                                           hrx_buffer_t buffer, size_t offset,
+                                           size_t size, const void* pattern,
+                                           size_t pattern_size) {
+  const hrx_fill_region_t region = {
+      .row_length = size, .row_count = 1, .slice_count = 1};
+  return hrx_stream_fill_buffer(stream, buffer, offset, pattern, pattern_size,
+                                &region);
+}
+
+hrx_status_t hrx_stream_copy_buffer(hrx_stream_t stream, hrx_buffer_t src,
+                                    size_t src_offset, hrx_buffer_t dst,
+                                    size_t dst_offset,
+                                    const hrx_transfer_region_t* region) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_copy_buffer");
+  if (!stream || !src || !dst || !region) {
+    HRX_RETURN_AND_END_ZONE(
+        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                            "stream, src, dst, or region is NULL"));
+  }
+  const iree_hal_transfer_region_t hal_region =
+      hrx_transfer_region_to_hal(region);
+  if (!iree_hal_transfer_range_fits(src_offset, region->row_length,
+                                    region->row_count, region->slice_count,
+                                    &hal_region.source_strides, src->size) ||
+      !iree_hal_transfer_range_fits(dst_offset, region->row_length,
+                                    region->row_count, region->slice_count,
+                                    &hal_region.target_strides, dst->size)) {
+    HRX_RETURN_AND_END_ZONE(z0, hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                                                "copy exceeds buffer size"));
+  }
+  HRX_TRACE_ZONE_APPEND_BYTES(z0, iree_hal_transfer_region_length(&hal_region));
+  iree_hal_buffer_ref_t source_ref = iree_hal_make_buffer_ref(
+      src->hal_buffer, src_offset,
+      iree_hal_transfer_range_length(region->row_length, region->row_count,
+                                     region->slice_count,
+                                     &hal_region.source_strides));
+  iree_hal_buffer_ref_t target_ref = iree_hal_make_buffer_ref(
+      dst->hal_buffer, dst_offset,
+      iree_hal_transfer_range_length(region->row_length, region->row_count,
+                                     region->slice_count,
+                                     &hal_region.target_strides));
+  iree_hal_command_buffer_t* command_buffer = NULL;
+  iree_status_t iree_status = hrx_stream_prepare_recording(
+      stream, IREE_HAL_COMMAND_CATEGORY_TRANSFER, &command_buffer);
+  if (iree_status_is_ok(iree_status)) {
+    iree_status = iree_hal_command_buffer_copy_buffer(
+        command_buffer, source_ref, target_ref, &hal_region, /*flags=*/0);
   }
   hrx_stream_finish_command(stream, command_buffer,
                             iree_status_is_ok(iree_status));
@@ -438,25 +503,48 @@ hrx_status_t hrx_stream_copy_buffer_linear(hrx_stream_t stream,
                                            hrx_buffer_t src, size_t src_offset,
                                            hrx_buffer_t dst, size_t dst_offset,
                                            size_t size) {
-  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_copy_buffer_linear");
-  HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
-  if (!stream || !src || !dst) {
-    HRX_RETURN_AND_END_ZONE(z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                                                "stream, src, or dst is NULL"));
-  }
+  const hrx_transfer_region_t region = {
+      .row_length = size, .row_count = 1, .slice_count = 1};
+  return hrx_stream_copy_buffer(stream, src, src_offset, dst, dst_offset,
+                                &region);
+}
 
-  iree_hal_buffer_ref_t source_ref =
-      iree_hal_make_buffer_ref(src->hal_buffer, (iree_device_size_t)src_offset,
-                               (iree_device_size_t)size);
-  iree_hal_buffer_ref_t target_ref =
-      iree_hal_make_buffer_ref(dst->hal_buffer, (iree_device_size_t)dst_offset,
-                               (iree_device_size_t)size);
+hrx_status_t hrx_stream_update_buffer(hrx_stream_t stream,
+                                      const void* host_data,
+                                      size_t host_data_size, hrx_buffer_t dst,
+                                      size_t dst_offset,
+                                      const hrx_transfer_region_t* region) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_update_buffer");
+  if (!stream || !host_data || !dst || !region) {
+    HRX_RETURN_AND_END_ZONE(
+        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                            "stream, host_data, dst, or region is NULL"));
+  }
+  const iree_hal_transfer_region_t hal_region =
+      hrx_transfer_region_to_hal(region);
+  if (!iree_hal_transfer_range_fits(
+          0, region->row_length, region->row_count, region->slice_count,
+          &hal_region.source_strides, host_data_size) ||
+      !iree_hal_transfer_range_fits(dst_offset, region->row_length,
+                                    region->row_count, region->slice_count,
+                                    &hal_region.target_strides, dst->size)) {
+    HRX_RETURN_AND_END_ZONE(
+        z0, hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                            "update exceeds source or destination size"));
+  }
+  HRX_TRACE_ZONE_APPEND_BYTES(z0, iree_hal_transfer_region_length(&hal_region));
+  iree_hal_buffer_ref_t target_ref = iree_hal_make_buffer_ref(
+      dst->hal_buffer, dst_offset,
+      iree_hal_transfer_range_length(region->row_length, region->row_count,
+                                     region->slice_count,
+                                     &hal_region.target_strides));
   iree_hal_command_buffer_t* command_buffer = NULL;
   iree_status_t iree_status = hrx_stream_prepare_recording(
       stream, IREE_HAL_COMMAND_CATEGORY_TRANSFER, &command_buffer);
   if (iree_status_is_ok(iree_status)) {
-    iree_status = iree_hal_command_buffer_copy_buffer_linear(
-        command_buffer, source_ref, target_ref, /*flags=*/0);
+    iree_status = iree_hal_command_buffer_update_buffer(
+        command_buffer, host_data, (iree_host_size_t)0, target_ref, &hal_region,
+        /*flags=*/0);
   }
   hrx_stream_finish_command(stream, command_buffer,
                             iree_status_is_ok(iree_status));
@@ -468,28 +556,10 @@ hrx_status_t hrx_stream_update_buffer_linear(hrx_stream_t stream,
                                              size_t host_data_size,
                                              hrx_buffer_t dst,
                                              size_t dst_offset) {
-  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_update_buffer_linear");
-  HRX_TRACE_ZONE_APPEND_BYTES(z0, host_data_size);
-  if (!stream || !host_data || !dst) {
-    HRX_RETURN_AND_END_ZONE(
-        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "stream, host_data, or dst is NULL"));
-  }
-
-  iree_hal_buffer_ref_t target_ref =
-      iree_hal_make_buffer_ref(dst->hal_buffer, (iree_device_size_t)dst_offset,
-                               (iree_device_size_t)host_data_size);
-  iree_hal_command_buffer_t* command_buffer = NULL;
-  iree_status_t iree_status = hrx_stream_prepare_recording(
-      stream, IREE_HAL_COMMAND_CATEGORY_TRANSFER, &command_buffer);
-  if (iree_status_is_ok(iree_status)) {
-    iree_status = iree_hal_command_buffer_update_buffer_linear(
-        command_buffer, host_data, (iree_host_size_t)0, target_ref,
-        /*flags=*/0);
-  }
-  hrx_stream_finish_command(stream, command_buffer,
-                            iree_status_is_ok(iree_status));
-  HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(iree_status));
+  const hrx_transfer_region_t region = {
+      .row_length = host_data_size, .row_count = 1, .slice_count = 1};
+  return hrx_stream_update_buffer(stream, host_data, host_data_size, dst,
+                                  dst_offset, &region);
 }
 
 hrx_status_t hrx_stream_dispatch(hrx_stream_t stream,
