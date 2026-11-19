@@ -18,6 +18,10 @@ namespace {
 class TimestampQueryCapture {
  public:
   struct QueryRange {
+    // Native recording that last used this query range.
+    VkCommandBuffer commands = VK_NULL_HANDLE;
+    // Recording generation, changed whenever the native handle is begun.
+    uint64_t generation = 0;
     // Query storage borrowed until the next submission or explicit trim.
     VkQueryPool pool = VK_NULL_HANDLE;
     // First query copied by the observed native command buffer.
@@ -48,13 +52,19 @@ class TimestampQueryCapture {
 
   QueryRange submitted() {
     std::lock_guard<std::mutex> lock(mutex_);
-    return submitted_;
+    // A closing clock operation may have reused this uncached native handle.
+    // Only observe query storage that still belongs to the captured recording.
+    return Find(submitted_.commands).generation == submitted_.generation
+               ? submitted_
+               : QueryRange{};
   }
 
  private:
   struct Recording {
     // Native handle whose recording owns the captured query-copy operation.
     VkCommandBuffer commands = VK_NULL_HANDLE;
+    // Generation incremented on each recording into this handle.
+    uint64_t generation = 0;
     // Range copied by this recording, empty for non-timestamp commands.
     QueryRange queries;
   };
@@ -67,7 +77,7 @@ class TimestampQueryCapture {
     if (it != recordings_.end()) {
       return *it;
     }
-    recordings_.push_back({commands, {}});
+    recordings_.push_back({commands, 0, {}});
     return recordings_.back();
   }
 
@@ -76,7 +86,9 @@ class TimestampQueryCapture {
     auto* capture = active_;
     {
       std::lock_guard<std::mutex> lock(capture->mutex_);
-      capture->Find(commands).queries = {};
+      auto& recording = capture->Find(commands);
+      ++recording.generation;
+      recording.queries = {};
     }
     return capture->original_.vkBeginCommandBuffer(commands, info);
   }
@@ -90,7 +102,8 @@ class TimestampQueryCapture {
     auto* capture = active_;
     {
       std::lock_guard<std::mutex> lock(capture->mutex_);
-      capture->Find(commands).queries = {pool, first, count};
+      auto& recording = capture->Find(commands);
+      recording.queries = {commands, recording.generation, pool, first, count};
     }
     capture->original_.vkCmdCopyQueryPoolResults(commands, pool, first, count,
                                                  target, offset, stride, flags);
@@ -134,9 +147,12 @@ class TimestampQueryCapture {
 
 TimestampQueryCapture* TimestampQueryCapture::active_ = nullptr;
 
-class TimestampReplayTest : public CtsTestBase<> {};
+class TimestampReplayTest : public CtsTestBase<> {
+ public:
+  void CheckReboundOutput(bool cache_recording);
+};
 
-TEST_P(TimestampReplayTest, NativeQueryMatchesReboundOutput) {
+void TimestampReplayTest::CheckReboundOutput(bool cache_recording) {
   auto* queue = reinterpret_cast<iree_hal_vulkan_queue_t*>(
       QueueForCommandCategories(IREE_HAL_COMMAND_CATEGORY_TRANSFER));
   ASSERT_NE(queue, nullptr);
@@ -169,20 +185,23 @@ TEST_P(TimestampReplayTest, NativeQueryMatchesReboundOutput) {
     IREE_ASSERT_OK(UploadBufferData(expected.data(), output, 0,
                                     expected.size() * sizeof(uint64_t)));
     Ref<iree_hal_command_buffer_t> commands;
-    IREE_ASSERT_OK(iree_hal_command_buffer_create(
-        iree_hal_queue_family(&queue->base), 0,
-        IREE_HAL_COMMAND_CATEGORY_TRANSFER, 1, commands.out()));
-    IREE_ASSERT_OK(iree_hal_command_buffer_begin(commands));
-    for (uint32_t i = 0; i < count; ++i) {
-      IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
-          commands, 0, 0, iree_hal_make_indirect_buffer_ref(0, 8 + i * 16, 8),
-          0));
-    }
-    IREE_ASSERT_OK(iree_hal_command_buffer_end(commands));
-
+    uint32_t native_comparisons = 0;
     std::vector<uint64_t> native(count * 2);
     for (uint32_t iteration = 0; iteration < kReplayCount; ++iteration) {
       SCOPED_TRACE(iteration);
+      if (!commands) {
+        IREE_ASSERT_OK(iree_hal_command_buffer_create(
+            iree_hal_queue_family(&queue->base),
+            cache_recording ? 0 : IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+            IREE_HAL_COMMAND_CATEGORY_TRANSFER, 1, commands.out()));
+        IREE_ASSERT_OK(iree_hal_command_buffer_begin(commands));
+        for (uint32_t i = 0; i < count; ++i) {
+          IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
+              commands, 0, 0,
+              iree_hal_make_indirect_buffer_ref(0, 8 + i * 16, 8), 0));
+        }
+        IREE_ASSERT_OK(iree_hal_command_buffer_end(commands));
+      }
       const uint32_t output_offset = (iteration % 3) * range_length;
       const iree_hal_buffer_binding_t binding = {output, output_offset,
                                                  range_length};
@@ -193,53 +212,80 @@ TEST_P(TimestampReplayTest, NativeQueryMatchesReboundOutput) {
                                               clock_buffer, 0, nullptr, 0));
       IREE_ASSERT_OK(iree_hal_queue_execute(&queue->base, before, executed,
                                             commands, {1, &binding}, 0));
-      IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
-          executed, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
-      // Read before another operation can reuse uncached query state. This
-      // observes completed native results; it introduces no device work.
-      const auto queries = capture.submitted();
-      ASSERT_EQ(queries.count, count);
-      ASSERT_TRUE(queries.pool != VK_NULL_HANDLE);
-      std::fill(native.begin(), native.end(), kGuard);
-      IREE_ASSERT_OK(iree_vkGetQueryPoolResults(
-          IREE_VULKAN_DEVICE(&queue->syms), queue->logical_device, queries.pool,
-          queries.first, queries.count, native.size() * sizeof(uint64_t),
-          native.data(), 2 * sizeof(uint64_t),
-          VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT));
       IREE_ASSERT_OK(iree_hal_queue_timestamp(&queue->base, executed, after,
                                               clock_buffer, 8, nullptr, 0));
       IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
           after, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+      const auto queries = capture.submitted();
+      if (queries.pool != VK_NULL_HANDLE) {
+        ASSERT_EQ(queries.count, count);
+        std::fill(native.begin(), native.end(), kGuard);
+        IREE_ASSERT_OK(iree_vkGetQueryPoolResults(
+            IREE_VULKAN_DEVICE(&queue->syms), queue->logical_device,
+            queries.pool, queries.first, queries.count,
+            native.size() * sizeof(uint64_t), native.data(),
+            2 * sizeof(uint64_t),
+            VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT));
+        ++native_comparisons;
+      }
       const auto bounds = ReadBufferData<uint64_t>(clock_buffer);
       ASSERT_EQ(bounds.size(), 2u);
-      for (uint32_t i = 0; i < count; ++i) {
-        SCOPED_TRACE(i);
-        ASSERT_NE(native[i * 2 + 1], 0u);
-        ASSERT_LE((native[i * 2] - bounds[0]) & tick_mask,
-                  (bounds[1] - bounds[0]) & tick_mask);
-        expected[output_offset / 8 + i * 2 + 1] = native[i * 2];
-      }
       const auto actual = ReadBufferData<uint64_t>(output);
       ASSERT_EQ(actual.size(), expected.size());
+      for (uint32_t i = 0; i < count; ++i) {
+        SCOPED_TRACE(i);
+        const auto value = actual[output_offset / 8 + i * 2 + 1];
+        ASSERT_LE((value - bounds[0]) & tick_mask,
+                  (bounds[1] - bounds[0]) & tick_mask)
+            << "value=" << value << " bounds=[" << bounds[0] << "," << bounds[1]
+            << "] native="
+            << (queries.pool != VK_NULL_HANDLE ? native[i * 2] : kGuard);
+        if (queries.pool != VK_NULL_HANDLE) {
+          ASSERT_NE(native[i * 2 + 1], 0u);
+          ASSERT_EQ(value, native[i * 2]);
+        }
+        expected[output_offset / 8 + i * 2 + 1] = value;
+      }
       for (size_t i = 0; i < actual.size(); ++i) {
         ASSERT_EQ(actual[i], expected[i])
             << "word=" << i << " query_pool=" << queries.pool << " bounds=["
             << bounds[0] << "," << bounds[1] << "]";
       }
+      if (!cache_recording) {
+        commands.reset();
+      }
     }
     iree_hal_vulkan_native_replay_cache_stats_t final_stats;
     iree_hal_vulkan_queue_sample_native_replay_cache_stats(queue, &final_stats);
-    std::printf("count=%u replays=%u cache_hits=%llu publications=%llu\n",
-                count, kReplayCount,
-                static_cast<unsigned long long>(final_stats.hit_count -
-                                                initial_stats.hit_count),
-                static_cast<unsigned long long>(
-                    final_stats.publication_update_count -
-                    initial_stats.publication_update_count));
-    ASSERT_GT(final_stats.hit_count, initial_stats.hit_count);
+    std::printf(
+        "count=%u executions=%u native_comparisons=%u cache_hits=%llu "
+        "publications=%llu one_shot_bypasses=%llu\n",
+        count, kReplayCount, native_comparisons,
+        static_cast<unsigned long long>(final_stats.hit_count -
+                                        initial_stats.hit_count),
+        static_cast<unsigned long long>(final_stats.publication_update_count -
+                                        initial_stats.publication_update_count),
+        static_cast<unsigned long long>(final_stats.one_shot_bypass_count -
+                                        initial_stats.one_shot_bypass_count));
+    ASSERT_GT(native_comparisons, 0u);
+    if (cache_recording) {
+      ASSERT_GT(final_stats.hit_count, initial_stats.hit_count);
+    } else {
+      ASSERT_EQ(final_stats.one_shot_bypass_count -
+                    initial_stats.one_shot_bypass_count,
+                kReplayCount);
+    }
     commands.reset();
     IREE_ASSERT_OK(iree_hal_device_trim(device_));
   }
+}
+
+TEST_P(TimestampReplayTest, NativeQueryMatchesPipelinedCachedOutput) {
+  CheckReboundOutput(/*cache_recording=*/true);
+}
+
+TEST_P(TimestampReplayTest, NativeQueryMatchesPipelinedFreshOutput) {
+  CheckReboundOutput(/*cache_recording=*/false);
 }
 
 CTS_REGISTER_TEST_SUITE(TimestampReplayTest);
