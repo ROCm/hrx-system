@@ -780,6 +780,10 @@ TEST_F(FactTableComputeTest, BooleanBranchTruthIsRetainedByRegion) {
     IREE_ASSERT_OK(loom_test_yield_build(&builder_, /*values=*/nullptr,
                                          /*values_count=*/0,
                                          LOOM_LOCATION_UNKNOWN, &yield));
+    bool changed = true;
+    IREE_ASSERT_OK(loom_value_fact_table_compute_op_and_report(
+        &table_, module_, yield, &changed));
+    EXPECT_FALSE(changed);
     loom_builder_restore(&builder_, saved);
   }
 
