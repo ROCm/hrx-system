@@ -593,13 +593,25 @@ class GpuNativeFileTest : public GpuNativeTest,
     return count == 1 ? frontier.entries[0].epoch : 0;
   }
 
-  uint64_t FilePublications(size_t length) const {
-    // The production device uses 2 MiB staging lanes. Each operation publishes
-    // its release and acquire, plus one copy per lane-sized chunk when staged.
+  void ExpectFilePublications(uint64_t before, size_t length,
+                              iree_hal_memory_access_t access) {
     constexpr size_t kStagingCapacity = 2 * 1024 * 1024;
-    return 2 + (uses_direct_file_access()
-                    ? 0
-                    : iree_host_size_ceil_div(length, kStagingCapacity));
+    const size_t copies =
+        uses_direct_file_access()
+            ? 0
+            : iree_host_size_ceil_div(length, kStagingCapacity);
+    const uint64_t count = Publications() - before;
+    RecordProperty(access == IREE_HAL_MEMORY_ACCESS_READ
+                       ? "read_queue_publications"
+                       : "write_queue_publications",
+                   count);
+    if (copies && access == IREE_HAL_MEMORY_ACCESS_READ) {
+      // Opening publication plus each staging copy. The consumer boundary
+      // can share the last copy or follow it once all windows have retired.
+      EXPECT_THAT(count, ::testing::AnyOf(copies + 1, copies + 2));
+    } else {
+      EXPECT_EQ(count, copies + 2);
+    }
   }
 
   void BufferedRoundTrip(size_t length);
@@ -677,8 +689,7 @@ void GpuNativeFileTest::BufferedRoundTrip(size_t length) {
       queues_[0], {1, &semaphore, &two}, {1, &semaphore, &three}, file, 64,
       buffer, kBufferOffset, length, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(three));
-  RecordProperty("read_queue_publications", Publications() - before_read);
-  EXPECT_EQ(Publications() - before_read, FilePublications(length));
+  ExpectFilePublications(before_read, length, IREE_HAL_MEMORY_ACCESS_READ);
   ASSERT_NO_FATAL_FAILURE(
       Accumulate(buffer, three, four, 19, accumulate_offset));
   ASSERT_NO_FATAL_FAILURE(Wait(four));
@@ -688,8 +699,7 @@ void GpuNativeFileTest::BufferedRoundTrip(size_t length) {
       queues_[0], {1, &semaphore, &four}, {1, &semaphore, &five}, buffer,
       kBufferOffset, file, 64, length, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(five));
-  RecordProperty("write_queue_publications", Publications() - before_write);
-  EXPECT_EQ(Publications() - before_write, FilePublications(length));
+  ExpectFilePublications(before_write, length, IREE_HAL_MEMORY_ACCESS_WRITE);
   ASSERT_NO_FATAL_FAILURE(ExpectFile(expected));
 
   // Check both allocation guards through the public GPU transfer path.
@@ -1018,7 +1028,7 @@ void GpuNativeFileAccessTest::RoundTrip(bool direct) {
     return;
   }
   ASSERT_NO_FATAL_FAILURE(Wait(two));
-  EXPECT_EQ(Publications() - before_read, FilePublications(kBytes));
+  ExpectFilePublications(before_read, kBytes, IREE_HAL_MEMORY_ACCESS_READ);
   ASSERT_NO_FATAL_FAILURE(Accumulate(buffer, two, three, 19, buffer_offset));
   expected[kAlignment / sizeof(uint32_t)] += 19;
   std::vector<uint32_t> observed(kBytes / 4);
@@ -1033,7 +1043,7 @@ void GpuNativeFileAccessTest::RoundTrip(bool direct) {
       queues_[0], {1, &semaphore, &four}, {1, &semaphore, &five}, buffer,
       buffer_offset, file, 0, kBytes, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(five));
-  EXPECT_EQ(Publications() - before_write, FilePublications(kBytes));
+  ExpectFilePublications(before_write, kBytes, IREE_HAL_MEMORY_ACCESS_WRITE);
   std::copy(observed.begin(), observed.end(), expected.begin());
   ASSERT_NO_FATAL_FAILURE(ExpectFile(expected));
 }

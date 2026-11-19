@@ -2006,6 +2006,7 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_create(
       .waits = &queue->wait_context,
       .queue_ordinal = options->queue_ordinal,
       .native_family_ordinal = options->family_ordinal,
+      .publication_mode = options->publication_mode,
       .transfer_site = IREE_HAL_MEMORY_SITE_QUEUE,
       .barrier_size = sizeof(iree_hal_amd_gpu_pm4_barrier_t),
       .add_effects = iree_hal_amd_gpu_pm4_file_add_effects,

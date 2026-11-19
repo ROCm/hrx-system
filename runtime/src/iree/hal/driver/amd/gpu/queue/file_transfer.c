@@ -77,7 +77,7 @@ typedef struct iree_hal_amd_gpu_file_transfer_t {
   iree_hal_semaphore_list_t signals;
   // Captured producer boundary, consumed once by the first native submission.
   void* before;
-  // Captured consumer boundary, augmented by qualified file visibility.
+  // Consumer boundary, or NULL once a terminal copy takes ownership of it.
   void* after;
   // Joins serial initialization/finalization submissions with their callbacks.
   iree_atomic_int32_t pending;
@@ -187,7 +187,7 @@ static void iree_hal_amd_gpu_file_transfer_retire(void* user_data,
 
 static void iree_hal_amd_gpu_file_transfer_complete(
     iree_hal_amd_gpu_file_transfer_t* operation, iree_status_t status) {
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && operation->after) {
     iree_hal_amd_gpu_file_transfer_submit_native(
         operation, 0, NULL, operation->after,
         iree_hal_amd_gpu_file_transfer_retire);
@@ -205,6 +205,8 @@ typedef enum iree_hal_amd_gpu_file_window_phase_e {
   IREE_HAL_AMD_GPU_FILE_WINDOW_BEFORE,
   IREE_HAL_AMD_GPU_FILE_WINDOW_IO,
   IREE_HAL_AMD_GPU_FILE_WINDOW_COPY,
+  // The final device write carries this operation's consumer boundary.
+  IREE_HAL_AMD_GPU_FILE_WINDOW_FINAL_COPY,
   IREE_HAL_AMD_GPU_FILE_WINDOW_RELEASE,
 } iree_hal_amd_gpu_file_window_phase_t;
 
@@ -265,7 +267,7 @@ struct iree_hal_amd_gpu_file_pipeline_t {
   iree_atomic_int64_t ready;
   // First error stops admission; every accepted access still drains.
   iree_atomic_intptr_t failure;
-  // Native/storage callbacks still borrowing their windows.
+  // Windows with an outstanding phase, including those ready for the drainer.
   uint32_t active;
   // Maximum independently progressing windows, bounded by staging policy.
   uint32_t window_count;
@@ -369,6 +371,10 @@ static void iree_hal_amd_gpu_file_window_copied(
     void* user_data, iree_status_t status,
     const iree_async_single_frontier_t* frontier, bool retired) {
   iree_hal_amd_gpu_file_window_t* window = user_data;
+  if (retired && frontier &&
+      window->phase == IREE_HAL_AMD_GPU_FILE_WINDOW_FINAL_COPY) {
+    window->pipeline->operation->frontier = *frontier;
+  }
   if (iree_status_is_ok(status)) {
     iree_hal_amd_gpu_file_window_complete(window, status);
   } else if (window->proactor) {
@@ -493,10 +499,15 @@ static void iree_hal_amd_gpu_file_window_copy(
       copies[IREE_HAL_AMD_GPU_FILE_WINDOW_CAPACITY];
   const bool reading = operation->access == IREE_HAL_MEMORY_ACCESS_READ;
   const uint32_t count = boundary_only ? 0 : window->count;
+  bool writes_destination =
+      reading || window->kind == IREE_HAL_AMD_GPU_FILE_WINDOW_MEMORY;
   for (uint32_t i = 0; i < count; ++i) {
     const iree_hal_amd_gpu_file_piece_t* piece = &window->pieces[i];
     if (window->kind == IREE_HAL_AMD_GPU_FILE_WINDOW_MEMORY) {
       copies[i] = piece->copy;
+      // A download still has a host write after the native DMA retires.
+      writes_destination &=
+          copies[i].type != IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
     } else {
       const iree_async_span_t span =
           iree_hal_file_request_span(&piece->request);
@@ -512,7 +523,6 @@ static void iree_hal_amd_gpu_file_window_copy(
     }
   }
   void* before = iree_alloca(executor->barrier_size);
-  void* after = iree_alloca(executor->barrier_size);
   const bool has_before = operation->before != NULL;
   if (operation->before) {
     memcpy(before, operation->before, executor->barrier_size);
@@ -520,7 +530,6 @@ static void iree_hal_amd_gpu_file_window_copy(
   } else {
     memset(before, 0, executor->barrier_size);
   }
-  memset(after, 0, executor->barrier_size);
   iree_hal_memory_effects_t before_effects = window->before,
                             after_effects = {0};
   if (window->kind == IREE_HAL_AMD_GPU_FILE_WINDOW_STAGED) {
@@ -533,19 +542,32 @@ static void iree_hal_amd_gpu_file_window_copy(
   if (before_effects.bits) {
     executor->add_effects(executor->queue, before_effects, before);
   }
-  if (after_effects.bits) {
-    executor->add_effects(executor->queue, after_effects, after);
-  }
-  window->phase = boundary_only ? IREE_HAL_AMD_GPU_FILE_WINDOW_BEFORE
-                                : IREE_HAL_AMD_GPU_FILE_WINDOW_COPY;
+  const void* after = NULL;
+  iree_hal_amd_gpu_file_pipeline_t* pipeline = window->pipeline;
+  const uint32_t bit = UINT32_C(1) << (window - pipeline->windows);
+  window->phase = IREE_HAL_AMD_GPU_FILE_WINDOW_COPY;
   if (boundary_only) {
-    window->pipeline->admission_pending = true;
+    window->phase = IREE_HAL_AMD_GPU_FILE_WINDOW_BEFORE;
+    pipeline->admission_pending = true;
+  } else if (after_effects.bits) {
+    void* staging_barrier = iree_alloca(executor->barrier_size);
+    memset(staging_barrier, 0, executor->barrier_size);
+    executor->add_effects(executor->queue, after_effects, staging_barrier);
+    after = staging_barrier;
+  } else if (executor->publication_mode == AMDF_QUEUE_PUBLICATION_MODE_KERNEL &&
+             writes_destination && pipeline->active == bit &&
+             !pipeline->iterator.current.row_length &&
+             pipeline->iterator.index == pipeline->iterator.count) {
+    // The final GPU write can publish the consumer boundary in the same
+    // kernel submission once all other windows have finished their work.
+    after = operation->after;
+    operation->after = NULL;
+    window->phase = IREE_HAL_AMD_GPU_FILE_WINDOW_FINAL_COPY;
   }
   window->failure_initialized = false;
   iree_status_t status =
       executor->submit(executor->queue, count, copies,
-                       has_before || before_effects.bits ? before : NULL,
-                       after_effects.bits ? after : NULL,
+                       has_before || before_effects.bits ? before : NULL, after,
                        (iree_hal_amd_gpu_retirement_callback_t){
                            iree_hal_amd_gpu_file_window_copied, window});
   if (!iree_status_is_ok(status)) {
@@ -750,11 +772,12 @@ static void iree_hal_amd_gpu_file_pipeline_drain(
       }
     }
     uint32_t completed = (uint32_t)ready;
-    pipeline->active &= ~completed;
     while (completed) {
       const uint32_t index = iree_math_count_trailing_zeros_u32(completed);
       const uint32_t bit = UINT32_C(1) << index;
       completed &= completed - 1;
+      // Other ready windows may still need a native copy or file I/O.
+      pipeline->active &= ~bit;
       iree_hal_amd_gpu_file_window_t* window = &pipeline->windows[index];
       if (window->phase == IREE_HAL_AMD_GPU_FILE_WINDOW_RESERVED ||
           window->phase == IREE_HAL_AMD_GPU_FILE_WINDOW_BEFORE) {

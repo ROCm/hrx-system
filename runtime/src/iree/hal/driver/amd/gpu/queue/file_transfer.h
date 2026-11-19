@@ -45,6 +45,8 @@ typedef struct iree_hal_amd_gpu_file_executor_t {
   uint32_t queue_ordinal;
   // Exact native family for physical-source host/device visibility queries.
   uint32_t native_family_ordinal;
+  // Selected command publication mechanism for this queue.
+  amdf_queue_publication_modes_t publication_mode;
   // Native address contract consumed by the queue's transfer implementation.
   iree_hal_memory_site_kind_t transfer_site;
   // Size of one immutable native barrier value copied into each operation.

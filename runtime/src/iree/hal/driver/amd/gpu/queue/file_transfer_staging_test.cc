@@ -36,7 +36,7 @@ class FileTransferStagingTest : public MemoryBackendTest,
   struct BoundaryQueue : iree_hal_queue_t {
     // File operations borrowing this queue until all captured uses retire.
     uint32_t host_owners = 0;
-    // Visibility boundaries completed by this coherent dependency.
+    // Standalone visibility submissions, excluding barriers carried by copies.
     uint32_t boundaries = 0;
     // Exact queue selected by the file caller; staging owns no native queue.
     iree_hal_amd_gpu_sdma_native_queue_t* native = nullptr;
@@ -175,6 +175,7 @@ class FileTransferStagingTest : public MemoryBackendTest,
         .staging = staging_,
         .waits = &waits_,
         .native_family_ordinal = 0,
+        .publication_mode = AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
         .transfer_site = IREE_HAL_MEMORY_SITE_QUEUE,
         .barrier_size = sizeof(uint32_t),
         .add_effects =
@@ -443,7 +444,10 @@ class FileTransferStagingTest : public MemoryBackendTest,
     PumpUntil([&] { return queue_.host_owners == 0; });
     ExpectCompletion(IREE_STATUS_OK);
     EXPECT_EQ(file_failures_, 0u);
-    EXPECT_EQ(queue_.boundaries, 2u);
+    // Submit holds every copy until this point. Overlapping windows and
+    // writes with file I/O still to perform must close separately.
+    EXPECT_EQ(queue_.boundaries,
+              GetParam() || queue_.copies.size() > 1 ? 2u : 1u);
     if (GetParam()) {
       // Close the caller's exclusive handle before reopening the completed
       // file.
@@ -1100,7 +1104,7 @@ TEST_P(FileTransferStagingTest, FailedQueueDoesNotPoisonSharedFileStaging) {
   uint64_t observed = 0;
   IREE_ASSERT_OK(iree_hal_semaphore_query(completed, &observed));
   EXPECT_EQ(observed, 1u);
-  EXPECT_EQ(other.boundaries, 2u);
+  EXPECT_EQ(other.boundaries, GetParam() ? 2u : 1u);
   EXPECT_EQ(
       std::memcmp(buffer_contents_ + 4096, expected_.data(), expected_.size()),
       0);
