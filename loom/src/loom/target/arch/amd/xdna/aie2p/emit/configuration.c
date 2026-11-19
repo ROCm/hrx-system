@@ -1096,8 +1096,8 @@ static iree_status_t loom_aie2p_configuration_place_workers(
     loom_aie2p_program_compiler_t* compiler,
     loom_aie2p_configuration_worker_set_t* worker_set,
     const loom_aie2p_program_layout_t* layouts, const iree_host_size_t* order,
-    bool provisional, loom_aie2p_catalog_rejection_t* out_rejection,
-    loom_target_compile_report_t* pending_reports, bool* out_materialized) {
+    bool provisional, loom_target_compile_report_t* pending_reports,
+    loom_aie2p_catalog_rejection_t* out_rejection, bool* out_materialized) {
   *out_materialized = false;
   const loom_aie2p_xdna_artifact_request_t* request = plan->request;
   loom_aie2p_xdna_tile_t* tiles = NULL;
@@ -1291,8 +1291,8 @@ static iree_status_t loom_aie2p_configuration_try_placement(
     memset(pending, 0, count * sizeof(*pending));
   }
   iree_status_t status = loom_aie2p_configuration_place_workers(
-      plan, compiler, worker_set, layouts, order, provisional, out_rejection,
-      pending, out_materialized);
+      plan, compiler, worker_set, layouts, order, provisional, pending,
+      out_rejection, out_materialized);
   if (pending) {
     for (iree_host_size_t i = 0; i < count; ++i) {
       if (*out_materialized && iree_status_is_ok(status) &&
@@ -1393,8 +1393,8 @@ iree_status_t loom_aie2p_configuration_plan_materialize(
   if (!plan->replacement_scope) {
     loom_aie2p_catalog_rejection_t rejected;
     return loom_aie2p_configuration_place_workers(plan, compiler, worker_set,
-                                                  NULL, NULL, false, &rejected,
-                                                  NULL, out_materialized);
+                                                  NULL, NULL, false, NULL,
+                                                  &rejected, out_materialized);
   }
   if (code_owners) {
     IREE_RETURN_IF_ERROR(loom_aie2p_configuration_place_cut(

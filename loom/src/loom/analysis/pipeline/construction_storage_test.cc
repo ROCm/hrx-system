@@ -100,7 +100,10 @@ TEST_F(PipelineConstructionStorageTest,
   const uint16_t inner = 0;
   const loom_cfg_natural_loop_t loop = {.depth = 1};
   control_.loops = {
-      .loops = &loop, .innermost_loop_indices = &inner, .loop_count = 1};
+      .loops = &loop,
+      .innermost_loop_indices = &inner,
+      .loop_count = 1,
+  };
   IREE_ASSERT_OK(loom_pipeline_lifetimes_build(&invocations_, &arena_,
                                                &invocations_.lifetimes));
   const uint32_t expected[] = {0, 0, 0, 1, 2};

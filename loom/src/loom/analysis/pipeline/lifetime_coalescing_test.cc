@@ -38,9 +38,11 @@ class LifetimeCoalescingTest : public ::testing::Test {
     return Append(parent, LOOM_PIPELINE_LIFETIME_SERIAL, nodes_[parent].owner);
   }
   void Expect(uint64_t capacity, std::vector<size_t> expected) {
-    loom_pipeline_lifetimes_t lifetimes = {.nodes = nodes_.data(),
-                                           .count = nodes_.size(),
-                                           .loop_depths = depths_.data()};
+    loom_pipeline_lifetimes_t lifetimes = {
+        .nodes = nodes_.data(),
+        .count = nodes_.size(),
+        .loop_depths = depths_.data(),
+    };
     std::vector<size_t> actual(lengths_.size());
     IREE_ASSERT_OK(loom_pipeline_lifetimes_coalesce(
         &lifetimes, lengths_.data(), capacity, &arena_, actual.data()));

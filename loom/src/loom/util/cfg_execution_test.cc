@@ -135,10 +135,15 @@ TEST_F(CfgExecutionTest, FiniteVariableLoopPreservesSiblingCounts) {
   loom_cfg_control_t control;
   IREE_ASSERT_OK(loom_cfg_control_build(fixture.get(), &arena_, &control));
   uint64_t trips[3];
+  const uint16_t outer = loom_cfg_loop_nest_innermost(&loops, 1);
   const uint16_t clear = loom_cfg_loop_nest_innermost(&loops, 2);
-  trips[loom_cfg_loop_nest_innermost(&loops, 1)] = 2;
+  const uint16_t drain = loom_cfg_loop_nest_innermost(&loops, 4);
+  ASSERT_LT(outer, IREE_ARRAYSIZE(trips));
+  ASSERT_LT(clear, IREE_ARRAYSIZE(trips));
+  ASSERT_LT(drain, IREE_ARRAYSIZE(trips));
+  trips[outer] = 2;
   trips[clear] = 512;
-  trips[loom_cfg_loop_nest_innermost(&loops, 4)] = 8;
+  trips[drain] = 8;
   bool variable_trips[3] = {};
   variable_trips[clear] = true;
   uint64_t storage[10];
