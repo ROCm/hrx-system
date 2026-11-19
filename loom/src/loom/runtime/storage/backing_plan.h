@@ -35,13 +35,15 @@ typedef struct loom_runtime_backing_plan_t {
   iree_host_size_t count;
   // Capacity of the run storage.
   iree_host_size_t capacity;
-  // Inline first run or allocator-owned overflow storage.
+  // Initial operation storage or allocator-owned overflow.
   loom_runtime_backing_run_t* runs;
-  // Singleton mappings require no separate run allocation.
-  loom_runtime_backing_run_t first;
+  // Borrowed initial storage owned by the enclosing operation allocation.
+  loom_runtime_backing_run_t* initial;
 } loom_runtime_backing_plan_t;
 
-void loom_runtime_backing_plan_initialize(loom_runtime_backing_plan_t* plan);
+void loom_runtime_backing_plan_initialize(loom_runtime_backing_plan_t* plan,
+                                          iree_host_size_t capacity,
+                                          loom_runtime_backing_run_t* initial);
 void loom_runtime_backing_plan_deinitialize(loom_runtime_backing_plan_t* plan,
                                             iree_allocator_t allocator);
 
@@ -49,6 +51,16 @@ void loom_runtime_backing_plan_deinitialize(loom_runtime_backing_plan_t* plan,
 iree_status_t loom_runtime_backing_plan_append(
     loom_runtime_backing_plan_t* plan, iree_allocator_t allocator,
     loom_runtime_backing_run_t run);
+
+// Extends the first run only when logical and physical pages are consecutive.
+bool loom_runtime_backing_run_extend(loom_runtime_backing_run_t* previous,
+                                     const loom_runtime_backing_run_t* next,
+                                     iree_device_size_t stride);
+
+// Captures a physical piece, coalescing adjacent pieces as they arrive.
+iree_status_t loom_runtime_backing_plan_capture(
+    loom_runtime_backing_plan_t* plan, iree_allocator_t allocator,
+    loom_runtime_backing_run_t run, iree_device_size_t stride);
 
 // Restores selection order after whole-parent claims preceded packed claims.
 void loom_runtime_backing_plan_order_by_ordinal(

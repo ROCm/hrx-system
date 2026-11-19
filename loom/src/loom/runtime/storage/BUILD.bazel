@@ -41,7 +41,11 @@ loom_cc_library(
     srcs = ["backing_directory.c"],
     hdrs = ["backing_directory.h"],
     visibility = ["//visibility:private"],
-    deps = ["//runtime/src/iree/base"],
+    deps = [
+        ":backing_pages",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
 )
 
 loom_cc_library(
@@ -81,7 +85,11 @@ loom_cc_library(
 
 loom_cc_library(
     name = "memory",
-    srcs = ["memory.c"],
+    srcs = [
+        "memory.c",
+        "memory_reservation.c",
+        "memory_reservation.h",
+    ],
     hdrs = ["memory.h"],
     visibility = ["//visibility:public"],
     deps = [

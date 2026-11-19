@@ -8,13 +8,16 @@
 
 #include "loom/util/adaptive_sort.h"
 
-void loom_runtime_backing_plan_initialize(loom_runtime_backing_plan_t* plan) {
-  *plan = (loom_runtime_backing_plan_t){.capacity = 1, .runs = &plan->first};
+void loom_runtime_backing_plan_initialize(loom_runtime_backing_plan_t* plan,
+                                          iree_host_size_t capacity,
+                                          loom_runtime_backing_run_t* initial) {
+  *plan = (loom_runtime_backing_plan_t){
+      .capacity = capacity, .initial = initial, .runs = initial};
 }
 
 void loom_runtime_backing_plan_deinitialize(loom_runtime_backing_plan_t* plan,
                                             iree_allocator_t allocator) {
-  if (plan->runs != &plan->first) {
+  if (plan->runs != plan->initial) {
     iree_allocator_free(allocator, plan->runs);
   }
 }
@@ -26,11 +29,11 @@ iree_status_t loom_runtime_backing_plan_append(
     // The current allocation already fits capacity elements. Doubling the
     // element count fits size_t because each element is larger than two bytes.
     const iree_host_size_t capacity = 2 * plan->capacity;
-    if (plan->runs == &plan->first) {
+    if (plan->runs == plan->initial) {
       loom_runtime_backing_run_t* runs = NULL;
-      IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      IREE_RETURN_IF_ERROR(iree_allocator_malloc_array_uninitialized(
           allocator, capacity, sizeof(*runs), (void**)&runs));
-      runs[0] = plan->first;
+      memcpy(runs, plan->initial, plan->count * sizeof(*runs));
       plan->runs = runs;
     } else {
       IREE_RETURN_IF_ERROR(iree_allocator_realloc_array(
@@ -40,6 +43,29 @@ iree_status_t loom_runtime_backing_plan_append(
   }
   plan->runs[plan->count++] = run;
   return iree_ok_status();
+}
+
+bool loom_runtime_backing_run_extend(loom_runtime_backing_run_t* previous,
+                                     const loom_runtime_backing_run_t* next,
+                                     iree_device_size_t stride) {
+  if (previous->buffer != next->buffer ||
+      previous->slot.parent != next->slot.parent ||
+      previous->index + previous->count != next->index ||
+      previous->slot.offset + previous->count * stride != next->slot.offset) {
+    return false;
+  }
+  previous->count += next->count;
+  return true;
+}
+
+iree_status_t loom_runtime_backing_plan_capture(
+    loom_runtime_backing_plan_t* plan, iree_allocator_t allocator,
+    loom_runtime_backing_run_t run, iree_device_size_t stride) {
+  if (plan->count && loom_runtime_backing_run_extend(
+                         &plan->runs[plan->count - 1], &run, stride)) {
+    return iree_ok_status();
+  }
+  return loom_runtime_backing_plan_append(plan, allocator, run);
 }
 
 static bool loom_runtime_backing_run_precedes(
