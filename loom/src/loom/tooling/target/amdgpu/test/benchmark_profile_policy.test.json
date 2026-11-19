@@ -2,6 +2,36 @@
   "version": 1,
   "cases": [
     {
+      "name": "one kernel invocation produces a dispatch event",
+      "steps": [
+        {
+          "name": "capture",
+          "run": {
+            "tool": "loom-run",
+            "args": [
+              "{srcdir}/../testdata/benchmark_profile_policy.loom",
+              "--root=increment",
+              "--device=amdgpu",
+              "--kernel-input-buffer=1xi32=7",
+              "--kernel-input-buffer=1xi32=-1",
+              "--expected-kernel-buffer=1xi32=7",
+              "--expected-kernel-buffer=1xi32=8",
+              "--device_profiling_mode=dispatch-events",
+              "--device_profiling_output={tmp}/increment.irpf"
+            ]
+          }
+        },
+        {
+          "name": "read-event",
+          "run": {
+            "tool": "iree-profile",
+            "args": ["dispatch", "--format=jsonl", "--dispatch_events", "{tmp}/increment.irpf"]
+          },
+          "stdout": {"contains": ["\"type\":\"dispatch_event\""]}
+        }
+      ]
+    },
+    {
       "name": "single-dispatch comparisons omit suppressed profile artifacts",
       "run": {
         "tool": "loom-benchmark",

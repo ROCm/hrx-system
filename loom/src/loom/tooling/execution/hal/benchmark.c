@@ -645,10 +645,9 @@ static iree_status_t loom_run_hal_benchmark_profile_final_batch(
       options->dispatch_batch;
   // Record a separate metadata-retaining batch so measured submissions keep the
   // fast unretained command-buffer shape.
-  profile_dispatch_options.command_buffer_mode |=
-      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA;
-  profile_dispatch_options.command_buffer_mode &=
-      ~IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED;
+  profile_dispatch_options.command_buffer_mode =
+      loom_run_hal_profile_command_buffer_mode(
+          profile_dispatch_options.command_buffer_mode);
   profile_dispatch_options.execute_flags &=
       ~IREE_HAL_QUEUE_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME;
 
@@ -698,10 +697,9 @@ static iree_status_t loom_run_hal_benchmark_profile_final_sequence_batch(
       options->dispatch_batch;
   // Record a separate metadata-retaining batch so measured submissions keep the
   // fast unretained command-buffer shape.
-  profile_dispatch_options.command_buffer_mode |=
-      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA;
-  profile_dispatch_options.command_buffer_mode &=
-      ~IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED;
+  profile_dispatch_options.command_buffer_mode =
+      loom_run_hal_profile_command_buffer_mode(
+          profile_dispatch_options.command_buffer_mode);
   profile_dispatch_options.execute_flags &=
       ~IREE_HAL_QUEUE_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME;
 
@@ -973,10 +971,8 @@ static iree_status_t loom_run_hal_benchmark_binding_table_profile_final_batch(
     const loom_run_hal_benchmark_options_t* options, iree_allocator_t allocator,
     loom_run_hal_profile_summary_t* out_profile) {
   loom_run_hal_dispatch_sequence_options_t sequence_options = {
-      .command_buffer_mode =
-          (options->dispatch_batch.command_buffer_mode |
-           IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA) &
-          ~IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED,
+      .command_buffer_mode = loom_run_hal_profile_command_buffer_mode(
+          options->dispatch_batch.command_buffer_mode),
       .execute_flags =
           options->dispatch_batch.execute_flags &
           ~IREE_HAL_QUEUE_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME,

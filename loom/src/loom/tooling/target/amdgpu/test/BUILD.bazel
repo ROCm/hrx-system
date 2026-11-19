@@ -85,7 +85,11 @@ iree_cli_test(
     target_compatible_with = _AMDGPU_EXECUTION_COMPATIBLE_WITH + loom_config_compatible_with([
         "//loom/config/execute:vm_iree_vm",
     ]),
-    tools = {"loom-benchmark": "//loom/src/loom/tools/loom-benchmark"},
+    tools = {
+        "iree-profile": "//tools:iree-profile",
+        "loom-benchmark": "//loom/src/loom/tools/loom-benchmark",
+        "loom-run": "//loom/src/loom/tools/loom-run",
+    },
 )
 
 iree_py_test(
