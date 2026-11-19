@@ -7,11 +7,13 @@
 #include "loom/runtime/storage/memory.h"
 
 #include "iree/async/semaphore.h"
+#include "iree/async/util/semaphore_wait.h"
 #include "iree/base/internal/atomic_slist.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/base/threading/notification.h"
 #include "iree/hal/memory/tlsf.h"
 #include "iree/hal/pool_wait.h"
+#include "iree/hal/utils/host_wait.h"
 #include "loom/runtime/storage/backing_directory.h"
 #include "loom/runtime/storage/backing_pages.h"
 #include "loom/runtime/storage/backing_plan.h"
@@ -20,6 +22,8 @@
 struct loom_runtime_memory_pool_t {
   // Allocator owning pool, buffer, and slab metadata.
   iree_allocator_t host_allocator;
+  // Associates pending physical acquisitions with their host continuations.
+  iree_async_semaphore_wait_context_t source_waits;
   // Borrowed sealed group outliving all source pools and virtual buffers.
   iree_hal_device_group_t* group;
   // Retained mapping-source pool, used only by this physical budget.
@@ -118,6 +122,16 @@ typedef struct loom_runtime_memory_stage_t {
   iree_status_t status;
 } loom_runtime_memory_stage_t;
 
+// Present in the mapping allocation only when physical parents are pending.
+typedef struct loom_runtime_memory_sources_t {
+  // Unique parent readiness points, borrowed through the reservation.
+  iree_hal_semaphore_list_t dependencies;
+  // Completes when every native acquisition has retired, including on failure.
+  iree_hal_host_wait_t wait;
+  // Tracker and timepoints share the mapping allocation.
+  iree_allocator_inline_storage_t tracker;
+} loom_runtime_memory_sources_t;
+
 struct loom_runtime_memory_operation_t {
   // Submission and both private stage callbacks each own one claim.
   iree_atomic_int32_t pending;
@@ -130,7 +144,7 @@ struct loom_runtime_memory_operation_t {
   // The first private stage established or retained physical ownership.
   bool keep_backing;
   // Unique pending-parent readiness, captured alongside native mappings.
-  iree_hal_semaphore_list_t allocation_waits;
+  loom_runtime_memory_sources_t* sources;
   // Owned native mapping batch followed by the semaphore wait storage.
   iree_hal_memory_mapping_t* mappings;
   // Number of native mapping runs produced by the latest mapping stage.
@@ -346,6 +360,7 @@ iree_status_t loom_runtime_memory_pool_allocate(
   pool->mapping_scope = (iree_hal_memory_scope_t){
       iree_hal_device_group_memory_domain(group), IREE_HAL_MEMORY_SCOPE_ANY};
   pool->limit_bytes = limit_bytes;
+  iree_async_semaphore_wait_context_initialize(&pool->source_waits);
   iree_slim_mutex_initialize(&pool->capacity_mutex);
   iree_atomic_slist_initialize(&pool->completed_operations);
   iree_notification_initialize(&pool->capacity_notification);
@@ -400,6 +415,7 @@ void loom_runtime_memory_pool_free(loom_runtime_memory_pool_t* pool) {
   iree_notification_deinitialize(&pool->capacity_notification);
   iree_atomic_slist_deinitialize(&pool->completed_operations);
   iree_slim_mutex_deinitialize(&pool->capacity_mutex);
+  iree_async_semaphore_wait_context_deinitialize(&pool->source_waits);
   loom_runtime_backing_pages_free(pool->pages);
   iree_hal_memory_budget_release(pool->budget);
   iree_hal_pool_release(pool->storage_pool);
@@ -1137,8 +1153,9 @@ static iree_status_t loom_runtime_memory_operation_allocate(
   return status;
 }
 
-// Adjacent physical runs can share both an allocation frontier and a target
-// predecessor. Payload 1 denotes native retirement on every private timeline.
+// Runs sharing a pending physical parent need one timepoint. Its storage is
+// part of the mapping batch and ready inventory needs none. Payload 1 denotes
+// native retirement on every private timeline.
 static iree_status_t loom_runtime_memory_operation_allocate_mappings(
     loom_runtime_memory_operation_t* operation) {
   const iree_host_size_t count = operation->plan.count;
@@ -1146,36 +1163,51 @@ static iree_status_t loom_runtime_memory_operation_allocate_mappings(
     return iree_ok_status();
   }
   iree_host_size_t sources = 0, targets = 0;
-  loom_runtime_backing_parent_t* previous_parent = NULL;
+  const uint64_t observation =
+      loom_runtime_backing_pages_begin_observation(operation->pool->pages);
   loom_runtime_memory_target_t* previous_target = NULL;
   for (iree_host_size_t i = 0; i < count; ++i) {
     const loom_runtime_backing_run_t* run = &operation->plan.runs[i];
     loom_runtime_memory_target_t* target = run->buffer->target;
     sources += !operation->growing && !operation->releasing &&
-               run->slot.parent != previous_parent;
+               loom_runtime_backing_pages_observe(run->slot, observation);
     targets += !operation->growing && target->mapping_completion &&
                target != previous_target;
-    previous_parent = run->slot.parent;
     previous_target = target;
   }
+  iree_host_size_t tracker_size = 0;
+  if (sources) {
+    IREE_RETURN_IF_ERROR(
+        iree_async_semaphore_wait_tracker_storage_size(sources, &tracker_size));
+  }
   iree_host_size_t size = 0, mappings_offset = 0, values_offset = 0,
-                   sources_offset = 0, targets_offset = 0;
+                   sources_offset = 0, targets_offset = 0, wait_offset = 0,
+                   tracker_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       0, &size,
       IREE_STRUCT_FIELD(count, iree_hal_memory_mapping_t, &mappings_offset),
       IREE_STRUCT_FIELD(iree_max(sources, targets), uint64_t, &values_offset),
       IREE_STRUCT_FIELD(sources, iree_hal_semaphore_t*, &sources_offset),
-      IREE_STRUCT_FIELD(targets, iree_hal_semaphore_t*, &targets_offset)));
+      IREE_STRUCT_FIELD(targets, iree_hal_semaphore_t*, &targets_offset),
+      IREE_STRUCT_FIELD(sources != 0, loom_runtime_memory_sources_t,
+                        &wait_offset),
+      IREE_STRUCT_FIELD_ALIGNED(tracker_size, uint8_t, iree_max_align_t,
+                                &tracker_offset)));
   uint8_t* storage = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_uninitialized(
       operation->pool->host_allocator, size, (void**)&storage));
   operation->mappings = (iree_hal_memory_mapping_t*)(storage + mappings_offset);
   operation->mapping_waits.payload_values =
       (uint64_t*)(storage + values_offset);
-  operation->allocation_waits.payload_values =
-      operation->mapping_waits.payload_values;
-  operation->allocation_waits.semaphores =
-      (iree_hal_semaphore_t**)(storage + sources_offset);
+  if (sources) {
+    operation->sources =
+        (loom_runtime_memory_sources_t*)(storage + wait_offset);
+    operation->sources->dependencies = (iree_hal_semaphore_list_t){
+        0, (iree_hal_semaphore_t**)(storage + sources_offset),
+        operation->mapping_waits.payload_values};
+    operation->sources->tracker = (iree_allocator_inline_storage_t){
+        .capacity = tracker_size, .buffer = storage + tracker_offset};
+  }
   operation->mapping_waits.semaphores =
       (iree_hal_semaphore_t**)(storage + targets_offset);
   return iree_ok_status();
@@ -1275,6 +1307,20 @@ static iree_status_t loom_runtime_memory_operation_prepare_backing(
   return status;
 }
 
+static void loom_runtime_memory_sources_ready(void* user_data,
+                                              iree_status_t status) {
+  iree_hal_semaphore_t* ready = user_data;
+  // Signaling can retire the operation and release its reference inline.
+  iree_hal_semaphore_retain(ready);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_semaphore_signal(ready, 1, NULL);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_hal_semaphore_fail(ready, status);
+  }
+  iree_hal_semaphore_release(ready);
+}
+
 static void loom_runtime_memory_operation_enqueue(
     loom_runtime_memory_pool_t* pool,
     loom_runtime_memory_operation_t* operation,
@@ -1314,13 +1360,14 @@ static void loom_runtime_memory_operation_enqueue(
       run->buffer->target->mapping_completion = mapping_completion;
       iree_hal_semaphore_retain(mapping_completion);
     }
-    if (!operation->growing && !operation->releasing) {
+    if (operation->sources) {
       iree_hal_semaphore_t* ready =
           loom_runtime_backing_pages_observe(run->slot, observation);
       if (ready) {
-        const iree_host_size_t index = operation->allocation_waits.count++;
-        operation->allocation_waits.semaphores[index] = ready;
-        operation->allocation_waits.payload_values[index] = 1;
+        iree_hal_semaphore_list_t* waits = &operation->sources->dependencies;
+        const iree_host_size_t index = waits->count++;
+        waits->semaphores[index] = ready;
+        waits->payload_values[index] = 1;
       }
     }
   }
@@ -1334,16 +1381,18 @@ static void loom_runtime_memory_operation_enqueue(
       loom_runtime_memory_stage_completed(stage, &stage->timepoint, acquired);
     }
   }
-  loom_runtime_backing_pages_submit(&operation->growth);
   iree_host_size_t mapping_count = 0;
   if (iree_status_is_ok(status)) {
     if (operation->releasing || operation->growing) {
       mapping_count = loom_runtime_memory_operation_build_mappings(operation);
       status = iree_hal_queue_map(pool->queue, operation->mapping_waits, first,
                                   mapping_count, operation->mappings, 0);
-    } else if (operation->allocation_waits.count) {
-      status = iree_hal_queue_barrier(pool->queue, operation->allocation_waits,
-                                      first, NULL, 0);
+    } else if (operation->sources) {
+      loom_runtime_memory_sources_t* sources = operation->sources;
+      status = iree_hal_host_wait_begin(
+          &pool->source_waits, sources->dependencies,
+          loom_runtime_memory_sources_ready, operation->stages[0].semaphore,
+          iree_allocator_inline_arena(&sources->tracker), &sources->wait);
     } else {
       status =
           iree_hal_semaphore_signal(operation->stages[0].semaphore, 1, NULL);
@@ -1371,6 +1420,7 @@ static void loom_runtime_memory_operation_enqueue(
       iree_hal_semaphore_fail(operation->stages[1].semaphore, status);
     }
   }
+  loom_runtime_backing_pages_submit(&operation->growth);
   // Non-growing continuations own predecessor references through map capture.
   // Growth has already captured both mapping batches on this owner.
   if (operation->growing) {

@@ -100,11 +100,13 @@ loom_cc_library(
         "//loom/src/loom/runtime:wake",
         "//loom/src/loom/runtime/storage:statistics",
         "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:semaphore_wait",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:atomic_slist",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/memory:tlsf",
+        "//runtime/src/iree/hal/utils:host_wait",
     ],
 )
 

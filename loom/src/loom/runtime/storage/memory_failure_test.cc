@@ -35,35 +35,37 @@ TEST_F(MemoryTest, RejectedAllocationPublishesFailureWithoutBacking) {
   RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
 }
 
-TEST_F(MemoryTest, FailedAcquisitionPropagatesBeforeBackingPublication) {
-  ASSERT_NO_FATAL_FAILURE(UseDeferredBacking());
+TEST_F(MemoryTest, FailedAcquisitionRetiresEverySourceBeforePublishing) {
+  ASSERT_NO_FATAL_FAILURE(UseDeferredBacking(2 * kSlabSize));
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
-      pool, loom_runtime_pool_weight_geometry(storage_owner), kSlabSize, 256,
-      &statistics[0], &first));
+      pool, loom_runtime_pool_weight_geometry(storage_owner), 2 * kSlabSize,
+      256, &statistics[0], &first));
   deferred_backing->defer = true;
-  const loom_runtime_memory_range_t range = {first, 0, kSlabSize};
+  const loom_runtime_memory_range_t range = {first, 0, 2 * kSlabSize};
   loom_runtime_memory_admission_t admission;
   loom_runtime_memory_operation_t* operation = nullptr;
   IREE_ASSERT_OK(loom_runtime_memory_pool_commit_async(
       pool, 1, &range, nullptr, 0, &admission, &operation));
   ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
-  deferred_backing->WaitForAcquisition();
+  ASSERT_EQ(deferred_backing->PendingRequestCount(), 2u);
   EXPECT_FALSE(loom_runtime_memory_operation_is_complete(operation));
 
   deferred_backing->FailOne();
+  EXPECT_FALSE(loom_runtime_memory_operation_is_complete(operation));
+  deferred_backing->CompleteOne();
   loom_runtime_memory_operation_await(operation);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                         loom_runtime_memory_operation_query_status(operation));
-  // Failed readiness forbids resolving the borrowed parent. Publication returns
-  // its lease, and no physical handle was exposed to file-loading producers.
+  // The failed commitment publishes neither lease. A subsequent request can
+  // reuse the successful sibling and acquire the missing backing.
   loom_runtime_memory_operation_free(operation);
   IREE_EXPECT_OK(loom_runtime_memory_pool_query_status(pool));
   EXPECT_EQ(statistics[0].pending_bytes, 0u);
   EXPECT_EQ(statistics[0].committed_bytes, 0u);
 
   deferred_backing->ResumeAcquisitions();
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, kSlabSize));
-  RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0x87654321);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, 2 * kSlabSize));
+  RoundTrip(loom_runtime_virtual_buffer_handle(first), kSlabSize, 0x87654321);
 }
 
 TEST_F(MemoryTest, NativeAllocationFailurePreservesWarmWorkAndAllowsRetry) {
