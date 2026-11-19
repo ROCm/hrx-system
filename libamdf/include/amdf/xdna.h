@@ -100,6 +100,14 @@ enum amdf_xdna_scheduling_mode_bits_e {
   AMDF_XDNA_SCHEDULING_MODE_TIME_SLICED = 1u << 2,
 };
 
+/// Optional operations available within a native XDNA instruction stream.
+typedef uint32_t amdf_xdna_instruction_features_t;
+enum amdf_xdna_instruction_feature_bits_e {
+  /// A LOAD_PDI transaction can load a configuration image from an instruction
+  /// allocation's firmware address. The caller owns the image and its lifetime.
+  AMDF_XDNA_INSTRUCTION_FEATURE_LOAD_PDI = 1u << 0,
+};
+
 /// Binding physical placement contracts supported by the native provider.
 /// Zero means no fixed placement is available, not an unqueried value.
 typedef uint32_t amdf_xdna_placement_modes_t;
@@ -191,7 +199,8 @@ typedef struct amdf_xdna_device_create_info_t {
 typedef struct amdf_xdna_device_info_t {
   /// Must be `AMDF_STRUCTURE_TYPE_XDNA_DEVICE_INFO`.
   amdf_structure_type_t type;
-  /// Must be at least `sizeof(amdf_xdna_device_info_t)`.
+  /// Size of the caller's structure. Providers accept the original prefix
+  /// ending after `instruction.format` and fill features for the full size.
   uint32_t structure_size;
   /// Optional output extension chain. No extensions are currently defined.
   void* next;
@@ -236,6 +245,9 @@ typedef struct amdf_xdna_device_info_t {
     uint32_t byte_length_granularity;
     /// Native encoding supplied by the caller, never parsed by libamdf.
     amdf_xdna_binary_format_info_t format;
+    /// Optional operations supported by the active submission path. Initialize
+    /// to zero before querying providers that predate this field.
+    amdf_xdna_instruction_features_t features;
   } instruction;
 } amdf_xdna_device_info_t;
 

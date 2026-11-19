@@ -25,6 +25,7 @@ amdf_xdna_umd_context_capabilities_t amdf_xdna_umd_query_context_capabilities(
        AMDF_XDNA_EXECUTION_CAPABILITY_ELF_INSTRUCTIONS) != 0) {
     capabilities.scheduling_modes = AMDF_XDNA_SCHEDULING_MODE_TIME_SLICED;
     capabilities.placement_modes = AMDF_XDNA_PLACEMENT_MODE_FIXED_FULL_ARRAY;
+    capabilities.instruction_features = AMDF_XDNA_INSTRUCTION_FEATURE_LOAD_PDI;
   }
   return capabilities;
 }
