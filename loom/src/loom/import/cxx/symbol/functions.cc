@@ -507,6 +507,18 @@ void Functions::prepare_analysis(cxx::FunctionSymbol* function, Types& types,
     diagnostics_.finish();
   }
   auto* definition_ast = concrete->declaration();
+  // The closure's call operator is synthesized inside an expression, outside
+  // the declaration lists visited by collect(). Admit its authored attributes
+  // at the same boundary as a member definition, before analyzing its body.
+  if (auto* record = cxx::symbol_cast<cxx::ClassSymbol>(concrete->parent());
+      record && record->isClosureType()) {
+    auto* prototype = cxx::getFunctionPrototype(definition_ast->declarator);
+    if (definition_ast->attributeList ||
+        (prototype && prototype->attributeList)) {
+      admit_declaration(concrete, definition_ast->attributeList, definition_ast,
+                        DeclarationScope::Nested);
+    }
+  }
   auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
       definition_ast->functionBody);
   const bool defaulted_destructor =

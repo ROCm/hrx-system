@@ -453,26 +453,21 @@ kernel.def @decode_dot() {
   %32 = vector.load<root_in_bounds> %31[0] : view<16xbf16> -> vector<16xbf16>
   %33 = buffer.view %activations_high[%table_byte_offset] : buffer -> view<16xbf16>
   %34 = vector.load<root_in_bounds> %33[0] : view<16xbf16> -> vector<16xbf16>
-  %35 = func.call pure @packed_group_dot(%28, %30, %32, %34, %scale, %seed) : (vector<16xi8>, vector<16xi8>, vector<16xbf16>, vector<16xbf16>, f32, f32) -> (f32)
-  %36 = buffer.view %output[%table_byte_offset] : buffer -> view<1xf32>
-  view.store<root_in_bounds|type_disjoint> %35, %36[0] : f32, view<1xf32>
-  kernel.return
-}
-
-func.def @packed_group_dot(%table: vector<16xi8>, %packed: vector<16xi8>, %activations_low: vector<16xbf16>, %activations_high: vector<16xbf16>, %scale: f32, %seed: f32) -> (f32) {
   %301 = vector.splati 15 : vector<16xi8>
-  %47 = vector.andi %packed, %301 : vector<16xi8>
-  %low_codes = vector.table.lookup %table[%47] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
+  %47 = vector.andi %30, %301 : vector<16xi8>
+  %low_codes = vector.table.lookup %28[%47] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
   %296 = vector.splati 4 : vector<16xi8>
-  %52 = vector.shrui %packed, %296 : vector<16xi8>
-  %high_codes = vector.table.lookup %table[%52] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
+  %52 = vector.shrui %30, %296 : vector<16xi8>
+  %high_codes = vector.table.lookup %28[%52] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
   %low_weights = vector.sitofp %low_codes : vector<16xi8> to vector<16xbf16>
   %high_weights = vector.sitofp %high_codes : vector<16xi8> to vector<16xbf16>
   %partial$291 = vector.splatf 0.0 : vector<8xf32>
-  %partial$57 = vector.dot2f %low_weights, %activations_low, %partial$291 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-  %partial$58 = vector.dot2f %high_weights, %activations_high, %partial$57 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %partial$57 = vector.dot2f %low_weights, %32, %partial$291 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %partial$58 = vector.dot2f %high_weights, %34, %partial$57 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   %59 = scalar.constant 0.0 : f32
   %60 = vector.reduce<addf> %partial$58, %59 : vector<8xf32>, f32
   %61 = scalar.fmaf %scale, %60, %seed : f32
-  func.return %61 : f32
+  %36 = buffer.view %output[%table_byte_offset] : buffer -> view<1xf32>
+  view.store<root_in_bounds|type_disjoint> %61, %36[0] : f32, view<1xf32>
+  kernel.return
 }

@@ -855,6 +855,16 @@ target requirement forces expansion. Each policy pair is mutually exclusive:
 }
 ```
 
+On a lambda the same attributes go after the capture list and before the
+parameters. For a generic lambda with explicit template parameters they go
+after the template parameter list. They govern the closure's call operator at
+each call site, including calls through a function template.
+
+```cpp
+auto update = [scale] [[loom::inline]] (float value) { return value * scale; };
+auto rare = []<class T> [[loom::noinline, loom::cold]] (T value) { return value + T{1}; };
+```
+
 The `LOOM_INLINE` facade macro combines `[[loom::inline]]` with the ordinary
 C++ `inline` keyword for header helpers. Direct attributes remain available
 when linkage and placement need separate control.

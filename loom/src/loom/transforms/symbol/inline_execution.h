@@ -19,7 +19,7 @@ extern "C" {
 // number of direct calls are expanded. Non-call references, retained function
 // versions, and demanded template families keep the definition alive.
 bool loom_inline_symbol_can_transfer_after_removing(
-    const loom_inline_callables_plan_t* plan, loom_symbol_id_t symbol_id,
+    loom_inline_callables_plan_t* plan, loom_symbol_id_t symbol_id,
     uint32_t planned_call_removals);
 
 iree_status_t loom_inline_execute_plan(loom_inline_callables_plan_t* plan);

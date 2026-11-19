@@ -1431,9 +1431,11 @@ static void loom_inline_select_candidates_for_target(
     }
   }
 
+  const uint32_t materialization_cost =
+      profitability->may_be_cloned ? profitability->expanded_body_cost : 0;
   const loom_inline_profitability_decision_t decision =
       loom_inline_profitability_select(state->options.profitability,
-                                       profitability->expanded_body_cost,
+                                       materialization_cost,
                                        ordinary_call_count, hot_call_count);
   for (uint32_t entry_index = profitability->first_candidate_by_target;
        entry_index != LOOM_INLINE_PLAN_ENTRY_INVALID;
@@ -1489,91 +1491,69 @@ static iree_status_t loom_inline_select_profitable_entries(
   }
 
   const iree_host_size_t symbol_count = state->module->symbols.count;
-  uint32_t* next_symbol = NULL;
+  // Group symbols by the combined SCC, preserving required-edge order inside
+  // each group. Rejected optional cycles can still contain an acyclic chain
+  // of required calls. Both traversals need that chain in dependency order.
+  uint32_t* symbol_order = NULL;
+  uint32_t* component_cursor = NULL;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(state->environment->arena, symbol_count,
-                                sizeof(*next_symbol), (void**)&next_symbol));
-  uint32_t worklist_count = 0;
-  for (iree_host_size_t symbol_id = 0; symbol_id < symbol_count; ++symbol_id) {
-    loom_inline_profitability_symbol_t* profitability =
-        &state->profitability_symbols[symbol_id];
-    bool has_candidate = false;
-    for (uint32_t entry_index = profitability->first_candidate_by_target;
-         entry_index != LOOM_INLINE_PLAN_ENTRY_INVALID;
-         entry_index = state->next_candidate_by_target[entry_index]) {
-      has_candidate |= state->entries[entry_index].action ==
-                       LOOM_INLINE_PLAN_ACTION_CANDIDATE;
-    }
-    if (has_candidate) {
-      profitability->expanded_body_cost = 0;
-      next_symbol[worklist_count++] = (uint32_t)symbol_id;
+                                sizeof(*symbol_order), (void**)&symbol_order));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      state->environment->arena, state->sccs.count, sizeof(*component_cursor),
+      (void**)&component_cursor));
+  uint32_t count = 0;
+  for (iree_host_size_t i = 0; i < state->sccs.count; ++i) {
+    component_cursor[i] = count;
+    count += (uint32_t)state->sccs.values[i].node_count;
+  }
+  for (iree_host_size_t i = 0; i < required_sccs->count; ++i) {
+    const loom_scc_t* component = &required_sccs->values[i];
+    for (iree_host_size_t j = 0; j < component->node_count; ++j) {
+      const loom_symbol_id_t symbol_id = (loom_symbol_id_t)component->nodes[j];
+      symbol_order[component_cursor[state->component_by_symbol[symbol_id]]++] =
+          symbol_id;
     }
   }
-  while (worklist_count > 0) {
-    const loom_symbol_id_t source_symbol_id =
-        (loom_symbol_id_t)next_symbol[--worklist_count];
-    for (uint32_t entry_index = state->first_graph_by_source[source_symbol_id];
-         entry_index != LOOM_INLINE_PLAN_ENTRY_INVALID;
-         entry_index = state->entries[entry_index].next_graph_from_source) {
-      const loom_inline_plan_entry_t* entry = &state->entries[entry_index];
-      if ((entry->action != LOOM_INLINE_PLAN_ACTION_REQUIRED &&
-           entry->action != LOOM_INLINE_PLAN_ACTION_CANDIDATE) ||
-          entry->target_symbol_id >= symbol_count) {
+
+  // Caller before callee: mark bodies needed for pricing, and distinguish a
+  // move from an expansion that can make another copy. Even a sole-use leaf
+  // can be duplicated if an enclosing wrapper is cloned into several callers.
+  for (uint32_t i = count; i > 0; --i) {
+    const loom_symbol_id_t symbol_id = symbol_order[i - 1];
+    const loom_inline_profitability_symbol_t* source =
+        &state->profitability_symbols[symbol_id];
+    for (uint32_t index = state->first_graph_by_source[symbol_id];
+         index != LOOM_INLINE_PLAN_ENTRY_INVALID;
+         index = state->entries[index].next_graph_from_source) {
+      const loom_inline_plan_entry_t* entry = &state->entries[index];
+      if (entry->action != LOOM_INLINE_PLAN_ACTION_REQUIRED &&
+          entry->action != LOOM_INLINE_PLAN_ACTION_CANDIDATE) {
         continue;
       }
       loom_inline_profitability_symbol_t* target =
           &state->profitability_symbols[entry->target_symbol_id];
-      if (target->expanded_body_cost == UINT32_MAX) {
+      if (entry->action == LOOM_INLINE_PLAN_ACTION_CANDIDATE ||
+          source->expanded_body_cost != UINT32_MAX) {
         target->expanded_body_cost = 0;
-        next_symbol[worklist_count++] = entry->target_symbol_id;
       }
+      target->may_be_cloned = target->may_be_cloned || source->may_be_cloned ||
+                              !loom_inline_symbol_can_transfer_after_removing(
+                                  state, entry->target_symbol_id, 1);
     }
   }
 
-  uint32_t* first_symbol_by_component = NULL;
-  uint32_t* last_symbol_by_component = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->environment->arena, state->sccs.count,
-      sizeof(*first_symbol_by_component), (void**)&first_symbol_by_component));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->environment->arena, state->sccs.count,
-      sizeof(*last_symbol_by_component), (void**)&last_symbol_by_component));
-  for (iree_host_size_t i = 0; i < state->sccs.count; ++i) {
-    first_symbol_by_component[i] = LOOM_INLINE_PLAN_ENTRY_INVALID;
-    last_symbol_by_component[i] = LOOM_INLINE_PLAN_ENTRY_INVALID;
-  }
-  for (iree_host_size_t component_index = 0;
-       component_index < required_sccs->count; ++component_index) {
-    const loom_scc_t* component = &required_sccs->values[component_index];
-    for (iree_host_size_t node_index = 0; node_index < component->node_count;
-         ++node_index) {
-      const uint32_t symbol_id = (uint32_t)component->nodes[node_index];
-      const iree_host_size_t combined_component =
-          state->component_by_symbol[symbol_id];
-      next_symbol[symbol_id] = LOOM_INLINE_PLAN_ENTRY_INVALID;
-      if (last_symbol_by_component[combined_component] ==
-          LOOM_INLINE_PLAN_ENTRY_INVALID) {
-        first_symbol_by_component[combined_component] = symbol_id;
-      } else {
-        next_symbol[last_symbol_by_component[combined_component]] = symbol_id;
-      }
-      last_symbol_by_component[combined_component] = symbol_id;
+  // Callee before caller: include selected expansions in the cost of any
+  // enclosing body whose callers would have to pay for copies.
+  for (uint32_t i = 0; i < count; ++i) {
+    const loom_symbol_id_t symbol_id = symbol_order[i];
+    if (state->profitability_symbols[symbol_id].expanded_body_cost ==
+        UINT32_MAX) {
+      continue;
     }
-  }
-
-  for (iree_host_size_t component_index = 0;
-       component_index < state->sccs.count; ++component_index) {
-    for (uint32_t symbol_id = first_symbol_by_component[component_index];
-         symbol_id != LOOM_INLINE_PLAN_ENTRY_INVALID;
-         symbol_id = next_symbol[symbol_id]) {
-      if (state->profitability_symbols[symbol_id].expanded_body_cost ==
-          UINT32_MAX) {
-        continue;
-      }
-      IREE_RETURN_IF_ERROR(
-          loom_inline_recompute_profitability_symbol(state, symbol_id));
-      loom_inline_select_candidates_for_target(state, symbol_id);
-    }
+    IREE_RETURN_IF_ERROR(
+        loom_inline_recompute_profitability_symbol(state, symbol_id));
+    loom_inline_select_candidates_for_target(state, symbol_id);
   }
 
   for (uint32_t entry_index = 0; entry_index < state->entry_count;

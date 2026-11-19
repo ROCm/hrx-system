@@ -184,13 +184,13 @@ func.def public @expanded_cost_entry(%value: i32) -> (i32) {
 
 // RUN: pass inline-callables{budget=3,hot-budget=0}
 
-func.def @single_use_selected(%value: i32) -> (i32) {
+func.def @within_budget(%value: i32) -> (i32) {
   %first = test.addi %value, %value : i32
   %second = test.addi %first, %value : i32
   func.return %second : i32
 }
 
-func.def @single_use_retained(%value: i32) -> (i32) {
+func.def @above_budget(%value: i32) -> (i32) {
   %first = test.addi %value, %value : i32
   %second = test.addi %first, %value : i32
   %third = test.addi %second, %value : i32
@@ -198,25 +198,19 @@ func.def @single_use_retained(%value: i32) -> (i32) {
 }
 
 func.def public @single_use_entry(%value: i32) -> (i32, i32) {
-  %selected = func.call @single_use_selected(%value) : (i32) -> (i32)
-  %retained = func.call @single_use_retained(%value) : (i32) -> (i32)
-  func.return %selected, %retained : i32, i32
+  %selected = func.call @within_budget(%value) : (i32) -> (i32)
+  %large = func.call @above_budget(%value) : (i32) -> (i32)
+  func.return %selected, %large : i32, i32
 }
 
 // ----
-
-func.def @single_use_retained(%value: i32) -> (i32) {
-  %first = test.addi %value, %value : i32
-  %second = test.addi %first, %value : i32
-  %third = test.addi %second, %value : i32
-  func.return %third : i32
-}
-
 func.def public @single_use_entry(%value: i32) -> (i32, i32) {
-  %first = test.addi %value, %value : i32
-  %second = test.addi %first, %value : i32
-  %retained = func.call @single_use_retained(%value) : (i32) -> (i32)
-  func.return %second, %retained : i32, i32
+  %first$2 = test.addi %value, %value : i32
+  %second$3 = test.addi %first$2, %value : i32
+  %first$6 = test.addi %value, %value : i32
+  %second$7 = test.addi %first$6, %value : i32
+  %third = test.addi %second$7, %value : i32
+  func.return %second$3, %third : i32, i32
 }
 
 // ====
@@ -225,7 +219,7 @@ func.def public @single_use_entry(%value: i32) -> (i32, i32) {
 // words and can expand into multiple target operations.
 // RUN: pass inline-callables{budget=16,hot-budget=0}
 
-func.def @wide_helper(%lhs: vector<8xi64>, %rhs: vector<8xi64>) -> (vector<8xi64>) {
+func.def public @wide_helper(%lhs: vector<8xi64>, %rhs: vector<8xi64>) -> (vector<8xi64>) {
   %result = vector.addi %lhs, %rhs : vector<8xi64>
   func.return %result : vector<8xi64>
 }
@@ -237,7 +231,7 @@ func.def public @wide_entry(%lhs: vector<8xi64>, %rhs: vector<8xi64>) -> (vector
 
 // ----
 
-func.def @wide_helper(%lhs: vector<8xi64>, %rhs: vector<8xi64>) -> (vector<8xi64>) {
+func.def public @wide_helper(%lhs: vector<8xi64>, %rhs: vector<8xi64>) -> (vector<8xi64>) {
   %result = vector.addi %lhs, %rhs : vector<8xi64>
   func.return %result : vector<8xi64>
 }
@@ -301,4 +295,42 @@ pipeline.def public @strand_owner() run() {
     %value = scalar.constant 1 : i32
     %result = func.call @strand_helper(%value) : (i32) -> (i32)
   }
+}
+
+// ====
+
+// A single source call in a wrapper expanded twice would copy the leaf twice.
+// RUN: pass inline-callables{budget=1,hot-budget=0}
+
+func.def @leaf(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def inline @inner(%value: i32) -> (i32) {
+  %result = func.call @leaf(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def inline @wrapper(%value: i32) -> (i32) {
+  %result = func.call @inner(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public @two_uses(%value: i32) -> (i32, i32) {
+  %a = func.call @wrapper(%value) : (i32) -> (i32)
+  %b = func.call @wrapper(%a) : (i32) -> (i32)
+  func.return %a, %b : i32, i32
+}
+
+// ----
+func.def @leaf(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def public @two_uses(%value: i32) -> (i32, i32) {
+  %result$14 = func.call pure @leaf(%value) : (i32) -> (i32)
+  %result$5 = func.call pure @leaf(%result$14) : (i32) -> (i32)
+  func.return %result$14, %result$5 : i32, i32
 }

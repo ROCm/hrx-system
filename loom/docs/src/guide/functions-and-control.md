@@ -110,17 +110,17 @@ needed merely because a helper is small; it is used when the source contract
 requires the boundary to disappear at the current stage. Without an explicit
 policy, the consuming pass decides from target, call graph, and cost evidence.
 
-The default `inline-callables` policy expands an unannotated callee when its
-expanded body cost, multiplied by the selected call count, fits the ordinary
-budget of 128 materialization units. Every operation costs at least one unit;
-operations over scalar, vector, tile, or tensor payloads also account for their
-static 32-bit payload word count. Hot call sites and calls to hot functions may
-instead use the hot budget of 512 units. Cold call sites and calls to cold
-functions retain their boundaries unless target legality requires expansion.
-A private helper with one remaining selected call transfers into its caller
-instead of cloning its body, but it still must fit the budget: a call boundary
-can contain register pressure even when removing it would not duplicate code.
-Required `inline` calls and target-required calls do not consume either budget.
+With optional inlining enabled, a private helper used once can move into its
+caller at any size. This applies through chains of single-use helpers. If an
+enclosing wrapper can be copied into several callers, or if another reference
+keeps the helper's definition alive, the compiler budgets for the copies.
+
+The ordinary budget is 128 materialization units, measured as expanded body
+cost times the number of eligible calls. Every operation costs at least one
+unit. Operations over scalar, vector, tile, or tensor payloads also account for
+their static 32-bit payload word count. Hot calls can use a separate budget of
+512 units. Cold calls retain their boundaries unless expansion is required.
+Explicit `inline` and target-required calls consume neither budget.
 
 Target-required expansion takes precedence over this cost policy. AMDGPU and
 AIE2P core helpers use the same budgets, with leaf-only native call boundaries.
