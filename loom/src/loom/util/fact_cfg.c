@@ -19,9 +19,9 @@ static void loom_value_fact_cfg_seed_selector(
   }
   const loom_value_id_t selector =
       loom_cfg_graph_refresh_selector(&region->graph, block_index);
-  loom_value_facts_t facts = loom_value_fact_table_lookup(table, selector);
-  if (selector != LOOM_VALUE_ID_INVALID &&
-      !loom_value_fact_table_has_entry(table, selector)) {
+  loom_value_facts_t facts = loom_value_facts_unknown();
+  if (!loom_value_fact_table_try_lookup(table, selector, &facts) &&
+      selector != LOOM_VALUE_ID_INVALID) {
     loom_value_facts_mark_cluster_uniform(&facts);
   }
   loom_value_fact_control_set_selector(region->control, block_index, facts);
