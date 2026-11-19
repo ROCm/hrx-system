@@ -129,9 +129,8 @@ static bool loom_spirv_workgroup_view_reference(
           loom_value_fact_table_lookup(fact_table, value_id), out_reference)) {
     return false;
   }
-  out_reference->root_value_id =
-      loom_value_fact_view_reference_resolve_root_value(*out_reference,
-                                                        value_id);
+  out_reference->byte_origin_value_id = loom_value_fact_reference_resolve(
+      out_reference->byte_origin_value_id, value_id);
   return out_reference->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP;
 }
 
@@ -271,13 +270,13 @@ static iree_status_t loom_spirv_prepare_workgroup_carriers(
     loom_value_fact_view_reference_t reference = {0};
     if (!loom_spirv_workgroup_view_reference(fact_table, value_id,
                                              &reference) ||
-        !loom_spirv_workgroup_view_root_is_alloca(module,
-                                                  reference.root_value_id)) {
+        !loom_spirv_workgroup_view_root_is_alloca(
+            module, reference.byte_origin_value_id)) {
       continue;
     }
     const loom_value_ordinal_t root_ordinal =
         loom_local_value_domain_try_ordinal(value_domain,
-                                            reference.root_value_id);
+                                            reference.byte_origin_value_id);
     if (root_ordinal == LOOM_VALUE_ORDINAL_INVALID) {
       continue;
     }
@@ -346,15 +345,15 @@ static iree_status_t loom_spirv_resolve_workgroup_view_reg_class_from_layout(
     return iree_ok_status();
   }
   *out_is_workgroup = true;
-  if (!loom_spirv_workgroup_view_root_is_alloca(module,
-                                                reference.root_value_id)) {
+  if (!loom_spirv_workgroup_view_root_is_alloca(
+          module, reference.byte_origin_value_id)) {
     return iree_ok_status();
   }
 
   IREE_RETURN_IF_ERROR(loom_spirv_prepare_workgroup_carriers(
       module, fact_table, value_domain, feature_bits, arena, layout));
   const loom_value_ordinal_t root_ordinal = loom_local_value_domain_try_ordinal(
-      value_domain, reference.root_value_id);
+      value_domain, reference.byte_origin_value_id);
   if (root_ordinal == LOOM_VALUE_ORDINAL_INVALID ||
       root_ordinal >= layout->scalar_type_count) {
     return iree_ok_status();
@@ -668,6 +667,6 @@ uint64_t loom_spirv_workgroup_layout_source_memory_root_byte_offset(
   return source_memory_access->memory_space ==
                  LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP
              ? loom_spirv_workgroup_layout_root_byte_offset(
-                   context, source_memory_access->root_value_id)
+                   context, source_memory_access->byte_origin_value_id)
              : 0;
 }

@@ -45,8 +45,8 @@ iree_status_t loom_aie2p_native_select_storage_accesses(
             context, source->source->call,
             IREE_SV("a resolved storage root for each core buffer capture"));
       }
-      root = loom_value_fact_buffer_reference_resolve_root_value(reference,
-                                                                 argument);
+      root = loom_value_fact_reference_resolve(reference.byte_origin_value_id,
+                                               argument);
       memory_space = reference.memory_space;
     } else {
       loom_value_fact_view_reference_t reference;
@@ -56,8 +56,8 @@ iree_status_t loom_aie2p_native_select_storage_accesses(
             context, source->source->call,
             IREE_SV("a resolved storage root for each core view capture"));
       }
-      root = loom_value_fact_view_reference_resolve_root_value(reference,
-                                                               argument);
+      root = loom_value_fact_reference_resolve(reference.byte_origin_value_id,
+                                               argument);
       memory_space = reference.memory_space;
       byte_offset = reference.base_byte_offset;
     }

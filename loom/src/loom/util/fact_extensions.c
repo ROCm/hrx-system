@@ -138,8 +138,8 @@ static uint32_t loom_value_fact_hash_buffer_reference(
   hash = loom_structural_hash_mix_u64(hash, reference.minimum_alignment);
   hash = loom_structural_hash_mix_u32(hash, (uint32_t)reference.memory_space);
   hash = loom_structural_hash_mix_u32(hash, reference.root_value_id);
-  hash = loom_structural_hash_mix_u32(
-      hash, reference.has_root_symbol | (reference.root_is_byte_origin << 1));
+  hash = loom_structural_hash_mix_u32(hash, reference.byte_origin_value_id);
+  hash = loom_structural_hash_mix_u32(hash, reference.has_root_symbol);
   if (reference.has_root_symbol) {
     hash = loom_structural_hash_mix_u32(
         hash, reference.root_symbol.module_id |
@@ -158,11 +158,13 @@ static uint32_t loom_value_fact_hash_view_reference(
   hash = loom_value_fact_hash_facts(reference.base_byte_offset, hash);
   hash = loom_value_fact_hash_facts(reference.footprint_byte_length, hash);
   hash = loom_structural_hash_mix_u64(hash, reference.minimum_alignment);
-  hash = loom_structural_hash_mix_u64(hash, reference.root_minimum_alignment);
+  hash =
+      loom_structural_hash_mix_u32(hash, reference.root_minimum_alignment_log2);
   hash =
       loom_structural_hash_mix_u64(hash, reference.static_element_byte_count);
   hash = loom_structural_hash_mix_u32(hash, (uint32_t)reference.memory_space);
   hash = loom_structural_hash_mix_u32(hash, reference.root_value_id);
+  hash = loom_structural_hash_mix_u32(hash, reference.byte_origin_value_id);
   hash = loom_structural_hash_mix_u32(hash, reference.buffer_value_id);
   hash = loom_structural_hash_mix_u32(hash, reference.alias_scope_id);
   hash =
@@ -187,8 +189,8 @@ static bool loom_value_fact_buffer_reference_equal(
          lhs.minimum_alignment == rhs.minimum_alignment &&
          lhs.memory_space == rhs.memory_space &&
          lhs.root_value_id == rhs.root_value_id &&
+         lhs.byte_origin_value_id == rhs.byte_origin_value_id &&
          lhs.has_root_symbol == rhs.has_root_symbol &&
-         lhs.root_is_byte_origin == rhs.root_is_byte_origin &&
          (!lhs.has_root_symbol ||
           (lhs.root_symbol.module_id == rhs.root_symbol.module_id &&
            lhs.root_symbol.symbol_id == rhs.root_symbol.symbol_id)) &&
@@ -206,10 +208,11 @@ static bool loom_value_fact_view_reference_equal(
          loom_value_facts_equal(lhs.footprint_byte_length,
                                 rhs.footprint_byte_length) &&
          lhs.minimum_alignment == rhs.minimum_alignment &&
-         lhs.root_minimum_alignment == rhs.root_minimum_alignment &&
+         lhs.root_minimum_alignment_log2 == rhs.root_minimum_alignment_log2 &&
          lhs.static_element_byte_count == rhs.static_element_byte_count &&
          lhs.memory_space == rhs.memory_space &&
          lhs.root_value_id == rhs.root_value_id &&
+         lhs.byte_origin_value_id == rhs.byte_origin_value_id &&
          lhs.buffer_value_id == rhs.buffer_value_id &&
          lhs.alias_scope_id == rhs.alias_scope_id &&
          lhs.restrict_access.domain_id == rhs.restrict_access.domain_id &&
@@ -702,8 +705,8 @@ static bool loom_value_fact_table_buffer_reference_equal(
          lhs.minimum_alignment == rhs.minimum_alignment &&
          lhs.memory_space == rhs.memory_space &&
          lhs.root_value_id == rhs.root_value_id &&
+         lhs.byte_origin_value_id == rhs.byte_origin_value_id &&
          lhs.has_root_symbol == rhs.has_root_symbol &&
-         lhs.root_is_byte_origin == rhs.root_is_byte_origin &&
          (!lhs.has_root_symbol ||
           (lhs.root_symbol.module_id == rhs.root_symbol.module_id &&
            lhs.root_symbol.symbol_id == rhs.root_symbol.symbol_id)) &&
@@ -725,10 +728,11 @@ static bool loom_value_fact_table_view_reference_equal(
                                            rhs_table,
                                            rhs.footprint_byte_length) &&
          lhs.minimum_alignment == rhs.minimum_alignment &&
-         lhs.root_minimum_alignment == rhs.root_minimum_alignment &&
+         lhs.root_minimum_alignment_log2 == rhs.root_minimum_alignment_log2 &&
          lhs.static_element_byte_count == rhs.static_element_byte_count &&
          lhs.memory_space == rhs.memory_space &&
          lhs.root_value_id == rhs.root_value_id &&
+         lhs.byte_origin_value_id == rhs.byte_origin_value_id &&
          lhs.buffer_value_id == rhs.buffer_value_id &&
          lhs.alias_scope_id == rhs.alias_scope_id &&
          lhs.restrict_access.domain_id == rhs.restrict_access.domain_id &&

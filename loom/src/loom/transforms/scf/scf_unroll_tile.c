@@ -145,7 +145,7 @@ static uint8_t loom_scf_unroll_endpoint_scope(
     return 0;
   }
   uint8_t scope =
-      loom_scf_unroll_value_is_invariant(facts, endpoint->root_value_id)
+      loom_scf_unroll_value_is_invariant(facts, endpoint->byte_origin_value_id)
           ? LOOM_SCF_UNROLL_SCOPE_INVARIANT_ROOT
           : 0;
   if (loom_scf_unroll_expression_is_invariant(facts,
@@ -227,11 +227,11 @@ static iree_status_t loom_scf_unroll_endpoints_nonconflicting(
     *out_nonconflicting = true;
     return iree_ok_status();
   }
-  if (left->root_value_id == LOOM_VALUE_ID_INVALID ||
-      right->root_value_id == LOOM_VALUE_ID_INVALID) {
+  if (left->byte_origin_value_id == LOOM_VALUE_ID_INVALID ||
+      right->byte_origin_value_id == LOOM_VALUE_ID_INVALID) {
     return iree_ok_status();
   }
-  if (left->root_value_id != right->root_value_id) {
+  if (left->byte_origin_value_id != right->byte_origin_value_id) {
     // A same-execution promise also covers an arbitrary execution on one side
     // when the other side is invariant.
     if (!iree_any_bit_set(left_scope | right_scope,

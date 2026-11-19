@@ -138,7 +138,7 @@ static iree_status_t loom_amdgpu_record_memory_packet_report(
       .source_op_kind = source_op->kind,
       .execution_count_plus_one = execution_count_plus_one,
       .source_root_name = loom_module_value_name(
-          loom_low_lower_context_module(context), source->root_value_id),
+          loom_low_lower_context_module(context), source->byte_origin_value_id),
       .source_root_argument_index =
           loom_low_lower_source_memory_root_argument_index(context, source),
       .memory_space = loom_amdgpu_memory_space_name(source->memory_space),
@@ -251,8 +251,9 @@ static iree_status_t loom_amdgpu_record_fragment_memory_access_report(
           loom_op_name(loom_low_lower_context_module(context), source_op),
       .source_op_kind = source_op->kind,
       .execution_count_plus_one = execution_count_plus_one,
-      .source_root_name = loom_module_value_name(
-          loom_low_lower_context_module(context), plan->source.root_value_id),
+      .source_root_name =
+          loom_module_value_name(loom_low_lower_context_module(context),
+                                 plan->source.byte_origin_value_id),
       .source_root_argument_index =
           loom_low_lower_source_memory_root_argument_index(context,
                                                            &plan->source),

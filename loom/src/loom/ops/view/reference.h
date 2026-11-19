@@ -23,10 +23,10 @@
 extern "C" {
 #endif
 
-// Joins root-relative view facts across value selection and loop transport.
-// Shared roots retain their relative byte coordinates. Distinct roots rebase
-// onto the joined value while preserving common storage properties. Widening
-// drops changing ranges independently of stable origin and footprint facts.
+// Joins view facts across value selection and loop transport. A common byte
+// origin retains relative coordinates. Distinct addresses rebase onto the
+// selected view, which may still have a known allocation. Widening drops
+// changing ranges independently of stable origin and footprint facts.
 extern const loom_value_fact_domain_t loom_view_fact_domain;
 
 // Refines one typed view with a source restrict association while preserving

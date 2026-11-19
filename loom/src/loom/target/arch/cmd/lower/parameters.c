@@ -221,9 +221,8 @@ static uint16_t loom_cmd_parameter_find_source_binding(
       loom_value_fact_table_lookup(build->fact_table, source_value),
       &reference);
   IREE_ASSERT(has_reference, "verified buffer values have reference facts");
-  const loom_value_id_t root_value =
-      loom_value_fact_buffer_reference_resolve_root_value(reference,
-                                                          source_value);
+  const loom_value_id_t root_value = loom_value_fact_reference_resolve(
+      reference.byte_origin_value_id, source_value);
   return loom_cmd_parameter_find_root_binding(build, root_value);
 }
 
@@ -279,8 +278,8 @@ static iree_status_t loom_cmd_parameter_append_projected_ranges(
           exact_byte_offset < 0 || exact_byte_length < 0) {
         continue;
       }
-      root_value = loom_value_fact_view_reference_resolve_root_value(
-          view_reference, result);
+      root_value = loom_value_fact_reference_resolve(
+          view_reference.byte_origin_value_id, result);
       byte_offset = (uint64_t)exact_byte_offset;
       byte_length = (uint64_t)exact_byte_length;
     } else if (loom_type_is_buffer(result_type)) {
@@ -289,8 +288,8 @@ static iree_status_t loom_cmd_parameter_append_projected_ranges(
               &build->fact_table->context, result_facts, &buffer_reference)) {
         continue;
       }
-      root_value = loom_value_fact_buffer_reference_resolve_root_value(
-          buffer_reference, result);
+      root_value = loom_value_fact_reference_resolve(
+          buffer_reference.byte_origin_value_id, result);
     } else {
       continue;
     }

@@ -308,6 +308,7 @@ static int loom_motion_memory_compare_roots(const loom_view_region_t* lhs,
     return lhs->field < rhs->field ? -1 : 1; \
   }
   LOOM_COMPARE_ROOT_FIELD(root_value_id)
+  LOOM_COMPARE_ROOT_FIELD(byte_origin_value_id)
   LOOM_COMPARE_ROOT_FIELD(alias_scope_id)
   LOOM_COMPARE_ROOT_FIELD(restrict_access.domain_id)
   LOOM_COMPARE_ROOT_FIELD(restrict_access.scope_id)
@@ -555,8 +556,8 @@ static iree_status_t loom_motion_memory_check_group(
           &read_root_observation, &write_root_observation)) {
     return iree_ok_status();
   }
-  if (read->root_value_id != LOOM_VALUE_ID_INVALID &&
-      read->root_value_id == representative->root_value_id &&
+  if (read->byte_origin_value_id != LOOM_VALUE_ID_INVALID &&
+      read->byte_origin_value_id == representative->byte_origin_value_id &&
       !loom_value_facts_is_float(read->begin_byte_offset.facts) &&
       !loom_value_facts_is_float(read->end_byte_offset.facts)) {
     loom_motion_memory_range_t range = group->intervals;

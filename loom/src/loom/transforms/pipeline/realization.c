@@ -106,8 +106,8 @@ static iree_status_t loom_pipeline_realization_record_copies(
         if (read == write) {
           continue;
         }
-        const loom_value_id_t root_id =
-            read ? copy->source.root_value_id : copy->dest.root_value_id;
+        const loom_value_id_t root_id = read ? copy->source.byte_origin_value_id
+                                             : copy->dest.byte_origin_value_id;
         if (root_id == LOOM_VALUE_ID_INVALID) {
           continue;
         }

@@ -95,6 +95,7 @@ iree_status_t loom_view_region_table_initialize(
     const loom_value_facts_t facts =
         loom_value_fact_table_lookup(fact_table, value_id);
     loom_value_id_t root = LOOM_VALUE_ID_INVALID;
+    loom_value_id_t byte_origin = LOOM_VALUE_ID_INVALID;
     loom_value_fact_restrict_access_t restrict_access = {0};
     loom_value_fact_buffer_reference_t buffer;
     loom_value_fact_view_reference_t view;
@@ -102,16 +103,23 @@ iree_status_t loom_view_region_table_initialize(
                                                 &buffer)) {
       root =
           loom_value_fact_buffer_reference_resolve_root_value(buffer, value_id);
+      byte_origin = buffer.byte_origin_value_id;
       restrict_access = buffer.restrict_access;
     } else if (loom_value_facts_query_view_reference(&fact_table->context,
                                                      facts, &view)) {
       root = view.root_value_id;
+      byte_origin = view.byte_origin_value_id;
       restrict_access = view.restrict_access;
     }
     if (root != LOOM_VALUE_ID_INVALID) {
       loom_value_ordinal_t root_ordinal;
       IREE_RETURN_IF_ERROR(loom_local_value_domain_register_value(
           value_domain, root, &root_ordinal));
+    }
+    if (byte_origin != root && byte_origin != LOOM_VALUE_ID_INVALID) {
+      loom_value_ordinal_t origin_ordinal;
+      IREE_RETURN_IF_ERROR(loom_local_value_domain_register_value(
+          value_domain, byte_origin, &origin_ordinal));
     }
     if (restrict_access.domain_id != 0) {
       out_table->flags |= LOOM_VIEW_REGION_TABLE_RESTRICT_ACCESS;
@@ -727,11 +735,12 @@ static loom_value_fact_view_reference_t loom_view_region_default_reference(
       .base_byte_offset = loom_value_facts_exact_i64(0),
       .footprint_byte_length = loom_value_facts_make(0, INT64_MAX, 1),
       .minimum_alignment = 1,
-      .root_minimum_alignment = 1,
+      .root_minimum_alignment_log2 = 0,
       .static_element_byte_count =
           loom_view_region_static_element_byte_count(context, view_type),
       .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN,
       .root_value_id = value_id,
+      .byte_origin_value_id = value_id,
       .buffer_value_id = LOOM_VALUE_ID_INVALID,
       .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
       .nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN,
@@ -761,6 +770,7 @@ static iree_status_t loom_view_region_build_default(
       .view_value_id = value_id,
       .base_view_value_id = value_id,
       .root_value_id = reference.root_value_id,
+      .byte_origin_value_id = reference.byte_origin_value_id,
       .alias_scope_id = reference.alias_scope_id,
       .restrict_access = reference.restrict_access,
       .nullability = reference.nullability,
@@ -772,7 +782,7 @@ static iree_status_t loom_view_region_build_default(
       .byte_length = length,
       .end_byte_offset = end,
       .minimum_alignment = reference.minimum_alignment,
-      .root_minimum_alignment = reference.root_minimum_alignment,
+      .root_minimum_alignment = loom_value_fact_view_root_alignment(&reference),
       .static_element_byte_count = reference.static_element_byte_count,
       .memory_space = reference.memory_space,
       .access_flags = 0,
@@ -860,6 +870,7 @@ static iree_status_t loom_view_region_build_subview(
   IREE_RETURN_IF_ERROR(loom_view_region_expr_add(
       table, &source_region->begin_byte_offset, &additional_offset, &begin));
   out_region->root_value_id = source_region->root_value_id;
+  out_region->byte_origin_value_id = source_region->byte_origin_value_id;
   out_region->alias_scope_id = source_region->alias_scope_id;
   out_region->restrict_access = source_region->restrict_access;
   out_region->nullability = source_region->nullability;
@@ -899,6 +910,7 @@ static iree_status_t loom_view_region_build_reinterpret(
     return iree_ok_status();
   }
   out_region->root_value_id = source_region->root_value_id;
+  out_region->byte_origin_value_id = source_region->byte_origin_value_id;
   out_region->alias_scope_id = source_region->alias_scope_id;
   out_region->restrict_access = source_region->restrict_access;
   out_region->nullability = source_region->nullability;
@@ -929,6 +941,8 @@ static iree_status_t loom_view_region_build_for_value(
       &table->expression_context->fact_table->context, facts, &reference);
   reference.root_value_id =
       loom_value_fact_view_reference_resolve_root_value(reference, value_id);
+  reference.byte_origin_value_id = loom_value_fact_reference_resolve(
+      reference.byte_origin_value_id, value_id);
 
   const loom_value_t* value = loom_module_value(module, value_id);
   if (loom_value_is_block_arg(value)) {
@@ -2181,9 +2195,9 @@ iree_status_t loom_view_regions_prove_no_overlap(
   }
   *out_no_overlap =
       loom_view_region_roots_are_disjoint(left_region, right_region);
-  if (*out_no_overlap || left_region->root_value_id == LOOM_VALUE_ID_INVALID ||
-      right_region->root_value_id == LOOM_VALUE_ID_INVALID ||
-      left_region->root_value_id != right_region->root_value_id) {
+  if (*out_no_overlap ||
+      left_region->byte_origin_value_id == LOOM_VALUE_ID_INVALID ||
+      left_region->byte_origin_value_id != right_region->byte_origin_value_id) {
     return iree_ok_status();
   }
 

@@ -127,7 +127,7 @@ iree_status_t loom_low_lower_function_storage_select(
         &facts->context, loom_value_fact_table_lookup(facts, result),
         &reference);
     extent = reference.footprint_byte_length;
-    alignment = (int64_t)reference.root_minimum_alignment;
+    alignment = (int64_t)loom_value_fact_view_root_alignment(&reference);
     extent_value = result;
     if (source == LOOM_LOW_LOWER_FUNCTION_STORAGE_SOURCE_REFERENCE_VIEW) {
       alignment = iree_max(alignment, reference.static_element_byte_count);

@@ -101,7 +101,8 @@ typedef struct loom_low_strided_byte_interval_t {
 typedef struct loom_low_memory_relative_interval_t {
   // Identity of the producer's captured evaluation namespace.
   const void* scope;
-  // Storage equality identity within scope; inequality proves nothing.
+  // Shared byte origin for relative offsets within scope. Distinct origins
+  // can address the same allocation.
   uint32_t storage_id;
   // One-based disjoint-storage identity within scope, or zero when unknown.
   // Unequal nonzero identities require a comparison mode that establishes one

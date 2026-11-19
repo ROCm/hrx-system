@@ -95,6 +95,7 @@ class NativeStorageTest : public ::testing::Test {
         .minimum_alignment = 64,
         .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
         .root_value_id = arguments_[0],
+        .byte_origin_value_id = arguments_[0],
     };
     loom_value_facts_t facts;
     IREE_ASSERT_OK(loom_value_facts_make_buffer_reference(
@@ -113,8 +114,9 @@ class NativeStorageTest : public ::testing::Test {
           .base_byte_offset = loom_value_facts_exact_i64(offsets[i - 1]),
           .footprint_byte_length = loom_value_facts_exact_i64(lengths[i - 1]),
           .minimum_alignment = alignments[i - 1],
-          .root_minimum_alignment = 64,
+          .root_minimum_alignment_log2 = 6,
           .root_value_id = i == 4 ? arguments_[4] : arguments_[0],
+          .byte_origin_value_id = i == 4 ? arguments_[4] : arguments_[0],
           .buffer_value_id = i == 4 ? LOOM_VALUE_ID_INVALID : arguments_[0],
           .static_element_byte_count = static_element_byte_count,
           .memory_space = memory_space,

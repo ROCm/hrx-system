@@ -327,3 +327,58 @@ check.scenario @signed_position_distance {
   }
   check.return
 }
+
+// The first handle starts at byte 256 of the second. Each store is observed
+// through the other handle, once as a typed view and once as raw bytes.
+func.def @exchange_shared_allocation(%window: buffer, %whole: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %start = index.constant 256 : offset
+  %next = index.constant 257 : offset
+  %shared = buffer.assume.same_root %window, %whole : buffer
+  %bytes = buffer.view %shared[%origin] : buffer -> view<2xi8>
+  %before = buffer.load.i8.u %shared[%origin]
+  %first = scalar.constant 91 : i8
+  view.store %first, %bytes[0] : i8, view<2xi8>
+  %from_whole = buffer.load.i8.u %whole[%start]
+  %second = scalar.constant 43 : i32
+  buffer.store.i8 %second, %whole[%next]
+  %from_window = view.load %bytes[1] : view<2xi8> -> i8
+  %after = scalar.extui %from_window : i8 to i32
+  %observed = buffer.view %output[%origin] : buffer -> view<3xi32>
+  view.store %before, %observed[0] : i32, view<3xi32>
+  view.store %from_whole, %observed[1] : i32, view<3xi32>
+  view.store %after, %observed[2] : i32, view<3xi32>
+  func.return
+}
+
+// Model the operation in one coordinate system, including its full write set.
+func.def @exchange_shared_allocation_oracle(%window: buffer, %whole: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %storage = buffer.view %whole[%origin] : buffer -> view<272xi8>
+  %initial_byte = view.load %storage[256] : view<272xi8> -> i8
+  %initial = scalar.extui %initial_byte : i8 to i32
+  %first = scalar.constant 91 : i32
+  %second = scalar.constant 43 : i32
+  %first_byte = scalar.trunci %first : i32 to i8
+  %second_byte = scalar.trunci %second : i32 to i8
+  view.store %first_byte, %storage[256] : i8, view<272xi8>
+  view.store %second_byte, %storage[257] : i8, view<272xi8>
+  %observed = buffer.view %output[%origin] : buffer -> view<3xi32>
+  view.store %initial, %observed[0] : i32, view<3xi32>
+  view.store %first, %observed[1] : i32, view<3xi32>
+  view.store %second, %observed[2] : i32, view<3xi32>
+  func.return
+}
+
+check.scenario @shared_allocation_byte_origins {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %whole = check.generate.iota offset(3) step(1) period(7) : tensor<272xi8>
+    %window = check.tensor.view %whole offset(256) : tensor<272xi8> -> tensor<16xi8>
+    %output = check.generate.fill value(-1) : tensor<3xi32>
+    check.compare<@exchange_shared_allocation, @exchange_shared_allocation_oracle>(%window, %whole, %output) : (tensor<16xi8>, tensor<272xi8>, tensor<3xi32>) -> () {
+      check.expect.bitwise actual(%whole) expected(%whole) : tensor<272xi8>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<3xi32>
+    }
+  }
+  check.return
+}

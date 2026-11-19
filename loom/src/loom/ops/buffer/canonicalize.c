@@ -31,16 +31,12 @@ iree_status_t loom_buffer_distance_canonicalize(loom_op_t* op,
         left.nullability == LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NULL &&
         right.nullability == LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NULL;
     const bool same_origin =
-        (left.root_is_byte_origin ||
-         left.root_value_id == LOOM_VALUE_ID_INVALID) &&
-        (right.root_is_byte_origin ||
-         right.root_value_id == LOOM_VALUE_ID_INVALID) &&
+        loom_rewriter_value_identity(rewriter,
+                                     loom_value_fact_reference_resolve(
+                                         left.byte_origin_value_id, lhs)) ==
         loom_rewriter_value_identity(
             rewriter,
-            loom_value_fact_buffer_reference_resolve_root_value(left, lhs)) ==
-            loom_rewriter_value_identity(
-                rewriter, loom_value_fact_buffer_reference_resolve_root_value(
-                              right, rhs));
+            loom_value_fact_reference_resolve(right.byte_origin_value_id, rhs));
     if (!both_null && !same_origin) {
       return iree_ok_status();
     }

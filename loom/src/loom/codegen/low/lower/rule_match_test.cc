@@ -112,6 +112,7 @@ TEST(LowLowerSourceMemoryMatchTest, SelectsExactRejectionReason) {
       .operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
       .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
       .root_value_id = 0,
+      .byte_origin_value_id = 0,
       .element_byte_count = 4,
       .vector_lane_count = 1,
       .vector_lane_byte_stride = 4,
@@ -390,6 +391,7 @@ TEST(LowLowerSourceMemoryMatchTest, MatchesResidualOfRetainedViewBase) {
       .operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
       .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
       .root_value_id = 0,
+      .byte_origin_value_id = 0,
       .element_byte_count = 4,
       .vector_lane_count = 1,
       .static_byte_offset = 4100,
@@ -2046,9 +2048,11 @@ TEST_F(LowLowerRuleMatchTest, SelectsRootKindRejection) {
       .static_byte_offset_maximum = 0,
   };
 
+  const auto root = loom_index_constant_result(BuildConstant(0));
   loom_low_source_memory_access_plan_t access = {
       .operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
-      .root_value_id = loom_index_constant_result(BuildConstant(0)),
+      .root_value_id = root,
+      .byte_origin_value_id = root,
   };
   access.memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL;
   access.element_byte_count = 4;

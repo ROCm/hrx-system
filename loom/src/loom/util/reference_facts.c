@@ -6,6 +6,21 @@
 
 #include "loom/util/reference_facts.h"
 
+#include "iree/base/internal/math.h"
+
+void loom_value_fact_view_rebase_byte_origin(
+    loom_value_fact_view_reference_t* reference, loom_value_id_t byte_origin) {
+  if (!loom_value_facts_is_zero(reference->base_byte_offset)) {
+    reference->root_minimum_alignment_log2 = iree_min(
+        reference->root_minimum_alignment_log2,
+        iree_math_count_trailing_zeros_u64(reference->minimum_alignment));
+  }
+  reference->byte_origin_value_id = byte_origin;
+  reference->buffer_value_id = LOOM_VALUE_ID_INVALID;
+  reference->base_byte_offset = loom_value_facts_exact_i64(0);
+  reference->minimum_alignment = 1;
+}
+
 bool loom_value_fact_reference_origin_equal(
     loom_value_fact_reference_origin_t lhs,
     loom_value_fact_reference_origin_t rhs) {

@@ -83,7 +83,7 @@ bool loom_amdgpu_memory_access_include_alloca_root_byte_offset(
 
   uint64_t root_byte_offset = 0;
   if (!loom_amdgpu_source_alloca_layout_lookup_byte_offset(
-          alloca_layout, source->memory_space, source->root_value_id,
+          alloca_layout, source->memory_space, source->byte_origin_value_id,
           &root_byte_offset)) {
     if (allows_dynamic_root_address) {
       *out_uses_dynamic_root_address = true;
@@ -412,7 +412,8 @@ void loom_amdgpu_mark_source_memory_plan_storage_demands(
 void loom_amdgpu_mark_source_memory_plan_root_storage_demands(
     loom_low_lower_context_t* context,
     const loom_low_source_memory_access_plan_t* source) {
-  loom_low_lower_require_source_value_storage(context, source->root_value_id);
+  loom_low_lower_require_source_value_storage(context,
+                                              source->byte_origin_value_id);
   loom_amdgpu_mark_source_memory_plan_dynamic_storage_demands(context, source);
 }
 
@@ -442,7 +443,7 @@ void loom_amdgpu_mark_memory_access_plan_storage_demands(
         &plan->packets[packet_index].access;
     if (access->uses_dynamic_root_address) {
       loom_low_lower_require_source_value_storage(
-          context, access->source->root_value_id);
+          context, access->source->byte_origin_value_id);
     }
     if (access->realization.vaddr) {
       if (loom_amdgpu_memory_access_uses_resource_operand(access)) {
@@ -966,7 +967,7 @@ bool loom_amdgpu_memory_access_plan_select(
       .materialization_plan = &materialization_plan,
       .root_prefers_vgpr = loom_amdgpu_analyzed_source_value_prefers_vgpr(
           module, fact_table, view_regions, analysis,
-          selected_source->root_value_id),
+          selected_source->byte_origin_value_id),
       .requires_scalar_payload =
           !preserve_inactive && source_op->result_count != 0 &&
           !loom_amdgpu_analyzed_source_value_prefers_vgpr(

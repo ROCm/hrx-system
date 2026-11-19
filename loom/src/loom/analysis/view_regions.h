@@ -121,8 +121,15 @@ typedef struct loom_view_region_t {
   // SSA value representing the storage root identity.
   loom_value_id_t root_value_id;
 
+  // SSA address against which the byte interval is measured.
+  loom_value_id_t byte_origin_value_id;
+
+  // Existing SSA value that materializes begin_byte_offset, or invalid when
+  // the begin offset only exists as a symbolic expression.
+  loom_value_id_t begin_value_id;
+
   // Comparable alias scope for disjointness proofs, or NONE when distinct
-  // root identities are only addressing provenance.
+  // allocation identities alone cannot prove disjointness.
   loom_value_fact_alias_scope_id_t alias_scope_id;
 
   // Active source restrict domain and access-path association.
@@ -134,10 +141,11 @@ typedef struct loom_view_region_t {
   // Intrinsic storage origin retained from the source reference.
   loom_value_fact_reference_origin_t origin;
 
-  // Symbolic byte offset of the view base relative to root_value_id.
+  // Symbolic byte offset of the view base relative to byte_origin_value_id.
   loom_symbolic_expr_t begin_byte_offset;
 
-  // Symbolic byte offset of base_view_value_id relative to root_value_id.
+  // Symbolic byte offset of base_view_value_id relative to
+  // byte_origin_value_id.
   loom_symbolic_expr_t base_begin_byte_offset;
 
   // Symbolic byte offset from base_view_value_id to view_value_id.
@@ -147,20 +155,17 @@ typedef struct loom_view_region_t {
   // NULL when projection_byte_offset is complete.
   const loom_view_address_projection_t* address_projection;
 
-  // Existing SSA value that materializes begin_byte_offset, or invalid when
-  // the begin offset only exists as a symbolic expression.
-  loom_value_id_t begin_value_id;
-
   // Symbolic byte length of the conservative footprint envelope.
   loom_symbolic_expr_t byte_length;
 
   // Symbolic byte offset one past the conservative footprint envelope.
   loom_symbolic_expr_t end_byte_offset;
 
-  // Minimum provable alignment of begin_byte_offset relative to root_value_id.
+  // Minimum provable alignment of begin_byte_offset relative to
+  // byte_origin_value_id.
   uint64_t minimum_alignment;
 
-  // Minimum provable byte alignment of the root storage base.
+  // Minimum provable alignment of the address supplying byte zero.
   uint64_t root_minimum_alignment;
 
   // Static addressed element byte count, or -1 for sub-byte/unknown elements.
@@ -408,13 +413,12 @@ bool loom_view_region_observations_are_nonconflicting(
     const loom_view_region_observation_t* left,
     const loom_view_region_observation_t* right);
 
-// Attempts to prove that two view regions cannot overlap. Same-root regions
-// use symbolic byte intervals. Distinct roots are disjoint when their concrete
-// memory spaces cannot alias or both carry comparable and different alias
-// scopes. These identities and symbolic terms describe one execution. A caller
-// comparing different executions establishes root/term correspondence before
-// applying this proof; equal SSA IDs alone do not establish that
-// correspondence.
+// Attempts to prove that two view regions cannot overlap. Regions with the
+// same byte origin use symbolic intervals. Distinct roots are disjoint when
+// their memory spaces cannot alias or they carry comparable and different
+// alias scopes. These identities and symbolic terms describe one execution.
+// Callers comparing different executions must establish which allocations,
+// byte origins, and symbolic terms correspond across the two executions.
 iree_status_t loom_view_regions_prove_no_overlap(
     loom_view_region_table_t* table, const loom_view_region_t* left_region,
     const loom_view_region_t* right_region, bool* out_no_overlap);

@@ -283,6 +283,7 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ir:types",
+        "//runtime/src/iree/base/internal",
     ],
 )
 

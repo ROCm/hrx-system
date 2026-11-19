@@ -200,7 +200,7 @@ static loom_value_id_t loom_aie2p_kernel_access_root(
     const loom_view_region_table_t* regions, loom_value_id_t value_id) {
   const loom_view_region_t* region = NULL;
   if (loom_view_region_table_try_lookup(regions, value_id, &region)) {
-    return region->root_value_id;
+    return region->byte_origin_value_id;
   }
   const loom_value_facts_t value_facts =
       loom_value_fact_table_lookup(facts, value_id);
@@ -208,14 +208,14 @@ static loom_value_id_t loom_aie2p_kernel_access_root(
   loom_value_fact_buffer_reference_t buffer_reference;
   if (loom_value_facts_query_buffer_reference(context, value_facts,
                                               &buffer_reference)) {
-    return loom_value_fact_buffer_reference_resolve_root_value(buffer_reference,
-                                                               value_id);
+    return loom_value_fact_reference_resolve(
+        buffer_reference.byte_origin_value_id, value_id);
   }
   loom_value_fact_view_reference_t view_reference;
   if (loom_value_facts_query_view_reference(context, value_facts,
                                             &view_reference)) {
-    return loom_value_fact_view_reference_resolve_root_value(view_reference,
-                                                             value_id);
+    return loom_value_fact_reference_resolve(
+        view_reference.byte_origin_value_id, value_id);
   }
   return LOOM_VALUE_ID_INVALID;
 }
@@ -407,7 +407,7 @@ static iree_status_t loom_aie2p_kernel_plan_bindings(
     binding->byte_alignment = plan->byte_alignment;
     for (iree_host_size_t r = 0; r < regions.region_count; ++r) {
       const loom_view_region_t* region = &regions.regions[r];
-      if (region->root_value_id != binding->source_argument ||
+      if (region->byte_origin_value_id != binding->source_argument ||
           region->access_flags == 0) {
         continue;
       }
