@@ -41,15 +41,16 @@ typedef struct loom_serve_device_configuration_t {
 // Parses independent nonempty "devices" and "pools" maps. Device entries
 // contain a HAL "uri". Pool entries name a nonempty "devices" array and support
 // pool_backing, weight_slab_bytes, state_slab_bytes, memory_bytes,
-// workspace_idle_ms, parameter_idle_ms, and placement. Placement is an optional
-// object containing exactly one selector: {"device":"key"} names a device's
-// allocation domain, or {"host_numa":N} names an OS NUMA node. Device keys
+// memory_prewarm_bytes, workspace_idle_ms, parameter_idle_ms, and placement.
+// Placement takes one selector: {"device":"key"} names a device's allocation
+// domain, or {"host_numa":N} names an OS NUMA node. Device keys
 // resolve independently of consumer membership; the sealed group later resolves
 // the physical node and qualifies required placement for every backing source.
 // Optional root "wait_mode" is "active" (default) or "blocking", applied to
 // device-owned completion waits for every device. Requests remain asynchronous.
 // Pool defaults are automatic placement, elastic backing,
-// 1 GiB weight slabs, 64 MiB state slabs, no byte limit, and disabled expiry.
+// 1 GiB weight slabs, 64 MiB state slabs, source capacity, zero prewarm,
+// and disabled expiry.
 // Byte counts accept integer JSON numbers or strings parsed by
 // iree_string_view_parse_device_size, such as "64gib". Idle durations remain
 // integer JSON numbers in milliseconds.

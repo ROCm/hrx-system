@@ -65,14 +65,21 @@ typedef struct loom_runtime_pool_options_t {
   // An explicit allowance can tighten that capacity, not increase it.
   // Parameters, permanent buffers, sparse state, and workspace share it.
   uint64_t memory_limit;
+  // Minimum reusable state-page backing to acquire at pool creation, in bytes.
+  // This one-time warmup is charged to memory_limit and remains reclaimable.
+  uint64_t memory_prewarm_bytes;
   // Fixed workspace sanitizer policy, qualified by the HAL child allocator.
   iree_hal_asan_pool_options_t asan;
   // Required backing domain for both ordinary and elastic physical sources.
   loom_runtime_pool_placement_t placement;
 } loom_runtime_pool_options_t;
 
+// Checks backing policies that can be resolved before opening the device.
+iree_status_t loom_runtime_pool_options_validate(
+    const loom_runtime_pool_options_t* options);
+
 // Qualifies the complete simultaneous access scope before publishing an owner.
-// Creates metadata and native sources, not model payload. All mutable pool and
+// Creates native sources and any requested idle backing. All mutable pool and
 // residency operations use one serialized host owner. Physical placement and
 // execution ordering are not inferred from the selected allocation queue.
 iree_status_t loom_runtime_pool_allocate(

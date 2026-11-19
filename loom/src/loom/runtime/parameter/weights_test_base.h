@@ -506,7 +506,7 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     state_geometry.mapping_size = state_geometry.minimum_size;
     IREE_ASSERT_OK(loom_runtime_memory_pool_allocate(
         group, scope, deferred_backing_, transfer_, geometry, state_geometry,
-        memory_limit, host_allocator_, &owned_pool_));
+        {.limit_bytes = memory_limit}, host_allocator_, &owned_pool_));
     pool_ = owned_pool_;
     IREE_ASSERT_OK(loom_runtime_residency_cache_allocate(
         pool_, nullptr, nullptr, host_allocator_, &owned_cache_));

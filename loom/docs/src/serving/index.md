@@ -55,6 +55,7 @@ above remain the ordinary entry point on every platform.
 | `--weight_slab_bytes=N` | `1073741824` | Reusable elastic parameter and shared-workspace slab size in bytes (1 GiB); loading uses independent bounded read windows. `0` uses the allocator recommendation. Ignored for fixed backing. |
 | `--state_slab_bytes=N` | `67108864` | Elastic mutable-state commitment/reclamation size in bytes (64 MiB); `0` uses the allocator recommendation. Ignored for fixed backing. |
 | `--memory_bytes=N` | `0` | Shared elastic physical-backing limit; `0` uses the selected source's physical capacity. An explicit limit can tighten it. |
+| `--memory_prewarm_bytes=N` | `0` | Minimum reusable backing to acquire when the elastic pool starts. Idle backing can be reclaimed. |
 
 The backing, slab, memory, and idle flags apply only to the `--device` shortcut.
 With `--devices`, those settings belong to each pool entry; mixing the file with
@@ -89,15 +90,24 @@ completion events. CPU devices report completion from their execution workers.
 
 ### Memory and admission limits
 
-`--memory_bytes`, `--weight_slab_bytes`, and `--state_slab_bytes` accept decimal
-byte counts or lowercase size suffixes: `b`, `kb`, `kib`, `mb`, `mib`, `gb`, and
+`--memory_bytes`, `--memory_prewarm_bytes`, `--weight_slab_bytes`, and
+`--state_slab_bytes` accept decimal byte counts or lowercase size suffixes:
+`b`, `kb`, `kib`, `mb`, `mib`, `gb`, and
 `gib`. For example, `--memory_bytes=64gib` sets a 68,719,476,736-byte allowance;
 `64gb` instead means 64,000,000,000 bytes. Values must be nonnegative whole
 numbers, with no spaces, signs, or fractional units. Overflow is rejected.
 
+For example, `--memory_prewarm_bytes=1gib --memory_bytes=8gib` acquires
+1 GiB of physical backing before the server accepts requests. With the default
+64 MiB state slabs, the first requests can draw from 16 ready slabs. Model
+addresses are mapped as needed. The pool can grow to its 8 GiB budget, and
+pressure or explicit trim can return idle slabs, including the initial reserve.
+Startup fails if the rounded allocation exceeds the budget or the device
+cannot supply it.
+
 Model, connection and body capacities must be positive. Holding credit must
 remain below connection capacity. Heartbeat/idle intervals, slab sizes and memory
-limits are nonnegative. A nonzero memory limit requires elastic backing.
+limits are nonnegative. A nonzero memory limit or prewarm requires elastic backing.
 Elastic backing for parameters, permanent model buffers, sparse mutable state,
 invocation input/output, and command workspace shares this limit. The reported
 storage and workspace values are breakdowns of that physical total, not
@@ -153,8 +163,9 @@ Each device entry contains `uri`. Each pool requires a nonempty `devices` array.
 The optional root `wait_mode` selects `active` (default) or `blocking` for all
 devices, as described under [completion latency and CPU use](#completion-latency-and-cpu-use).
 Optional pool fields `pool_backing`, `weight_slab_bytes`,
-`state_slab_bytes`, `memory_bytes`, `workspace_idle_ms`, and `parameter_idle_ms`
-have the same defaults and units as the single-device flags above. Byte counts
+`state_slab_bytes`, `memory_bytes`, `memory_prewarm_bytes`, `workspace_idle_ms`,
+and `parameter_idle_ms` have the same defaults and units as the single-device
+flags above. Byte counts
 can be JSON integers or strings such as `"64gib"`, `"64mib"`, or `"4096"`.
 Strings preserve exact counts when a JSON client uses floating-point numbers.
 Idle durations remain JSON integers in milliseconds. Unknown or duplicate

@@ -45,7 +45,7 @@ TEST_F(DeviceConfigurationTest, OwnsIndependentDeviceAndPoolInventories) {
   std::string json = R"({
     "pools":{
       "agents":{"devices":["gpu","npu"],"memory_bytes":"64gib",
-        "weight_slab_bytes":2097152,"state_slab_bytes":65536,
+        "weight_slab_bytes":2097152,"state_slab_bytes":65536,"memory_prewarm_bytes":"1gib",
         "workspace_idle_ms":2000,"parameter_idle_ms":60000},
       "images":{"devices":["gpu"],"memory_bytes":"16gib"},
       "audio":{"devices":["npu"],"pool_backing":"fixed"}},
@@ -72,6 +72,7 @@ TEST_F(DeviceConfigurationTest, OwnsIndependentDeviceAndPoolInventories) {
   EXPECT_EQ(agents.binding.device_mask, 3u);
   EXPECT_TRUE(agents.options.elastic);
   EXPECT_EQ(agents.options.memory_limit, UINT64_C(64) << 30);
+  EXPECT_EQ(agents.options.memory_prewarm_bytes, UINT64_C(1) << 30);
   EXPECT_EQ(agents.options.weight_slab_size, 2097152u);
   EXPECT_EQ(agents.options.state_slab_size, 65536u);
   EXPECT_EQ(configuration_.idle[0].workspace_timeout,
@@ -80,6 +81,7 @@ TEST_F(DeviceConfigurationTest, OwnsIndependentDeviceAndPoolInventories) {
             iree_make_duration_ms(60000));
   EXPECT_EQ(configuration_.pools[1].binding.device_mask, 1u);
   EXPECT_EQ(configuration_.pools[1].options.memory_limit, UINT64_C(16) << 30);
+  EXPECT_EQ(configuration_.pools[1].options.memory_prewarm_bytes, 0u);
   EXPECT_EQ(configuration_.pools[2].binding.device_mask, 2u);
   EXPECT_FALSE(configuration_.pools[2].options.elastic);
   EXPECT_EQ(configuration_.pools[2].options.memory_limit, 0u);
@@ -259,6 +261,7 @@ TEST_F(DeviceConfigurationTest, RejectsMalformedPoolFieldsAndConsumerSets) {
       R"("devices":["gpu"],"devices":["gpu"])",
       R"("devices":["gpu"],"memory_bytes":1,"pool_backing":"fixed")",
       R"("devices":["gpu"],"memory_bytes":"1gib","pool_backing":"fixed")",
+      R"("devices":["gpu"],"memory_prewarm_bytes":1,"pool_backing":"fixed")",
       R"("devices":["gpu"],"pool_backing":"automatic")",
       R"("devices":["gpu"],"memory_bytes":1,"memory_bytes":"4kib")",
       R"("devices":["gpu"],"parameter_idle_ms":false)",

@@ -741,16 +741,44 @@ bool loom_runtime_backing_pages_is_pending(
     const loom_runtime_backing_pages_t* pages) {
   return pages->pending_count != 0;
 }
-void loom_runtime_backing_pages_await(loom_runtime_backing_pages_t* pages) {
+iree_status_t loom_runtime_backing_pages_await(
+    loom_runtime_backing_pages_t* pages) {
+  iree_status_t status = iree_ok_status();
   for (loom_runtime_backing_parent_t* parent = pages->parents; parent;
        parent = parent->all.next) {
     if (parent->state == LOOM_RUNTIME_BACKING_PENDING) {
-      // The operation and parent retain the diagnostic. This join only protects
-      // borrowed source/group lifetimes during outer-owner destruction.
-      iree_status_ignore(iree_hal_semaphore_wait(parent->ready, 1,
-                                                 iree_infinite_timeout(),
-                                                 IREE_ASYNC_WAIT_FLAG_NONE));
+      status = iree_status_join(
+          status,
+          iree_hal_semaphore_wait(parent->ready, 1, iree_infinite_timeout(),
+                                  IREE_ASYNC_WAIT_FLAG_NONE));
     }
   }
   loom_runtime_backing_pages_collect(pages);
+  return status;
+}
+
+iree_status_t loom_runtime_backing_pages_prewarm(
+    loom_runtime_backing_pages_t* pages, iree_hal_memory_budget_t* budget,
+    uint64_t minimum_bytes) {
+  const uint64_t slot_size = pages->classes[0].slot_size;
+  const uint64_t slots =
+      minimum_bytes / slot_size + (minimum_bytes % slot_size != 0);
+  const uint64_t cost =
+      loom_runtime_backing_pages_growth_cost(pages, slots, 0, 0);
+  loom_runtime_backing_growth_t growth = {0};
+  if (!iree_hal_memory_budget_try_reserve(budget, cost, &growth.credit)) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "prewarming %" PRIu64 " bytes requires %" PRIu64
+        " bytes of physical backing; pool limit is %" PRIu64 " bytes",
+        minimum_bytes, cost, iree_hal_memory_budget_limit(budget));
+  }
+  iree_status_t status =
+      loom_runtime_backing_pages_prepare_packed(pages, slots, &growth);
+  if (!iree_status_is_ok(status)) {
+    loom_runtime_backing_pages_abort(&growth);
+    return status;
+  }
+  loom_runtime_backing_pages_submit(&growth);
+  return loom_runtime_backing_pages_await(pages);
 }

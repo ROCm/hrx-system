@@ -256,8 +256,8 @@ class MemoryLossTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_runtime_memory_pool_query_geometry(
         &capabilities, source_, kSlabSize, &geometry_));
     IREE_ASSERT_OK(loom_runtime_memory_pool_allocate(
-        group, scope, source_, queue, geometry_, geometry_, 3 * kSlabSize,
-        iree_allocator_system(), &pool_));
+        group, scope, source_, queue, geometry_, geometry_,
+        {.limit_bytes = 3 * kSlabSize}, iree_allocator_system(), &pool_));
     for (auto& buffer : buffers_) {
       IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
           pool_, geometry_, kSlabSize, 64, &statistics_, &buffer));

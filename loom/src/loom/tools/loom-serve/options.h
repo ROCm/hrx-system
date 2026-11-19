@@ -40,6 +40,8 @@ typedef struct loom_serve_device_configuration_options_t {
   iree_string_view_t state_slab_bytes;
   // Optional single-device elastic physical-backing byte budget.
   iree_string_view_t memory_bytes;
+  // Optional single-device byte target for prewarming idle elastic backing.
+  iree_string_view_t memory_prewarm_bytes;
   // Optional single-device workspace idle expiry in milliseconds.
   iree_string_view_t workspace_idle_ms;
   // Optional single-device parameter idle expiry in milliseconds.

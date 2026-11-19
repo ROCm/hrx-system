@@ -335,12 +335,13 @@ iree_status_t loom_runtime_memory_pool_allocate(
     iree_hal_device_group_t* group, iree_hal_pool_scope_t scope,
     iree_hal_pool_t* storage_pool, iree_hal_queue_t* queue,
     loom_runtime_memory_geometry_t weight_geometry,
-    loom_runtime_memory_geometry_t state_geometry, uint64_t limit_bytes,
-    iree_allocator_t host_allocator, loom_runtime_memory_pool_t** out_pool) {
+    loom_runtime_memory_geometry_t state_geometry,
+    loom_runtime_memory_pool_options_t options, iree_allocator_t host_allocator,
+    loom_runtime_memory_pool_t** out_pool) {
   *out_pool = NULL;
   iree_hal_pool_capabilities_t capabilities;
   iree_hal_pool_query_capabilities(storage_pool, &capabilities);
-  limit_bytes = limit_bytes ? limit_bytes : UINT64_MAX;
+  uint64_t limit_bytes = options.limit_bytes ? options.limit_bytes : UINT64_MAX;
   if (capabilities.physical_capacity) {
     limit_bytes = iree_min(limit_bytes, capabilities.physical_capacity);
   }
@@ -395,6 +396,10 @@ iree_status_t loom_runtime_memory_pool_allocate(
   if (iree_status_is_ok(status)) {
     status = iree_hal_pool_wait_allocate(storage_pool, host_allocator,
                                          &pool->capacity_wait);
+  }
+  if (iree_status_is_ok(status) && options.prewarm_bytes) {
+    status = loom_runtime_backing_pages_prewarm(pool->pages, pool->budget,
+                                                options.prewarm_bytes);
   }
   if (iree_status_is_ok(status)) {
     *out_pool = pool;
@@ -523,7 +528,9 @@ iree_status_t loom_runtime_memory_pool_await(loom_runtime_memory_pool_t* pool) {
     if (pool->pending_operations) {
       loom_runtime_memory_operation_await(pool->pending_operations);
     } else if (loom_runtime_backing_pages_is_pending(pool->pages)) {
-      loom_runtime_backing_pages_await(pool->pages);
+      // An accepted mapping owns its acquisition failure. This outer join
+      // only retires remaining parent callbacks after the mapping publishes.
+      iree_status_ignore(loom_runtime_backing_pages_await(pool->pages));
     } else {
       iree_notification_await(&pool->capacity_notification,
                               loom_runtime_memory_capacity_is_idle, pool,
