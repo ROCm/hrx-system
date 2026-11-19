@@ -176,6 +176,7 @@ amdf_cc_library(
     deps = [
         ":adapter_info",
         ":private_allocation",
+        "//libamdf/src/xdna:elf_packet",
         "//libamdf/src/xdna:transaction_interpreter",
         "//libamdf/src/xdna/umd:kernel_queue",
     ],
@@ -198,7 +199,7 @@ amdf_cc_library(
         "//libamdf/src/platform:wait",
         "//libamdf/src/platform/windows:native_event",
         "//libamdf/src/xdna:bootstrap",
-        "//libamdf/src/xdna:transaction_interpreter",
+        "//libamdf/src/xdna:elf_packet",
         "//libamdf/src/xdna/umd:context",
         "//libamdf/src/xdna/umd:kernel_queue",
         "//libamdf/src/xdna/umd:result_buffer",

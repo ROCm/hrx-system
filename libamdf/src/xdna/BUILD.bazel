@@ -31,6 +31,13 @@ amdf_cc_test(
 )
 
 amdf_cc_library(
+    name = "elf_packet",
+    srcs = ["elf_packet.c"],
+    hdrs = ["elf_packet.h"],
+    visibility = ["//libamdf/src/xdna/umd:__subpackages__"],
+)
+
+amdf_cc_library(
     name = "transaction_interpreter",
     srcs = ["transaction_interpreter.c"],
     hdrs = ["transaction_interpreter.h"],

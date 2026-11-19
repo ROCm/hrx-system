@@ -136,9 +136,6 @@ static iree_status_t iree_hal_amd_xdna_context_open(
       "xdna.device_query_info"));
   context->target.instruction_alignment =
       context->device_info.instruction.address_alignment;
-  context->target.supports_load_pdi =
-      (context->device_info.instruction.features &
-       AMDF_XDNA_INSTRUCTION_FEATURE_LOAD_PDI) != 0;
   amdf_endpoint_host_locality_t locality = {
       .type = AMDF_STRUCTURE_TYPE_ENDPOINT_HOST_LOCALITY,
       .structure_size = sizeof(locality),

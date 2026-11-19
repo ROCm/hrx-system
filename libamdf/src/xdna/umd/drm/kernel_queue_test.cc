@@ -23,8 +23,8 @@
 
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
+#include "libamdf/src/xdna/elf_packet.h"
 #include "libamdf/src/xdna/umd/drm/context.h"
-#include "libamdf/src/xdna/umd/drm/elf_packet.h"
 
 namespace {
 
@@ -125,7 +125,7 @@ class LinuxXdnaKernelQueueTest : public ::testing::Test {
     context_.device = &device_;
     context_.handle = 7;
     context_.completion_syncobj = 8;
-    ASSERT_EQ(amdf_xdna_umd_kernel_queue_create(&context_, 3, &queue_),
+    ASSERT_EQ(amdf_xdna_umd_kernel_queue_create(&context_, 3, 0, &queue_),
               AMDF_STATUS_OK);
     ASSERT_EQ(
         amdf_wait_deadline_initialize(AMDF_TIMEOUT_INFINITE, 0, &deadline_),
@@ -312,7 +312,7 @@ TEST_F(LinuxXdnaKernelQueueTest,
     ASSERT_EQ(amdf_xdna_umd_kernel_queue_destroy(queue_), AMDF_STATUS_OK);
     queue_ = nullptr;
     native_.notification_probe_error = error;
-    ASSERT_EQ(amdf_xdna_umd_kernel_queue_create(&context_, 1, &queue_),
+    ASSERT_EQ(amdf_xdna_umd_kernel_queue_create(&context_, 1, 0, &queue_),
               AMDF_STATUS_OK);
     EXPECT_EQ(amdf_xdna_umd_kernel_queue_query_notification_types(queue_), 0u);
     uint64_t submission = 0;
@@ -328,7 +328,7 @@ TEST_F(LinuxXdnaKernelQueueTest, UnexpectedProbeErrorRollsBackConstruction) {
   queue_ = nullptr;
   native_.notification_probe_error = EIO;
   auto* output = reinterpret_cast<amdf_xdna_umd_kernel_queue_t*>(uintptr_t{1});
-  EXPECT_EQ(amdf_xdna_umd_kernel_queue_create(&context_, 1, &output),
+  EXPECT_EQ(amdf_xdna_umd_kernel_queue_create(&context_, 1, 0, &output),
             amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EIO));
   EXPECT_EQ(output,
             reinterpret_cast<amdf_xdna_umd_kernel_queue_t*>(uintptr_t{1}));
@@ -355,7 +355,7 @@ TEST_F(LinuxXdnaKernelQueueTest, FailedPacketReleaseConsumesContextLease) {
   EXPECT_EQ(amdf_atomic_uint32_load_acquire(&context_.queue_leased), 0u);
 
   native_.packet_release_error = 0;
-  ASSERT_EQ(amdf_xdna_umd_kernel_queue_create(&context_, 3, &queue_),
+  ASSERT_EQ(amdf_xdna_umd_kernel_queue_create(&context_, 3, 0, &queue_),
             AMDF_STATUS_OK);
   EXPECT_EQ(native_.packet_release_count, 3u);
   EXPECT_EQ(amdf_atomic_uint32_load_acquire(&context_.queue_leased), 1u);
@@ -474,7 +474,7 @@ TEST_F(LinuxXdnaKernelQueueTest,
   ASSERT_EQ(amdf_xdna_umd_kernel_queue_destroy(queue_), AMDF_STATUS_OK);
   queue_ = nullptr;
   const uint32_t packet_base = native_.packet_count;
-  ASSERT_EQ(amdf_xdna_umd_kernel_queue_create(&context_, 7, &queue_),
+  ASSERT_EQ(amdf_xdna_umd_kernel_queue_create(&context_, 7, 0, &queue_),
             AMDF_STATUS_OK);
   const std::array<amdf_xdna_umd_kernel_command_t, 4> commands = {
       {{0x100004000, 64},
@@ -699,7 +699,7 @@ TEST_F(LinuxXdnaKernelQueueTest,
   amdf_atomic_uint64_store_release(&context_.terminal_status, unsupported);
   amdf_xdna_umd_kernel_queue_t* output =
       reinterpret_cast<amdf_xdna_umd_kernel_queue_t*>(uintptr_t{1});
-  EXPECT_EQ(amdf_xdna_umd_kernel_queue_create(&context_, 3, &output),
+  EXPECT_EQ(amdf_xdna_umd_kernel_queue_create(&context_, 3, 0, &output),
             unsupported);
   EXPECT_EQ(output,
             reinterpret_cast<amdf_xdna_umd_kernel_queue_t*>(uintptr_t{1}));
@@ -714,7 +714,7 @@ TEST_F(LinuxXdnaKernelQueueTest,
   native_.failed_packet = native_.packet_count + 1;
   amdf_xdna_umd_kernel_queue_t* output =
       reinterpret_cast<amdf_xdna_umd_kernel_queue_t*>(uintptr_t{1});
-  EXPECT_EQ(amdf_xdna_umd_kernel_queue_create(&context_, 3, &output),
+  EXPECT_EQ(amdf_xdna_umd_kernel_queue_create(&context_, 3, 0, &output),
             amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, ENOMEM));
   EXPECT_EQ(output,
             reinterpret_cast<amdf_xdna_umd_kernel_queue_t*>(uintptr_t{1}));
@@ -722,7 +722,7 @@ TEST_F(LinuxXdnaKernelQueueTest,
   EXPECT_EQ(native_.snapshot_release_count, 2u);
   EXPECT_EQ(amdf_atomic_uint32_load_acquire(&context_.queue_leased), 0u);
   native_.failed_packet = UINT32_MAX;
-  EXPECT_EQ(amdf_xdna_umd_kernel_queue_create(&context_, 3, &queue_),
+  EXPECT_EQ(amdf_xdna_umd_kernel_queue_create(&context_, 3, 0, &queue_),
             AMDF_STATUS_OK);
 }
 
@@ -850,7 +850,7 @@ extern "C" int __wrap_ioctl(int descriptor, unsigned long request, ...) {
     }
     std::memcpy(native.submitted_packet.data(),
                 native.packets[submit->cmd_handles - 9].words.data(),
-                sizeof(amdf_linux_xdna_elf_packet_t));
+                sizeof(amdf_xdna_elf_packet_t));
     native.accepted_handles.push_back(
         static_cast<uint32_t>(submit->cmd_handles));
     submit->seq = native.submission_count++;

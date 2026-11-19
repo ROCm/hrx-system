@@ -139,7 +139,7 @@ amdf_xdna_device_create(amdf_endpoint_t* endpoint,
     const amdf_xdna_umd_context_capabilities_t capabilities =
         amdf_xdna_umd_query_context_capabilities(&device->profile);
     device->info.context.scheduling_modes = capabilities.scheduling_modes;
-    device->info.instruction.features = capabilities.instruction_features;
+    device->info.instruction.features = result.instruction_features;
     *out_device = &device->base;
   } else {
     if (device->base.endpoint != NULL) {

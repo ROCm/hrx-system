@@ -64,7 +64,7 @@ amdf_status_t amdf_structure_validate_output(
                                             minimum_size);
 }
 
-amdf_status_t amdf_structure_validate_output_extension(
+amdf_status_t amdf_structure_validate_extension(
     const void* structure, amdf_structure_type_t expected_type,
     uint32_t minimum_size, amdf_structure_type_t extension_type,
     uint32_t extension_size) {
@@ -85,5 +85,6 @@ amdf_status_t amdf_structure_validate_output_extension(
   if (type != extension_type) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
-  return amdf_structure_validate_output(next, extension_type, extension_size);
+  return amdf_structure_validate_unextended(next, extension_type,
+                                            extension_size);
 }

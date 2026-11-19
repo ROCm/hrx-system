@@ -10,7 +10,6 @@
 #include <stdint.h>
 
 #include "amdf/amdf.h"
-#include "libamdf/src/xdna/transaction_interpreter.h"
 #include "libamdf/src/xdna/umd/kernel_queue.h"
 #include "libamdf/src/xdna/umd/mcdm/adapter_info.h"
 #include "libamdf/src/xdna/umd/mcdm/private_allocation.h"
@@ -22,12 +21,8 @@ extern "C" {
 // Maximum private record accepted by the native submission interface.
 #define AMDF_WINDOWS_XDNA_SUBMISSION_CAPACITY 640u
 
-// One firmware command-list cell holds 36 fixed-size interpreter entries.
+// A private command-list cell occupies one page in the context aperture.
 #define AMDF_WINDOWS_XDNA_COMMAND_LIST_BYTE_LENGTH 4096u
-#define AMDF_WINDOWS_XDNA_COMMAND_LIST_ENTRY_BYTE_LENGTH 112u
-#define AMDF_WINDOWS_XDNA_COMMAND_LIST_CAPACITY \
-  (AMDF_WINDOWS_XDNA_COMMAND_LIST_BYTE_LENGTH / \
-   AMDF_WINDOWS_XDNA_COMMAND_LIST_ENTRY_BYTE_LENGTH)
 #define AMDF_WINDOWS_XDNA_COMMAND_LIST_OPCODE 19u
 
 // Bounded private record passed beside one KMT command submission.
@@ -68,29 +63,31 @@ void amdf_windows_xdna_submission_build_result_buffer(
     uint64_t native_byte_offset, uint64_t byte_length,
     amdf_windows_xdna_submission_t* out_submission);
 
-// Builds the private execution record adjoining one ERT packet. The caller
-// owns the eight-byte cell at response_byte_offset in response_allocation
-// through checked retirement; the offset is allocation-relative in bytes.
-void amdf_windows_xdna_submission_build_execute(
-    amdf_windows_xdna_protocol_t protocol,
+// Maximum command count that fits both a firmware list cell and its ERT root.
+uint32_t amdf_windows_xdna_submission_list_capacity(bool uses_elf_packets);
+
+// Frames one validated instruction range in the active device's ERT format.
+// Returns the live extent written to the caller's aligned 512-byte packet slot.
+// The caller owns the packet and eight-byte response cell through retirement.
+uint32_t amdf_windows_xdna_submission_build_execute(
+    amdf_windows_xdna_protocol_t protocol, bool uses_elf_packets,
     const amdf_windows_xdna_private_allocation_t* execution_allocation,
     const amdf_windows_xdna_private_allocation_t* response_allocation,
     uint32_t response_byte_offset,
-    const amdf_xdna_transaction_interpreter_packet_t* packet,
+    const amdf_xdna_umd_kernel_command_t* command, void* packet_pointer,
     amdf_windows_xdna_submission_t* out_submission);
 
-// Frames a Direct-protocol interpreter list and its private submission record.
-// The validated array contains 2..COMMAND_LIST_CAPACITY commands. The caller
-// owns a COMMAND_LIST_BYTE_LENGTH-byte firmware-addressable list cell and a
-// 512-byte root packet, publishes both, and retains them and the response cell
-// through checked retirement. The root has 28 + 8 * command_count live bytes;
-// child references are zero because the private record already names the list.
-void amdf_windows_xdna_submission_build_execute_list(
+// Frames a Direct-protocol command list in caller-owned firmware storage.
+// Returns the ERT root's live byte length and sets out_list_byte_length to the
+// packed child extent. Both ranges must be published and retained with the
+// response cell through checked retirement.
+uint32_t amdf_windows_xdna_submission_build_execute_list(
+    bool uses_elf_packets,
     const amdf_windows_xdna_private_allocation_t* execution_allocation,
     const amdf_windows_xdna_private_allocation_t* response_allocation,
     uint32_t response_byte_offset, uint64_t list_address,
     uint32_t command_count, const amdf_xdna_umd_kernel_command_t* commands,
-    void* list_pointer, void* packet_pointer,
+    void* list_pointer, void* packet_pointer, uint32_t* out_list_byte_length,
     amdf_windows_xdna_submission_t* out_submission);
 
 // Reads the context-initialization Boolean response after native retirement.

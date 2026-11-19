@@ -1429,16 +1429,32 @@ iree_status_t iree_hal_amd_xdna_queue_create(
   iree_atomic_store(&queue->pending.visible_count, 0,
                     iree_memory_order_relaxed);
   iree_hal_amd_xdna_frontier_state_initialize(&queue->accepted_frontier);
-  const amdf_xdna_kernel_queue_create_info_t create_info = {
+  const amdf_xdna_kernel_queue_instruction_requirements_t requirements = {
+      .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_INSTRUCTION_REQUIREMENTS,
+      .structure_size = sizeof(requirements),
+      .features = AMDF_XDNA_INSTRUCTION_FEATURE_LOAD_PDI,
+  };
+  amdf_xdna_kernel_queue_create_info_t create_info = {
       .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_CREATE_INFO,
       .structure_size = sizeof(create_info),
+      .next =
+          (context->device_info.instruction.features & requirements.features)
+              ? NULL
+              : &requirements,
       .queue_family_ordinal = context->queue_family_ordinal,
       .maximum_pending_submission_count = 0,
   };
-  iree_status_t status = IREE_HAL_AMD_STATUS_FROM_AMDF(
-      context->xdna->kernel_queue_create(context->handle, &create_info,
-                                         &queue->handle),
-      "xdna.kernel_queue_create");
+  amdf_status_t queue_status = context->xdna->kernel_queue_create(
+      context->handle, &create_info, &queue->handle);
+  context->target.supports_load_pdi = amdf_status_is_ok(queue_status);
+  if (create_info.next != NULL &&
+      queue_status == amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
+    create_info.next = NULL;
+    queue_status = context->xdna->kernel_queue_create(
+        context->handle, &create_info, &queue->handle);
+  }
+  iree_status_t status =
+      IREE_HAL_AMD_STATUS_FROM_AMDF(queue_status, "xdna.kernel_queue_create");
   if (iree_status_is_unimplemented(status)) {
     status = iree_status_annotate(
         status,

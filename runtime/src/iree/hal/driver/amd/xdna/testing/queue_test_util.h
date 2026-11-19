@@ -483,6 +483,11 @@ struct NativeProvider {
   QueueCreate(amdf_xdna_context_t* context,
               const amdf_xdna_kernel_queue_create_info_t* info,
               amdf_kernel_queue_t** out_queue) {
+    // This provider implements the ordinary instruction queue. Native Loom
+    // dispatch remains usable when a provider declines the ELF extension.
+    if (info->next) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+    }
     *out_queue = reinterpret_cast<amdf_kernel_queue_t*>(context);
     return AMDF_STATUS_OK;
   }

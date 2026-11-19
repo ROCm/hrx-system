@@ -6,6 +6,7 @@
 
 #include "libamdf/src/xdna/umd/mcdm/kernel_execution.h"
 
+#include <ntstatus.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -15,6 +16,7 @@
 #include "libamdf/src/platform/wait.h"
 #include "libamdf/src/wait.h"
 #include "libamdf/src/xdna/bootstrap.h"
+#include "libamdf/src/xdna/elf_packet.h"
 #include "libamdf/src/xdna/umd/mcdm/context.h"
 #include "libamdf/src/xdna/umd/mcdm/submission.h"
 
@@ -22,11 +24,14 @@ enum {
   AMDF_WINDOWS_WAIT_SIGNALED = 0,
   // Page-rounded transport extent, including every supported native header.
   AMDF_WINDOWS_XDNA_KERNEL_EXECUTION_PACKET_STRIDE = 8192,
-  // The first page holds the bootstrap PDI; the remaining prefix holds lists.
+  // Keep the PDI in the final page. The first list cell starts at the aligned
+  // aperture base and can hold the ELF admission program before queue use.
+  AMDF_WINDOWS_XDNA_BOOTSTRAP_PDI_OFFSET =
+      AMDF_WINDOWS_XDNA_PRIVATE_BOOTSTRAP_SIZE -
+      AMDF_WINDOWS_XDNA_COMMAND_LIST_BYTE_LENGTH,
   AMDF_WINDOWS_XDNA_KERNEL_EXECUTION_LIST_CAPACITY =
-      AMDF_WINDOWS_XDNA_PRIVATE_BOOTSTRAP_SIZE /
-          AMDF_WINDOWS_XDNA_COMMAND_LIST_BYTE_LENGTH -
-      1,
+      AMDF_WINDOWS_XDNA_BOOTSTRAP_PDI_OFFSET /
+      AMDF_WINDOWS_XDNA_COMMAND_LIST_BYTE_LENGTH,
 };
 
 typedef enum amdf_windows_xdna_kernel_execution_preparation_phase_e {
@@ -42,6 +47,8 @@ struct amdf_windows_xdna_kernel_execution_t {
   D3DKMT_HANDLE context;
   // Coupled native interface established by the owning context's adapter query.
   amdf_windows_xdna_protocol_t protocol;
+  // Packet format of the exclusive queue lease, fixed before publication.
+  bool uses_elf_packets;
   // First observed command or bootstrap failure, scoped to this context.
   amdf_atomic_uint64_t terminal_status;
   // Serializes native preparation, private binding, and queue leasing.
@@ -72,7 +79,7 @@ struct amdf_windows_xdna_kernel_execution_t {
   struct {
     // Bound instruction allocation, cleared before its final release.
     amdf_windows_xdna_private_allocation_t* allocation;
-    // Next cell to publish, excluding the first bootstrap page.
+    // Next cell to publish in the reserved prefix before the bootstrap PDI.
     uint32_t next;
     // Number of accepted lists, written only by the exclusive publisher.
     uint64_t published;
@@ -310,10 +317,12 @@ static amdf_status_t amdf_windows_xdna_kernel_execution_publish_pdi(
     amdf_windows_xdna_private_allocation_t* allocation) {
   _Static_assert(AMDF_XDNA_BOOTSTRAP_PDI_BYTE_LENGTH <=
                      AMDF_WINDOWS_XDNA_COMMAND_LIST_BYTE_LENGTH,
-                 "native admission PDI must fit the first reserved page");
-  amdf_xdna_bootstrap_write_pdi(allocation->host_pointer);
+                 "native admission PDI must fit its reserved page");
+  amdf_xdna_bootstrap_write_pdi((uint8_t*)allocation->host_pointer +
+                                AMDF_WINDOWS_XDNA_BOOTSTRAP_PDI_OFFSET);
   return amdf_windows_xdna_private_allocation_publish(
-      allocation, 0, AMDF_XDNA_BOOTSTRAP_PDI_BYTE_LENGTH);
+      allocation, AMDF_WINDOWS_XDNA_BOOTSTRAP_PDI_OFFSET,
+      AMDF_XDNA_BOOTSTRAP_PDI_BYTE_LENGTH);
 }
 
 static amdf_status_t amdf_windows_xdna_kernel_execution_activate_context(
@@ -419,7 +428,8 @@ amdf_status_t amdf_windows_xdna_kernel_execution_prepare_memory(
   }
   if (amdf_status_is_ok(status)) {
     status = amdf_windows_xdna_kernel_execution_activate_context(
-        execution, allocation->firmware_address);
+        execution,
+        allocation->firmware_address + AMDF_WINDOWS_XDNA_BOOTSTRAP_PDI_OFFSET);
   }
   if (amdf_status_is_ok(status)) {
     amdf_windows_xdna_submission_t submission;
@@ -573,6 +583,18 @@ amdf_status_t amdf_windows_xdna_kernel_execution_prepare_context_destroy(
   return status;
 }
 
+static amdf_status_t amdf_windows_xdna_kernel_execution_release_queue_storage(
+    amdf_windows_xdna_kernel_execution_t* execution) {
+  const amdf_status_t status =
+      amdf_windows_xdna_private_allocation_destroy(&execution->packet_storage);
+  const amdf_status_t response_status =
+      amdf_windows_xdna_private_allocation_destroy(&execution->responses);
+  // Final release consumes both owners even if native cleanup fails.
+  memset(&execution->packet_storage, 0, sizeof(execution->packet_storage));
+  memset(&execution->responses, 0, sizeof(execution->responses));
+  return amdf_status_is_ok(status) ? response_status : status;
+}
+
 amdf_status_t amdf_windows_xdna_kernel_execution_destroy(
     amdf_windows_xdna_kernel_execution_t* execution) {
   if (execution == NULL) {
@@ -585,7 +607,13 @@ amdf_status_t amdf_windows_xdna_kernel_execution_destroy(
   amdf_assert(execution->hardware_queue == 0);
 
   amdf_status_t status = AMDF_STATUS_OK;
-  if (execution->command_allocation.device != NULL) {
+  // A failed admission wait retains ring storage until native teardown.
+  if (execution->packet_storage.device != NULL) {
+    status =
+        amdf_windows_xdna_kernel_execution_release_queue_storage(execution);
+  }
+  if (amdf_status_is_ok(status) &&
+      execution->command_allocation.device != NULL) {
     status = amdf_windows_xdna_private_allocation_destroy(
         &execution->command_allocation);
   }
@@ -603,20 +631,113 @@ amdf_status_t amdf_windows_xdna_kernel_execution_destroy(
   return status;
 }
 
-static amdf_status_t amdf_windows_xdna_kernel_execution_release_queue_storage(
+static amdf_status_t amdf_windows_xdna_kernel_execution_publish_commands(
+    amdf_windows_xdna_kernel_execution_t* execution, uint32_t slot,
+    uint32_t command_count, const amdf_xdna_umd_kernel_command_t* commands,
+    amdf_windows_xdna_submission_t* submission) {
+  amdf_windows_xdna_private_allocation_t* storage = &execution->packet_storage;
+  const uint64_t packet_byte_offset =
+      (uint64_t)slot * AMDF_WINDOWS_XDNA_KERNEL_EXECUTION_PACKET_STRIDE;
+  uint8_t* packet_pointer =
+      (uint8_t*)storage->host_pointer + packet_byte_offset;
+  const uint32_t response_byte_offset = slot * sizeof(uint64_t);
+  const bool uses_elf_packets = execution->uses_elf_packets;
+  uint32_t packet_byte_length;
+  amdf_status_t status = AMDF_STATUS_OK;
+  if (command_count == 1) {
+    packet_byte_length = amdf_windows_xdna_submission_build_execute(
+        execution->protocol, uses_elf_packets, storage, &execution->responses,
+        response_byte_offset, commands, packet_pointer, submission);
+  } else {
+    amdf_windows_xdna_private_allocation_t* allocation =
+        execution->lists.allocation;
+    const uint32_t list_byte_offset =
+        execution->lists.next * AMDF_WINDOWS_XDNA_COMMAND_LIST_BYTE_LENGTH;
+    uint32_t list_byte_length;
+    packet_byte_length = amdf_windows_xdna_submission_build_execute_list(
+        uses_elf_packets, storage, &execution->responses, response_byte_offset,
+        allocation->firmware_address + list_byte_offset, command_count,
+        commands, (uint8_t*)allocation->host_pointer + list_byte_offset,
+        packet_pointer, &list_byte_length, submission);
+    status = amdf_windows_xdna_private_allocation_publish(
+        allocation, list_byte_offset, list_byte_length);
+  }
+  if (amdf_status_is_ok(status)) {
+    status = amdf_windows_xdna_private_allocation_publish(
+        storage, packet_byte_offset, packet_byte_length);
+  }
+  return status;
+}
+
+static amdf_status_t amdf_windows_xdna_kernel_execution_submit_slot(
+    amdf_windows_xdna_kernel_execution_t* execution, uint32_t slot,
+    const amdf_windows_xdna_submission_t* submission,
+    uint64_t* out_native_submission) {
+  // The public slot or exclusive admission owns this cell until retirement.
+  ((uint64_t*)execution->responses.host_pointer)[slot] = 0;
+  return amdf_windows_xdna_kernel_execution_submit_native(
+      execution,
+      execution->packet_storage.device_address +
+          (uint64_t)slot * AMDF_WINDOWS_XDNA_KERNEL_EXECUTION_PACKET_STRIDE,
+      4096 + amdf_windows_xdna_submission_header_size(execution->protocol),
+      submission, out_native_submission);
+}
+
+// Slot zero and the first list cell belong exclusively to queue construction.
+// Only an explicit native rejection of this known-valid packet denotes an
+// unavailable command interface. Once accepted, both the fence and the
+// independent ERT result are required before either storage can be reused.
+static amdf_status_t amdf_windows_xdna_kernel_execution_admit_elf(
     amdf_windows_xdna_kernel_execution_t* execution) {
-  const amdf_status_t status =
-      amdf_windows_xdna_private_allocation_destroy(&execution->packet_storage);
-  const amdf_status_t response_status =
-      amdf_windows_xdna_private_allocation_destroy(&execution->responses);
-  // Final release consumes both owners even if native cleanup fails.
-  memset(&execution->packet_storage, 0, sizeof(execution->packet_storage));
-  memset(&execution->responses, 0, sizeof(execution->responses));
-  return amdf_status_is_ok(status) ? response_status : status;
+  amdf_windows_xdna_private_allocation_t* allocation =
+      execution->lists.allocation;
+  const amdf_xdna_device_profile_t* profile = execution->device->profile;
+  amdf_xdna_elf_admission_write(
+      profile->transaction.device_generation,
+      (uint8_t)profile->info->array.row_count,
+      (uint8_t)profile->rows.memory_count,
+      allocation->firmware_address + AMDF_WINDOWS_XDNA_BOOTSTRAP_PDI_OFFSET,
+      AMDF_XDNA_BOOTSTRAP_PDI_BYTE_LENGTH, allocation->host_pointer);
+  amdf_status_t status = amdf_windows_xdna_private_allocation_publish(
+      allocation, 0, AMDF_XDNA_ELF_ADMISSION_BYTE_LENGTH);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  const amdf_xdna_umd_kernel_command_t command = {
+      .instruction_address = allocation->firmware_address,
+      .instruction_byte_length = AMDF_XDNA_ELF_ADMISSION_BYTE_LENGTH,
+  };
+  amdf_windows_xdna_submission_t submission;
+  status = amdf_windows_xdna_kernel_execution_publish_commands(
+      execution, 0, 1, &command, &submission);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  status = amdf_windows_xdna_kernel_execution_submit_slot(
+      execution, 0, &submission, &execution->preparation_submission);
+  if (!amdf_status_is_ok(status)) {
+    if (status == amdf_kmt_make_status(STATUS_NOT_SUPPORTED) ||
+        status == amdf_kmt_make_status(STATUS_NOT_IMPLEMENTED) ||
+        status == amdf_kmt_make_status(STATUS_INVALID_DEVICE_REQUEST) ||
+        status == amdf_kmt_make_status(STATUS_INVALID_PARAMETER)) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+    }
+    return status;
+  }
+  status = amdf_windows_xdna_kernel_execution_wait_synchronous(
+      execution, execution->preparation_submission);
+  if (!amdf_status_is_ok(status)) {
+    amdf_windows_xdna_kernel_execution_record_failure(execution, status);
+    return status;
+  }
+  execution->preparation_submission = 0;
+  return amdf_windows_xdna_submission_query_execute_result(
+      &execution->responses, 0);
 }
 
 amdf_status_t amdf_windows_xdna_kernel_execution_acquire_queue(
-    amdf_windows_xdna_kernel_execution_t* execution, uint32_t capacity) {
+    amdf_windows_xdna_kernel_execution_t* execution, uint32_t capacity,
+    amdf_xdna_instruction_features_t required_features) {
   // The native response descriptor has a 32-bit allocation-relative offset.
   if (capacity > UINT32_MAX / sizeof(uint64_t) + 1) {
     return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
@@ -629,7 +750,11 @@ amdf_status_t amdf_windows_xdna_kernel_execution_acquire_queue(
   AcquireSRWLockExclusive(&execution->state_lock);
   if (execution->queue_lease_count != 0) {
     status = amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
+  } else if (required_features && execution->lists.allocation == NULL) {
+    status = amdf_make_api_status(AMDF_STATUS_CODE_FAILED_PRECONDITION);
   } else {
+    execution->uses_elf_packets =
+        (required_features & AMDF_XDNA_INSTRUCTION_FEATURE_LOAD_PDI) != 0;
     amdf_windows_xdna_private_allocation_descriptor_t response_descriptor =
         execution->command_allocation.descriptor;
     const uint64_t response_byte_length =
@@ -653,12 +778,15 @@ amdf_status_t amdf_windows_xdna_kernel_execution_acquire_queue(
       status =
           amdf_windows_xdna_private_allocation_lock(&execution->packet_storage);
     }
+    if (amdf_status_is_ok(status) && execution->uses_elf_packets) {
+      status = amdf_windows_xdna_kernel_execution_admit_elf(execution);
+    }
     if (amdf_status_is_ok(status)) {
       execution->lists.next = 0;
       execution->lists.published = 0;
       amdf_atomic_uint64_store_release(&execution->lists.retired, 0);
       execution->queue_lease_count = 1;
-    } else {
+    } else if (execution->preparation_submission == 0) {
       const amdf_status_t release_status =
           amdf_windows_xdna_kernel_execution_release_queue_storage(execution);
       if (!amdf_status_is_ok(release_status)) {
@@ -687,7 +815,8 @@ uint32_t amdf_windows_xdna_kernel_execution_maximum_command_count(
   // The metadata interfaces have different private layouts and currently only
   // establish single-command execution. Direct admission defines opcode six.
   return execution->protocol == AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT
-             ? AMDF_WINDOWS_XDNA_COMMAND_LIST_CAPACITY
+             ? amdf_windows_xdna_submission_list_capacity(
+                   execution->uses_elf_packets)
              : 1;
 }
 
@@ -704,53 +833,12 @@ amdf_status_t amdf_windows_xdna_kernel_execution_submit(
     amdf_windows_xdna_kernel_execution_t* execution, uint32_t slot,
     uint32_t command_count, const amdf_xdna_umd_kernel_command_t* commands,
     uint64_t* out_native_submission) {
-  amdf_windows_xdna_private_allocation_t* storage = &execution->packet_storage;
-  const uint64_t packet_byte_offset =
-      (uint64_t)slot * AMDF_WINDOWS_XDNA_KERNEL_EXECUTION_PACKET_STRIDE;
-  uint8_t* packet_pointer =
-      (uint8_t*)storage->host_pointer + packet_byte_offset;
   amdf_windows_xdna_submission_t submission;
-  const uint32_t response_byte_offset = slot * sizeof(uint64_t);
-  uint32_t packet_byte_length =
-      sizeof(amdf_xdna_transaction_interpreter_packet_t);
-  amdf_status_t status = AMDF_STATUS_OK;
-  if (command_count == 1) {
-    amdf_xdna_transaction_interpreter_packet_t* packet =
-        (amdf_xdna_transaction_interpreter_packet_t*)packet_pointer;
-    amdf_xdna_transaction_interpreter_packet_build(
-        commands[0].instruction_address, commands[0].instruction_byte_length,
-        packet);
-    amdf_windows_xdna_submission_build_execute(
-        execution->protocol, storage, &execution->responses,
-        response_byte_offset, packet, &submission);
-  } else {
-    amdf_windows_xdna_private_allocation_t* allocation =
-        execution->lists.allocation;
-    const uint32_t list_byte_offset =
-        (execution->lists.next + 1) *
-        AMDF_WINDOWS_XDNA_COMMAND_LIST_BYTE_LENGTH;
-    amdf_windows_xdna_submission_build_execute_list(
-        storage, &execution->responses, response_byte_offset,
-        allocation->firmware_address + list_byte_offset, command_count,
-        commands, (uint8_t*)allocation->host_pointer + list_byte_offset,
-        packet_pointer, &submission);
-    packet_byte_length = 28 + 8 * command_count;
-    status = amdf_windows_xdna_private_allocation_publish(
-        allocation, list_byte_offset,
-        command_count * AMDF_WINDOWS_XDNA_COMMAND_LIST_ENTRY_BYTE_LENGTH);
-  }
+  amdf_status_t status = amdf_windows_xdna_kernel_execution_publish_commands(
+      execution, slot, command_count, commands, &submission);
   if (amdf_status_is_ok(status)) {
-    status = amdf_windows_xdna_private_allocation_publish(
-        storage, packet_byte_offset, packet_byte_length);
-  }
-  if (amdf_status_is_ok(status)) {
-    // The public slot and checked retirement own this independent result cell.
-    uint64_t* responses = execution->responses.host_pointer;
-    responses[slot] = 0;
-    status = amdf_windows_xdna_kernel_execution_submit_native(
-        execution, storage->device_address + packet_byte_offset,
-        4096 + amdf_windows_xdna_submission_header_size(execution->protocol),
-        &submission, out_native_submission);
+    status = amdf_windows_xdna_kernel_execution_submit_slot(
+        execution, slot, &submission, out_native_submission);
   }
   if (amdf_status_is_ok(status) && command_count > 1) {
     ++execution->lists.published;

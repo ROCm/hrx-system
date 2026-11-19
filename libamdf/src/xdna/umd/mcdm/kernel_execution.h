@@ -22,9 +22,8 @@ extern "C" {
 typedef struct amdf_windows_xdna_kernel_execution_t
     amdf_windows_xdna_kernel_execution_t;
 
-// The native context binds one allocation. Its prefix contains the bootstrap
-// page and bounded firmware command-list cells. The remainder belongs to
-// callers.
+// The native context binds one allocation. Its prefix contains bounded command
+// list cells and the bootstrap PDI. The remainder belongs to the caller.
 #define AMDF_WINDOWS_XDNA_PRIVATE_APERTURE_SIZE UINT64_C(0x4000000)
 #define AMDF_WINDOWS_XDNA_PRIVATE_BOOTSTRAP_SIZE UINT64_C(0x8000)
 
@@ -71,9 +70,11 @@ amdf_status_t amdf_windows_xdna_kernel_execution_destroy(
 // in capacity. Responses use a separate native role for kernel CPU access.
 // Submission derives host/GPU addresses and cache ranges from the slot offset,
 // without allocation or storage locks. Checked retirement owns slot reuse.
-// Success publishes fully prepared storage. Failure rolls back without a lease.
+// A required ELF transport is admitted before publishing the lease. A failure
+// after native acceptance retains its storage until retirement.
 amdf_status_t amdf_windows_xdna_kernel_execution_acquire_queue(
-    amdf_windows_xdna_kernel_execution_t* execution, uint32_t capacity);
+    amdf_windows_xdna_kernel_execution_t* execution, uint32_t capacity,
+    amdf_xdna_instruction_features_t required_features);
 
 // Consumes one idle queue lease and its packet storage, including on native
 // cleanup failure. No packet metadata remains for a later retry.

@@ -7,14 +7,13 @@
 #include "libamdf/src/xdna/umd/context.h"
 
 #include <drm/amdxdna_accel.h>
-#include <string.h>
 #include <sys/ioctl.h>
 
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/platform/linux/file.h"
 #include "libamdf/src/platform/linux/host_cache.h"
+#include "libamdf/src/xdna/elf_packet.h"
 #include "libamdf/src/xdna/umd/drm/context.h"
-#include "libamdf/src/xdna/umd/drm/elf_packet.h"
 
 static amdf_status_t amdf_linux_xdna_context_release_admission(
     amdf_xdna_umd_context_t* context) {
@@ -101,24 +100,16 @@ amdf_status_t amdf_linux_xdna_context_prepare_execution(
                                            NULL, &context->admission.packet);
   }
   if (amdf_status_is_ok(status)) {
-    // Transaction 0.1: twelve XAIE_IO_NOOP operations. No array register, tile
-    // program, DMA, lock, or application memory is touched by this program.
-    uint8_t* bytes = context->admission.instructions.host_pointer;
-    memset(bytes, 0, 64);
-    bytes[1] = 1;
-    bytes[2] = profile->transaction.device_generation;
-    bytes[3] = (uint8_t)profile->info->array.row_count;
-    bytes[4] = 1;
-    bytes[5] = (uint8_t)profile->rows.memory_count;
-    bytes[8] = 12;
-    bytes[12] = 64;
-    for (size_t offset = 16; offset < 64; offset += 4) {
-      bytes[offset] = 5;
-    }
-    amdf_linux_host_cache_transfer(bytes, 64, device->cache_line_size);
-    amdf_linux_xdna_elf_packet_build(
-        context->admission.instructions.device_address, 64,
-        context->admission.packet.host_pointer);
+    void* bytes = context->admission.instructions.host_pointer;
+    amdf_xdna_elf_admission_write(profile->transaction.device_generation,
+                                  (uint8_t)profile->info->array.row_count,
+                                  (uint8_t)profile->rows.memory_count, 0, 0,
+                                  bytes);
+    amdf_linux_host_cache_transfer(bytes, AMDF_XDNA_ELF_ADMISSION_BYTE_LENGTH,
+                                   device->cache_line_size);
+    amdf_xdna_elf_packet_build(context->admission.instructions.device_address,
+                               AMDF_XDNA_ELF_ADMISSION_BYTE_LENGTH,
+                               context->admission.packet.host_pointer);
   }
   bool retired = true;
   uint64_t sequence = 0;

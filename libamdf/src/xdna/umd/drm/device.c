@@ -25,7 +25,6 @@ amdf_xdna_umd_context_capabilities_t amdf_xdna_umd_query_context_capabilities(
        AMDF_XDNA_EXECUTION_CAPABILITY_ELF_INSTRUCTIONS) != 0) {
     capabilities.scheduling_modes = AMDF_XDNA_SCHEDULING_MODE_TIME_SLICED;
     capabilities.placement_modes = AMDF_XDNA_PLACEMENT_MODE_FIXED_FULL_ARRAY;
-    capabilities.instruction_features = AMDF_XDNA_INSTRUCTION_FEATURE_LOAD_PDI;
   }
   return capabilities;
 }
@@ -124,6 +123,7 @@ amdf_status_t amdf_xdna_umd_device_create(
       (profile->execution_capabilities &
        AMDF_XDNA_EXECUTION_CAPABILITY_ELF_INSTRUCTIONS) != 0) {
     status = amdf_linux_xdna_device_prepare_execution(device);
+    result.instruction_features = AMDF_XDNA_INSTRUCTION_FEATURE_LOAD_PDI;
   }
   if (amdf_status_is_ok(status)) {
     result.id.words[0] = (uintptr_t)device;

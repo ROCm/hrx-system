@@ -37,7 +37,7 @@ amdf_status_t AMDF_CALL amdf_kernel_queue_query_info(
   if (queue == NULL) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
-  const amdf_status_t status = amdf_structure_validate_output_extension(
+  const amdf_status_t status = amdf_structure_validate_extension(
       out_info, AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO,
       sizeof(amdf_kernel_queue_info_t),
       AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_PROGRESS_OBSERVATION,

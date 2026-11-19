@@ -150,7 +150,7 @@ The following native execution contracts apply to the admitted AIE2P profiles:
 | --- | --- | --- |
 | Context admission | Native hardware context; queue creation qualifies direct instruction execution and completion. | Native private adapter query selects direct or metadata partition admission. |
 | Instruction storage | Context-qualified DEV backing, with sizes and alignment from its scope. | One 64 MiB native aperture per context; a reserved 32 KiB bootstrap prefix is excluded from the caller's usable range. |
-| Instruction submission | Mandatory DRM execution record and command BO referencing the caller's instruction range. | Mandatory native transport record and transaction-interpreter packet referencing that range. |
+| Instruction submission | Mandatory DRM execution record and command BO referencing the caller's instruction range. | An ERT ELF or bootstrap-interpreter packet referencing the same range, selected at queue creation. |
 | Ordinary data addresses | Firmware and shim-DMA address interpretations. | Firmware and shim-DMA address interpretations for standard system backing. |
 | Private addresses | The scope reports available firmware and DMA interpretations. | Firmware address returned by native allocation; a private shim-DMA interpretation is not advertised. |
 
@@ -209,6 +209,33 @@ Native query and context failures propagate without guessing
 another layout. An escape query on the created device supplies native tile
 layout. Native context ID zero is valid.
 
+AIE2P callers that need a transaction to load a PDI from a firmware address
+can request that operation when creating the queue:
+
+```c
+const amdf_xdna_kernel_queue_instruction_requirements_t instructions = {
+    .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_INSTRUCTION_REQUIREMENTS,
+    .structure_size = sizeof(instructions),
+    .features = AMDF_XDNA_INSTRUCTION_FEATURE_LOAD_PDI,
+};
+create_info.next = &instructions;
+amdf_status_t status = xdna->kernel_queue_create(context, &create_info, &queue);
+```
+
+Success guarantees the operation on that queue. The device's
+`instruction.features` reports operations guaranteed on every queue. Linux DRM
+uses the ELF transport for every admitted queue. Windows also supports an
+ordinary queue that uses the bootstrap interpreter. To request an ELF queue on
+Windows, allocate the context's instruction backing first. Queue creation
+submits one native ELF transaction that loads the provider's inert PDI and
+checks both the progress fence and the firmware response. Its storage comes
+from the existing queue ring and the reserved context prefix.
+
+If the native interface rejects the command as unsupported, the application
+can create an ordinary queue with `create_info.next = NULL`. Access, allocation,
+and execution failures propagate to the caller. The selected format applies
+to single commands and command arrays for the queue's lifetime.
+
 Windows initialization constructs a minimal PDI/CDO container directly in
 reserved private backing. Its single NOP admits the transaction interpreter
 without installing a tile program or assigning application DMA, locks, routes,
@@ -249,10 +276,13 @@ amdf_status_t publish_instructions(
 }
 ```
 
-Queues admit one instruction range per submission and a configurable number of
-unretired submissions. Set `maximum_pending_submission_count` at queue creation;
-zero selects the default of 128, and `kernel_queue_query_info` reports the
-effective capacity. The library publication path performs no allocation,
+A single command names one instruction range. Submit an array of commands up to
+the queue's reported `maximum_command_count` to execute them in order with one
+retirement point. Direct MCDM queues fit 60 ELF descriptors or 36 interpreter
+descriptors per submission. Metadata MCDM queues accept one command.
+Set `maximum_pending_submission_count` at queue creation to size the pending
+window. Zero selects the default of 128. The queue reports its effective
+capacity through `kernel_queue_query_info`. The library publication path performs no allocation,
 instruction parsing, relocation, argument resolution, native submission retry,
 sleep or host wait.
 

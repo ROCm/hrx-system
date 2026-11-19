@@ -44,10 +44,13 @@ state. Firmware can skip loading the last PDI address, including an address
 reused by a new executable after the old one was released.
 
 Standalone execution requires the active libamdf queue's
-`AMDF_XDNA_INSTRUCTION_FEATURE_LOAD_PDI` capability. Linux DRM exposes this
-operation. The current Windows MCDM submission path returns `INCOMPATIBLE` at
-HAL executable load. Grouped AIE2P transactions with buffer arguments are the
-experimental format. Auxiliary save/restore sections, scalar argument encodings,
+`AMDF_XDNA_INSTRUCTION_FEATURE_LOAD_PDI` capability. Linux DRM and Windows MCDM
+providers with native ELF commands execute the same image. The HAL requests
+this feature during queue setup when the device-wide guarantee is absent. If
+the provider rejects the request as unsupported, the HAL uses its ordinary
+queue for Loom executables. Loading a standalone ELF on that queue returns
+`INCOMPATIBLE` before allocating device storage. The experimental format covers grouped AIE2P
+transactions with buffer arguments. Auxiliary save/restore sections, scalar argument encodings,
 and other relocation kinds require additional ABI support.
 [Producer fixtures and regeneration](testdata/README.md#standalone-mlir-aie-elfs)
 

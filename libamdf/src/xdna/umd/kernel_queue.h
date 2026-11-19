@@ -36,6 +36,7 @@ typedef struct amdf_xdna_umd_kernel_command_t {
 // are ready before return. Submit, status and wait cannot lazily prepare them.
 amdf_status_t amdf_xdna_umd_kernel_queue_create(
     amdf_xdna_umd_context_t* context, uint32_t capacity,
+    amdf_xdna_instruction_features_t required_features,
     amdf_xdna_umd_kernel_queue_t** out_queue);
 
 // Returns the immutable native array limit, at most the shared bound above.
