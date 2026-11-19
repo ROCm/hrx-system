@@ -54,7 +54,6 @@ PACKAGE_NAMES = [
 ]
 
 PUBLIC_DEPS_REQUIRED_GLOBS = [
-    "bin/rocminfo",
     "lib/libhsa-runtime64.so*",
     "lib/libhsa-amd-aqlprofile64.so*",
 ]
@@ -573,7 +572,6 @@ def prepare_public_deps_root(args: argparse.Namespace) -> None:
         rocm_root, deps_root, PUBLIC_DEPS_REQUIRED_GLOBS + PUBLIC_DEPS_OPTIONAL_GLOBS
     )
     for seed in [
-        rocm_root / "bin" / "rocminfo",
         rocm_root / "lib" / "libhsa-runtime64.so",
         rocm_root / "lib" / "libhsa-amd-aqlprofile64.so",
     ]:

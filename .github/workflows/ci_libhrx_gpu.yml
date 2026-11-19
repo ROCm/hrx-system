@@ -123,13 +123,19 @@ jobs:
           bash .github/scripts/check_rocm_device_toolchain.sh
           test -d "${HRX_ROCM_ROOT}/include"
 
-      - name: Report ROCm environment
-        id: rocm_preflight
+      - name: Build native GPU discovery tool
+        run: >-
+          python3 build_tools/devtools/ci.py iree-bazel-amdgpu
+          --amdgpu-target "${{ matrix.target_selector }}"
+          --build-target //libamdf/tool/amdf-info
+
+      - name: Check assigned native GPU
+        id: gpu_preflight
         timeout-minutes: 1
         run: |
           printf 'started=%s\n' "$(date -u '+%F %T')" >> "$GITHUB_OUTPUT"
-          bash .github/scripts/check_rocm_environment.sh \
-            --export-libamdf-gpu-selection --amdgpu-target "${{ matrix.target_selector }}"
+          python3 -u -m build_tools.ci.amdgpu_environment \
+            --native bazel-bin/libamdf/tool/amdf-info/amdf-info "${{ matrix.target_selector }}"
 
       - name: Build and test LibHRX GPU coverage
         id: libhrx_bazel_ci
@@ -141,9 +147,9 @@ jobs:
           --bazel-test-results-dir "${RUNNER_TEMP}/native-test-results-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
       - name: Capture accelerator kernel errors
-        if: ${{ (failure() || cancelled()) && steps.rocm_preflight.outputs.started }}
+        if: ${{ (failure() || cancelled()) && steps.gpu_preflight.outputs.started }}
         env:
-          GPU_PREFLIGHT_STARTED: ${{ steps.rocm_preflight.outputs.started }}
+          GPU_PREFLIGHT_STARTED: ${{ steps.gpu_preflight.outputs.started }}
         run: bash .github/scripts/capture_amdgpu_kernel.sh "$GPU_PREFLIGHT_STARTED"
 
       - name: Upload Bazel profiles

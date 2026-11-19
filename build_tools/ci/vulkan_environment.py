@@ -5,26 +5,20 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Selects the CI render node and verifies Vulkan device zero uses that hardware.
-
-The runner controller may name its comma-separated allocation in
-PARENT_GPU_DEVICES. Prefer discrete hardware among the allocated devices, or
-among all accessible devices when there is no explicit allocation.
-Mesa selects the physical card by PCI address, independently of its product ID.
-Khronos vulkaninfo supplies native device properties before the CTS runs.
-"""
+"""Verifies Vulkan device zero uses the render node granted to this job."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import os
-import stat
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+from build_tools.ci import gpu_assignment
 
 
 @dataclass(frozen=True)
@@ -43,57 +37,23 @@ class RenderDevice:
         return f"pci-{self.pci_address.replace(':', '_').replace('.', '_')}!"
 
 
-def render_device_candidates(
-    sysfs_drm_path: Path, dri_path: Path, allocation: str | None
-) -> list[RenderDevice]:
-    """Checks access to allocated render nodes, or inventories the host if unscoped."""
-    paths = tuple(Path(path) for path in allocation.split(",")) if allocation else ()
-    devices = []
-    print(f"DRM render nodes (uid={os.getuid()}, gid={os.getgid()}):", flush=True)
-    for entry in sorted(sysfs_drm_path.glob("renderD[0-9]*")):
-        node_path = dri_path / entry.name
-        if paths and node_path not in paths:
-            continue
-        try:
-            pci_path = (entry / "device").resolve(strict=True)
-            vendor_id = int((pci_path / "vendor").read_text(), 16)
-            device_id = int((pci_path / "device").read_text(), 16)
-            driver = (pci_path / "driver").resolve(strict=True).name
-            print(
-                f"  {node_path}: PCI {pci_path.name} "
-                f"{vendor_id:04x}:{device_id:04x}, driver={driver}",
-                flush=True,
-            )
-            if vendor_id != 0x1002:
-                continue
-            descriptor = os.open(node_path, os.O_RDWR | os.O_CLOEXEC)
-            try:
-                node_stat = os.fstat(descriptor)
-            finally:
-                os.close(descriptor)
-            if not stat.S_ISCHR(node_stat.st_mode):
-                raise RuntimeError(f"{node_path} is not a character device")
-        except OSError as error:
-            print(f"  {node_path}: unavailable: {error}", flush=True)
-            continue
-        devices.append(
-            RenderDevice(node_path, pci_path.name, device_id, node_stat.st_rdev)
-        )
-    if paths:
-        accessible = {device.path: device for device in devices}
-        candidates = []
-        for path in paths:
-            device = accessible.get(path)
-            if device is None:
-                raise RuntimeError(
-                    f"PARENT_GPU_DEVICES={allocation!r} contains an inaccessible "
-                    f"AMD render node {str(path)!r}; refusing to test a different GPU"
-                )
-            candidates.append(device)
-        return candidates
-    if not devices:
-        raise RuntimeError("No accessible AMD DRM render node is exposed to this job")
-    return devices
+def open_render_device(path: Path, number: int) -> RenderDevice:
+    pci_path = (gpu_assignment.DRM_CLASS / path.name / "device").resolve(strict=True)
+    vendor_id = int((pci_path / "vendor").read_text(), 16)
+    device_id = int((pci_path / "device").read_text(), 16)
+    print(
+        f"Opening {path}: PCI {pci_path.name} {vendor_id:04x}:{device_id:04x}",
+        flush=True,
+    )
+    if vendor_id != 0x1002:
+        raise ValueError(f"Assigned render node {path} is not an AMD GPU")
+    descriptor = os.open(path, os.O_RDWR | os.O_CLOEXEC)
+    try:
+        if os.fstat(descriptor).st_rdev != number:
+            raise RuntimeError(f"Render device changed while opening {path}")
+    finally:
+        os.close(descriptor)
+    return RenderDevice(path, pci_path.name, device_id, number)
 
 
 def validate_vulkan_device(profile: dict, selected: RenderDevice) -> str:
@@ -128,16 +88,13 @@ def validate_vulkan_device(profile: dict, selected: RenderDevice) -> str:
     return device["deviceType"]
 
 
-def check_environment(
-    sysfs_drm_path: Path, dri_path: Path, profile_output: Path | None = None
-) -> None:
-    allocation = os.environ.get("PARENT_GPU_DEVICES")
-    print(f"Runner GPU allocation: {allocation or '(not specified)'}", flush=True)
-    candidates = render_device_candidates(sysfs_drm_path, dri_path, allocation)
+def check_environment(profile_output: Path | None = None) -> None:
+    candidates = gpu_assignment.assigned_render_nodes()
     # A private runtime directory keeps this headless probe independent of a
     # desktop session. The process supervisor also bounds native driver calls.
     with tempfile.TemporaryDirectory(prefix="iree-vulkan-") as temporary_dir:
-        for candidate in candidates:
+        for path, number in candidates.items():
+            candidate = open_render_device(path, number)
             print(f"Checking Vulkan with DRI_PRIME={candidate.dri_prime}", flush=True)
             profile_path = Path(temporary_dir) / f"{candidate.path.name}.json"
             subprocess.run(
@@ -159,20 +116,10 @@ def check_environment(
                 break
         else:
             raise RuntimeError(
-                "Multiple AMD GPUs are exposed without a discrete GPU; "
-                "PARENT_GPU_DEVICES must identify the job's render node"
+                "Multiple assigned GPUs are integrated; assign the render node for this job"
             )
     print(f"Selected {selected.path}: DRI_PRIME={selected.dri_prime}", flush=True)
-    native_identity = (
-        f"linux_device:{os.major(selected.device_number)}:"
-        f"{os.minor(selected.device_number)}"
-    )
-    previous = os.environ.get("AMDF_CTS_GPU_NATIVE_IDENTITY")
-    if previous is not None and previous != native_identity:
-        raise RuntimeError(
-            f"AMDF_CTS_GPU_NATIVE_IDENTITY={previous!r} conflicts with "
-            f"the Vulkan allocation {native_identity}"
-        )
+    native_identity = gpu_assignment.native_identity(selected.device_number)
     if profile_output is not None:
         profile_output.write_bytes(profile)
     # Later workflow steps receive only a selection verified by the native
@@ -180,6 +127,7 @@ def check_environment(
     if github_env := os.environ.get("GITHUB_ENV"):
         with Path(github_env).open("a") as environment_file:
             environment_file.write(f"DRI_PRIME={selected.dri_prime}\n")
+            environment_file.write(f"HAL_AMD_GPU_ASSIGNMENT={native_identity}\n")
             environment_file.write(f"AMDF_CTS_GPU_NATIVE_IDENTITY={native_identity}\n")
 
 
@@ -192,7 +140,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     try:
-        check_environment(Path("/sys/class/drm"), Path("/dev/dri"), args.profile_output)
+        check_environment(args.profile_output)
     except (
         OSError,
         ValueError,
