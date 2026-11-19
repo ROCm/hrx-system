@@ -116,6 +116,7 @@ amdf_cc_library(
         ":memory_profile",
         ":paging_queue",
         "//libamdf/src/gpu/umd:device",
+        "//libamdf/src/gpu/umd/dxg:mapping_context",
     ],
 )
 
@@ -151,6 +152,7 @@ amdf_cc_library(
         ":memory",
         "//libamdf/src:allocator",
         "//libamdf/src/gpu/umd:memory_reservation",
+        "//libamdf/src/gpu/umd/dxg:mapping_context",
         "//libamdf/src/gpu/umd/dxg:memory_reservation",
     ],
 )
@@ -173,6 +175,7 @@ amdf_cc_library(
         "//libamdf/src:wait",
         "//libamdf/src/gpu/umd:kernel_queue",
         "//libamdf/src/gpu/umd/dxg:adapter",
+        "//libamdf/src/gpu/umd/dxg:mapping_context",
         "//libamdf/src/platform:native_event",
         "//libamdf/src/platform:wait",
         "//libamdf/src/platform/linux:file",
@@ -191,6 +194,7 @@ amdf_cc_library(
     deps = [
         ":api_contract",
         ":device_state",
+        ":memory",
         ":memory_profile",
         "//libamdf/src:allocator",
         "//libamdf/src/gpu/umd/dxg/wsl:provider",
@@ -372,6 +376,7 @@ amdf_cc_test(
         ":memory_reservation",
         "//libamdf/src:allocator",
         "//libamdf/src/gpu/umd:memory_reservation",
+        "//libamdf/src/gpu/umd/dxg:mapping_context",
         "//third_party:google_test",
         "//third_party:google_test_main",
     ],

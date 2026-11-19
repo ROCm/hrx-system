@@ -7,11 +7,14 @@
 #ifndef AMDF_SRC_GPU_UMD_DXG_LINUX_DEVICE_H_
 #define AMDF_SRC_GPU_UMD_DXG_LINUX_DEVICE_H_
 
+#include <pthread.h>
+
 #include "libamdf/src/gpu/umd/dxg/linux/api.h"
 #include "libamdf/src/gpu/umd/dxg/linux/device_status.h"
 #include "libamdf/src/gpu/umd/dxg/linux/logical_device.h"
 #include "libamdf/src/gpu/umd/dxg/linux/memory_profile.h"
 #include "libamdf/src/gpu/umd/dxg/linux/paging_queue.h"
+#include "libamdf/src/gpu/umd/dxg/mapping_context.h"
 
 // Concrete direct Linux DXG state backing one GPU device.
 struct amdf_gpu_umd_device_t {
@@ -31,6 +34,11 @@ struct amdf_gpu_umd_device_t {
   amdf_gpu_linux_dxg_logical_device_t logical_device;
   // Confirmed execution failure shared by every queue on this device.
   amdf_gpu_linux_dxg_device_status_t status;
+  // Serializes mapping context preparation and issue, independently of host
+  // waits.
+  pthread_mutex_t mapping_lock;
+  // Private synchronization-only context, created on the first mapping vector.
+  amdf_gpu_dxg_mapping_context_t mapping_context;
   // Paging queue owned by the logical device.
   amdf_gpu_linux_dxg_paging_queue_t paging_queue;
 };

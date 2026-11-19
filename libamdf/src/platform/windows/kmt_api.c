@@ -155,6 +155,12 @@ bool amdf_kmt_api_supports_xdna_kernel_execution(const amdf_kmt_api_t* api) {
          api->submit_command_to_hardware_queue != NULL;
 }
 
+bool amdf_kmt_api_supports_mapping_context(const amdf_kmt_api_t* api) {
+  return api->create_context_virtual && api->destroy_context &&
+         api->create_synchronization_object &&
+         api->destroy_synchronization_object && api->update_gpu_virtual_address;
+}
+
 bool amdf_kmt_status_is_success_or_pending(NTSTATUS status) {
   const uint32_t code = (uint32_t)status;
   return code == 0 || code == 0x00000103u;

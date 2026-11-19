@@ -19,6 +19,7 @@
 #include "libamdf/src/gpu/umd/dxg/adapter.h"
 #include "libamdf/src/gpu/umd/dxg/linux/api.h"
 #include "libamdf/src/gpu/umd/dxg/linux/device.h"
+#include "libamdf/src/gpu/umd/dxg/mapping_context.h"
 #include "libamdf/src/platform/linux/file.h"
 #include "libamdf/src/platform/native_event.h"
 #include "libamdf/src/platform/wait.h"
@@ -250,18 +251,11 @@ amdf_status_t amdf_gpu_linux_dxg_kernel_queue_update_memory(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  D3DKMT_UPDATEGPUVIRTUALADDRESS update = {
-      .hDevice = queue->device->logical_device.native,
-      .hContext = queue->context,
-      .hFenceObject = queue->progress_fence,
-      .NumOperations = operation_count,
-      .Operations = operations,
-      .FenceValue = submission - 1,
-  };
   *mutation_started = true;
-  status = amdf_linux_dxg_kmt_make_status(
-      amdf_linux_dxg_kmt_update_gpu_virtual_address(
-          queue->device->logical_device.kmt, &update));
+  status = amdf_gpu_dxg_mapping_operations_submit(
+      queue->device->logical_device.kmt, queue->device->logical_device.native,
+      queue->context, queue->progress_fence, submission - 1, operation_count,
+      operations);
   if (!amdf_status_is_ok(status)) {
     return amdf_gpu_linux_dxg_device_status_observe_error(
         &queue->device->status, queue->device->logical_device.kmt,

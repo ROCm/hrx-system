@@ -18,10 +18,30 @@ extern "C" {
 typedef struct amdf_gpu_dxg_memory_reservation_t
     amdf_gpu_dxg_memory_reservation_t;
 
+// One accepted batch on a device-owned monitored fence.
+typedef struct amdf_gpu_dxg_mapping_point_t {
+  // Native synchronization object owned by the publishing device.
+  uint32_t fence;
+  // Borrowed CPU progress mapping, valid through device destruction.
+  const volatile uint64_t* progress;
+  // Monotonic completion value; zero means no outstanding work.
+  uint64_t value;
+} amdf_gpu_dxg_mapping_point_t;
+
+// Encodes and publishes multiple physical spans on the consumer's dedicated
+// paging timeline. A pre-submission failure leaves mutation_started clear.
+typedef amdf_status_t (*amdf_gpu_dxg_publish_mapping_batch_fn_t)(
+    void* device, const amdf_gpu_dxg_memory_reservation_t* reservation,
+    uint32_t update_count, const amdf_gpu_umd_mapping_update_t* updates,
+    uint64_t operation_count, bool* mutation_started,
+    amdf_gpu_dxg_mapping_point_t* out_point);
+
 // Immutable native attachment copied into one virtual-memory reservation.
 typedef struct amdf_gpu_dxg_memory_reservation_device_t {
   // Native operation table selected by the device provider.
   const amdf_gpu_dxg_memory_native_api_t* native_api;
+  // Optional vector publisher for this attachment.
+  amdf_gpu_dxg_publish_mapping_batch_fn_t publish_batch;
   // Live provider device forwarded to contextual native operations.
   void* native_context;
   // Query adapter owning GPU virtual-address reservations.

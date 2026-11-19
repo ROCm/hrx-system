@@ -7,10 +7,37 @@
 #include "libamdf/src/gpu/umd/memory_reservation.h"
 
 #include "libamdf/src/allocator.h"
+#include "libamdf/src/gpu/umd/dxg/mapping_context.h"
 #include "libamdf/src/gpu/umd/dxg/memory_reservation.h"
 #include "libamdf/src/gpu/umd/wddm/device.h"
 #include "libamdf/src/gpu/umd/wddm/kernel_queue.h"
 #include "libamdf/src/gpu/umd/wddm/memory.h"
+
+static amdf_status_t amdf_gpu_wddm_publish_mapping_batch(
+    void* native_context, const amdf_gpu_dxg_memory_reservation_t* reservation,
+    uint32_t update_count, const amdf_gpu_umd_mapping_update_t* updates,
+    uint64_t operation_count, bool* mutation_started,
+    amdf_gpu_dxg_mapping_point_t* out_point) {
+  amdf_gpu_umd_device_t* device = native_context;
+  D3DDDI_UPDATEGPUVIRTUALADDRESS_OPERATION* operations = NULL;
+  amdf_status_t status = amdf_gpu_dxg_mapping_operations_create(
+      reservation, update_count, updates, operation_count, &operations);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  AcquireSRWLockExclusive(&device->mapping_lock);
+  status = amdf_gpu_dxg_mapping_context_submit(
+      &device->mapping_context, device->kmt, device->device,
+      device->physical_adapter_index, (uint32_t)operation_count, operations,
+      mutation_started, out_point);
+  ReleaseSRWLockExclusive(&device->mapping_lock);
+  amdf_free(amdf_gpu_dxg_memory_reservation_host_allocator(reservation),
+            operations);
+  return amdf_status_is_ok(status)
+             ? status
+             : amdf_kmt_device_status_observe_error(
+                   &device->status, device->kmt, device->device, status);
+}
 
 static amdf_gpu_dxg_memory_reservation_device_t
 amdf_gpu_wddm_reservation_device(amdf_gpu_umd_device_t* device) {
@@ -19,6 +46,11 @@ amdf_gpu_wddm_reservation_device(amdf_gpu_umd_device_t* device) {
   return (amdf_gpu_dxg_memory_reservation_device_t){
       .native_api = memory_device.native_api,
       .native_context = memory_device.native_context,
+      .publish_batch =
+          device->physical_adapter_index < 32 &&
+                  amdf_kmt_api_supports_mapping_context(device->kmt)
+              ? amdf_gpu_wddm_publish_mapping_batch
+              : NULL,
       .adapter_handle = memory_device.adapter_handle,
       .adapter_luid = memory_device.adapter_luid,
       .physical_adapter_index = device->physical_adapter_index,
@@ -107,29 +139,6 @@ amdf_status_t amdf_gpu_umd_memory_reservation_destroy(
       (amdf_gpu_dxg_memory_reservation_t*)reservation);
 }
 
-static void amdf_gpu_wddm_write_mapping_operation(
-    void* context, uint32_t ordinal,
-    const amdf_gpu_dxg_mapping_operation_t* source) {
-  D3DDDI_UPDATEGPUVIRTUALADDRESS_OPERATION* operations = context;
-  D3DDDI_UPDATEGPUVIRTUALADDRESS_OPERATION* operation = &operations[ordinal];
-  if (source->allocation_handle == 0) {
-    operation->OperationType = D3DDDI_UPDATEGPUVIRTUALADDRESS_UNMAP;
-    operation->Unmap.BaseAddress = source->target_address;
-    operation->Unmap.SizeInBytes = source->byte_length;
-    operation->Unmap.Protection.NoAccess = 1;
-  } else {
-    operation->OperationType = D3DDDI_UPDATEGPUVIRTUALADDRESS_MAP_PROTECT;
-    operation->MapProtect.BaseAddress = source->target_address;
-    operation->MapProtect.SizeInBytes = source->byte_length;
-    operation->MapProtect.hAllocation = source->allocation_handle;
-    operation->MapProtect.AllocationOffsetInBytes = source->source_byte_offset;
-    operation->MapProtect.Protection.Write =
-        (source->access & AMDF_MEMORY_ACCESS_WRITE) != 0;
-    operation->MapProtect.Protection.Execute =
-        (source->access & AMDF_MEMORY_ACCESS_EXECUTE) != 0;
-  }
-}
-
 amdf_status_t amdf_gpu_umd_memory_reservation_update_on_queue(
     amdf_gpu_umd_memory_reservation_t* reservation,
     amdf_gpu_umd_kernel_queue_t* queue, uint32_t access_ordinal,
@@ -140,27 +149,20 @@ amdf_status_t amdf_gpu_umd_memory_reservation_update_on_queue(
   const uint64_t operation_count =
       amdf_gpu_dxg_memory_reservation_mapping_operation_count(
           dxg_reservation, update_count, updates);
-  if (operation_count > UINT32_MAX) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
-  }
-  const amdf_allocator_t host_allocator =
-      amdf_gpu_dxg_memory_reservation_host_allocator(dxg_reservation);
   D3DDDI_UPDATEGPUVIRTUALADDRESS_OPERATION* operations = NULL;
-  amdf_status_t status =
-      amdf_calloc_array(host_allocator, operation_count, sizeof(*operations),
-                        amdf_alignof(D3DDDI_UPDATEGPUVIRTUALADDRESS_OPERATION),
-                        (void**)&operations);
+  amdf_status_t status = amdf_gpu_dxg_mapping_operations_create(
+      dxg_reservation, update_count, updates, operation_count, &operations);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  amdf_gpu_dxg_memory_reservation_visit_mapping_operations(
-      dxg_reservation, update_count, updates,
-      amdf_gpu_wddm_write_mapping_operation, operations);
-  amdf_gpu_dxg_memory_reservation_select_publisher(dxg_reservation,
-                                                   access_ordinal);
   status = amdf_gpu_wddm_kernel_queue_update_memory(
       queue, (uint32_t)operation_count, operations, submission,
       mutation_started, accepted);
-  amdf_free(host_allocator, operations);
+  if (*mutation_started) {
+    amdf_gpu_dxg_memory_reservation_select_publisher(dxg_reservation,
+                                                     access_ordinal);
+  }
+  amdf_free(amdf_gpu_dxg_memory_reservation_host_allocator(dxg_reservation),
+            operations);
   return status;
 }

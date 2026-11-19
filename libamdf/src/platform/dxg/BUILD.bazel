@@ -29,3 +29,14 @@ amdf_cc_test(
         "//third_party:google_test_main",
     ],
 )
+
+amdf_cc_library(
+    name = "kmt",
+    hdrs = ["kmt.h"],
+    visibility = ["//libamdf/src/gpu/umd/dxg:__pkg__"],
+    deps = select({
+        "@platforms//os:linux": ["//libamdf/src/platform/linux/dxg:kmt"],
+        "@platforms//os:windows": ["//libamdf/src/platform/windows:kmt_api"],
+        "//conditions:default": [],
+    }),
+)

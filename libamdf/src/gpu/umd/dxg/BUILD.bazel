@@ -180,6 +180,18 @@ amdf_cc_test(
 )
 
 amdf_cc_library(
+    name = "mapping_context",
+    srcs = ["mapping_context.c"],
+    hdrs = ["mapping_context.h"],
+    visibility = ["//libamdf/src/gpu/umd:__subpackages__"],
+    deps = [
+        ":memory_reservation",
+        "//libamdf/src:allocator",
+        "//libamdf/src/platform/dxg:kmt",
+    ],
+)
+
+amdf_cc_library(
     name = "memory_reservation",
     srcs = ["memory_reservation.c"],
     hdrs = ["memory_reservation.h"],

@@ -504,6 +504,47 @@ TEST_F(DxgMemoryReservationTest,
   EXPECT_EQ(state_.wait_targets, (std::vector<uint64_t>{2}));
 }
 
+TEST_F(DxgMemoryReservationTest, BatchesOneRangeWhichCrossesAllocationHandles) {
+  PrepareSource();
+  reservation_device_.publish_batch =
+      [](void* context, const amdf_gpu_dxg_memory_reservation_t*,
+         uint32_t update_count, const amdf_gpu_umd_mapping_update_t*,
+         uint64_t operation_count, bool* mutated,
+         amdf_gpu_dxg_mapping_point_t* out_point) {
+        auto* state = static_cast<FakeState*>(context);
+        EXPECT_EQ(update_count, 1u);
+        EXPECT_EQ(operation_count, 2u);
+        *mutated = true;
+        *out_point = {
+            .fence = 0x50,
+            .progress = &state->next_paging_fence,
+            .value = 97,
+        };
+        return AMDF_STATUS_OK;
+      };
+  auto* reservation = CreateReservation();
+  amdf_gpu_umd_mapping_update_t update = {
+      .byte_length = 4096,
+      .memory = reinterpret_cast<amdf_gpu_umd_memory_t*>(source_),
+      .source_byte_offset = 32768 - 4096,
+      .access = AMDF_MEMORY_ACCESS_READ,
+  };
+  bool mutated = false;
+  ASSERT_EQ(amdf_gpu_dxg_memory_reservation_update(reservation, 0, 1, &update,
+                                                   &mutated),
+            AMDF_STATUS_OK);
+  EXPECT_TRUE(mutated);
+  ASSERT_EQ(state_.mappings.size(), 1u);
+  update.byte_length = 8192;
+  ASSERT_EQ(amdf_gpu_dxg_memory_reservation_update(reservation, 0, 1, &update,
+                                                   &mutated),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(state_.mappings.size(), 1u);
+  EXPECT_EQ(state_.wait_targets, (std::vector<uint64_t>{1, 97}));
+  EXPECT_EQ(amdf_gpu_dxg_memory_reservation_destroy(reservation),
+            AMDF_STATUS_OK);
+}
+
 TEST_F(DxgMemoryReservationTest, PreservesAnExactBorrowedCommonAddress) {
   constexpr uint64_t common_address = 0x800000;
   amdf_gpu_dxg_memory_reservation_t* reservation =
