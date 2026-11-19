@@ -16,12 +16,15 @@ bool loom_serve_text_has_work(const loom_serve_text_service_t* service) {
 iree_status_t loom_serve_text_await_work(loom_serve_text_service_t* service,
                                          loom_serve_text_work_t work) {
   service->completion.start_time = iree_time_now();
+  const loom_runtime_execution_frontier_t frontier =
+      work == TEXT_WORK_EPOCH_ALLOCATIONS
+          ? loom_serve_text_model_allocation_frontier(service->model)
+          : service->completion.frontier;
   IREE_RETURN_IF_ERROR(loom_runtime_execution_await(
-      &service->readiness, &service->completion.frontier,
-      &service->device_wait));
+      &service->readiness, &frontier, &service->device_wait));
   service->completion.work = work;
   IREE_TRACE({
-    if (work == TEXT_WORK_EPOCH) {
+    if (work == TEXT_WORK_EPOCH || work == TEXT_WORK_EPOCH_ALLOCATIONS) {
       service->completion.section = loom_service_trace_section_enter(
           LOOM_SERVICE_TRACE_SECTION_EXECUTE, service->name);
     }

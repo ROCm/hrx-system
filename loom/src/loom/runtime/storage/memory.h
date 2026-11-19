@@ -151,7 +151,8 @@ void loom_runtime_memory_pool_set_reclaimer(
 typedef enum loom_runtime_memory_admission_e {
   // The requested bytes cannot currently fit and no capacity wake was armed.
   LOOM_RUNTIME_MEMORY_ADMISSION_CAPACITY = 0,
-  // Accepted work or a native return can change capacity and wake the owner.
+  // Accepted work or a native return can resolve backing overlap or capacity
+  // and wake the owner.
   // This result remains authoritative even if that completion races the return.
   LOOM_RUNTIME_MEMORY_ADMISSION_DEFERRED,
   // Capacity is available; the serialized owner can commit before yielding.
@@ -340,13 +341,14 @@ iree_status_t loom_runtime_memory_pool_try_commit(
 // of native progress even if it completes before the caller handles the result.
 //
 // The caller keeps every reservation and its accounting alive until the
-// returned operation retires, independently of readiness success/failure. No
-// other commitment or trim may touch its pending slabs. Ranges are copied; the
-// readiness semaphore is retained. Mapping edits to one reservation are ordered
-// even for disjoint slabs; source allocations and separate reservations remain
-// independent. Completion may precede return. Inline
-// readiness callbacks may schedule the owner but cannot collect or await this
-// operation; the owner joins publication through is_complete before freeing it.
+// returned operation retires, independently of readiness success/failure. A
+// commitment intersecting pending slabs defers; trims must exclude them.
+// Ranges are copied; the readiness semaphore is retained. Mapping edits to one
+// reservation are ordered even for disjoint slabs; source allocations and
+// separate reservations remain independent. Completion may precede return.
+// Inline readiness callbacks may schedule the owner but cannot collect or await
+// this operation; the owner joins publication through is_complete before
+// freeing it.
 iree_status_t loom_runtime_memory_pool_commit_async(
     loom_runtime_memory_pool_t* pool, iree_host_size_t range_count,
     const loom_runtime_memory_range_t* ranges, iree_hal_semaphore_t* readiness,
@@ -371,13 +373,18 @@ typedef struct loom_runtime_memory_commit_t {
 } loom_runtime_memory_commit_t;
 
 // Selects missing mappings and retains their count/demand for one admission.
-// Sparse directory growth can allocate. The caller joins prior operations on
-// these buffers and excludes another selection or backing edit until consuming
-// this preparation. Preparation, admission, and submission share one serialized
-// owner turn; the record cannot survive a yield. On failure it is cancelled.
+// Sparse directory growth can allocate. An intersecting pending mapping returns
+// DEFERRED and cancels this selection without allocating physical capacity or
+// invoking pressure policy. AVAILABLE returns a prepared selection, not
+// admitted physical capacity. Disjoint mappings remain independently
+// admissible. The caller excludes another selection or backing edit until
+// consuming this preparation. Preparation, admission, and submission share one
+// serialized owner turn; the record cannot survive a yield. On failure it is
+// cancelled.
 iree_status_t loom_runtime_memory_pool_prepare_commit(
     loom_runtime_memory_pool_t* pool, iree_host_size_t range_count,
     const loom_runtime_memory_range_t* ranges,
+    loom_runtime_memory_admission_t* out_admission,
     loom_runtime_memory_commit_t* out_commit);
 
 // Cancels the selection and clears the record without submitting native work.

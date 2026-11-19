@@ -61,7 +61,8 @@ static bool loom_serve_text_begin_input_count(
     loom_serve_text_service_t* service) {
   if (!service->input_counts.count || service->cpu_work != TEXT_CPU_WORK_NONE ||
       (service->completion.work != TEXT_WORK_NONE &&
-       service->completion.work != TEXT_WORK_EPOCH)) {
+       service->completion.work != TEXT_WORK_EPOCH &&
+       service->completion.work != TEXT_WORK_EPOCH_ALLOCATIONS)) {
     return false;
   }
   loom_serve_text_schedule_cpu(service, TEXT_CPU_WORK_INPUT_COUNT,
@@ -506,7 +507,11 @@ static iree_status_t loom_serve_text_submit_epoch(
     loom_serve_text_capture_release(capture);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_text_await_work(service, TEXT_WORK_EPOCH);
+    status = loom_serve_text_await_work(
+        service, service->pool.trim.pending &&
+                         !loom_serve_text_model_is_reclaiming(service->model)
+                     ? TEXT_WORK_EPOCH_ALLOCATIONS
+                     : TEXT_WORK_EPOCH);
   }
   IREE_RETURN_AND_END_ZONE(z0, status);
 }
@@ -997,6 +1002,7 @@ static bool loom_serve_text_has_requests(void* self) {
 static bool loom_serve_text_is_pending(void* self) {
   loom_serve_text_service_t* service = self;
   return loom_serve_text_has_work(service) ||
+         loom_serve_text_model_is_reclaiming(service->model) ||
          loom_serve_text_warmup_is_pending(
              loom_serve_text_model_warmup(service->model)) ||
          loom_serve_text_media_projector_is_pending(service->projector) ||
@@ -1009,6 +1015,7 @@ static bool loom_serve_text_is_pending(void* self) {
 static bool loom_serve_text_is_active(void* self) {
   const loom_serve_text_service_t* service = self;
   if (loom_serve_text_has_work(service) || service->pool.trim.pending ||
+      loom_serve_text_model_is_reclaiming(service->model) ||
       loom_serve_text_warmup_is_pending(
           loom_serve_text_model_warmup(service->model)) ||
       loom_serve_text_media_projector_is_pending(service->projector) ||
@@ -1040,7 +1047,8 @@ static iree_status_t loom_serve_text_advance_work(
   // Start that independent CPU loan before consuming epoch readiness, even if
   // the device has already signaled; collection waits for the shared source
   // invocation to return. Closed unborrowed requests were retired above.
-  if (service->completion.work == TEXT_WORK_EPOCH &&
+  if ((service->completion.work == TEXT_WORK_EPOCH ||
+       service->completion.work == TEXT_WORK_EPOCH_ALLOCATIONS) &&
       service->cpu_work == TEXT_CPU_WORK_NONE &&
       !iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
     *out_progress |= loom_serve_text_begin_preparation(service);
@@ -1084,6 +1092,7 @@ static iree_status_t loom_serve_text_advance_work(
       yield_preparation = true;
     }
   }
+  IREE_RETURN_IF_ERROR(loom_serve_text_collect_reclaim(service, out_progress));
   if (service->completion.work != TEXT_WORK_NONE) {
     iree_status_t status = iree_ok_status();
     if (!loom_runtime_readiness_take(
@@ -1092,11 +1101,29 @@ static iree_status_t loom_serve_text_advance_work(
     }
     const loom_serve_text_work_t work = service->completion.work;
     service->completion.work = TEXT_WORK_NONE;
-    IREE_TRACE_SECTION_LEAVE(service->completion.section);
-    IREE_TRACE(service->completion.section = 0);
+    if (work != TEXT_WORK_EPOCH_ALLOCATIONS || !iree_status_is_ok(status)) {
+      IREE_TRACE_SECTION_LEAVE(service->completion.section);
+      IREE_TRACE(service->completion.section = 0);
+    }
     *out_progress = true;
     IREE_RETURN_IF_ERROR(status);
     switch (work) {
+      case TEXT_WORK_EPOCH_ALLOCATIONS:
+        if (!iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
+          status = loom_serve_text_submit_reclaim(service, out_progress);
+        }
+        if (iree_status_is_ok(status)) {
+          status = loom_runtime_execution_await(&service->readiness,
+                                                &service->completion.frontier,
+                                                &service->device_wait);
+        }
+        if (iree_status_is_ok(status)) {
+          service->completion.work = TEXT_WORK_EPOCH;
+        } else {
+          IREE_TRACE_SECTION_LEAVE(service->completion.section);
+          IREE_TRACE(service->completion.section = 0);
+        }
+        break;
       case TEXT_WORK_EPOCH:
         status = loom_serve_text_complete_epoch(service, flags);
         break;
@@ -1157,7 +1184,8 @@ static iree_status_t loom_serve_text_advance_work(
       service->reconfiguration, /*quiescent=*/true, /*stopping=*/false);
   // Release/suspend controls can free capacity for a stalled generation queue.
   // They run only after the previous epoch relinquishes its retained views.
-  if (service->control.consumer.self) {
+  if (service->control.consumer.self &&
+      !loom_serve_text_model_is_reclaiming(service->model)) {
     *out_progress = true;
     if (!service->control.consumer.is_open(service->control.consumer.self)) {
       loom_serve_text_checkpoint_request_abort(&service->control,
@@ -1195,9 +1223,10 @@ static iree_status_t loom_serve_text_advance_work(
     status = loom_serve_text_prepare_ready(service, service->sessions[i],
                                            out_progress, &ready[i]);
   }
-  if (iree_status_is_ok(status)) {
-    *out_progress |= service->pool.trim.pending;
-    status = loom_serve_text_submit_trim(service);
+  if (iree_status_is_ok(status) && service->pool.trim.pending &&
+      !loom_serve_text_model_is_reclaiming(service->model)) {
+    service->pool.trim.pending =
+        loom_serve_text_model_prepare_reclaim(service->model);
   }
   if (iree_status_is_ok(status) && !loom_serve_text_has_work(service)) {
     if (service->scheduling.packing_mode ==
@@ -1217,6 +1246,9 @@ static iree_status_t loom_serve_text_advance_work(
       // With no ready device work, rejection never stalls the remaining FIFO.
       *out_progress |= loom_serve_text_begin_preparation(service);
     }
+  }
+  if (iree_status_is_ok(status) && !loom_serve_text_has_work(service)) {
+    status = loom_serve_text_submit_reclaim(service, out_progress);
   }
   if (!loom_serve_text_has_work(service)) {
     loom_serve_text_observe(service,

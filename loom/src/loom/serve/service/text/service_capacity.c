@@ -55,6 +55,7 @@ bool loom_serve_text_service_capacity_begin(
       service->max_sessions ? iree_min(service->max_sessions, INT32_MAX)
                             : INT32_MAX;
   if (loom_serve_text_has_work(service) || service->pending.prepared.session ||
+      loom_serve_text_model_is_reclaiming(service->model) ||
       service->row_count == maximum) {
     return false;
   }

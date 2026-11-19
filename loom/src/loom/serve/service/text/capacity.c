@@ -62,7 +62,8 @@ iree_status_t loom_serve_text_model_prepare_resize(
         z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                              "resident growth requires a larger i32 capacity"));
   }
-  if (model->state.prepared_reservations) {
+  if (model->state.prepared_reservations ||
+      loom_serve_text_model_is_reclaiming(model)) {
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }

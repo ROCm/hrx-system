@@ -61,11 +61,63 @@ void loom_serve_text_pending_cancel_failed(loom_serve_text_service_t* service,
   }
 }
 
+static void loom_serve_text_record_trim(loom_serve_text_service_t* service) {
+  const loom_runtime_storage_statistics_t memory =
+      loom_serve_text_model_memory_statistics(service->model);
+  const loom_service_text_trim_record_t value = {
+      .duration_ns = iree_time_now() - service->pool.trim.start_time,
+      .moved_blocks = service->pool.trim.result.moved_blocks,
+      .copied_bytes = service->pool.trim.result.copied_bytes,
+      .released_bytes = service->pool.trim.result.released_bytes,
+      .committed_bytes = memory.committed_bytes};
+  loom_service_text_record(service->telemetry.stream, &LOOM_SERVICE_TEXT_TRIM,
+                           0, &value, sizeof(value));
+}
+
+iree_status_t loom_serve_text_collect_reclaim(
+    loom_serve_text_service_t* service, bool* out_progress) {
+  if (!loom_serve_text_model_is_reclaiming(service->model)) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_collect_reclaim(service->model));
+  if (!loom_serve_text_model_is_reclaiming(service->model)) {
+    service->pool.trim.result.released_bytes =
+        loom_serve_text_model_memory_statistics(service->model).released_bytes -
+        service->pool.trim.result.released_bytes;
+    loom_serve_text_record_trim(service);
+    *out_progress = true;
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_serve_text_submit_reclaim(loom_serve_text_service_t* service,
+                                             bool* out_progress) {
+  if (!service->pool.trim.pending ||
+      loom_serve_text_model_is_reclaiming(service->model)) {
+    return iree_ok_status();
+  }
+  service->pool.trim.start_time = iree_time_now();
+  service->pool.trim.result = (loom_serve_text_trim_result_t){
+      .released_bytes = loom_serve_text_model_memory_statistics(service->model)
+                            .released_bytes};
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_submit_reclaim(service->model));
+  service->pool.trim.pending = false;
+  *out_progress = true;
+  if (loom_serve_text_model_is_reclaiming(service->model)) {
+    return loom_serve_text_collect_reclaim(service, out_progress);
+  }
+  service->pool.trim.result.released_bytes = 0;
+  loom_serve_text_record_trim(service);
+  return iree_ok_status();
+}
+
 // Reclaim completed ownership at an epoch boundary or after admission denial.
 // Compaction itself admits its temporary destinations and may leave a sparse
 // map when moving would exceed the shared physical budget.
 iree_status_t loom_serve_text_submit_trim(loom_serve_text_service_t* service) {
-  if (!service->pool.trim.pending) {
+  if (loom_serve_text_model_is_reclaiming(service->model) ||
+      (!service->pool.trim.pending &&
+       !loom_serve_text_model_needs_compaction(service->model))) {
     return iree_ok_status();
   }
   loom_serve_text_observe(service, "trim");
@@ -97,16 +149,7 @@ iree_status_t loom_serve_text_complete_trim(
     return loom_serve_text_await_work(service, TEXT_WORK_TRIM);
   }
   service->pool.trim.pending = false;
-  const loom_runtime_storage_statistics_t memory =
-      loom_serve_text_model_memory_statistics(service->model);
-  const loom_service_text_trim_record_t value = {
-      .duration_ns = iree_time_now() - service->pool.trim.start_time,
-      .moved_blocks = result->moved_blocks,
-      .copied_bytes = result->copied_bytes,
-      .released_bytes = result->released_bytes,
-      .committed_bytes = memory.committed_bytes};
-  loom_service_text_record(service->telemetry.stream, &LOOM_SERVICE_TEXT_TRIM,
-                           0, &value, sizeof(value));
+  loom_serve_text_record_trim(service);
   return iree_ok_status();
 }
 
@@ -121,7 +164,8 @@ static void loom_serve_text_reset_session(loom_serve_text_service_t* service,
 
 bool loom_serve_text_cache_reclaim_pending(void* self) {
   const loom_serve_text_service_t* service = self;
-  return service->pool.trim.pending;
+  return service->pool.trim.pending ||
+         loom_serve_text_model_is_reclaiming(service->model);
 }
 
 static bool loom_serve_text_cache_can_reclaim(
@@ -786,7 +830,8 @@ iree_status_t loom_serve_text_media_lookahead(
   if (!service->media_preparation_end || service->pending.prepared.session ||
       service->cpu_work != TEXT_CPU_WORK_NONE ||
       (service->completion.work != TEXT_WORK_NONE &&
-       service->completion.work != TEXT_WORK_EPOCH)) {
+       service->completion.work != TEXT_WORK_EPOCH &&
+       service->completion.work != TEXT_WORK_EPOCH_ALLOCATIONS)) {
     return iree_ok_status();
   }
   iree_status_t status = iree_ok_status();

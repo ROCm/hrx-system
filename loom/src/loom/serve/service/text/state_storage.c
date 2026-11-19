@@ -309,6 +309,8 @@ void loom_serve_text_state_retire(loom_serve_text_state_t* state,
   loom_runtime_retirement_set_observer(&state->retirement, wake, user_data);
   loom_runtime_memory_operation_set_observer(state->memory.backing.operation,
                                              wake, user_data);
+  loom_runtime_memory_operation_set_observer(state->memory.reclaim, wake,
+                                             user_data);
   for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
        ++i) {
     loom_runtime_memory_operation_set_observer(
@@ -355,6 +357,7 @@ void loom_serve_text_state_retire(loom_serve_text_state_t* state,
 bool loom_serve_text_state_is_retired(loom_serve_text_state_t* state) {
   bool complete = loom_runtime_memory_operation_is_complete(
       state->memory.backing.operation);
+  complete &= loom_runtime_memory_operation_is_complete(state->memory.reclaim);
   for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
        ++i) {
     complete &= loom_runtime_memory_operation_is_complete(
@@ -365,6 +368,7 @@ bool loom_serve_text_state_is_retired(loom_serve_text_state_t* state) {
 
 void loom_serve_text_state_await_retirement(loom_serve_text_state_t* state) {
   loom_runtime_memory_operation_await(state->memory.backing.operation);
+  loom_runtime_memory_operation_await(state->memory.reclaim);
   for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
        ++i) {
     loom_runtime_memory_operation_await(state->memory.growth.operations[i]);
@@ -375,6 +379,7 @@ void loom_serve_text_state_await_retirement(loom_serve_text_state_t* state) {
 iree_status_t loom_serve_text_state_deinitialize(
     loom_serve_text_state_t* state) {
   IREE_ASSERT(loom_serve_text_state_is_retired(state));
+  IREE_RETURN_IF_ERROR(loom_serve_text_state_collect_reclaim(state));
   loom_runtime_memory_operation_free(state->memory.backing.operation);
   state->memory.backing.operation = NULL;
   loom_serve_text_state_complete_resize(state);

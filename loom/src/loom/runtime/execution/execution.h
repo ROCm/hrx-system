@@ -119,11 +119,20 @@ iree_status_t loom_runtime_execution_dealloca(
 typedef struct loom_runtime_execution_frontier_t {
   // Model work followed by its independent host feedback branch.
   iree_hal_semaphore_t* semaphores[2];
-  // Last accepted submission on each corresponding branch.
+  // Selected accepted submission on each corresponding branch.
   uint64_t values[2];
 } loom_runtime_execution_frontier_t;
 
 loom_runtime_execution_frontier_t loom_runtime_execution_frontier(
+    loom_runtime_execution_t* execution);
+
+// Snapshots the latest accepted allocation on the work timeline. Successful
+// readiness establishes backing for that allocation and every earlier one,
+// including persistent storage. Later commands and feedback do not extend it.
+// Semaphores remain borrowed through execution release, as above. Rejected
+// allocations never advance this value; accepted allocations do even if later
+// host view tracking fails. This is readiness, not buffer retirement.
+loom_runtime_execution_frontier_t loom_runtime_execution_allocation_frontier(
     loom_runtime_execution_t* execution);
 
 // Imports external dependencies into the model timeline without a host wait.

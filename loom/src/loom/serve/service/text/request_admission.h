@@ -20,7 +20,18 @@ void loom_serve_text_pending_cancel(loom_serve_text_service_t* service,
 void loom_serve_text_pending_cancel_failed(loom_serve_text_service_t* service,
                                            bool* out_progress);
 
-// Submits pending state maintenance at a completed model boundary.
+// Captures pending dead-page releases without waiting on model execution.
+// Called after completed logical ownership is published, once the next epoch's
+// accepted allocations are ready or no foreground work remains.
+iree_status_t loom_serve_text_submit_reclaim(loom_serve_text_service_t* service,
+                                             bool* out_progress);
+
+// Publishes completed independent reclaim after CPU borrowers return. Disjoint
+// GPU work need not complete before this collection.
+iree_status_t loom_serve_text_collect_reclaim(
+    loom_serve_text_service_t* service, bool* out_progress);
+
+// Submits exclusive compaction under pressure at a completed model boundary.
 iree_status_t loom_serve_text_submit_trim(loom_serve_text_service_t* service);
 
 // Advances completed maintenance and publishes its final storage counters.
