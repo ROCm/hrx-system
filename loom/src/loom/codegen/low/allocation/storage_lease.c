@@ -12,6 +12,7 @@
 #include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/storage.h"
 #include "loom/codegen/low/allocation/unit_liveness.h"
+#include "loom/util/cfg_graph.h"
 
 static iree_status_t loom_low_allocation_validate_storage_lease_table(
     const loom_low_storage_lease_table_t* lease_table,
@@ -533,7 +534,8 @@ static bool loom_low_allocation_storage_release_policy_allows_record(
   return false;
 }
 
-static bool loom_low_allocation_storage_lease_scan_conflicts(
+static const loom_low_storage_lease_record_t*
+loom_low_allocation_storage_lease_scan_for_conflict(
     const loom_low_allocation_storage_lease_state_t* state,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_liveness_analysis_t* liveness,
@@ -569,13 +571,14 @@ static bool loom_low_allocation_storage_lease_scan_conflicts(
               state, liveness, lease, candidate)) {
         continue;
       }
-      return true;
+      return record;
     }
   }
-  return false;
+  return NULL;
 }
 
-static bool loom_low_allocation_storage_lease_index_conflicts(
+static const loom_low_storage_lease_record_t*
+loom_low_allocation_storage_lease_index_find_conflict(
     const loom_low_allocation_storage_lease_state_t* state,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_liveness_analysis_t* liveness,
@@ -619,9 +622,9 @@ static bool loom_low_allocation_storage_lease_index_conflicts(
             state, liveness, lease, candidate)) {
       continue;
     }
-    return true;
+    return record;
   }
-  return false;
+  return NULL;
 }
 
 // Assignment capacity and ABI-fixed windows bound distinct physical units.
@@ -897,7 +900,8 @@ iree_status_t loom_low_allocation_storage_lease_state_initialize(
   return iree_ok_status();
 }
 
-bool loom_low_allocation_storage_lease_state_conflicts(
+const loom_low_storage_lease_record_t*
+loom_low_allocation_storage_lease_state_find_conflict(
     const loom_low_allocation_storage_lease_state_t* state,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_liveness_analysis_t* liveness,
@@ -909,25 +913,21 @@ bool loom_low_allocation_storage_lease_state_conflicts(
   IREE_ASSERT_ARGUMENT(liveness);
   IREE_ASSERT_ARGUMENT(candidate);
   if (state->lease_table == NULL || state->lease_table->record_count == 0) {
-    return false;
+    return NULL;
   }
   if (!loom_low_allocation_location_kind_is_register_like(
           candidate->location_kind)) {
-    return false;
+    return NULL;
   }
   if (loom_low_allocation_storage_assignment_uses_explicit_physical_register(
-          descriptor_set, candidate)) {
-    return loom_low_allocation_storage_lease_scan_conflicts(
-        state, descriptor_set, liveness, candidate, ignored_value_ids,
-        ignored_value_count, policy);
-  }
-  if (!loom_low_allocation_storage_lease_unit_index_is_enabled(
+          descriptor_set, candidate) ||
+      !loom_low_allocation_storage_lease_unit_index_is_enabled(
           state->unit_index)) {
-    return loom_low_allocation_storage_lease_scan_conflicts(
+    return loom_low_allocation_storage_lease_scan_for_conflict(
         state, descriptor_set, liveness, candidate, ignored_value_ids,
         ignored_value_count, policy);
   }
-  return loom_low_allocation_storage_lease_index_conflicts(
+  return loom_low_allocation_storage_lease_index_find_conflict(
       state, descriptor_set, liveness, candidate, ignored_value_ids,
       ignored_value_count, policy);
 }
@@ -1285,6 +1285,63 @@ iree_status_t loom_low_allocation_storage_lease_state_record_release_actions(
   return iree_ok_status();
 }
 
+// On the edge that skips the last use, the load can still write its register.
+// A single lease interval can cover the optional use and its join precisely
+// when the three blocks are consecutive and the arm and join have no other
+// incoming edges.
+IREE_ATTRIBUTE_NOINLINE static uint32_t
+loom_low_allocation_conditional_result_end_point(
+    const loom_cfg_graph_t* graph, const loom_liveness_analysis_t* liveness,
+    uint16_t issue_block, uint32_t last_use) {
+  const loom_cfg_block_index_span_t successors =
+      loom_cfg_graph_successors(graph, issue_block);
+  if (successors.count != 2) {
+    return liveness->blocks[issue_block].end_point;
+  }
+  const uint16_t arm = iree_min(successors.values[0], successors.values[1]);
+  const uint16_t join = iree_max(successors.values[0], successors.values[1]);
+  if (arm != issue_block + 1u || join != arm + 1u ||
+      graph->blocks[arm].predecessor_count != 1 ||
+      graph->blocks[join].predecessor_count != 2 ||
+      last_use <= liveness->blocks[arm].start_point ||
+      last_use > liveness->blocks[arm].end_point) {
+    return liveness->blocks[issue_block].end_point;
+  }
+  const loom_cfg_block_index_span_t arm_successors =
+      loom_cfg_graph_successors(graph, arm);
+  return arm_successors.count == 1 && arm_successors.values[0] == join
+             ? liveness->blocks[join].end_point
+             : liveness->blocks[issue_block].end_point;
+}
+
+static uint32_t loom_low_allocation_storage_lease_end_point(
+    const loom_low_storage_lease_record_t* record,
+    const loom_low_allocation_assignment_t* assignment,
+    const loom_liveness_analysis_t* liveness, const loom_cfg_graph_t* graph) {
+  const loom_liveness_block_info_t* block =
+      &liveness->blocks[record->block_index];
+  if (record->release_before_scheduled_ordinal_plus_one) {
+    return block->start_point +
+           record->release_before_scheduled_ordinal_plus_one;
+  }
+  if (liveness->block_count == 1 ||
+      iree_any_bit_set(record->flags,
+                       LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_BEFORE_BOUNDARY)) {
+    return block->end_point;
+  }
+  if (record->kind == LOOM_LOW_STORAGE_LEASE_RESULT_WRITE &&
+      iree_all_bits_set(record->flags,
+                        LOOM_LOW_STORAGE_LEASE_FLAG_MAY_CARRY_ACROSS_BOUNDARY |
+                            LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_FOR_PRESSURE)) {
+    return assignment->end_point <= block->end_point
+               ? block->end_point
+               : loom_low_allocation_conditional_result_end_point(
+                     graph, liveness, record->block_index,
+                     assignment->end_point);
+  }
+  return liveness->blocks[liveness->block_count - 1u].end_point;
+}
+
 void loom_low_allocation_storage_lease_state_record_assignment(
     loom_low_allocation_storage_lease_state_t* state,
     const loom_low_descriptor_set_t* descriptor_set,
@@ -1311,14 +1368,10 @@ void loom_low_allocation_storage_lease_state_record_assignment(
     const loom_liveness_block_info_t* block_info =
         &liveness->blocks[record->block_index];
     const uint32_t end_point =
-        !is_register ? 0
-        : record->release_before_scheduled_ordinal_plus_one != 0
-            ? block_info->start_point +
-                  record->release_before_scheduled_ordinal_plus_one
-        : iree_any_bit_set(record->flags,
-                           LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_BEFORE_BOUNDARY)
-            ? block_info->end_point
-            : liveness->blocks[liveness->block_count - 1u].end_point;
+        is_register ? loom_low_allocation_storage_lease_end_point(
+                          record, assignment, liveness,
+                          &state->lease_table->schedule->cfg_graph)
+                    : 0;
     // The temporal index reserves nodes for exactly one insertion per lease.
     IREE_ASSERT_EQ(state->instance_written[lease_record_index], 0u);
     // Inputs are read at the issue point; results and asynchronous ownership

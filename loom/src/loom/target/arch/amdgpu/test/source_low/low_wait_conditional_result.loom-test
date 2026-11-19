@@ -1,0 +1,67 @@
+// RUN: emit amdgpu-assembly @spare_register
+
+// Initializing LDS opens a third VGPR. Use it for the address at the join
+// so waves that skip the LDS store can issue the second load immediately.
+amdgpu.target<gfx1151> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @spare_register(%lane: reg<amdgpu.vgpr>, %initial: reg<amdgpu.vgpr>, %address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %condition: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+  ds_write_b32 %lane, %initial
+  %first = global_load_b32_saddr %address, %base
+  low.cond_br %condition, ^use, ^join : reg<amdgpu.scc>
+^use:
+  ds_write_b32 %lane, %first
+  low.br ^join
+^join:
+  %offset = v_lshlrev_b32_src0_inline %lane, 2
+  %second = global_load_b32_saddr %offset, %base
+  %sum = v_add_u32 %lane, %second
+  return %sum
+}
+
+// ----
+  ds_write_b32 v2, v0 offset:0
+  global_load_b32 v0, v1, s[0:1] offset:0
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  ds_write_b32 v2, v0 offset:0
+.Lbb2:
+  v_lshlrev_b32 v1, 2, v2
+  global_load_b32 v1, v1, s[0:1] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_add_u32 v2, v2, v1
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @reuse_pending_result
+
+// With only two VGPRs open, the lane ID is still live and the other register
+// holds the pending load. Reusing it for the address requires a wait.
+amdgpu.target<gfx1151> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse_pending_result(%lane: reg<amdgpu.vgpr>, %address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %condition: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+  %first = global_load_b32_saddr %address, %base
+  low.cond_br %condition, ^use, ^join : reg<amdgpu.scc>
+^use:
+  ds_write_b32 %lane, %first
+  low.br ^join
+^join:
+  %offset = v_lshlrev_b32_src0_inline %lane, 2
+  %second = global_load_b32_saddr %offset, %base
+  %sum = v_add_u32 %lane, %second
+  return %sum
+}
+
+// ----
+  global_load_b32 v0, v0, s[0:1] offset:0
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  ds_write_b32 v1, v0 offset:0
+.Lbb2:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_lshlrev_b32 v0, 2, v1
+  global_load_b32 v0, v0, s[0:1] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_add_u32 v0, v1, v0
+  s_endpgm

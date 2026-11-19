@@ -634,7 +634,7 @@ def test_memory_completion_leases_results_not_sources() -> None:
 
     pressure_flags = (
         StorageLeaseFlag.STARTS_AT_ISSUE,
-        StorageLeaseFlag.RELEASE_BEFORE_BOUNDARY,
+        StorageLeaseFlag.MAY_CARRY_ACROSS_BOUNDARY,
         StorageLeaseFlag.RELEASE_FOR_PRESSURE,
     )
     assert _storage_lease_signature(descriptor) == (
