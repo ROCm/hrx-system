@@ -1268,6 +1268,7 @@ static iree_status_t loom_runtime_jit_compile_request(
   }
   for (iree_host_size_t i = 0;
        i < output->root_count && iree_status_is_ok(status); ++i) {
+    IREE_TRACE_ZONE_APPEND_TEXT(z0, roots[i].data, roots[i].size);
     // Names must survive module mutation through compile and native emission.
     status = iree_status_from_loomc(loomc_string_view_clone(
         roots[i], loomc_allocator_from_iree(artifact_allocator),
