@@ -439,8 +439,8 @@ enum loom_serve_text_load_flag_bits_e {
   // Irreversible cancellation stops new phases after accepted work returns.
   LOOM_SERVE_TEXT_LOAD_FLAG_CANCEL = 1u << 0,
   // Current inference or explicit warmup allows prepared weights to activate
-  // while native compilation/tokenizer work remains pending. Ordinary
-  // registration stays cold.
+  // on any owner turn while other preparation work remains pending. Ordinary
+  // registration stays cold; cancellation and failure prevent new activation.
   LOOM_SERVE_TEXT_LOAD_FLAG_DEMAND = 1u << 1,
 };
 typedef uint32_t loom_serve_text_load_flags_t;

@@ -47,9 +47,12 @@ TEST_F(RegisteredSourceTextServiceTest,
   EXPECT_EQ(Content(response), Oracle::Complete("abxa", 4));
 }
 
-TEST_F(SourceTextServiceTest, PreparationActivatesWeightsOnlyWithDemand) {
-  for (const auto flags : {0u, uint32_t{LOOM_SERVE_TEXT_LOAD_FLAG_DEMAND}}) {
-    SCOPED_TRACE(flags);
+TEST_F(SourceTextServiceTest, PreparationActivatesWeightsWhenDemandArrives) {
+  // Move arrival across owner turns, including turns after weight preparation
+  // while recording or state initialization still owns the load. The final
+  // pass finishes before demand arrives and must leave the registration cold.
+  for (size_t demand_turn = 0;; ++demand_turn) {
+    SCOPED_TRACE(demand_turn);
     auto* pool = loom_runtime_pool_memory(storage_owner_);
     if (pool) {
       IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
@@ -67,8 +70,13 @@ TEST_F(SourceTextServiceTest, PreparationActivatesWeightsOnlyWithDemand) {
         },
         &notification, host_allocator_, &load));
     bool complete = false;
+    size_t turn = 0;
+    bool demanded = false;
     while (!complete) {
       const auto ticket = iree_notification_prepare_wait(&notification);
+      const uint32_t flags =
+          turn++ >= demand_turn ? LOOM_SERVE_TEXT_LOAD_FLAG_DEMAND : 0u;
+      demanded |= flags != 0;
       IREE_ASSERT_OK(loom_serve_text_load_advance(load, flags, &complete));
       if (complete) {
         iree_notification_cancel_wait(&notification);
@@ -85,7 +93,7 @@ TEST_F(SourceTextServiceTest, PreparationActivatesWeightsOnlyWithDemand) {
     // weight-ready dependency into the mutable-state execution timeline.
     EXPECT_FALSE(parameters.active);
     EXPECT_EQ(parameters.pin_count, 0u);
-    EXPECT_EQ(parameters.activity.activations, flags ? 1u : 0u);
+    EXPECT_EQ(parameters.activity.activations, demanded ? 1u : 0u);
     auto* row = loom_serve_text_model_row(model, 0);
     const int32_t token = Oracle::Id('a');
     IREE_ASSERT_OK(loom_serve_text_row_prefill(row, 1, &token));
@@ -106,6 +114,75 @@ TEST_F(SourceTextServiceTest, PreparationActivatesWeightsOnlyWithDemand) {
     const auto after = loom_runtime_pool_statistics(storage_owner_);
     EXPECT_EQ(after.retained.reserved_bytes, before.retained.reserved_bytes);
     EXPECT_EQ(after.retained.committed_bytes, before.retained.committed_bytes);
+    if (!demanded) {
+      break;
+    }
+  }
+}
+
+TEST_F(SourceTextServiceTest,
+       CancellationRetiresDemandedPreparationAtEveryOwnerTurn) {
+  for (size_t cancel_turn = 0;; ++cancel_turn) {
+    SCOPED_TRACE(cancel_turn);
+    auto* pool = loom_runtime_pool_memory(storage_owner_);
+    if (pool) {
+      IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
+    }
+    const auto before = loom_runtime_pool_statistics(storage_owner_);
+    const auto options = ModelOptions();
+    iree_notification_t notification;
+    iree_notification_initialize(&notification);
+    loom_serve_text_load_t* load = nullptr;
+    IREE_ASSERT_OK(loom_serve_text_load_allocate(
+        device_, storage_owner_, &options,
+        [](void* payload) {
+          iree_notification_post(static_cast<iree_notification_t*>(payload),
+                                 IREE_ALL_WAITERS);
+        },
+        &notification, host_allocator_, &load));
+    bool complete = false;
+    bool cancelled = false;
+    size_t turn = 0;
+    iree_status_t status = iree_ok_status();
+    while (!complete) {
+      const auto ticket = iree_notification_prepare_wait(&notification);
+      uint32_t flags = LOOM_SERVE_TEXT_LOAD_FLAG_DEMAND;
+      // Cancellation is latched by the owner, even when later turns report
+      // demand alone. It must join accepted callbacks and warmup ownership.
+      if (turn++ == cancel_turn) {
+        flags |= LOOM_SERVE_TEXT_LOAD_FLAG_CANCEL;
+        cancelled = true;
+      }
+      status = loom_serve_text_load_advance(load, flags, &complete);
+      if (complete) {
+        iree_notification_cancel_wait(&notification);
+      } else {
+        IREE_ASSERT_OK(status);
+        iree_notification_commit_wait(&notification, ticket, IREE_DURATION_ZERO,
+                                      IREE_TIME_INFINITE_FUTURE);
+      }
+    }
+    if (cancelled) {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, status);
+    } else {
+      IREE_EXPECT_OK(status);
+    }
+    auto* model = loom_serve_text_load_take_model(load);
+    loom_serve_text_load_free(load);
+    if (cancelled) {
+      EXPECT_TRUE(loom_serve_text_model_is_retired(model));
+    }
+    IREE_ASSERT_OK(loom_serve_text_model_free(model));
+    iree_notification_deinitialize(&notification);
+    if (pool) {
+      IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
+    }
+    const auto after = loom_runtime_pool_statistics(storage_owner_);
+    EXPECT_EQ(after.retained.reserved_bytes, before.retained.reserved_bytes);
+    EXPECT_EQ(after.retained.committed_bytes, before.retained.committed_bytes);
+    if (!cancelled) {
+      break;
+    }
   }
 }
 
