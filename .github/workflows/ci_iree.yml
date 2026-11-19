@@ -146,22 +146,12 @@ jobs:
             host_ar: ar
             host_cc: gcc
             host_cxx: g++
-            container_options: &vulkan_container_options >-
+            container_options: >-
               --device /dev/dri --cap-add SYS_ADMIN --cap-add SYSLOG
               --env-file /etc/podinfo/gha-gpu-isolation-settings
               --security-opt seccomp=unconfined
               --security-opt apparmor=unconfined
               --security-opt systempaths=unconfined --user 0:0
-          - name: GCC / Fastbuild / XSJ discrete Vulkan
-            kind: vulkan
-            command: iree-bazel-vulkan
-            runner: labxsj-linux-u2604-discrete-vulkan
-            pci_vendor: '0x10de'
-            uncached: true
-            host_ar: ar
-            host_cc: gcc
-            host_cxx: g++
-            container_options: *vulkan_container_options
           - name: Clang / Fastbuild / AMD gfx942
             kind: amdgpu
             command: iree-bazel-amdgpu
