@@ -34,13 +34,21 @@ iree_status_t loom_aie2p_program_replacement_owners(
     const loom_aie2p_program_source_function_t* source,
     const loom_aie2p_program_object_t* native, uint64_t* worker_lengths,
     uint64_t* maximum_lengths, iree_arena_allocator_t* arena,
-    const iree_host_size_t** out_owners) {
+    const loom_aie2p_program_census_t** out_census) {
+  *out_census = NULL;
   const iree_host_size_t count = native->function_count;
   const loom_pipeline_lifetimes_t* lifetimes =
       &source->pipeline_entry->scope->lifetimes;
   iree_host_size_t* owners = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, count + 1, sizeof(*owners), (void**)&owners));
+  loom_aie2p_program_census_t* census = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(arena, sizeof(*census), (void**)&census));
+  *census = (loom_aie2p_program_census_t){
+      .function_owners = owners,
+      .function_count = count + 1,
+  };
   iree_arena_allocator_t scratch;
   iree_arena_initialize(arena->block_pool, &scratch);
   loom_aie2p_body_owners_t* bodies = NULL;
@@ -88,27 +96,107 @@ iree_status_t loom_aie2p_program_replacement_owners(
           bodies[i].bound = loom_aie2p_join_owners(lifetimes, bodies[i].bound,
                                                    bodies[i].ordinary);
         }
+        if (length && !worker_lengths[bodies[i].bound]) {
+          ++census->demand_count;
+        }
         worker_lengths[bodies[i].bound] += iree_host_align(length, alignment);
       }
     }
-    if (maximum_lengths) {
+    loom_aie2p_program_demand_t* demands = NULL;
+    if (census->demand_count) {
+      status = iree_arena_allocate_array(arena, census->demand_count,
+                                         sizeof(*demands), (void**)&demands);
+    }
+    if (demands) {
+      iree_host_size_t next = 0;
       for (iree_host_size_t i = 0; i < count; ++i) {
         if (native->functions[i].equivalent_index != i) {
           continue;
         }
         const iree_host_size_t owner = bodies[i].bound;
-        maximum_lengths[owner] =
-            iree_max(maximum_lengths[owner], worker_lengths[owner]);
-        worker_lengths[owner] = 0;
+        const uint64_t length = worker_lengths[owner];
+        if (length) {
+          demands[next++] = (loom_aie2p_program_demand_t){owner, length};
+          maximum_lengths[owner] = iree_max(maximum_lengths[owner], length);
+          worker_lengths[owner] = 0;
+        }
       }
+      census->demands = demands;
     }
-    *out_owners = owners;
+    *out_census = census;
   }
   iree_arena_deinitialize(&scratch);
   return status;
 }
 
+static iree_host_size_t loom_aie2p_program_replacement_group(
+    const loom_aie2p_program_layout_t* layout, iree_host_size_t owner) {
+  if (layout->groups[0].owner == owner) {
+    return 0;
+  }
+  iree_host_size_t first = 1;
+  iree_host_size_t last = layout->group_count;
+  while (first < last) {
+    const iree_host_size_t middle = first + (last - first) / 2;
+    if (layout->groups[middle].owner < owner) {
+      first = middle + 1;
+    } else {
+      last = middle;
+    }
+  }
+  return first;
+}
+
+// Project each actual call once before releasing the construction-to-code map.
+// Native candidates can renumber descriptors while retaining the boundary.
+static iree_status_t loom_aie2p_program_replacement_calls(
+    loom_aie2p_program_source_table_t* sources,
+    const loom_aie2p_program_source_function_t* source,
+    const iree_host_size_t* code_owners, iree_arena_allocator_t* arena,
+    loom_aie2p_program_layout_t* layout) {
+  const iree_host_size_t** groups = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, source->helpers.count + 1, sizeof(*groups), (void**)&groups));
+  for (iree_host_size_t i = 0; i <= source->helpers.count; ++i) {
+    const loom_aie2p_program_source_function_t* input =
+        i == source->helpers.count ? source
+                                   : loom_aie2p_program_source_table_lookup(
+                                         sources, source->helpers.values[i]);
+    const loom_low_call_boundary_index_t calls =
+        input->requirements.call_boundaries;
+    groups[i] = NULL;
+    if (!calls.count) {
+      continue;
+    }
+    iree_host_size_t* call_groups = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, calls.count, sizeof(*call_groups), (void**)&call_groups));
+    groups[i] = call_groups;
+    const iree_host_size_t caller = code_owners
+                                        ? code_owners[source->entry_owners[i]]
+                                        : source->entry_owners[i];
+    for (iree_host_size_t j = 0; j < calls.count; ++j) {
+      call_groups[j] = 0;
+      const loom_symbol_ref_t callee =
+          loom_low_func_call_callee(calls.calls[j]);
+      const loom_pipeline_entry_binding_t* binding =
+          loom_aie2p_program_source_table_lookup(sources, callee)
+              ->pipeline_entry;
+      if (binding && binding->role != LOOM_PIPELINE_ENTRY_RETIRE) {
+        const iree_host_size_t owner =
+            code_owners ? code_owners[binding->owner] : binding->owner;
+        if (owner != caller) {
+          call_groups[j] = loom_aie2p_program_replacement_group(layout, owner);
+        }
+      }
+    }
+  }
+  layout->call_groups = groups;
+  return iree_ok_status();
+}
+
 iree_status_t loom_aie2p_program_replacement_prepare(
+    loom_aie2p_program_source_table_t* sources,
     const loom_aie2p_program_source_function_t* source,
     const iree_host_size_t* owners, const iree_host_size_t* code_owners,
     iree_arena_allocator_t* arena, loom_aie2p_program_layout_t* out_layout) {
@@ -131,33 +219,13 @@ iree_status_t loom_aie2p_program_replacement_prepare(
     status = loom_aie2p_program_layout_initialize(
         &source->pipeline_entry->scope->lifetimes, owners, count, arena,
         &scratch, out_layout);
-    out_layout->code_owners = code_owners;
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_aie2p_program_replacement_calls(sources, source, code_owners,
+                                                  arena, out_layout);
   }
   iree_arena_deinitialize(&scratch);
   return status;
-}
-
-static iree_host_size_t loom_aie2p_code_owner(
-    const loom_aie2p_program_layout_t* layout, iree_host_size_t owner) {
-  return layout->code_owners ? layout->code_owners[owner] : owner;
-}
-
-static iree_host_size_t loom_aie2p_program_replacement_group(
-    const loom_aie2p_program_layout_t* layout, iree_host_size_t owner) {
-  if (layout->groups[0].owner == owner) {
-    return 0;
-  }
-  iree_host_size_t first = 1;
-  iree_host_size_t last = layout->group_count;
-  while (first < last) {
-    const iree_host_size_t middle = first + (last - first) / 2;
-    if (layout->groups[middle].owner < owner) {
-      first = middle + 1;
-    } else {
-      last = middle;
-    }
-  }
-  return first;
 }
 
 static loom_aie2p_program_helper_t loom_aie2p_program_replacement_helper(
@@ -287,25 +355,8 @@ static iree_status_t loom_aie2p_program_replacement_prepare_native(
                                                    (void**)&call_descriptors));
     candidate->call_descriptors[i] = call_descriptors;
     for (iree_host_size_t j = 0; j < calls.count; ++j) {
-      const loom_symbol_ref_t callee =
-          loom_low_func_call_callee(calls.calls[j]);
-      const loom_pipeline_entry_binding_t* binding =
-          loom_aie2p_program_source_table_lookup(sources, callee)
-              ->pipeline_entry;
-      call_descriptors[j] = UINT32_MAX;
-      if (!binding || binding->role == LOOM_PIPELINE_ENTRY_RETIRE) {
-        continue;
-      }
-      const iree_host_size_t owner =
-          loom_aie2p_code_owner(layout, binding->owner);
-      if (owner == loom_aie2p_code_owner(layout, source->entry_owners[i])) {
-        continue;
-      }
-      const iree_host_size_t group =
-          loom_aie2p_program_replacement_group(layout, owner);
-      if (group != 0) {
-        call_descriptors[j] = descriptors[group - 1];
-      }
+      const iree_host_size_t group = layout->call_groups[i][j];
+      call_descriptors[j] = group ? descriptors[group - 1] : UINT32_MAX;
     }
     const iree_host_size_t original_count = function->call_boundaries.count;
     IREE_RETURN_IF_ERROR(loom_aie2p_program_loading_insert(
@@ -450,14 +501,7 @@ static iree_status_t loom_aie2p_program_replacement_compile_impl(
         report, report->emitted_instruction_count,
         report->emitted_code_byte_count, layout->byte_length);
   }
-  // A coalesced cut is provisional until every tile and its transport fit.
-  // Its caller may still use the independent construction boundaries.
-  if (layout->code_owners) {
-    return iree_ok_status();
-  }
-  return loom_aie2p_program_capacity_admit(
-      request->module, source->function_op, layout->byte_length,
-      request->diagnostic_emitter, out_compiled);
+  return iree_ok_status();
 }
 
 iree_status_t loom_aie2p_program_replacement_compile(

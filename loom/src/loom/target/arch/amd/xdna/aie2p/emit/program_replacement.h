@@ -25,11 +25,12 @@ iree_status_t loom_aie2p_program_replacement_owners(
     const loom_aie2p_program_source_function_t* source,
     const loom_aie2p_program_object_t* native, uint64_t* worker_lengths,
     uint64_t* maximum_lengths, iree_arena_allocator_t* arena,
-    const iree_host_size_t** out_owners);
+    const loom_aie2p_program_census_t** out_census);
 
 // Projects the entry/loader/helper closure into physical code groups.
 // A NULL code owner map preserves the source construction boundaries.
 iree_status_t loom_aie2p_program_replacement_prepare(
+    loom_aie2p_program_source_table_t* sources,
     const loom_aie2p_program_source_function_t* source,
     const iree_host_size_t* owners, const iree_host_size_t* code_owners,
     iree_arena_allocator_t* arena, loom_aie2p_program_layout_t* out_layout);
