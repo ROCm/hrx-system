@@ -843,7 +843,10 @@ iree_hal_amd_gpu_pm4_process_submission(
     kind = IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS;
     uint64_t required = 0;
     if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_EXECUTE) {
-      required = sizeof(iree_hal_amd_gpu_pm4_program_arguments_t);
+      const iree_hal_amd_gpu_pm4_command_program_t* program =
+          submission->execute.program;
+      required =
+          iree_max(program->argument_length, program->argument_alignment);
     } else if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_CONTROL) {
       required = sizeof(iree_hal_amd_gpu_control_program_arguments_t);
     } else {

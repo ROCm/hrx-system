@@ -16,11 +16,11 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Creates a recorder whose end operation seals device-resident native blocks.
-// The recording and its independently retainable program borrow the device.
-// The device-owned program pool provides placement and trim; native sealing
-// allocations run on the caller. UNRETAINED controls only the caller's direct
-// buffers/executables, not native program ownership.
+// Creates a recorder for the queue family's native packet format. Compact
+// one-shot recordings execute in the primary submission. Other recordings
+// acquire native storage from the device-owned pool at end. Both the recorder
+// and its sealed program borrow the family device. UNRETAINED controls
+// ownership of the caller's direct buffers and executables.
 iree_status_t iree_hal_amd_gpu_pm4_command_buffer_create(
     const iree_hal_queue_family_t* family,
     iree_hal_amd_gpu_pm4_program_pool_t* pool,
@@ -30,6 +30,11 @@ iree_status_t iree_hal_amd_gpu_pm4_command_buffer_create(
     uint32_t maximum_scratch_wave_byte_length,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     iree_allocator_t host_allocator, iree_hal_command_buffer_t** out_buffer);
+
+// Compact recordings can use the command and argument ranges of the primary
+// submission. The bound limits both publisher work and the largest ring
+// reservation independent of queue geometry.
+enum { IREE_HAL_AMD_GPU_PM4_INLINE_BYTE_CAPACITY = 512 };
 
 // Separately retained cold recording facts read directly by publication. The
 // public recording owns user resources; this object contains sealed execution
@@ -42,10 +47,16 @@ typedef struct iree_hal_amd_gpu_pm4_command_program_t {
   iree_allocator_t host_allocator;
   // Owned native instances and shared immutable fixup table.
   iree_hal_amd_gpu_program_t resident;
-  // Entry block; native successors and exits are encoded in resident commands.
+  // Host packet template for small one-shot recordings, otherwise NULL.
+  struct iree_hal_amd_gpu_pm4_inline_program_t* inline_program;
+  // Extent of the inline packet body or the first resident native block.
   iree_hal_amd_gpu_pm4_program_block_t entry;
   // Dense uint64_t inputs resolved once per invocation.
   uint32_t value_count;
+  // Queue argument bytes for private inline data or resident builtin launches.
+  uint16_t argument_length;
+  // Required alignment of the argument range within its queue allocation.
+  uint16_t argument_alignment;
   // Bounded confirmed-write extent, or zero for the shader fixup path.
   uint16_t fixup_word_count;
   // Recording excludes changing native inputs and invocation-private writes;
@@ -104,6 +115,16 @@ iree_status_t iree_hal_amd_gpu_pm4_command_invocation_initialize(
 // proven native retirement; cancellation preserves earlier causal state.
 void iree_hal_amd_gpu_pm4_command_invocation_deinitialize(
     iree_hal_amd_gpu_pm4_command_invocation_t* invocation);
+
+// Prepares a bounded one-shot recording after its dependencies are admitted.
+// |words| provides INLINE_BYTE_CAPACITY bytes of host scratch for the complete
+// image. On success its first entry.word_count words form the primary packet
+// body, and |arguments| contains the relocated private data.
+iree_status_t iree_hal_amd_gpu_pm4_command_invocation_inline(
+    const iree_hal_amd_gpu_pm4_command_invocation_t* invocation,
+    uint32_t queue_ordinal, uint64_t cooperative_address, uint64_t dispatch_id,
+    uint64_t profile_address, uint64_t argument_address, void* arguments,
+    uint32_t* words);
 
 // Resolves the dense input vector after dependencies commit backing addresses.
 // The shader path writes its separate values mapping. A bounded packet plan

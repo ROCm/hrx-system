@@ -132,8 +132,14 @@ class GpuNativeRecordingTest : public GpuNativeTest {
   iree_hal_executable_function_t function_ = {};
 };
 
-TEST_F(GpuNativeRecordingTest,
-       BorrowedLifetimesStillCaptureBindingTableEntries) {
+class GpuNativeBindingCaptureTest
+    : public GpuNativeRecordingTest,
+      public ::testing::WithParamInterface<iree_hal_command_buffer_mode_t> {};
+
+TEST_P(GpuNativeBindingCaptureTest,
+       BorrowedLifetimesCaptureTheTableBeforeWait) {
+  const uint32_t count =
+      GetParam() == IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT ? 1 : 1000;
   iree_hal_buffer_t* output = nullptr;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       pool_, iree_hal_make_pool_reservation_request(64, 4),
@@ -143,8 +149,8 @@ TEST_F(GpuNativeRecordingTest,
   CreateSemaphore(&gate);
   CreateSemaphore(&done);
   iree_hal_command_buffer_t* recording = nullptr;
-  Record(iree_hal_make_indirect_buffer_ref(2, 4, 4), 1000,
-         IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED |
+  Record(iree_hal_make_indirect_buffer_ref(2, 4, 4), count,
+         GetParam() | IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED |
              IREE_HAL_COMMAND_BUFFER_MODE_UNVALIDATED,
          &recording);
   ASSERT_FALSE(HasFatalFailure());
@@ -166,10 +172,73 @@ TEST_F(GpuNativeRecordingTest,
                                          IREE_ASYNC_WAIT_FLAG_NONE));
   uint32_t value = 0;
   IREE_ASSERT_OK(iree_hal_buffer_map_read(output, 20, &value, sizeof(value)));
-  EXPECT_EQ(value, 1000u);
+  EXPECT_EQ(value, count);
   iree_hal_buffer_release(output);
   iree_hal_semaphore_release(done);
   iree_hal_semaphore_release(gate);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ProgramPlacement, GpuNativeBindingCaptureTest,
+    ::testing::Values(IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT));
+
+TEST_F(GpuNativeRecordingTest, PrimarySubmissionBoundsPacketBytesAndFixups) {
+  using iree::hal::cts::Ref;
+  Ref<iree_hal_buffer_t> output;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(512, 4),
+      iree_infinite_timeout(), output.out()));
+  Ref<iree_hal_semaphore_t> done;
+  CreateSemaphore(done.out());
+  auto* timeline = done.get();
+  uint64_t epoch = 0;
+  // Each aligned fill through 256 bytes uses one WRITE_DATA with a 16-byte
+  // header and two DWORD replacements for its address.
+  using Case = std::tuple<uint32_t, uint32_t, bool>;
+  for (auto [count, bytes_per_write, inline_packets] : {
+           Case{2, 240, true},   // Exactly 512 bytes.
+           Case{2, 244, false},  // Same fixup count, too many packet bytes.
+           Case{4, 4, true},     // Exactly eight DWORD replacements.
+           Case{5, 4, false},    // Small packet body, too many replacements.
+       }) {
+    SCOPED_TRACE(::testing::Message() << count << " x " << bytes_per_write);
+    Ref<iree_hal_command_buffer_t> recording;
+    IREE_ASSERT_OK(iree_hal_command_buffer_create(
+        iree_hal_queue_family(queues_[0]),
+        IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+        IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0, recording.out()));
+    IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+    const uint32_t seed = static_cast<uint32_t>(epoch + 1);
+    for (uint32_t i = 0; i < count; ++i) {
+      const uint32_t pattern = seed + i;
+      IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+          recording,
+          iree_hal_make_buffer_ref(output, i * bytes_per_write,
+                                   bytes_per_write),
+          &pattern, sizeof(pattern), 0));
+    }
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+    iree_hal_amd_gpu_pm4_command_invocation_t invocation;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_command_invocation_initialize(
+        recording, {}, nullptr, 0, &invocation));
+    EXPECT_EQ(invocation.program->resident.pool == nullptr, inline_packets);
+    iree_hal_amd_gpu_pm4_command_invocation_deinitialize(&invocation);
+
+    uint64_t executed = ++epoch;
+    uint64_t downloaded = ++epoch;
+    IREE_ASSERT_OK(iree_hal_queue_execute(
+        queues_[0], {}, {1, &timeline, &executed}, recording, {}, 0));
+    std::array<uint32_t, 128> values = {};
+    IREE_ASSERT_OK(iree_hal_queue_download(
+        queues_[0], {1, &timeline, &executed}, {1, &timeline, &downloaded},
+        output, 0, values.data(), count * bytes_per_write, nullptr));
+    IREE_ASSERT_OK(
+        iree_hal_semaphore_wait(done, downloaded, iree_infinite_timeout(), 0));
+    for (uint32_t byte = 0; byte < count * bytes_per_write; byte += 4) {
+      EXPECT_EQ(values[byte / 4], seed + byte / bytes_per_write);
+    }
+  }
 }
 
 TEST_F(GpuNativeRecordingTest, HostCallPublishesShaderAndHostWrites) {

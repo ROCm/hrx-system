@@ -96,7 +96,8 @@ iree_hal_amd_gpu_pm4_publish_accepted(
             ? iree_async_single_frontier_as_const_frontier(&death_frontier)
             : NULL);
   }
-  if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_EXECUTE) {
+  if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_EXECUTE &&
+      submission->execute.instance) {
     iree_hal_amd_gpu_pm4_command_invocation_t* invocation =
         &submission->execute;
     iree_hal_amd_gpu_program_publish(
@@ -487,9 +488,18 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
       words, after, arguments->end, chunk.download, terminal);
 }
 
-// One bounded primary sequence invokes the entire resident program. Native
-// copy/fixup work scales with program size; host work scales only with its
-// dense input table and semaphore edges. No recorded operation is visited here.
+static_assert(
+    IREE_HAL_AMD_GPU_PM4_INLINE_BYTE_CAPACITY / sizeof(uint32_t) + 8 <=
+        IREE_HAL_AMD_GPU_PM4_DISPATCH_MAX_WORDS,
+    "inline packets and their acquire must fit the queue wait budget");
+static_assert(IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_WORD_CAPACITY *
+                      sizeof(uint32_t) <=
+                  IREE_HAL_AMD_GPU_PM4_INLINE_BYTE_CAPACITY,
+              "resident packet fixups must fit the shared publication scratch");
+
+// Both representations use one bounded primary submission. A compact recording
+// contributes its packets directly. A resident program executes all its blocks
+// through a single entry, regardless of the recorded operation count.
 iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
     iree_hal_amd_gpu_pm4_queue_t* queue,
     iree_hal_amd_gpu_pm4_submission_t* submission, uint64_t position) {
@@ -501,13 +511,14 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
   const uint64_t sample_length = profile ? (uint64_t)profile->completion.count *
                                                profile->completion.sample_stride
                                          : 0;
-  const uint64_t argument_length =
-      sizeof(iree_hal_amd_gpu_pm4_program_arguments_t);
+  const uint32_t argument_length = command->argument_length;
+  const uint32_t alignment = command->argument_alignment;
   iree_hal_amd_gpu_byte_storage_t* arguments = queue->producer.arguments;
-  if (argument_length > arguments->capacity) {
+  if (iree_max(argument_length, alignment) > arguments->capacity) {
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_ARGUMENTS;
   }
-  uint64_t relative = iree_align_uint64(arguments->end - arguments->begin, 8);
+  uint64_t relative =
+      iree_align_uint64(arguments->end - arguments->begin, alignment);
   uint64_t offset = relative & (arguments->capacity - 1);
   if (argument_length > arguments->capacity - offset) {
     relative += arguments->capacity - offset;
@@ -533,7 +544,7 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
                  : IREE_HAL_AMD_GPU_PM4_PUBLICATION_CAPACITY;
     }
   }
-  if (!invocation->instance) {
+  if (!command->inline_program && !invocation->instance) {
     invocation->instance = iree_hal_amd_gpu_program_try_acquire(
         program, queue->options.queue_ordinal,
         queue->producer.frontier.pending);
@@ -545,9 +556,10 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
   // Acceptance installs a nonzero epoch only after this instance's initial
   // repairs. Exclusive acquisition has already proved every prior use ordered
   // or retired; fixed addresses need neither rewriting nor a reader join.
-  const uint32_t fixup_count = command->invariant_fixups && instance->last_epoch
-                                   ? 0
-                                   : program->fixup_count;
+  const uint32_t fixup_count =
+      instance && !(command->invariant_fixups && instance->last_epoch)
+          ? program->fixup_count
+          : 0;
   const uint32_t fixup_word_count = fixup_count ? command->fixup_word_count : 0;
   uint64_t values_offset = 0, values_end = 0;
   const bool shader_fixup = fixup_count && !fixup_word_count;
@@ -564,14 +576,16 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
   }
   const uint64_t values_address =
       shader_fixup ? queue->values.current->address + values_offset : 0;
-  const uint32_t program_words = iree_hal_amd_gpu_pm4_program_word_count(
-      program, instance, &queue->options.barriers, fixup_count,
-      fixup_word_count);
+  const uint32_t program_words =
+      command->inline_program ? 8 + command->entry.word_count
+                              : iree_hal_amd_gpu_pm4_program_word_count(
+                                    program, instance, &queue->options.barriers,
+                                    fixup_count, fixup_word_count);
   const uint32_t scratch_words = iree_hal_amd_gpu_pm4_scratch_word_count(
       &queue->producer.scratch, command->scratch_wave_byte_length,
       queue->kernel != NULL);
   const uint32_t prefix_words =
-      submission->native_wait_count * 7 + scratch_words + program_words - 4;
+      submission->native_wait_count * 7 + scratch_words + program_words;
   const bool native_signal =
       iree_hal_amd_gpu_pm4_needs_native_signal(submission->signals);
   const iree_hal_amd_gpu_pm4_barrier_t after = {
@@ -582,16 +596,17 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
       iree_hal_amd_gpu_pm4_barrier_tail_word_count(after) +
       (native_signal ? 8 : 14);
   uint32_t root_padding = 0;
-  if (queue->kernel) {
-    root_padding = (0u - prefix_words - 4) & 7u;
+  const bool chain = queue->kernel && !command->inline_program;
+  if (chain) {
+    root_padding = (0u - prefix_words) & 7u;
     if (root_padding == 1) {
       root_padding += 8;
     }
   }
-  const uint32_t entry_words =
-      queue->kernel ? prefix_words + root_padding + 4 : 0;
+  const uint32_t entry_words = chain ? prefix_words + root_padding : 0;
   const uint32_t body_words =
-      queue->kernel ? entry_words + 32 : prefix_words + 4 + tail_words + 8;
+      chain ? entry_words + 32
+            : prefix_words + tail_words + (queue->kernel ? 0 : 8);
   iree_hal_amd_gpu_pm4_ring_t candidate = queue->producer.ring;
   iree_hal_amd_gpu_pm4_ring_reservation_t reservation;
   if (!iree_hal_amd_gpu_pm4_ring_try_reserve(
@@ -610,7 +625,7 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
   }
   const uint64_t dispatch_id = queue->producer.dispatch_count;
   const uint64_t continuation =
-      queue->kernel
+      chain
           ? queue->kernel->address +
                 (reservation.words - queue->producer.ring.words + entry_words) *
                     4
@@ -618,19 +633,25 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
   uint8_t* upload = arguments->memory.contents.data + offset;
   const uint64_t sample_address =
       sample_length ? queue->samples->current->address + sample_offset : 0;
-  uint32_t fixup_words[IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_WORD_CAPACITY];
-  if (fixup_count) {
-    iree_status_t status = iree_hal_amd_gpu_pm4_command_invocation_write(
+  uint32_t prepared_words[IREE_HAL_AMD_GPU_PM4_INLINE_BYTE_CAPACITY / 4];
+  iree_status_t status = iree_ok_status();
+  if (command->inline_program) {
+    status = iree_hal_amd_gpu_pm4_command_invocation_inline(
+        invocation, queue->options.queue_ordinal, queue->grid.address,
+        dispatch_id, sample_address, arguments->address + offset, upload,
+        prepared_words);
+  } else if (fixup_count) {
+    status = iree_hal_amd_gpu_pm4_command_invocation_write(
         invocation, queue->options.queue_ordinal, queue->grid.address,
         dispatch_id, continuation, sample_address,
         shader_fixup ? (void*)(queue->values.current->memory.contents.data +
                                values_offset)
                      : NULL,
-        fixup_words);
-    if (!iree_status_is_ok(status)) {
-      iree_hal_amd_gpu_pm4_abandon(queue, submission, status);
-      return IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;
-    }
+        prepared_words);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_hal_amd_gpu_pm4_abandon(queue, submission, status);
+    return IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;
   }
   arguments->end = start + argument_length;
   queue->issued[position & queue->retirement.capacity_mask].consumed_values =
@@ -654,10 +675,18 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
       reservation.words, NULL, submission->wait_count, submission->waits);
   words = iree_hal_amd_gpu_pm4_scratch_emit(words, &queue->producer.scratch,
                                             scratch_words);
-  words = iree_hal_amd_gpu_pm4_program_emit(
-      program, instance, command->entry, &queue->options.barriers,
-      arguments->address + offset, values_address, (void*)upload, fixup_count,
-      fixup_word_count, fixup_words, root_padding, words);
+  if (command->inline_program) {
+    words = iree_hal_amd_gpu_pm4_emit_acquire(words,
+                                              queue->options.barriers.acquire);
+    iree_memcpy_write_only(words, prepared_words,
+                           command->entry.word_count * sizeof(*words));
+    words += command->entry.word_count;
+  } else {
+    words = iree_hal_amd_gpu_pm4_program_emit(
+        program, instance, command->entry, &queue->options.barriers,
+        arguments->address + offset, values_address, (void*)upload, fixup_count,
+        fixup_word_count, prepared_words, root_padding, words);
+  }
   return iree_hal_amd_gpu_pm4_publish_commit(
       queue, submission, position, &reservation, body_words, entry_words,
       submission->native_wait_count, words, after, arguments->end,
