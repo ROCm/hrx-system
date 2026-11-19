@@ -593,6 +593,31 @@ TEST_F(KernelQueueTest, PayloadGrowthPreservesLaunchArgumentCapacity) {
   EXPECT_EQ(queue->producer.transfers.retired, nullptr);
 }
 
+TEST_F(KernelQueueTest, RetiredTransferStorageReusesItsFullCapacity) {
+  auto buffer = Buffer(384);
+  std::vector<uint8_t> expected;
+  const size_t lengths[] = {192, 128, 64};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(lengths); ++i) {
+    const std::vector<uint8_t> payload(lengths[i], static_cast<uint8_t>(i + 1));
+    IREE_ASSERT_OK(iree_hal_queue_update(queues_[0], {}, {}, payload.data(), 0,
+                                         buffer, expected.size(),
+                                         payload.size(), nullptr, 0));
+    expected.insert(expected.end(), payload.begin(), payload.end());
+    iree_hal_amd_gpu_context_join_memory(&context_);
+    Publish(0);
+    EXPECT_EQ(native_queues_[0].commands.size(), i + 1);
+    // Retire the first 192 bytes of the 256-byte ring. The next update fits
+    // the empty ring in full. The last update must preserve its live bytes.
+    if (i == 0) {
+      ASSERT_NO_FATAL_FAILURE(Execute(0));
+      Poll(0);
+    }
+  }
+  ASSERT_NO_FATAL_FAILURE(Execute(0));
+  Poll(0);
+  EXPECT_EQ(Read(buffer, expected.size()), expected);
+}
+
 TEST_F(KernelQueueTest, RejectionRollsBackTheBorrowedPayloadGeneration) {
   auto buffer = Buffer(2048);
   auto rejected = Semaphore(), completed = Semaphore();
