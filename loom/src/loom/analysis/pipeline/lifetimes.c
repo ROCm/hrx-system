@@ -26,25 +26,24 @@ iree_status_t loom_pipeline_lifetimes_index(
     if (largest == IREE_HOST_SIZE_MAX) {
       continue;
     }
-    for (iree_host_size_t child = nodes[largest].next_sibling;
-         child != IREE_HOST_SIZE_MAX; child = nodes[child].next_sibling) {
-      if (ancestry[child].subtree_count > ancestry[largest].subtree_count) {
+    // Child subtree sizes assign both depth-first orders without a second
+    // tree walk. Only concurrent scopes reverse their sibling intervals.
+    iree_host_size_t offset = 1;
+    for (iree_host_size_t child = largest; child != IREE_HOST_SIZE_MAX;
+         child = nodes[child].next_sibling) {
+      const iree_host_size_t length = ancestry[child].subtree_count;
+      ancestry[child].preorder = ancestry[i].preorder + offset;
+      ancestry[child].concurrent_preorder =
+          ancestry[i].concurrent_preorder +
+          (nodes[i].kind == LOOM_PIPELINE_LIFETIME_CONCURRENT
+               ? ancestry[i].subtree_count - offset - length + 1
+               : offset);
+      offset += length;
+      if (length > ancestry[largest].subtree_count) {
         largest = child;
       }
     }
     ancestry[largest].chain_head = ancestry[i].chain_head;
-  }
-  iree_host_size_t node = 0;
-  for (iree_host_size_t preorder = 0; preorder < lifetimes->count; ++preorder) {
-    ancestry[node].preorder = preorder;
-    if (nodes[node].first_child != IREE_HOST_SIZE_MAX) {
-      node = nodes[node].first_child;
-    } else {
-      while (node && nodes[node].next_sibling == IREE_HOST_SIZE_MAX) {
-        node = nodes[node].parent;
-      }
-      node = nodes[node].next_sibling;
-    }
   }
   lifetimes->ancestry = ancestry;
   return iree_ok_status();

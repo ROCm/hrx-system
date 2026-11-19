@@ -42,6 +42,9 @@ typedef struct loom_pipeline_lifetime_t {
 typedef struct loom_pipeline_lifetime_ancestry_t {
   // Depth-first ordinal; every subtree occupies one contiguous interval.
   iree_host_size_t preorder;
+  // Depth-first ordinal with concurrent sibling lists reversed. Distinct
+  // OWNER leaves appear in opposite orders exactly when they can coexist.
+  iree_host_size_t concurrent_preorder;
   // Number of nodes in this subtree, including its root.
   iree_host_size_t subtree_count;
   // Highest ancestor reached through largest-subtree child edges.

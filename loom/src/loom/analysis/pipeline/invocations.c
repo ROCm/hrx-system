@@ -6,6 +6,7 @@
 
 #include "loom/analysis/pipeline/invocations.h"
 
+#include "loom/analysis/pipeline/source_stability.h"
 #include "loom/error/error_catalog.h"
 #include "loom/error/parameter.h"
 #include "loom/ops/channel/ops.h"
@@ -472,8 +473,8 @@ iree_status_t loom_pipeline_invocations_analyze_workers(
       return iree_ok_status();
     }
   }
-  IREE_RETURN_IF_ERROR(loom_pipeline_workers_prove_sources(
-      &storage_access, workers, invocations->worker_count));
+  IREE_RETURN_IF_ERROR(loom_pipeline_prove_source_stability(
+      &storage_access, invocations, workers, invocations->worker_count));
   *out_workers = workers;
   *out_valid = true;
   return iree_ok_status();

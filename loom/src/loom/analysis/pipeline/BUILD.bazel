@@ -187,12 +187,14 @@ loom_cc_library(
         "invocations.c",
         "lifetime_layout.c",
         "lifetimes.c",
+        "source_stability.c",
     ],
     hdrs = [
         "construction_storage.h",
         "invocations.h",
         "lifetime_layout.h",
         "lifetimes.h",
+        "source_stability.h",
     ],
     deps = [
         ":arguments",
@@ -201,6 +203,7 @@ loom_cc_library(
         ":workers",
         "//loom/src/loom/analysis:source_storage_packing",
         "//loom/src/loom/analysis:storage_access",
+        "//loom/src/loom/analysis:view_regions",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/error:parameter",
@@ -210,6 +213,7 @@ loom_cc_library(
         "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
@@ -300,7 +304,6 @@ loom_cc_library(
         "//loom/src/loom/ops/func:op_defs",
         "//loom/src/loom/ops/kernel:op_defs",
         "//loom/src/loom/ops/pipeline:op_defs",
-        "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:cfg_execution",
         "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:cfg_loop_nest",
