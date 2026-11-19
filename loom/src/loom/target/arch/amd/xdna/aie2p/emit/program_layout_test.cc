@@ -34,6 +34,62 @@ loom_pipeline_lifetimes_t MakeLifetimes() {
   };
 }
 
+TEST(Aie2pProgramLayoutTest, LocalDemandReducesOnlyTheWorkersThatBenefit) {
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&pool, &arena);
+  constexpr auto none = IREE_HOST_SIZE_MAX;
+  const loom_pipeline_lifetime_t nodes[] = {
+      {LOOM_PIPELINE_LIFETIME_CONCURRENT, 0, none, 1, none},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 0, 0, none, 2},
+      {LOOM_PIPELINE_LIFETIME_SERIAL, 0, 0, 3, none},
+      {LOOM_PIPELINE_LIFETIME_CONCURRENT, 1, 2, 6, 4},
+      {LOOM_PIPELINE_LIFETIME_CONCURRENT, 2, 2, 7, 5},
+      {LOOM_PIPELINE_LIFETIME_CONCURRENT, 3, 2, 8, none},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 1, 3, none, none},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 2, 4, none, none},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 3, 5, none, none},
+  };
+  const uint32_t depths[] = {0, 1, 0, 0};
+  const loom_pipeline_lifetimes_t lifetimes = {
+      .nodes = nodes,
+      .count = IREE_ARRAYSIZE(nodes),
+      .loop_depths = depths,
+  };
+  // A 2 KiB repeated phase can stay beside either 12 KiB sibling. A worker
+  // with 14 KiB siblings must keep all three phases replaceable.
+  const iree_host_size_t function_owners[] = {0, 0, 1, 2, 2, 3};
+  const loom_aie2p_program_demand_t small[] = {
+      {0, 1024}, {1, 2048}, {2, 12288}, {3, 12288}};
+  const loom_aie2p_program_demand_t large[] = {
+      {0, 1024}, {1, 2048}, {2, 14336}, {3, 14336}};
+  loom_aie2p_program_census_t census = {
+      .function_owners = function_owners,
+      .function_count = IREE_ARRAYSIZE(function_owners),
+      .demands = small,
+      .demand_count = IREE_ARRAYSIZE(small),
+  };
+  const iree_host_size_t* owners = nullptr;
+  IREE_ASSERT_OK(loom_aie2p_program_layout_reduce_catalog(
+      &lifetimes, 4, &census, 16384, 4, &arena, &owners));
+  ASSERT_NE(owners, nullptr);
+  EXPECT_EQ(owners[0], 0u);
+  EXPECT_EQ(owners[1], 0u);
+  EXPECT_EQ(owners[2], 2u);
+  EXPECT_EQ(owners[3], 3u);
+  // The same local placement saves nothing against a three-group incumbent.
+  IREE_ASSERT_OK(loom_aie2p_program_layout_reduce_catalog(
+      &lifetimes, 4, &census, 16384, 3, &arena, &owners));
+  EXPECT_EQ(owners, nullptr);
+  census.demands = large;
+  IREE_ASSERT_OK(loom_aie2p_program_layout_reduce_catalog(
+      &lifetimes, 4, &census, 16384, 4, &arena, &owners));
+  EXPECT_EQ(owners, nullptr);
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&pool);
+}
+
 TEST(Aie2pProgramLayoutTest, SharesInstructionMemoryWithoutLoadingEmptyWindow) {
   iree_arena_block_pool_t pool;
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &pool);

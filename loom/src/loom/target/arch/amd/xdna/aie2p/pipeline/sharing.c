@@ -28,6 +28,26 @@ uint8_t loom_aie2p_native_delivery_packet(
       ~(occupied | (UINT32_C(1) << LOOM_AIE2P_NATIVE_DELIVERY_PACKET_ID));
   if (preferred != UINT8_MAX) {
     available |= UINT32_C(1) << preferred;
+  } else if (delivery &&
+             iree_math_count_ones_u32(delivery->command_packets) == 1) {
+    // A shared prefix can forward two classes with one masked filter when
+    // their IDs differ in one bit. Preserve the first ID for its terminal
+    // when another source can already use it.
+    const uint8_t first =
+        iree_math_count_trailing_zeros_u32(delivery->command_packets);
+    if ((available & delivery->command_packets) &&
+        loom_aie2p_native_delivery_accepts(delivery, first, tile, port,
+                                           channel)) {
+      preferred = first;
+    } else {
+      for (unsigned bit = 0; bit < 5; ++bit) {
+        const uint8_t neighbor = first ^ (1u << bit);
+        if (available & (UINT32_C(1) << neighbor)) {
+          preferred = neighbor;
+          break;
+        }
+      }
+    }
   }
   while (available) {
     const uint8_t packet = preferred != UINT8_MAX

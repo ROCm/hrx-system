@@ -8,9 +8,52 @@
 
 #include <string.h>
 
+#include "loom/analysis/pipeline/lifetime_coalescing.h"
 #include "loom/analysis/pipeline/lifetime_retention.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/leaf_program.h"
 #include "loom/util/adaptive_sort.h"
+
+iree_status_t loom_aie2p_program_layout_reduce_catalog(
+    const loom_pipeline_lifetimes_t* lifetimes, iree_host_size_t owner_count,
+    const loom_aie2p_program_census_t* census, uint64_t capacity,
+    iree_host_size_t current_group_count, iree_arena_allocator_t* scratch,
+    const iree_host_size_t** out_owners) {
+  *out_owners = NULL;
+  if (current_group_count <= 2) {
+    return iree_ok_status();
+  }
+  uint64_t* lengths = NULL;
+  iree_host_size_t* owners = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      scratch, owner_count, sizeof(*lengths), (void**)&lengths));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      scratch, owner_count, sizeof(*owners), (void**)&owners));
+  memset(lengths, 0, owner_count * sizeof(*lengths));
+  for (iree_host_size_t i = 0; i < census->demand_count; ++i) {
+    lengths[census->demands[i].owner] = census->demands[i].length;
+  }
+  IREE_RETURN_IF_ERROR(loom_pipeline_lifetimes_coalesce(
+      lifetimes, lengths, capacity, scratch, owners));
+
+  // Bound aliases still require a phase entry even when another owner supplied
+  // their native bytes. Count the groups reached by all functions.
+  bool* reached = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      scratch, owner_count, sizeof(*reached), (void**)&reached));
+  memset(reached, 0, owner_count * sizeof(*reached));
+  iree_host_size_t group_count = 0;
+  for (iree_host_size_t i = 0; i < census->function_count; ++i) {
+    const iree_host_size_t owner = owners[census->function_owners[i]];
+    if (!reached[owner]) {
+      reached[owner] = true;
+      ++group_count;
+    }
+  }
+  if (group_count > 1 && group_count < current_group_count) {
+    *out_owners = owners;
+  }
+  return iree_ok_status();
+}
 
 static bool loom_aie2p_program_layout_owner_less(const iree_host_size_t* owners,
                                                  const iree_host_size_t* a,

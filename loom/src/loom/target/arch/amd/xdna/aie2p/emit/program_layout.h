@@ -14,6 +14,25 @@
 extern "C" {
 #endif
 
+// Aligned demand of this worker's unique native bodies at one construction.
+typedef struct loom_aie2p_program_demand_t {
+  // Construction ordinal in the shared pipeline lifetime tree.
+  iree_host_size_t owner;
+  // Aligned native bytes attributed to this owner on this worker.
+  uint64_t length;
+} loom_aie2p_program_demand_t;
+
+typedef struct loom_aie2p_program_census_t {
+  // Native entry, synthetic loader, and helper construction owners.
+  const iree_host_size_t* function_owners;
+  // Number of native functions, including the synthetic loader.
+  iree_host_size_t function_count;
+  // Only constructions with nonempty native demand on this worker.
+  const loom_aie2p_program_demand_t* demands;
+  // Number of construction demands.
+  iree_host_size_t demand_count;
+} loom_aie2p_program_census_t;
+
 // Lifetime-local native code, loaded as one image when its owner starts.
 typedef struct loom_aie2p_program_layout_group_t {
   // Construction ordinal in the retained lifetime tree.
@@ -29,9 +48,9 @@ typedef struct loom_aie2p_program_layout_group_t {
 typedef struct loom_aie2p_program_layout_t {
   // Complete detached program with independently relocatable code sections.
   loom_aie2p_program_object_t program;
-  // Source construction to code lifetime, shared by every tile in the scope.
-  // NULL preserves the original construction lifetimes.
-  const iree_host_size_t* code_owners;
+  // Original code group to load at each call boundary, in helper then entry
+  // order. Zero means the caller can invoke that boundary directly.
+  const iree_host_size_t* const* call_groups;
   // Dense code group for each function in the program's retained input order.
   iree_host_size_t* function_groups;
   // Root group first, then other reached construction owners in ordinal order.
@@ -48,6 +67,16 @@ typedef struct loom_aie2p_program_layout_t {
   // Maximum simultaneous instruction footprint, including write padding.
   uint64_t byte_length;
 } loom_aie2p_program_layout_t;
+
+// Returns the construction-to-code map when this worker needs fewer code-load
+// descriptors than the incumbent placement. The original native image already
+// exceeded capacity, so the worker still needs at least one replaceable group.
+// All results and temporary storage have the lifetime of one worker's scratch.
+iree_status_t loom_aie2p_program_layout_reduce_catalog(
+    const loom_pipeline_lifetimes_t* lifetimes, iree_host_size_t owner_count,
+    const loom_aie2p_program_census_t* census, uint64_t capacity,
+    iree_host_size_t current_group_count, iree_arena_allocator_t* scratch,
+    const iree_host_size_t** out_owners);
 
 // Groups the admitted entry/helper closure by producer-retained construction
 // owners before native composition. Functions have entry-then-helper order.
