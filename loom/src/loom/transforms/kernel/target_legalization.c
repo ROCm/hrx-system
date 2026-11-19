@@ -1431,13 +1431,16 @@ iree_status_t loom_kernel_target_legalize_subgroup_reduce_butterfly(
   IREE_RETURN_IF_ERROR(loom_kernel_scan_build_transport_value(
       &state, source_value, &accumulator));
   for (uint32_t distance = 1; distance < cluster.size; distance <<= 1) {
-    loom_value_id_t offset = LOOM_VALUE_ID_INVALID;
+    // All lanes in each half already hold that half's reduction. Mirroring
+    // the combined group reads the opposite half and lets targets fold
+    // half-row and row mirrors directly into the arithmetic instruction.
+    loom_value_id_t partner_mask = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_kernel_scan_build_integer_constant(
-        &state, state.i32_type, distance, &offset));
+        &state, state.i32_type, (distance << 1) - 1, &partner_mask));
     loom_op_t* shuffle_op = NULL;
     IREE_RETURN_IF_ERROR(loom_kernel_subgroup_shuffle_build(
         state.builder, LOOM_KERNEL_SUBGROUP_SHUFFLE_MODE_XOR, accumulator,
-        offset, state.subgroup_size_i32, state.value_type, state.location,
+        partner_mask, state.subgroup_size_i32, state.value_type, state.location,
         &shuffle_op));
     loom_value_id_t combined = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_kernel_scan_build_combine(

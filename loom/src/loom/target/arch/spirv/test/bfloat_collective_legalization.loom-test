@@ -23,10 +23,10 @@ kernel.def @clustered_bfloat_sum() {
   %8 = scalar.constant 1 : i32
   %9, %10 = kernel.subgroup.shuffle<xor> %4, %8, %7 : f32, i32, i32
   %11 = scalar.addf %4, %9 : f32
-  %12 = scalar.constant 2 : i32
+  %12 = scalar.constant 3 : i32
   %13, %14 = kernel.subgroup.shuffle<xor> %11, %12, %7 : f32, i32, i32
   %15 = scalar.addf %11, %13 : f32
-  %16 = scalar.constant 4 : i32
+  %16 = scalar.constant 7 : i32
   %17, %18 = kernel.subgroup.shuffle<xor> %15, %16, %7 : f32, i32, i32
   %19 = scalar.addf %15, %17 : f32
   %result = scalar.fptrunc %19 : f32 to bf16
