@@ -143,12 +143,12 @@ typedef std::atomic<intptr_t> iree_atomic_intptr_t;
 #else
 
 // When compiling in C we can use _Generic to automatically route to the
-// builtins that change their name based on the atomic type. This implementation
-// is not good: it ignores memory order entirely and uses the full barrier
-// implied by any of the _Interlocked* builtins. There are some variants of the
-// builtins that we could use based on the order but their support across
-// targets differs. Hopefully ~soon we can use C11 atomics directly and drop
-// this code path.
+// builtins that change their name based on the atomic type. Loads use plain
+// atomic reads followed by the requested compiler or architecture barrier.
+// Stores and read-modify-write operations conservatively retain the full
+// barrier implied by the _Interlocked* builtins.
+
+#include <intrin.h>
 
 typedef enum iree_memory_order_e {
   iree_memory_order_relaxed = 0u,
@@ -169,24 +169,57 @@ typedef intptr_t iree_atomic_intptr_t;
 
 #define iree_atomic_thread_fence(order) MemoryBarrier()
 
-#define iree_atomic_load(object, order)                       \
-  _Generic((object),                                          \
-      iree_atomic_int32_t*: _InterlockedExchangeAdd(          \
-               (volatile int32_t*)(object), 0),               \
-      iree_atomic_int64_t*: _InterlockedExchangeAdd64(        \
-               (volatile int64_t*)(object), 0),               \
-      iree_atomic_uint32_t*: _InterlockedExchangeAdd(         \
-               (volatile int32_t*)(object), 0),               \
-      iree_atomic_uint64_t*: _InterlockedExchangeAdd64(       \
-               (volatile int64_t*)(object), 0),               \
-      const iree_atomic_int32_t*: _InterlockedExchangeAdd(    \
-               (volatile int32_t*)(object), 0),               \
-      const iree_atomic_int64_t*: _InterlockedExchangeAdd64(  \
-               (volatile int64_t*)(object), 0),               \
-      const iree_atomic_uint32_t*: _InterlockedExchangeAdd(   \
-               (volatile int32_t*)(object), 0),               \
-      const iree_atomic_uint64_t*: _InterlockedExchangeAdd64( \
-               (volatile int64_t*)(object), 0))
+// Loads must not acquire write ownership of their source: native fence words
+// can be mapped read-only. Match the MSVC standard library's load ordering.
+// x86/x64 need only a compiler barrier; ARM also orders subsequent accesses.
+static inline void iree_atomic_load_barrier(iree_memory_order_t order) {
+  if (order != iree_memory_order_relaxed) {
+#if defined(_M_ARM) || defined(_M_ARM64) || defined(_M_ARM64EC) || \
+    defined(_M_HYBRID_X86_ARM64)
+    __dmb(0xB);  // Inner-shareable data memory barrier.
+#else
+    _ReadWriteBarrier();
+#endif
+  }
+}
+
+static inline int32_t iree_atomic_load_int32_impl(
+    const volatile int32_t* object, iree_memory_order_t order) {
+  const int32_t value = __iso_volatile_load32(object);
+  iree_atomic_load_barrier(order);
+  return value;
+}
+
+static inline int64_t iree_atomic_load_int64_impl(
+    const volatile int64_t* object, iree_memory_order_t order) {
+#if defined(_M_ARM)
+  // A pair of ordinary 32-bit reads could tear on ARM32.
+  const int64_t value = __ldrexd(object);
+#else
+  const int64_t value = __iso_volatile_load64(object);
+#endif
+  iree_atomic_load_barrier(order);
+  return value;
+}
+
+#define iree_atomic_load(object, order)                                   \
+  _Generic((object),                                                      \
+      iree_atomic_int32_t*: iree_atomic_load_int32_impl(                  \
+               (const volatile int32_t*)(object), (order)),               \
+      iree_atomic_int64_t*: iree_atomic_load_int64_impl(                  \
+               (const volatile int64_t*)(object), (order)),               \
+      iree_atomic_uint32_t*: (uint32_t)iree_atomic_load_int32_impl(       \
+               (const volatile int32_t*)(object), (order)),               \
+      iree_atomic_uint64_t*: (uint64_t)iree_atomic_load_int64_impl(       \
+               (const volatile int64_t*)(object), (order)),               \
+      const iree_atomic_int32_t*: iree_atomic_load_int32_impl(            \
+               (const volatile int32_t*)(object), (order)),               \
+      const iree_atomic_int64_t*: iree_atomic_load_int64_impl(            \
+               (const volatile int64_t*)(object), (order)),               \
+      const iree_atomic_uint32_t*: (uint32_t)iree_atomic_load_int32_impl( \
+               (const volatile int32_t*)(object), (order)),               \
+      const iree_atomic_uint64_t*: (uint64_t)iree_atomic_load_int64_impl( \
+               (const volatile int64_t*)(object), (order)))
 #define iree_atomic_store(object, desired, order)                              \
   _Generic((object),                                                           \
       iree_atomic_int32_t*: _InterlockedExchange((volatile int32_t*)(object),  \

@@ -53,7 +53,10 @@ iree_runtime_cc_library(
 
 iree_runtime_cc_test(
     name = "atomics_test",
-    srcs = ["atomics_test.cc"],
+    srcs = [
+        "atomics_c_test.c",
+        "atomics_test.cc",
+    ],
     deps = [
         ":internal",
         "//runtime/src/iree/base:core_headers",
