@@ -119,7 +119,7 @@ TEST_F(MemoryMappingTest, PendingMappingDefersOnlyIntersectingCommitments) {
     ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
     EXPECT_EQ(prepared.mapping_count, unmap ? 4u : 3u);
     IREE_ASSERT_OK(loom_runtime_memory_pool_commit_prepared_async(
-        pool, &prepared, {}, nullptr, 0, &admission, &operation));
+        pool, &prepared, {}, {}, nullptr, 0, &admission, &operation));
     ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
     const auto completed = AwaitOperation(operation);
     IREE_ASSERT_OK(loom_runtime_memory_operation_query_status(operation));
@@ -325,7 +325,7 @@ TEST_F(MemoryMappingTest, FailedCaptureReturnsEveryFragmentBeforeRetry) {
   native.FailNextAllocation(IREE_ALLOCATOR_COMMAND_REALLOC);
   loom_runtime_memory_operation_t* operation = nullptr;
   IREE_ASSERT_OK(loom_runtime_memory_pool_commit_prepared_async(
-      pool, &commit, {}, nullptr, 0, &admission, &operation));
+      pool, &commit, {}, {}, nullptr, 0, &admission, &operation));
   const auto completed = AwaitOperation(operation);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                         loom_runtime_memory_operation_query_status(operation));

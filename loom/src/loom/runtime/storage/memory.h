@@ -27,6 +27,15 @@ typedef struct loom_runtime_memory_arena_t loom_runtime_memory_arena_t;
 typedef struct loom_runtime_virtual_buffer_t loom_runtime_virtual_buffer_t;
 typedef struct loom_runtime_memory_operation_t loom_runtime_memory_operation_t;
 
+// Packed pages required by a later consumer of a serialized admission.
+// The source accounts only its native-page mappings in this pool.
+typedef struct loom_runtime_memory_headroom_t {
+  // Borrowed owner counters through preparation, or NULL without shared pages.
+  const loom_runtime_storage_statistics_t* source;
+  // Aggregate page-rounded payload that must fit alongside the request.
+  uint64_t minimum_bytes;
+} loom_runtime_memory_headroom_t;
+
 // Additional physical ownership within one pool, not a reservation of credit.
 // Folds distinct roots/groups without enumerating their physical mappings.
 typedef struct loom_runtime_memory_demand_t {
@@ -172,6 +181,19 @@ typedef enum loom_runtime_memory_admission_e {
 // does not poison other demands which fit the surviving capacity.
 iree_status_t loom_runtime_memory_pool_prepare(
     loom_runtime_memory_pool_t* pool, loom_runtime_memory_demand_t additional,
+    loom_runtime_memory_admission_t* out_admission);
+
+// Whether the packed peak fits the current inventory without reclamation.
+// Does not collect completions, consult a native allocator, or reserve pages.
+bool loom_runtime_memory_pool_has_headroom(
+    const loom_runtime_memory_pool_t* pool,
+    loom_runtime_memory_headroom_t headroom);
+
+// Prices the cohort together with any pages still missing from headroom.
+// Reclamation may return the source's existing pages during preparation.
+iree_status_t loom_runtime_memory_pool_prepare_working_set(
+    loom_runtime_memory_pool_t* pool, loom_runtime_memory_demand_t additional,
+    loom_runtime_memory_headroom_t headroom,
     loom_runtime_memory_admission_t* out_admission);
 
 // Reserves stable device addresses without committing physical storage.
@@ -397,15 +419,16 @@ iree_status_t loom_runtime_memory_pool_cancel_commit(
     loom_runtime_memory_commit_t* commit);
 
 // Consumes the selection and clears the record on every return. Admits its
-// retained demand together with the caller's immediate demand, then constructs
-// one exact native operation from the selected directory entries. Immediate
-// demand excludes the selected mappings and existing backing. Denial submits
-// neither. Accepted operations follow commit_async's retirement contract; a
-// non-NULL output must retire even when another part of admission fails. The
-// caller commits immediate demand before yielding this owner turn.
+// retained demand, the caller's immediate demand, and the headroom that later
+// consumers still need. Only the selected directory entries are committed.
+// Immediate demand excludes selected mappings and existing backing. The caller
+// commits that demand before yielding this owner turn. Denial submits no work.
+// A non-NULL output follows commit_async's retirement contract even when
+// another part of admission fails.
 iree_status_t loom_runtime_memory_pool_commit_prepared_async(
     loom_runtime_memory_pool_t* pool, loom_runtime_memory_commit_t* commit,
-    loom_runtime_memory_demand_t immediate, iree_hal_semaphore_t* readiness,
+    loom_runtime_memory_demand_t immediate,
+    loom_runtime_memory_headroom_t headroom, iree_hal_semaphore_t* readiness,
     uint64_t value, loom_runtime_memory_admission_t* out_admission,
     loom_runtime_memory_operation_t** out_operation);
 

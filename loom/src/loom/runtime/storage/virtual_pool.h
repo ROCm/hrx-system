@@ -62,6 +62,10 @@ loom_runtime_storage_usage_t loom_runtime_virtual_pool_memory_usage(
 loom_runtime_storage_usage_t loom_runtime_virtual_pool_source_memory_usage(
     const iree_hal_pool_t* source);
 
+// Quotes a source's minimum aggregate native-page payload for admission.
+loom_runtime_memory_headroom_t loom_runtime_virtual_pool_source_headroom(
+    const iree_hal_pool_t* source, uint64_t byte_length);
+
 // Charged backing that cannot currently be reclaimed from this source. Includes
 // unpublished acquisitions and failed ranges, excludes idle reusable ranges and
 // accepted returns. A trim still awaiting consumer history remains protected.

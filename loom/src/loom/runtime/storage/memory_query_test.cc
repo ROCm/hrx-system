@@ -50,7 +50,7 @@ TEST_F(MemoryTest, PreparedCommitCanBeCancelledAndDeniedWithoutBacking) {
       .weight_bytes = 3 * kSlabSize,
   };
   IREE_ASSERT_OK(loom_runtime_memory_pool_commit_prepared_async(
-      pool, &prepared, parameters, nullptr, 0, &admission, &operation));
+      pool, &prepared, parameters, {}, nullptr, 0, &admission, &operation));
   EXPECT_EQ(prepared.ranges, nullptr);
   EXPECT_EQ(operation, nullptr);
   EXPECT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_CAPACITY);
@@ -77,7 +77,7 @@ TEST_F(MemoryTest, PreparedCommitCanBeCancelledAndDeniedWithoutBacking) {
   EXPECT_EQ(prepared.mapping_count, 0u);
   EXPECT_EQ(loom_runtime_memory_demand_total(prepared.demand), 0u);
   IREE_ASSERT_OK(loom_runtime_memory_pool_commit_prepared_async(
-      pool, &prepared, {}, nullptr, 0, &admission, &operation));
+      pool, &prepared, {}, {}, nullptr, 0, &admission, &operation));
   EXPECT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
   EXPECT_EQ(operation, nullptr);
   EXPECT_EQ(native.allocation_metrics().request_count, 0u);
@@ -104,7 +104,7 @@ TEST_F(MemoryTest, FailedPreparedCommitAllocationLeavesRetryIntact) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
       loom_runtime_memory_pool_commit_prepared_async(
-          pool, &prepared, {}, nullptr, 0, &admission, &operation));
+          pool, &prepared, {}, {}, nullptr, 0, &admission, &operation));
   EXPECT_EQ(prepared.ranges, nullptr);
   EXPECT_EQ(operation, nullptr);
   EXPECT_EQ(statistics[0].pending_bytes, 0u);

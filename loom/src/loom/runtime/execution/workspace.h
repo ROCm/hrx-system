@@ -119,10 +119,9 @@ loom_runtime_storage_usage_t loom_runtime_workspace_memory_usage(
 uint64_t loom_runtime_workspace_protected_bytes(
     const loom_runtime_workspace_t* workspace);
 
-// Rounds a declared simultaneous workspace peak to physical slab bytes for
-// admission. Fixed backing leaves the bound unchanged. This uses immutable
-// geometry, not allocator availability or currently retained backing.
-uint64_t loom_runtime_workspace_round_size(
+// Quotes the page-rounded simultaneous peak and its backing account for
+// admission. Fixed workspace has no shared backing account.
+loom_runtime_memory_headroom_t loom_runtime_workspace_headroom(
     const loom_runtime_workspace_t* workspace, uint64_t byte_length);
 
 // Records released scopes whose accepted raw roots can publish backing after
