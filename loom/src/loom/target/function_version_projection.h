@@ -19,6 +19,14 @@
 extern "C" {
 #endif
 
+// Writes exact target witnesses directly into an exclusively owned working
+// module. Functions retain their bodies, value identities, and source data.
+// Contexts share the same authored or generated definitions as an independent
+// projection. On failure the caller discards the unpublished working module.
+iree_status_t loom_target_function_versions_bind_module(
+    loom_module_t* module, const loom_function_version_list_t* versions,
+    iree_arena_allocator_t* arena);
+
 // Projects |source_module| into a standalone IR-only module that preserves
 // every target-refined function version in |function_versions| as an ordinary
 // target definition and function target reference.

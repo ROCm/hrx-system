@@ -86,23 +86,12 @@ static iree_status_t loom_target_function_version_project_scopes(
   return iree_ok_status();
 }
 
-typedef struct loom_target_function_version_projection_context_table_t {
-  // Context ordinals present in the function-version owner.
-  iree_bitmap_t present;
-
-  // Context ordinals with an exact authored target definition.
-  iree_bitmap_t exact;
-
-  // Projected target definition indexed by context ordinal.
-  loom_symbol_ref_t* target_refs;
-} loom_target_function_version_projection_context_table_t;
-
 typedef struct loom_target_function_version_projection_plan_t {
   // Target versions reconciled against the source module symbol table.
   loom_target_function_version_snapshot_t version_snapshot;
 
   // Direct target-definition projection indexed by producer-owned identity.
-  loom_target_function_version_projection_context_table_t contexts;
+  loom_symbol_ref_t* target_refs;
 
   // Number of target contexts requiring provider materialization.
   iree_host_size_t materialization_count;
@@ -178,45 +167,6 @@ loom_target_function_version_projection_select_generated_name_namespace(
   return iree_ok_status();
 }
 
-static iree_status_t
-loom_target_function_version_projection_context_table_initialize(
-    iree_host_size_t context_capacity, iree_arena_allocator_t* arena,
-    loom_target_function_version_projection_context_table_t* out_table) {
-  *out_table = (loom_target_function_version_projection_context_table_t){
-      .present = {.bit_count = context_capacity},
-      .exact = {.bit_count = context_capacity},
-  };
-  if (context_capacity == 0) {
-    return iree_ok_status();
-  }
-
-  const iree_host_size_t bitmap_word_count =
-      iree_bitmap_calculate_words(context_capacity);
-  iree_host_size_t bitmap_storage_count = 0;
-  iree_host_size_t bitmap_storage_size = 0;
-  if (!iree_host_size_checked_mul(bitmap_word_count, 2,
-                                  &bitmap_storage_count) ||
-      !iree_host_size_checked_mul(bitmap_storage_count, sizeof(uint64_t),
-                                  &bitmap_storage_size)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "target context bitmap size overflow");
-  }
-  uint64_t* bitmap_storage = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate(arena, bitmap_storage_size, (void**)&bitmap_storage));
-  memset(bitmap_storage, 0, bitmap_storage_size);
-  out_table->present.words = bitmap_storage;
-  out_table->exact.words = bitmap_storage + bitmap_word_count;
-
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, context_capacity, sizeof(*out_table->target_refs),
-      (void**)&out_table->target_refs));
-  for (iree_host_size_t i = 0; i < context_capacity; ++i) {
-    out_table->target_refs[i] = loom_symbol_ref_null();
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_target_function_version_projection_plan_build(
     const loom_module_t* source_module,
     const loom_function_version_list_t* function_versions,
@@ -238,13 +188,21 @@ static iree_status_t loom_target_function_version_projection_plan_build(
 
   const iree_host_size_t context_capacity =
       out_plan->version_snapshot.target_context_capacity;
-  IREE_RETURN_IF_ERROR(
-      loom_target_function_version_projection_context_table_initialize(
-          context_capacity, arena, &out_plan->contexts));
   if (context_capacity == 0) {
     return iree_ok_status();
   }
-
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, context_capacity, sizeof(*out_plan->target_refs),
+      (void**)&out_plan->target_refs));
+  for (iree_host_size_t i = 0; i < context_capacity; ++i) {
+    out_plan->target_refs[i] = loom_symbol_ref_null();
+  }
+  iree_bitmap_t present = {.bit_count = context_capacity};
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, iree_bitmap_calculate_words(context_capacity),
+      sizeof(*present.words), (void**)&present.words));
+  iree_bitmap_reset_all(present);
+  iree_host_size_t exact_count = 0;
   for (loom_symbol_id_t symbol_id = 0; symbol_id < source_module->symbols.count;
        ++symbol_id) {
     const loom_target_function_version_t* function_version =
@@ -256,16 +214,19 @@ static iree_status_t loom_target_function_version_projection_plan_build(
     const loom_target_context_ordinal_t context_ordinal =
         function_version->target_context_ordinal;
     IREE_ASSERT_LT(context_ordinal, context_capacity);
-    iree_bitmap_set(out_plan->contexts.present, context_ordinal);
+    iree_bitmap_set(present, context_ordinal);
     if (function_version->authored_target_is_exact) {
-      iree_bitmap_set(out_plan->contexts.exact, context_ordinal);
+      loom_symbol_ref_t* witness = &out_plan->target_refs[context_ordinal];
+      if (!loom_symbol_ref_is_valid(*witness)) {
+        // Both the owned module and an exact clone preserve local symbol IDs.
+        // One authored witness names this context for every function using it.
+        *witness = loom_func_like_target(function_version->base.function);
+        ++exact_count;
+      }
     }
   }
 
-  const iree_host_size_t present_count =
-      iree_bitmap_count(out_plan->contexts.present);
-  const iree_host_size_t exact_count =
-      iree_bitmap_count(out_plan->contexts.exact);
+  const iree_host_size_t present_count = iree_bitmap_count(present);
   IREE_ASSERT_LE(exact_count, present_count);
   out_plan->materialization_count = present_count - exact_count;
   if (out_plan->materialization_count == 0) {
@@ -282,7 +243,7 @@ static iree_status_t loom_target_function_version_projection_plan_build(
     }
     const loom_target_context_ordinal_t context_ordinal =
         function_version->target_context_ordinal;
-    if (iree_bitmap_test(out_plan->contexts.exact, context_ordinal)) {
+    if (loom_symbol_ref_is_valid(out_plan->target_refs[context_ordinal])) {
       continue;
     }
     const loom_target_provider_t* provider =
@@ -507,43 +468,6 @@ static void loom_target_function_version_clone_finish_op(
   }
 }
 
-static void loom_target_function_version_projection_seed_exact_contexts(
-    const loom_module_t* source_module,
-    const loom_ir_module_projection_t* projection,
-    loom_target_function_version_projection_plan_t* plan) {
-  for (loom_symbol_id_t symbol_id = 0; symbol_id < source_module->symbols.count;
-       ++symbol_id) {
-    const loom_target_function_version_t* function_version =
-        loom_target_function_version_snapshot_at(&plan->version_snapshot,
-                                                 symbol_id);
-    if (function_version == NULL ||
-        !function_version->authored_target_is_exact) {
-      continue;
-    }
-
-    const loom_symbol_ref_t source_target_ref =
-        loom_func_like_target(function_version->base.function);
-    IREE_ASSERT(loom_symbol_ref_is_valid(source_target_ref));
-    IREE_ASSERT_EQ(source_target_ref.module_id, 0);
-    IREE_ASSERT_LT(source_target_ref.symbol_id, source_module->symbols.count);
-    const loom_symbol_ref_t projected_target_ref =
-        loom_ir_module_projection_target_symbol(projection,
-                                                source_target_ref.symbol_id);
-
-    const loom_target_context_ordinal_t context_ordinal =
-        function_version->target_context_ordinal;
-    loom_symbol_ref_t* context_target_ref =
-        &plan->contexts.target_refs[context_ordinal];
-    // Callgraph specialization preserves a context across distinct authored
-    // requirements that leave its facts unchanged. Any exact witness can name
-    // that context. Bind its versions to one witness so Low calls remain
-    // within the same target after serialization and resumed compilation.
-    if (!loom_symbol_ref_is_valid(*context_target_ref)) {
-      *context_target_ref = projected_target_ref;
-    }
-  }
-}
-
 static iree_status_t loom_target_function_version_projection_add_target_symbol(
     loom_module_t* module, iree_host_size_t generated_name_namespace,
     iree_host_size_t materialization_ordinal,
@@ -573,16 +497,20 @@ static iree_status_t loom_target_function_version_projection_add_target_symbol(
 
 static iree_status_t
 loom_target_function_version_projection_materialize_and_bind(
-    const loom_module_t* source_module, loom_module_t* projected_module,
-    const loom_ir_module_projection_t* projection,
+    loom_module_t* module,
     loom_target_function_version_projection_plan_t* plan) {
+  if (plan->version_snapshot.target_context_capacity == 0) {
+    return iree_ok_status();
+  }
   loom_builder_t builder;
-  loom_builder_initialize(projected_module, &projected_module->arena,
-                          loom_module_block(projected_module), &builder);
+  loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                          &builder);
 
+  // Target definitions append new symbols. Only the original symbol prefix
+  // has function versions, and its identities are stable across the appends.
   iree_host_size_t materialization_ordinal = 0;
-  for (loom_symbol_id_t symbol_id = 0; symbol_id < source_module->symbols.count;
-       ++symbol_id) {
+  for (loom_symbol_id_t symbol_id = 0;
+       symbol_id < plan->version_snapshot.symbol_count; ++symbol_id) {
     const loom_target_function_version_t* function_version =
         loom_target_function_version_snapshot_at(&plan->version_snapshot,
                                                  symbol_id);
@@ -592,14 +520,13 @@ loom_target_function_version_projection_materialize_and_bind(
 
     const loom_target_context_ordinal_t context_ordinal =
         function_version->target_context_ordinal;
-    loom_symbol_ref_t* target_ref =
-        &plan->contexts.target_refs[context_ordinal];
+    loom_symbol_ref_t* target_ref = &plan->target_refs[context_ordinal];
     if (!loom_symbol_ref_is_valid(*target_ref)) {
       loom_symbol_ref_t materialized_ref = loom_symbol_ref_null();
       IREE_RETURN_IF_ERROR(
           loom_target_function_version_projection_add_target_symbol(
-              projected_module, plan->generated_name_namespace,
-              materialization_ordinal, &materialized_ref));
+              module, plan->generated_name_namespace, materialization_ordinal,
+              &materialized_ref));
       IREE_RETURN_IF_ERROR(
           function_version->resolved_target.provider->materialize_definition(
               &builder, &function_version->resolved_target, materialized_ref,
@@ -608,17 +535,22 @@ loom_target_function_version_projection_materialize_and_bind(
       ++materialization_ordinal;
     }
 
-    const loom_symbol_ref_t projected_function_ref =
-        loom_ir_module_projection_target_symbol(projection, symbol_id);
-    const loom_func_like_t projected_function = loom_func_like_cast(
-        projected_module,
-        projected_module->symbols.entries[projected_function_ref.symbol_id]
-            .defining_op);
-    loom_func_like_set_target(projected_module, projected_function,
-                              *target_ref);
+    const loom_func_like_t function = loom_func_like_cast(
+        module, module->symbols.entries[symbol_id].defining_op);
+    loom_func_like_set_target(module, function, *target_ref);
   }
   IREE_ASSERT_EQ(materialization_ordinal, plan->materialization_count);
   return iree_ok_status();
+}
+
+iree_status_t loom_target_function_versions_bind_module(
+    loom_module_t* module, const loom_function_version_list_t* versions,
+    iree_arena_allocator_t* arena) {
+  loom_target_function_version_projection_plan_t plan = {0};
+  IREE_RETURN_IF_ERROR(loom_target_function_version_projection_plan_build(
+      module, versions, arena, &plan));
+  return loom_target_function_version_projection_materialize_and_bind(module,
+                                                                      &plan);
 }
 
 iree_status_t loom_target_function_versions_project_module(
@@ -674,11 +606,9 @@ iree_status_t loom_target_function_versions_project_module(
                                   &scratch_arena, allocator, &projection,
                                   &projected_module);
   }
-  if (iree_status_is_ok(status) && plan.contexts.present.bit_count > 0) {
-    loom_target_function_version_projection_seed_exact_contexts(
-        source_module, &projection, &plan);
+  if (iree_status_is_ok(status)) {
     status = loom_target_function_version_projection_materialize_and_bind(
-        source_module, projected_module, &projection, &plan);
+        projected_module, &plan);
   }
   if (iree_status_is_ok(status)) {
     *out_projected_module = projected_module;

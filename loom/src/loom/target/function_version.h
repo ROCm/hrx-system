@@ -127,8 +127,9 @@ loom_target_function_version_t* loom_target_function_version_list_find(
 
 // Target-refined versions observed against one module symbol snapshot.
 //
-// Entries are indexed directly by module-local symbol ID. The snapshot is
-// valid only until the module adds, erases, replaces, or compacts symbols.
+// Entries are indexed directly by module-local symbol ID. The snapshot
+// covers the original symbol prefix. Appending symbols leaves its captured
+// identities intact. Erasing, replacing, or compacting them invalidates it.
 // Compiler version objects remain the semantic identity; this transient vector
 // only reconciles them with one mutable module observation boundary.
 typedef struct loom_target_function_version_snapshot_t {
@@ -147,9 +148,9 @@ typedef struct loom_target_function_version_snapshot_t {
 // Observes |function_versions| against the current |module| symbol table.
 //
 // Construction is O(symbol_count + version_count). The returned snapshot is
-// allocated from |arena| and must be discarded before the module symbol table
-// changes. Each target-refined version must name a distinct live function
-// symbol in |module|; inconsistent version state returns
+// allocated from |arena| and remains valid while its captured symbols retain
+// their identities. Each target-refined version must name a distinct live
+// function symbol in |module|; inconsistent version state returns
 // IREE_STATUS_FAILED_PRECONDITION.
 iree_status_t loom_target_function_version_snapshot_build(
     const loom_module_t* module,

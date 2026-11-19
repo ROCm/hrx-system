@@ -339,14 +339,14 @@ static iree_status_t loomc_link_materialization_prepare_module(
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_link_plan_materialization_t* materialization, bool* out_accepted) {
   *out_accepted = false;
-  loom_module_t** inout_module = &materialization->module;
+  loom_module_t* module = materialization->module;
   loomc_link_materialization_state_t* state =
       (loomc_link_materialization_state_t*)user_data;
   const loomc_config_apply_text_to_module_options_t apply_options = {
       .context = state->composition.context,
       .bindings = &state->specialization.config_bindings,
       .policy_flags = state->specialization.config_policy_flags,
-      .module = *inout_module,
+      .module = module,
       .source_resolver = {.fn = loom_source_table_resolve,
                           .user_data = &materialization->sources},
       .result = state->diagnostics.result,
@@ -378,7 +378,7 @@ static iree_status_t loomc_link_materialization_prepare_module(
       loomc_context_target_pass_environment(state->composition.context);
   loomc_diagnostic_capture_t capture;
   loomc_diagnostic_capture_initialize(
-      state->diagnostics.result, /*source=*/NULL, *inout_module,
+      state->diagnostics.result, /*source=*/NULL, module,
       (loom_source_resolver_t){.fn = loom_source_table_resolve,
                                .user_data = &materialization->sources},
       LOOM_EMITTER_PASS,
@@ -397,10 +397,10 @@ static iree_status_t loomc_link_materialization_prepare_module(
                 LOOMC_LINK_DEPLOYMENT_SPECIALIZATION_PHASE_COMMAND_PROJECTION
             ? loom_target_specialize_module_command_projection_entries(
                   target_environment, profile, diagnostic_emitter, block_pool,
-                  allocator, inout_module, &error_count)
+                  module, &error_count)
             : loom_target_specialize_module_deployment_entries(
                   target_environment, profile, diagnostic_emitter, block_pool,
-                  allocator, inout_module, &error_count));
+                  module, &error_count));
   } else {
     iree_arena_allocator_t arena;
     iree_arena_initialize(block_pool, &arena);
@@ -408,7 +408,7 @@ static iree_status_t loomc_link_materialization_prepare_module(
     loom_target_declaration_binding_list_t bindings = {0};
     if (state->specialization.indexed == NULL) {
       status = loomc_target_specialization_options_make_lists(
-          target, *inout_module, &arena, &requests, &bindings);
+          target, module, &arena, &requests, &bindings);
       if (loomc_status_is_ok(status)) {
         status =
             loomc_status_from_iree(loomc_link_target_specializations_capture(
@@ -421,9 +421,9 @@ static iree_status_t loomc_link_materialization_prepare_module(
           &bindings));
     }
     if (loomc_status_is_ok(status)) {
-      status = loomc_status_from_iree(loom_target_specialize_module(
-          target_environment, requests, bindings, diagnostic_emitter,
-          block_pool, allocator, inout_module, &error_count));
+      status = loomc_status_from_iree(loom_target_specialize_module_in_place(
+          target_environment, module, requests, bindings, diagnostic_emitter,
+          &arena, &error_count));
     }
     iree_arena_deinitialize(&arena);
   }
