@@ -238,11 +238,23 @@ static loomc_status_t loomc_cxx_resolve_options(
     out_options->module_name =
         iree_string_view_from_loomc(options->module_name);
   }
+  // kernel_ref roots follow module_name; a descriptor sized before them has
+  // none.
+  const loomc_string_view_t* kernel_refs_in = options->kernel_refs;
+  loomc_host_size_t kernel_ref_count = options->kernel_ref_count;
+  if (options->structure_size &&
+      options->structure_size <
+          offsetof(loomc_cxx_import_options_t, kernel_ref_count) +
+              sizeof(options->kernel_ref_count)) {
+    kernel_refs_in = NULL;
+    kernel_ref_count = 0;
+  }
   if ((!options->include_paths && options->include_path_count) ||
       (!options->system_include_paths && options->system_include_path_count) ||
       (!options->defines && options->define_count) ||
       (!options->undefines && options->undefine_count) ||
-      (!options->roots && options->root_count)) {
+      (!options->roots && options->root_count) ||
+      (!kernel_refs_in && kernel_ref_count)) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "nonempty C/C++ option arrays require storage");
   }
@@ -257,10 +269,12 @@ static loomc_status_t loomc_cxx_resolve_options(
   out_options->root_count = options->root_count;
   out_options->define_count = options->define_count;
   out_options->undefine_count = options->undefine_count;
+  out_options->kernel_ref_count = kernel_ref_count;
 
   iree_host_size_t allocation_size = 0;
   iree_host_size_t includes_offset = 0, system_offset = 0, roots_offset = 0;
   iree_host_size_t defines_offset = 0, undefines_offset = 0;
+  iree_host_size_t kernel_refs_offset = 0;
   LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(IREE_STRUCT_LAYOUT(
       0, &allocation_size,
       IREE_STRUCT_FIELD(options->include_path_count, iree_string_view_t,
@@ -271,7 +285,9 @@ static loomc_status_t loomc_cxx_resolve_options(
       IREE_STRUCT_FIELD(options->define_count, loom_cxx_define_t,
                         &defines_offset),
       IREE_STRUCT_FIELD(options->undefine_count, iree_string_view_t,
-                        &undefines_offset))));
+                        &undefines_offset),
+      IREE_STRUCT_FIELD(kernel_ref_count, iree_string_view_t,
+                        &kernel_refs_offset))));
   if (!allocation_size) {
     return loomc_ok_status();
   }
@@ -285,11 +301,14 @@ static loomc_status_t loomc_cxx_resolve_options(
   loom_cxx_define_t* defines = (loom_cxx_define_t*)(storage + defines_offset);
   iree_string_view_t* undefines =
       (iree_string_view_t*)(storage + undefines_offset);
+  iree_string_view_t* kernel_refs =
+      (iree_string_view_t*)(storage + kernel_refs_offset);
   out_options->include_paths = includes;
   out_options->system_include_paths = system;
   out_options->roots = roots;
   out_options->defines = defines;
   out_options->undefines = undefines;
+  out_options->kernel_refs = kernel_refs;
   LOOMC_RETURN_IF_ERROR(loomc_cxx_copy_strings(
       options->include_path_count, options->include_paths, includes));
   LOOMC_RETURN_IF_ERROR(
@@ -299,6 +318,8 @@ static loomc_status_t loomc_cxx_resolve_options(
       loomc_cxx_copy_strings(options->root_count, options->roots, roots));
   LOOMC_RETURN_IF_ERROR(loomc_cxx_copy_strings(
       options->undefine_count, options->undefines, undefines));
+  LOOMC_RETURN_IF_ERROR(loomc_cxx_copy_strings(
+      kernel_ref_count, kernel_refs_in, kernel_refs));
   loomc_status_t status = loomc_ok_status();
   for (loomc_host_size_t i = 0;
        i < options->define_count && loomc_status_is_ok(status); ++i) {

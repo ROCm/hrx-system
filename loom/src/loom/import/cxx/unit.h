@@ -16,6 +16,7 @@
 
 #include "loom/import/cxx/import.h"
 #include "loom/import/cxx/source/frontend.h"
+#include "loom/import/cxx/symbol/kernel_launch.h"
 
 // C++ view of a parsed loom_cxx_unit_t for consumers that share the frontend
 // translation unit with the importer, such as a host code generator in a
@@ -41,6 +42,13 @@ struct UnitStatistics {
   uint64_t import_count = 0;
 };
 UnitStatistics unit_statistics(const loom_cxx_unit_t* unit);
+
+// Host launch facts of every kernel_ref root of the most recent successful
+// import, in request order.
+// A single-source driver combines these with the native argument layout of
+// the compiled kernels to define the host's descriptors.
+const std::vector<KernelLaunch>& unit_kernel_launches(
+    const loom_cxx_unit_t* unit);
 
 }  // namespace loom::cxx_import
 

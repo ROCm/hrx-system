@@ -60,12 +60,12 @@ void loom_cxx_unit_set_diagnostic_sink(loom_cxx_unit_t* unit,
                                        loom_diagnostic_sink_t sink);
 
 // Imports an already parsed translation unit, as loom_cxx_import() does after
-// parsing. Translation options apply: roots, floating-point model, Low
-// assembly environment and source observer.
+// parsing. Translation options apply: roots, kernel_ref roots, floating-point
+// model, Low assembly environment and source observer.
 // The source configuration was fixed by loom_cxx_unit_parse(); options->
-// diagnostic_sink becomes the unit's sink. The unit can be imported again;
-// translation may instantiate further templates in it but does not reparse
-// it.
+// diagnostic_sink becomes the unit's sink. The unit can be imported again,
+// for example with fewer kernel_ref roots; translation may instantiate further
+// templates in it but does not reparse it.
 iree_status_t loom_cxx_import_unit(loom_cxx_unit_t* unit,
                                    loom_context_t* context,
                                    iree_arena_block_pool_t* block_pool,

@@ -194,6 +194,18 @@ typedef struct loomc_cxx_import_options_t {
   /// uses the source identifier. This does not change include lookup or source
   /// diagnostics. Requires `structure_size` to include this field.
   loomc_string_view_t module_name;
+
+  /// Linkage names of specializations ref<&K> of variable templates that a
+  /// driver declares with [[loom::kernel_ref]], for example
+  ///   template <auto K> [[loom::kernel_ref]] extern const launch_info ref;
+  /// as host code generation emits them. When nonempty, the import exports
+  /// their kernels K, together with any |roots|; a root that names one of
+  /// these kernels exports it once, under its kernel_ref export name. The
+  /// importer reads only the leading template argument; the variable's type
+  /// and definition belong to the driver.
+  const loomc_string_view_t* kernel_refs;
+  /// Number of kernel_ref roots.
+  loomc_host_size_t kernel_ref_count;
 } loomc_cxx_import_options_t;
 
 /// Creates an immutable semantic preamble from leading include directives.
@@ -327,14 +339,15 @@ LOOMC_API_EXPORT void loomc_cxx_unit_release(loomc_cxx_unit_t* unit);
 /// @param context Immutable context containing the core dialects.
 /// @param workspace Workspace backing the returned module's arena storage.
 /// @param unit Unit from loomc_cxx_unit_parse. It is not reparsed.
-/// @param options Import policy, or NULL for defaults: roots, floating-point
-/// model and path mapper. Source configuration
+/// @param options Import policy, or NULL for defaults: roots, kernel_ref roots,
+/// floating-point model and path mapper. Source configuration
 /// fields were fixed when the unit was parsed and are ignored.
 /// @param allocator Host allocator for public handles and temporary adapters.
 /// @param out_module Receives one owned module on successful translation.
 /// @param out_result Receives one owned result with retained diagnostics.
 /// @return OK for successful import or diagnosed rejection, as
-/// loomc_module_import_cxx. A unit can be imported again.
+/// loomc_module_import_cxx. A unit can be imported again, for example with
+/// fewer kernel_ref roots.
 ///
 /// @ownership
 /// Release outputs with loomc_module_release and loomc_result_release.
