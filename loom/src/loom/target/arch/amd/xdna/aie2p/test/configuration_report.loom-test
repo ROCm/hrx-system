@@ -62,36 +62,37 @@ COMPILE-REPORT: pipeline.memory[2] placement=1,3 memory_index=2 reserved_byte_co
 // RUN: emit aie2p-xdna input=source-low output=pipeline-report
 
 // A complete input-to-output transfer needs channel storage but no program
-// image or compute worker. Native emission and reporting preserve that cut.
+// image or compute worker. The input selects every other word and the output
+// is contiguous. Both transfer the same two words.
 aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
 
 pipeline.def<kernel> public retain target(@device) @dma_copy() run(%input: buffer, %output: buffer) {
   %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 4} : buffer, buffer
   %memory = pipeline.memory<workgroup>[0, 2] : pool
-  %bytes = index.constant 8 : offset
+  %bytes = index.constant 16 : offset
   %origin = index.constant 0 : offset
   %slots = index.constant 2 : index
   %storage = buffer.alloca<workgroup> pool(%memory) align(4) %bytes : buffer
-  %records = buffer.view %storage[%origin] : buffer -> view<2x1xi32>
-  %channel = channel.bind<fifo> %records, %slots : view<2x1xi32>, index -> channel<tile<1xi32>>
+  %records = buffer.view %storage[%origin] : buffer -> view<2x2xi32>
+  %channel = channel.bind<fifo> %records, %slots : view<2x2xi32>, index -> channel<tile<2xi32>>
   pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
-    %external_input = buffer.view %source[%origin] : buffer -> view<1xi32>
-    %write, %record = channel.reserve %channel : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
-    %ingress = kernel.async.copy %external_input to %record {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<1xi32> to view<1xi32> -> kernel.async.token
+    %external_input = buffer.view %source[%origin] : buffer -> view<2xi32, #encoding.layout.strided<strides=[2]>>
+    %write, %record = channel.reserve %channel : channel<tile<2xi32>> -> (write<tile<2xi32>>, view<2xi32>)
+    %ingress = kernel.async.copy %external_input to %record {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<2xi32, #encoding.layout.strided<strides=[2]>> to view<2xi32> -> kernel.async.token
     %incoming = kernel.async.group %ingress : kernel.async.token -> kernel.async.group
     kernel.async.wait %incoming {newer_groups = 0} : kernel.async.group
-    channel.publish %write : write<tile<1xi32>>
-    %read, %ready = channel.acquire %channel : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
-    %external_output = buffer.view %destination[%origin] : buffer -> view<1xi32>
-    %egress = kernel.async.copy %ready to %external_output {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<1xi32> to view<1xi32> -> kernel.async.token
+    channel.publish %write : write<tile<2xi32>>
+    %read, %ready = channel.acquire %channel : channel<tile<2xi32>> -> (read<tile<2xi32>>, view<2xi32>)
+    %external_output = buffer.view %destination[%origin] : buffer -> view<2xi32>
+    %egress = kernel.async.copy %ready to %external_output {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<2xi32> to view<2xi32> -> kernel.async.token
     %outgoing = kernel.async.group %egress : kernel.async.token -> kernel.async.group
     kernel.async.wait %outgoing {newer_groups = 0} : kernel.async.group
-    channel.release %read : read<tile<1xi32>>
+    channel.release %read : read<tile<2xi32>>
   }
 }
 
 // ----
-COMPILE-REPORT: pipeline.copy root=dma_copy phase=dma_copy occurrence=0 binding=0 direction=read bytes_per_copy=4 copies_per_phase_call=1 reserved_fifo=0 reserved_fifo_capacity=2 reservations_per_worker=1
-COMPILE-REPORT: pipeline.copy root=dma_copy phase=dma_copy occurrence=0 binding=1 direction=write bytes_per_copy=4 copies_per_phase_call=1
-COMPILE-REPORT: pipeline root=dma_copy realization=resident-configuration workers=0 binding_count=2 program_count=0 program_code_byte_count=0 memory_count=1 reserved_storage_byte_count=8 worker_code_byte_count=0 maximum_worker_code_byte_count=0 minimum_worker_code_headroom_byte_count=0 worker_storage_byte_count=0 maximum_tile_local_memory_byte_count=8 minimum_tile_local_memory_headroom_byte_count=65528 maximum_bank_storage_byte_count=8 bank_storage_capacity_byte_count=16384
-COMPILE-REPORT: pipeline.memory[0] placement=0,2 memory_index=0 reserved_byte_count=8 program_data_byte_count=0 occupied_byte_count=8 high_water_byte_count=8 capacity_byte_count=65536 maximum_bank_storage_byte_count=8 bank_storage_capacity_byte_count=16384
+COMPILE-REPORT: pipeline.copy root=dma_copy phase=dma_copy occurrence=0 binding=0 direction=read bytes_per_copy=8 copies_per_phase_call=1 reserved_fifo=0 reserved_fifo_capacity=2 reservations_per_worker=1 contiguous_run_bytes=4
+COMPILE-REPORT: pipeline.copy root=dma_copy phase=dma_copy occurrence=0 binding=1 direction=write bytes_per_copy=8 copies_per_phase_call=1
+COMPILE-REPORT: pipeline root=dma_copy realization=resident-configuration workers=0 binding_count=2 program_count=0 program_code_byte_count=0 memory_count=1 reserved_storage_byte_count=16 worker_code_byte_count=0 maximum_worker_code_byte_count=0 minimum_worker_code_headroom_byte_count=0 worker_storage_byte_count=0 maximum_tile_local_memory_byte_count=16 minimum_tile_local_memory_headroom_byte_count=65520 maximum_bank_storage_byte_count=16 bank_storage_capacity_byte_count=16384
+COMPILE-REPORT: pipeline.memory[0] placement=0,2 memory_index=0 reserved_byte_count=16 program_data_byte_count=0 occupied_byte_count=16 high_water_byte_count=16 capacity_byte_count=65536 maximum_bank_storage_byte_count=16 bank_storage_capacity_byte_count=16384

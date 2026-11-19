@@ -190,7 +190,7 @@ bool loom_aie2p_array_resolve_binding_transfer(
     transfer_byte_length = transfer_bit_length / 8u;
     binding_span_byte_length = binding_span_bit_length / 8u;
 
-    if (!span.dense) {
+    if (!loom_storage_geometry_span_is_dense(&span)) {
       const uint8_t unit_bits = family->address_generation_granularity_bits;
       const bool wide = element_bit_width > unit_bits;
       const uint16_t axis_bits = wide ? unit_bits : element_bit_width;

@@ -9,7 +9,10 @@ from __future__ import annotations
 import pytest
 
 from loom.reporting.compile_report import CompileReportError, parse_compile_report
-from loom.reporting.compile_report_suggestions import CompileReportSuggestionOptions
+from loom.reporting.compile_report_suggestions import (
+    CompileReportSuggestionOptions,
+    build_compile_report_suggestions,
+)
 from loom.target.arch.compile_report_suggestions import suggest_compile_report
 
 
@@ -120,6 +123,45 @@ def test_single_slot_ingress_requires_repeated_reservations_by_one_worker() -> N
     assert finding.example_magnitude == 4096
     assert finding.evidence[1].path.endswith("[0].reservations_per_worker")
     assert finding.evidence[1].value == 2
+
+
+def test_short_external_runs_group_large_live_copies_by_evidence() -> None:
+    site = dict(
+        root="projection",
+        phase="rows",
+        occurrence=0,
+        direction="read",
+        binding=4,
+        bytes_per_copy=16384,
+        copies_per_phase_call=8,
+        contiguous_run_bytes=64,
+    )
+    report = _compile_report([], mode="summary")
+    report["pipeline_external_copies"] = [
+        site,
+        dict(
+            site, direction="write", bytes_per_copy=131072, copies_per_phase_call=None
+        ),
+        dict(site, bytes_per_copy=8192),
+        dict(site, contiguous_run_bytes=128),
+        dict(site, copies_per_phase_call=0),
+        {k: v for k, v in site.items() if k != "contiguous_run_bytes"},
+    ]
+    document = parse_compile_report(report)
+    assert not suggest_compile_report(document).suggestions
+    result = suggest_compile_report(
+        document, CompileReportSuggestionOptions(include_experimental=True)
+    )
+    (finding,) = build_compile_report_suggestions(document, result)["findings"]
+    assert finding["id"] == "pipeline.short_external_runs"
+    assert finding["match_count"] == 2
+    assert finding["confidence"] == "experimental"
+    assert finding["entry"] == "rows binding[4] write"
+    assert "2,048 groups of 64 consecutive bytes" in finding["action"]
+    assert finding["evidence"] == {
+        "pipeline_external_copies[1].bytes_per_copy": 131072,
+        "pipeline_external_copies[1].contiguous_run_bytes": 64,
+    }
 
 
 def test_aggregates_pathological_repetition_into_one_finding() -> None:

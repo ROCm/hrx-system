@@ -38,7 +38,7 @@ TEST(StorageGeometryTest, ScalarWidthsKeepLogicalElementsSeparateFromBits) {
     ASSERT_TRUE(loom_storage_geometry_measure(&geometry, 0, &span));
     EXPECT_EQ(span.element_count, 96u);
     EXPECT_EQ(span.element_span, 96u);
-    EXPECT_TRUE(span.dense);
+    EXPECT_TRUE(loom_storage_geometry_span_is_dense(&span));
   }
 }
 
@@ -55,14 +55,14 @@ TEST(StorageGeometryTest,
   EXPECT_EQ(record.element_count * 2, 2048u);
   EXPECT_EQ(record.element_span * 2, 23168u);
   EXPECT_EQ(geometry.axes[0].element_stride * 2, 128u);
-  EXPECT_FALSE(record.dense);
+  EXPECT_FALSE(loom_storage_geometry_span_is_dense(&record));
 
   loom_storage_geometry_span_t storage;
   ASSERT_TRUE(loom_storage_geometry_measure(&geometry, 0, &storage));
   EXPECT_EQ(storage.element_count * 2, 24576u);
   EXPECT_EQ(storage.element_span * 2, 24576u);
   // The same envelope size as a dense layout does not imply the same walk.
-  EXPECT_FALSE(storage.dense);
+  EXPECT_FALSE(loom_storage_geometry_span_is_dense(&storage));
 }
 
 // Enumerate addresses in logical order rather than reproducing the closed-form
@@ -91,9 +91,10 @@ TEST(StorageGeometryTest, RegionSpansMatchEnumeratedAddresses) {
                 addresses.push_back(row * row_stride + column * column_stride);
               }
             }
-            bool dense = true;
-            for (size_t i = 0; i < addresses.size(); ++i) {
-              dense &= addresses[i] == i;
+            size_t consecutive = 0;
+            while (consecutive < addresses.size() &&
+                   addresses[consecutive] == consecutive) {
+              ++consecutive;
             }
             loom_storage_geometry_span_t span;
             ASSERT_TRUE(
@@ -104,7 +105,9 @@ TEST(StorageGeometryTest, RegionSpansMatchEnumeratedAddresses) {
                                         : *std::max_element(addresses.begin(),
                                                             addresses.end()) +
                                               1);
-            EXPECT_EQ(span.dense, dense);
+            EXPECT_EQ(span.contiguous_element_count, consecutive);
+            EXPECT_EQ(loom_storage_geometry_span_is_dense(&span),
+                      consecutive == addresses.size());
           }
         }
       }
@@ -199,7 +202,7 @@ TEST_F(StorageGeometryFactsTest,
   ASSERT_TRUE(loom_storage_geometry_measure(&geometry, 0, &span));
   EXPECT_EQ(span.element_count * 2, 2048u);
   EXPECT_EQ(span.element_span * 2, 23168u);
-  EXPECT_FALSE(span.dense);
+  EXPECT_FALSE(loom_storage_geometry_span_is_dense(&span));
 
   // The retained geometry owns its axes after the query's fact scope changes.
   IREE_ASSERT_OK(loom_value_fact_table_define(&facts_, 1,

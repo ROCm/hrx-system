@@ -508,7 +508,8 @@ static uint32_t loom_aie2p_native_ingress_records(
       loom_storage_geometry_span_t span;
       if (!loom_storage_geometry_query(&source->facts.context, module,
                                        endpoints[endpoint], &geometry) ||
-          !loom_storage_geometry_measure(&geometry, 0, &span) || !span.dense) {
+          !loom_storage_geometry_measure(&geometry, 0, &span) ||
+          !loom_storage_geometry_span_is_dense(&span)) {
         return 1;
       }
     }

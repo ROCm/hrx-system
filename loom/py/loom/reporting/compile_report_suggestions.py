@@ -23,6 +23,7 @@ from loom.reporting.compile_report_pipelines import (
     build_pipeline_phase_copies,
     build_pipeline_show,
     single_slot_refills,
+    strided_external_copies,
 )
 
 SUGGEST_KIND = "loom.compile_report.suggest"
@@ -112,6 +113,40 @@ def suggest_single_slot_ingress(
                         ("reservations_per_worker", visits),
                         ("bytes_per_copy", width),
                     )
+                ),
+            )
+        )
+    return tuple(findings)
+
+
+def suggest_short_external_runs(
+    document: CompileReportDocument,
+) -> tuple[CompileReportSuggestion, ...]:
+    findings = []
+    for path, phase, binding, direction, width, run in strided_external_copies(
+        document
+    ):
+        if width < 16_384 or run > 64:
+            continue
+        groups = width // run
+        findings.append(
+            CompileReportSuggestion(
+                suggestion_id="pipeline.short_external_runs",
+                entry_name=f"{phase} binding[{binding}] {direction}",
+                confidence=CompileReportSuggestionConfidence.EXPERIMENTAL,
+                example_magnitude=groups,
+                action=(
+                    f"One {width:,} B external {direction} traverses {groups:,} "
+                    f"groups of {run:,} consecutive bytes in source order. "
+                    "Check the selected DMA address order at both endpoints. "
+                    "Compare a longer external run with the reorder in local "
+                    "memory at the same payload and time the complete phase."
+                ),
+                evidence=(
+                    CompileReportSuggestionEvidence(f"{path}.bytes_per_copy", width),
+                    CompileReportSuggestionEvidence(
+                        f"{path}.contiguous_run_bytes", run
+                    ),
                 ),
             )
         )

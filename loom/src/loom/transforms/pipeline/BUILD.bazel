@@ -83,6 +83,7 @@ loom_cc_library(
         "//loom/src/loom/analysis:channel_plan",
         "//loom/src/loom/analysis:kernel_synchronization_legality",
         "//loom/src/loom/analysis:movement",
+        "//loom/src/loom/analysis:storage_geometry",
         "//loom/src/loom/analysis/pipeline:invocations",
         "//loom/src/loom/analysis/pipeline:resources",
         "//loom/src/loom/analysis/pipeline:workers",

@@ -79,7 +79,8 @@ static iree_status_t loom_pipeline_resources_channel_geometry(
                             &record_bit_span)) {
     return iree_ok_status();
   }
-  const uint8_t rank = record.dense ? 0 : storage.rank - 1;
+  const bool dense = loom_storage_geometry_span_is_dense(&record);
+  const uint8_t rank = dense ? 0 : storage.rank - 1;
   const iree_host_size_t axis_bytes = rank * sizeof(storage.axes[0]);
   loom_pipeline_channel_geometry_t* geometry;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(
@@ -89,7 +90,7 @@ static iree_status_t loom_pipeline_resources_channel_geometry(
       .record_element_count = record.element_count,
       .record_bit_span = record_bit_span,
       .element_bit_count = storage.element_bit_count,
-      .record_dense = record.dense,
+      .record_dense = dense,
       .slots_disjoint = loom_pipeline_channel_slots_disjoint(
           &storage, capacity, record.element_span),
       .strided_record_rank = rank};
