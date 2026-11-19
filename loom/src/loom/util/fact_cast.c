@@ -143,6 +143,13 @@ iree_status_t loom_value_fact_table_define_integer_cast(
   }
   if (changed) {
     entry->cast = cast;
+    if (cast.immediate.bit_count) {
+      loom_value_fact_table_record_numeric_endpoint(table, value);
+      loom_value_fact_table_record_numeric_endpoint(
+          table, cast.immediate.source_value_id);
+      loom_value_fact_table_record_numeric_endpoint(
+          table, cast.composed.source_value_id);
+    }
   }
   loom_value_fact_table_record_origin(
       table, value, LOOM_VALUE_FACT_ORIGIN_INTEGER_CAST, changed);

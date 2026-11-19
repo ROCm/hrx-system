@@ -527,6 +527,9 @@ iree_status_t loom_value_fact_table_define_exact_scalar_origin(
         table->arena, value_id, sizeof(*table->exact_scalar_origins.entries),
         &invalid, &table->exact_scalar_origins.range,
         (void**)&table->exact_scalar_origins.entries));
+    loom_value_fact_table_record_numeric_endpoint(table, value_id);
+    loom_value_fact_table_record_numeric_endpoint(table,
+                                                  origin.source_value_id);
   } else if (!loom_value_fact_range_contains(table->exact_scalar_origins.range,
                                              value_id)) {
     return iree_ok_status();

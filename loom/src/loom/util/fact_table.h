@@ -94,6 +94,9 @@ typedef struct loom_value_fact_segment_t {
   uint64_t touched_bits;
   // First value ID of the next touched segment, or INVALID at the tail.
   loom_value_id_t next_touched_segment_id;
+  // Conservative membership of scalar-origin and integer-cast endpoints.
+  // IDs 32 apart share a bit, so a clear bit excludes both from projection.
+  uint32_t numeric_endpoint_bits;
   // Transient publication generations while iterative replay is active.
   uint32_t* replay_generations;
 } loom_value_fact_segment_t;
@@ -272,6 +275,10 @@ struct loom_value_fact_table_t {
 
   // This fact scope has published at least one counted-loop domain.
   bool has_counted_loop_domains;
+
+  // A numeric endpoint was published outside the touched segment domain.
+  // Presence queries remain conservative until the next populated scope.
+  bool has_unindexed_numeric_endpoint;
 
   // Extension entries bypassed the block pool and persist across scopes.
   bool has_persistent_extension_entries;
@@ -891,6 +898,18 @@ static inline loom_value_id_t loom_value_fact_table_query_numeric_identity(
              ? value_id
              : loom_value_fact_table_query_identity(table, source);
 }
+
+// Records an endpoint of a nontrivial numeric interpretation. Publications
+// are monotonic within the scope: withdrawing a proof needs no index update.
+void loom_value_fact_table_record_numeric_endpoint(
+    loom_value_fact_table_t* table, loom_value_id_t value_id);
+
+// Whether another value may represent this integer relation endpoint through
+// a declared identity, an exact scalar origin, or an integer cast. A negative
+// result leaves only direct uses. A positive result requires the ordinary
+// interpretation queries. This summary is for use discovery between solves.
+bool loom_value_fact_table_may_project_integer_endpoint(
+    const loom_value_fact_table_t* table, loom_value_id_t value_id);
 
 // Returns true when exact relation-bearing identities await consumption.
 static inline bool loom_value_fact_table_has_pending_exact_relations(
