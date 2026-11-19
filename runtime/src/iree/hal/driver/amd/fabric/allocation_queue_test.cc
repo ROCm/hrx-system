@@ -74,6 +74,8 @@ struct NativeAllocator {
   uint32_t free_count = 0;
   // Native operation sequence, observed only after explicit completion.
   std::vector<char> operations;
+  // Native allocation sizes in execution order, observed after completion.
+  std::vector<uint64_t> allocation_lengths;
   // Optional native release gate for priority and rollback tests.
   std::function<void()> before_free;
   // Worker thread observed by each native call.
@@ -112,6 +114,7 @@ amdf_status_t AMDF_CALL NativeAllocator::Allocate(
   self->threads.push_back(std::this_thread::get_id());
   ++self->allocate_count;
   self->operations.push_back('A');
+  self->allocation_lengths.push_back(info->byte_length);
   if (self->entered) {
     self->entered->set_value();
     self->resume.wait();
@@ -569,88 +572,150 @@ TEST_F(AllocationQueueTest, RollbackCompletesBeforeLaterAcquisition) {
   Release(later.memories.data(), later.memories.size());
 }
 
-TEST_F(AllocationQueueTest, SlabsAndPrivateBackingShareOneNativeWorker) {
-  iree_hal_mock_device_options_t device_options;
-  iree_hal_mock_device_options_initialize(&device_options);
-  iree_hal_device_t* device = nullptr;
-  IREE_ASSERT_OK(iree_hal_mock_device_create(&device_options,
-                                             iree_allocator_system(), &device));
-  const iree_hal_amd_fabric_slab_provider_options_t provider_options = {
-      .memory = native_.options,
-      .host_binding_index = IREE_HAL_BUFFER_NATIVE_BINDING_INDEX_NONE,
-      .memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-      .maintenance_alignment = 1,
-  };
-  iree_hal_slab_provider_t* provider = nullptr;
-  IREE_ASSERT_OK(iree_hal_amd_fabric_slab_provider_create(
-      device, &native_.api, iree_hal_device_event_sink_discard(), queue_,
-      &provider_options, iree_allocator_system(), &provider));
+struct SlabAcquire {
+  explicit SlabAcquire(size_t count)
+      : geometries(count, iree_hal_slab_request_t{512, 64}), slabs(count) {
+    request.count = geometries.size();
+    request.requests = geometries.data();
+    request.slabs = slabs.data();
+    request.completion = {
+        .fn =
+            [](void* user_data, iree_status_t status,
+               iree_hal_slab_release_info_t release_info) {
+              IREE_EXPECT_OK(iree::Status(std::move(release_info.status)));
+              EXPECT_EQ(release_info.abandoned_byte_length, 0u);
+              static_cast<SlabAcquire*>(user_data)->completed.set_value(
+                  iree::Status(std::move(status)));
+            },
+        .user_data = this,
+    };
+  }
 
+  // Captured slab geometry, borrowed until completion.
+  std::vector<iree_hal_slab_request_t> geometries;
+  // Slab owners published only when the whole batch succeeds.
+  std::vector<iree_hal_slab_t> slabs;
+  // Prepared production slab batch, borrowed through completion.
+  iree_hal_slab_acquire_request_t request = {};
+  // Explicit observation of terminal slab acquisition.
+  std::promise<iree::Status> completed;
+};
+
+class SlabAllocationQueueTest : public AllocationQueueTest {
+ protected:
+  void SetUp() override {
+    AllocationQueueTest::SetUp();
+    iree_hal_mock_device_options_t device_options;
+    iree_hal_mock_device_options_initialize(&device_options);
+    IREE_ASSERT_OK(iree_hal_mock_device_create(
+        &device_options, iree_allocator_system(), &device_));
+    const iree_hal_amd_fabric_slab_provider_options_t provider_options = {
+        .memory = native_.options,
+        .host_binding_index = IREE_HAL_BUFFER_NATIVE_BINDING_INDEX_NONE,
+        .memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+        .maintenance_alignment = 1,
+    };
+    IREE_ASSERT_OK(iree_hal_amd_fabric_slab_provider_create(
+        device_, &native_.api, iree_hal_device_event_sink_discard(), queue_,
+        &provider_options, iree_allocator_system(), &provider_));
+  }
+
+  void TearDown() override {
+    iree_hal_slab_provider_release(provider_);
+    AllocationQueueTest::TearDown();
+    iree_hal_device_release(device_);
+  }
+
+  void ReleaseSlabs(SlabAcquire& acquire) {
+    std::promise<void> released;
+    iree_hal_slab_release_request_t release = {
+        .count = acquire.slabs.size(),
+        .slabs = acquire.slabs.data(),
+        .completion =
+            {
+                .fn =
+                    [](void* user_data,
+                       iree_hal_slab_release_info_t release_info) {
+                      IREE_EXPECT_OK(
+                          iree::Status(std::move(release_info.status)));
+                      EXPECT_EQ(release_info.abandoned_byte_length, 0u);
+                      static_cast<std::promise<void>*>(user_data)->set_value();
+                    },
+                .user_data = &released,
+            },
+    };
+    iree_hal_slab_provider_release_slabs(provider_, &release);
+    released.get_future().get();
+  }
+
+  // Buffer implementation used by the production native slab provider.
+  iree_hal_device_t* device_ = nullptr;
+  // Pool backing shares the fixture's native worker with private allocations.
+  iree_hal_slab_provider_t* provider_ = nullptr;
+};
+
+TEST_F(SlabAllocationQueueTest, PrivateBackingOvertakesRemainingSlabs) {
   std::promise<void> entered;
   std::promise<void> resume;
   native_.entered = &entered;
   native_.resume = resume.get_future().share();
+  SlabAcquire slabs(100);
+  iree_hal_slab_provider_acquire_slabs(provider_, &slabs.request);
+  entered.get_future().get();
   Acquire first(&native_);
   Acquire second(&native_);
+  for (auto& geometry : second.geometries) {
+    geometry.byte_length += 512;
+  }
   iree_hal_amd_fabric_allocation_queue_acquire_memory(queue_, &first.request);
-  entered.get_future().get();
   iree_hal_amd_fabric_allocation_queue_acquire_memory(queue_, &second.request);
-  iree_hal_slab_t slab = {};
-  const iree_hal_slab_request_t geometry = {256, 64};
-  std::promise<iree::Status> acquired;
-  iree_hal_slab_acquire_request_t acquire = {
-      .count = 1,
-      .requests = &geometry,
-      .slabs = &slab,
-      .completion =
-          {
-              .fn =
-                  [](void* user_data, iree_status_t status,
-                     iree_hal_slab_release_info_t release_info) {
-                    IREE_EXPECT_OK(
-                        iree::Status(std::move(release_info.status)));
-                    EXPECT_EQ(release_info.abandoned_byte_length, 0u);
-                    static_cast<std::promise<iree::Status>*>(user_data)
-                        ->set_value(iree::Status(std::move(status)));
-                  },
-              .user_data = &acquired,
-          },
-  };
-  iree_hal_slab_provider_acquire_slabs(provider, &acquire);
   resume.set_value();
   IREE_ASSERT_OK(first.completed.get_future().get());
   IREE_ASSERT_OK(second.completed.get_future().get());
-  IREE_ASSERT_OK(acquired.get_future().get());
+  IREE_ASSERT_OK(slabs.completed.get_future().get());
+  ASSERT_EQ(native_.allocation_lengths.size(), 106u);
+  EXPECT_EQ(std::vector<uint64_t>(native_.allocation_lengths.begin(),
+                                  native_.allocation_lengths.begin() + 8),
+            (std::vector<uint64_t>{512, 128, 192, 256, 640, 704, 768, 512}));
   Release(first.memories.data(), first.memories.size());
   Release(second.memories.data(), second.memories.size());
-  std::promise<void> released;
-  iree_hal_slab_release_request_t release = {
-      .count = 1,
-      .slabs = &slab,
-      .completion =
-          {
-              .fn =
-                  [](void* user_data,
-                     iree_hal_slab_release_info_t release_info) {
-                    IREE_EXPECT_OK(
-                        iree::Status(std::move(release_info.status)));
-                    EXPECT_EQ(release_info.abandoned_byte_length, 0u);
-                    static_cast<std::promise<void>*>(user_data)->set_value();
-                  },
-              .user_data = &released,
-          },
-  };
-  iree_hal_slab_provider_release_slabs(provider, &release);
-  released.get_future().get();
-  iree_hal_slab_provider_release(provider);
-  iree_hal_amd_fabric_allocation_queue_drain(queue_);
-  iree_hal_device_release(device);
-  EXPECT_EQ(native_.allocate_count, 7u);
-  EXPECT_EQ(native_.free_count, 7u);
+  ReleaseSlabs(slabs);
+  EXPECT_EQ(native_.allocate_count, 106u);
+  EXPECT_EQ(native_.free_count, 106u);
   for (auto thread : native_.threads) {
     EXPECT_NE(thread, std::this_thread::get_id());
     EXPECT_EQ(thread, native_.threads.front());
   }
+}
+
+TEST_F(SlabAllocationQueueTest, SlabRollbackPrecedesPrivateBacking) {
+  native_.fail_on_allocate = 3;
+  std::promise<void> entered;
+  std::promise<void> resume;
+  const auto resumed = resume.get_future().share();
+  native_.before_free = [&] {
+    if (native_.free_count == 1) {
+      entered.set_value();
+      resumed.wait();
+    }
+  };
+  SlabAcquire failed(100);
+  iree_hal_slab_provider_acquire_slabs(provider_, &failed.request);
+  entered.get_future().get();
+  Acquire later(&native_);
+  iree_hal_amd_fabric_allocation_queue_acquire_memory(queue_, &later.request);
+  resume.set_value();
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        failed.completed.get_future().get());
+  IREE_ASSERT_OK(later.completed.get_future().get());
+  iree_hal_amd_fabric_allocation_queue_drain(queue_);
+  EXPECT_EQ(native_.operations,
+            (std::vector<char>{'A', 'A', 'A', 'R', 'R', 'A', 'A', 'A'}));
+  for (const auto& slab : failed.slabs) {
+    EXPECT_EQ(slab.provider_handle, 0u);
+    EXPECT_EQ(slab.length, 0u);
+  }
+  Release(later.memories.data(), later.memories.size());
 }
 
 TEST_F(AllocationQueueTest, CompletionReusesDescriptorAndReleasesFinalOwner) {

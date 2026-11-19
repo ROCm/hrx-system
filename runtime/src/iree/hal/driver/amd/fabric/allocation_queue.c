@@ -26,7 +26,9 @@ static_assert(iree_alignof(iree_hal_amd_fabric_memory_operation_t) >= 2,
 typedef enum iree_hal_amd_fabric_allocation_priority_e {
   IREE_HAL_AMD_FABRIC_ALLOCATION_PRIORITY_MAP = 0,
   IREE_HAL_AMD_FABRIC_ALLOCATION_PRIORITY_RELEASE,
-  IREE_HAL_AMD_FABRIC_ALLOCATION_PRIORITY_ACQUIRE,
+  // Backing needed to execute accepted work must not wait behind pool growth.
+  IREE_HAL_AMD_FABRIC_ALLOCATION_PRIORITY_ACQUIRE_BACKING,
+  IREE_HAL_AMD_FABRIC_ALLOCATION_PRIORITY_ACQUIRE_SLAB,
   IREE_HAL_AMD_FABRIC_ALLOCATION_PRIORITY_COUNT,
 } iree_hal_amd_fabric_allocation_priority_t;
 
@@ -386,6 +388,10 @@ static int iree_hal_amd_fabric_allocation_queue_main(void* user_data) {
           queue->rollback_release_info, release_info);
       queue->rollback_release_info = (iree_hal_slab_release_info_t){0};
     }
+    const uint32_t acquisition_priority =
+        link & IREE_HAL_AMD_FABRIC_ALLOCATION_LINK_MEMORY
+            ? IREE_HAL_AMD_FABRIC_ALLOCATION_PRIORITY_ACQUIRE_BACKING
+            : IREE_HAL_AMD_FABRIC_ALLOCATION_PRIORITY_ACQUIRE_SLAB;
     iree_hal_amd_fabric_allocation_complete(link, status, release_info);
     iree_hal_amd_fabric_allocation_queue_release(queue);
     // The worker's independent body claim spans final public release and these
@@ -395,8 +401,7 @@ static int iree_hal_amd_fabric_allocation_queue_main(void* user_data) {
     ++bucket->retired_count;
     if (release && acquisition) {
       // The failed acquisition is terminal only after its rollback callback.
-      ++queue->buckets[IREE_HAL_AMD_FABRIC_ALLOCATION_PRIORITY_ACQUIRE]
-            .retired_count;
+      ++queue->buckets[acquisition_priority].retired_count;
     }
     if (queue->drain_waiter_count) {
       iree_notification_post(&queue->drain_notification, IREE_ALL_WAITERS);
@@ -539,7 +544,7 @@ void iree_hal_amd_fabric_allocation_queue_enqueue(
   iree_hal_amd_fabric_allocation_queue_submit(
       queue,
       operation->type == IREE_HAL_SLAB_OPERATION_ACQUIRE
-          ? IREE_HAL_AMD_FABRIC_ALLOCATION_PRIORITY_ACQUIRE
+          ? IREE_HAL_AMD_FABRIC_ALLOCATION_PRIORITY_ACQUIRE_SLAB
           : IREE_HAL_AMD_FABRIC_ALLOCATION_PRIORITY_RELEASE,
       (uintptr_t)operation);
 }
@@ -549,7 +554,7 @@ void iree_hal_amd_fabric_allocation_queue_acquire_memory(
     iree_hal_amd_fabric_memory_acquire_request_t* request) {
   request->operation.type = IREE_HAL_AMD_FABRIC_MEMORY_OPERATION_ACQUIRE;
   iree_hal_amd_fabric_allocation_queue_submit(
-      queue, IREE_HAL_AMD_FABRIC_ALLOCATION_PRIORITY_ACQUIRE,
+      queue, IREE_HAL_AMD_FABRIC_ALLOCATION_PRIORITY_ACQUIRE_BACKING,
       (uintptr_t)&request->operation |
           IREE_HAL_AMD_FABRIC_ALLOCATION_LINK_MEMORY);
 }
