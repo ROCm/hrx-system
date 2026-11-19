@@ -146,12 +146,22 @@ jobs:
             host_ar: ar
             host_cc: gcc
             host_cxx: g++
-            container_options: >-
+            container_options: &vulkan_container_options >-
               --device /dev/dri --cap-add SYS_ADMIN --cap-add SYSLOG
               --env-file /etc/podinfo/gha-gpu-isolation-settings
               --security-opt seccomp=unconfined
               --security-opt apparmor=unconfined
               --security-opt systempaths=unconfined --user 0:0
+          - name: GCC / Fastbuild / XSJ discrete Vulkan
+            kind: vulkan
+            command: iree-bazel-vulkan
+            runner: labxsj-linux-u2604-discrete-vulkan
+            pci_vendor: '0x10de'
+            uncached: true
+            host_ar: ar
+            host_cc: gcc
+            host_cxx: g++
+            container_options: *vulkan_container_options
           - name: Clang / Fastbuild / AMD gfx942
             kind: amdgpu
             command: iree-bazel-amdgpu
@@ -223,7 +233,7 @@ jobs:
             target_selector: gfx942
             container_options: *amdgpu_container_options
     concurrency:
-      group: iree-bazel-linux-${{ matrix.kind }}-${{ matrix.command }}-${{ matrix.target_selector }}-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
+      group: iree-bazel-linux-${{ matrix.kind }}-${{ matrix.command }}-${{ matrix.target_selector || matrix.runner }}-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true
     runs-on: ${{ matrix.runner }}
     continue-on-error: ${{ matrix.optional || false }}
@@ -541,7 +551,7 @@ jobs:
         if: ${{ always() && steps.iree_bazel_ci.outcome != 'skipped' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: bazel-profiles-${{ matrix.kind }}-${{ matrix.command }}-${{ matrix.target_selector || 'host' }}-attempt-${{ github.run_attempt }}
+          name: bazel-profiles-${{ matrix.kind }}-${{ matrix.command }}-${{ matrix.target_selector || (matrix.kind == 'vulkan' && matrix.runner) || 'host' }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/bazel-profiles/
           if-no-files-found: warn
           compression-level: 0
@@ -551,7 +561,7 @@ jobs:
         if: ${{ always() && steps.iree_bazel_ci.outcome == 'failure' && matrix.kind != 'amdgpu' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: test-results-${{ matrix.command }}-${{ matrix.target_selector || 'host' }}-attempt-${{ github.run_attempt }}
+          name: test-results-${{ matrix.command }}-${{ matrix.target_selector || (matrix.kind == 'vulkan' && matrix.runner) || 'host' }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/repository-test-results-${{ github.run_id }}-${{ github.run_attempt }}/**/bazel-testlogs/**
           if-no-files-found: warn
           retention-days: 7
@@ -603,7 +613,7 @@ jobs:
         if: ${{ always() && matrix.kind == 'vulkan' && steps.iree_bazel_ci.outcome == 'failure' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: vulkan-bazel-executables-attempt-${{ github.run_attempt }}
+          name: vulkan-bazel-executables-${{ matrix.runner }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/vulkan-evidence-${{ github.run_id }}-${{ github.run_attempt }}/
           compression-level: 0
           if-no-files-found: warn
