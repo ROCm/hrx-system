@@ -99,23 +99,34 @@ iree_status_t loom_cfg_execution_classify_unmodeled_blocks(
   return status;
 }
 
+typedef struct loom_cfg_execution_loop_model_t {
+  // Natural loops used to expand the block bounds.
+  const loom_cfg_loop_nest_t* loops;
+  // Indexed by loop, or NULL when all finite counts are exact.
+  const bool* variable_trips;
+} loom_cfg_execution_loop_model_t;
+
 static bool loom_cfg_execution_loop_selector_is_modeled(const void* user_data,
                                                         uint16_t block_index) {
-  const loom_cfg_loop_nest_t* loops = user_data;
+  const loom_cfg_execution_loop_model_t* model = user_data;
+  const loom_cfg_loop_nest_t* loops = model->loops;
   const uint16_t loop = loom_cfg_loop_nest_innermost(loops, block_index);
   return loop != LOOM_CFG_LOOP_NEST_NONE &&
-         loops->loops[loop].header_index == block_index;
+         loops->loops[loop].header_index == block_index &&
+         loops->graph->blocks[block_index].successor_count == 2 &&
+         (!model->variable_trips || !model->variable_trips[loop]);
 }
 
 iree_status_t loom_cfg_execution_counts_calculate(
-    const loom_cfg_loop_nest_t* loops, const uint64_t* trip_counts,
-    const loom_cfg_control_t* control, iree_arena_allocator_t* arena,
-    uint64_t* storage, loom_cfg_execution_counts_t* out_counts) {
+    const loom_cfg_loop_nest_t* loops, const uint64_t* trip_bounds,
+    const bool* variable_trips, const loom_cfg_control_t* control,
+    iree_arena_allocator_t* arena, uint64_t* storage,
+    loom_cfg_execution_counts_t* out_counts) {
   *out_counts = (loom_cfg_execution_counts_t){0};
   bool single_path = false;
   const bool bounded = loom_cfg_loop_nest_calculate_bounds(
-      loops, trip_counts, storage, &single_path);
-  if (bounded && single_path) {
+      loops, trip_bounds, storage, &single_path);
+  if (bounded && single_path && !variable_trips) {
     out_counts->single_path = true;
     out_counts->values = storage;
     return iree_ok_status();
@@ -123,11 +134,15 @@ iree_status_t loom_cfg_execution_counts_calculate(
   if (!control || !bounded) {
     return iree_ok_status();
   }
+  const loom_cfg_execution_loop_model_t model = {
+      .loops = loops,
+      .variable_trips = variable_trips,
+  };
   IREE_RETURN_IF_ERROR(loom_cfg_execution_classify_unmodeled_blocks(
       control,
       (loom_cfg_execution_selector_model_t){
           .is_modeled = loom_cfg_execution_loop_selector_is_modeled,
-          .user_data = loops,
+          .user_data = &model,
       },
       arena, &out_counts->unmodeled_blocks));
   out_counts->values = storage;

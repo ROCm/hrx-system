@@ -75,7 +75,7 @@ static bool loom_pipeline_continuation_scope(
     uint16_t* scope) {
   while (*scope != LOOM_CFG_LOOP_NEST_NONE) {
     const uint16_t header = loops->loops[*scope].header_index;
-    const uint64_t trips = worker->loop_trip_counts[*scope];
+    const uint64_t trips = worker->loop_trip_bounds[*scope];
     const uint64_t headers = worker->execution_counts.values[header];
     if (loom_cfg_execution_count_is_exact(&worker->execution_counts, header) &&
         trips && trips != UINT64_MAX && headers % (trips + 1) == 0 &&

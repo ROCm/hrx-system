@@ -232,7 +232,7 @@ static iree_status_t loom_check_test_pipeline_transport_print(
       const uint16_t parent = structure->loops.loops[i].parent_loop_index;
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           output, "    loop %u: iterations=%" PRIu64 " parent=", i,
-          worker->loop_trip_counts[i]));
+          worker->loop_trip_bounds[i]));
       if (parent == LOOM_CFG_LOOP_NEST_NONE) {
         IREE_RETURN_IF_ERROR(
             iree_string_builder_append_cstring(output, "none\n"));

@@ -1,6 +1,7 @@
 // RUN: emit pipeline-continuations @stream
 
-// Reverse demand order selects the first actual read, not source phase zero.
+// A bounded scan of the bulk record finishes before the reader gets its
+// prefix. Both records are read once even when the scan is empty.
 func.def @ingress(%source: buffer, %prefix: channel<tile<4xi32>>, %bulk: channel<tile<4xi32>>) {
   %origin = index.constant 0 : offset
   %input = buffer.view %source[%origin] : buffer -> view<4xi32>
@@ -17,15 +18,32 @@ func.def @ingress(%source: buffer, %prefix: channel<tile<4xi32>>, %bulk: channel
   func.return
 }
 
-func.def @reader_1(%prefix: channel<tile<4xi32>>, %bulk: channel<tile<4xi32>>, %condition: i1) {
+func.def @reader_1(%prefix: channel<tile<4xi32>>, %bulk: channel<tile<4xi32>>, %length: index, %checksum: buffer) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %initial = scalar.constant 0 : i32
+  %count = index.assume %length [range(%length, 0, 4)] : index
+  %result = buffer.view %checksum[%origin] : buffer -> view<1xi32>
   %bulk_read, %bulk_view = channel.acquire %bulk : channel<tile<4xi32>> -> (read<tile<4xi32>>, view<4xi32>)
+  cfg.br ^scan(%c0: index, %initial: i32)
+^scan(%i: index, %sum: i32):
+  %more = index.cmp ult, %i, %count : index
+  cfg.cond_br %more, ^word, ^done
+^word:
+  %value = view.load %bulk_view[%i] : view<4xi32> -> i32
+  %updated = scalar.addi %sum, %value : i32
+  %next = index.add %i, %c1 : index
+  cfg.br ^scan(%next: index, %updated: i32)
+^done:
+  view.store %sum, %result[%c0] : i32, view<1xi32>
   channel.release %bulk_read : read<tile<4xi32>>
   %prefix_read, %prefix_view = channel.acquire %prefix : channel<tile<4xi32>> -> (read<tile<4xi32>>, view<4xi32>)
   channel.release %prefix_read : read<tile<4xi32>>
   func.return
 }
 
-pipeline.def<kernel> public @stream() run(%source: buffer, %memory: pool, %condition: i1) {
+pipeline.def<kernel> public @stream() run(%source: buffer, %memory: pool, %length: index, %checksum: buffer) {
   %bytes = index.constant 128 : offset
   %origin = index.constant 0 : offset
   %second_slot = index.constant 64 : offset
@@ -39,7 +57,7 @@ pipeline.def<kernel> public @stream() run(%source: buffer, %memory: pool, %condi
     func.call @ingress(%source, %prefix, %bulk) : (buffer, channel<tile<4xi32>>, channel<tile<4xi32>>)
   }
   pipeline.strand workers([0], [1], [1]) {
-    func.call @reader_1(%prefix, %bulk, %condition) : (channel<tile<4xi32>>, channel<tile<4xi32>>, i1)
+    func.call @reader_1(%prefix, %bulk, %length, %checksum) : (channel<tile<4xi32>>, channel<tile<4xi32>>, index, buffer)
   }
 }
 

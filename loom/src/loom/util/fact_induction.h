@@ -83,6 +83,16 @@ loom_loop_recurrence_facts_t loom_value_fact_induction_facts(
     const loom_value_fact_table_t* table, const loom_module_t* module,
     const loom_value_fact_induction_t* induction);
 
+// Evaluates each retained equation once. Bounds are exact counts, finite
+// maxima, or UINT64_MAX for an unknown count. Only a finite variable count
+// needs a precision flag. Both arrays belong to arena and variable_trips is
+// NULL when no loop has a finite variable count.
+iree_status_t loom_value_fact_induction_trip_bounds(
+    const loom_value_fact_table_t* table, const loom_module_t* module,
+    const loom_value_fact_induction_t* inductions, iree_host_size_t loop_count,
+    iree_arena_allocator_t* arena, const uint64_t** out_bounds,
+    const bool** out_variable_trips);
+
 // Recognizes a necessary guard's recurrence at a verified LoopLike boundary.
 // The summary owner supplies a structurally implied guard and its truth, after
 // computing declared SSA aliases. A guard other than the condition selector
