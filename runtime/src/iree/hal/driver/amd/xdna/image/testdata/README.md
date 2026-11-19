@@ -1,5 +1,27 @@
 # XDNA execution fixtures
 
+## Standalone MLIR-AIE ELFs
+
+The two files under `aie/` are complete MLIR-AIE compiler outputs. The named
+export `main:sequence` starts a worker that writes 42 and drains one 32-bit
+word into output binding zero. `full_elf_42.elf` is the default
+one-shot image. `full_elf_42_expanded.elf` uses `--expand-load-pdis` for
+repeated dispatch. Its command references two reset PDIs with identical bytes
+under distinct symbols. Their firmware addresses distinguish the two loads.
+Both files retain the ELF groups, symbols, and relocations used at load time.
+[Upstream program and host caller](https://github.com/Xilinx/mlir-aie/tree/86ca39d361d3b24bebfd2f699131fabb8fa47fc4/test/python/npu-xrt/full_elf_42)
+
+The test-only `aie:full_elf_42` target embeds the checked-in bytes. For fixture
+updates, configure `aiecc` from MLIR-AIE v1.4.5 on `PATH` with its pinned
+Peano backend (`22.0.0.2026102001+4f5df13d`) and run the following from the
+repository root. The input MLIR is the output of the upstream IRON example.
+
+```sh
+python3 runtime/src/iree/hal/driver/amd/xdna/image/testdata/aie/regenerate.py
+```
+
+## Native Loom images
+
 `mul_i32.loom` and `add_i32.loom` produce the native images used by the loader
 and execution CTS. Their exports multiply or add sixteen little-endian i32
 pairs, retaining each result's low 32 bits. Both have three buffer bindings:
