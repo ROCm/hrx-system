@@ -39,7 +39,7 @@ typedef struct loom_pipeline_execution_t {
   const iree_host_size_t* offsets;
   // Total actual invocation/engine pairs in the compact ranges.
   iree_host_size_t participant_count;
-  // Serial participant sets, sorted by bound source scope address.
+  // Serial participant sets indexed by bound scope ordinal.
   const loom_pipeline_execution_schedule_t* schedules;
   // Number of bound serial scopes, including nested scopes.
   iree_host_size_t schedule_count;
@@ -99,12 +99,13 @@ static inline iree_host_size_t loom_pipeline_execution_index(
                                      : execution->offsets[invocation] + index;
 }
 
-// Returns the retained physical participant record for a source scope. The
-// scope belongs to the graph used to build execution; the lookup neither
-// traverses nor replans it.
-const loom_pipeline_execution_schedule_t* loom_pipeline_execution_schedule(
+// Returns the physical participants of a scope in this execution graph.
+static inline const loom_pipeline_execution_schedule_t*
+loom_pipeline_execution_schedule(
     const loom_pipeline_execution_t* execution,
-    const loom_pipeline_invocation_schedule_t* schedule);
+    const loom_pipeline_invocation_schedule_t* schedule) {
+  return &execution->schedules[schedule->ordinal];
+}
 
 #ifdef __cplusplus
 }  // extern "C"

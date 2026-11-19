@@ -173,7 +173,6 @@ loom_cc_library(
         ":participants",
         ":resources",
         ":schedule",
-        "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

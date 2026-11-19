@@ -164,8 +164,6 @@ iree_status_t loom_aie2p_native_select_collectives(
       }
     }
   }
-  loom_aie2p_native_collective_sort(context->collectives,
-                                    context->collective_count);
   *out_valid = true;
   return iree_ok_status();
 }
@@ -239,6 +237,10 @@ iree_status_t loom_aie2p_native_route_collectives(
       }
     }
   }
+  // Packet allocation follows construction order. Pointer order is only
+  // an index for looking up the assigned packets during worker emission.
+  loom_aie2p_native_collective_sort(context->collectives,
+                                    context->collective_count);
   *out_valid = true;
   return iree_ok_status();
 }

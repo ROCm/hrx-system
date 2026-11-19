@@ -221,8 +221,8 @@ static iree_status_t loom_pipeline_invocations_append(
 
 static iree_status_t loom_pipeline_invocations_collect(
     loom_module_t* module, loom_pipeline_invocation_frame_t* frame,
-    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
-    bool* out_valid) {
+    iree_host_size_t* next_scope, iree_diagnostic_emitter_t diagnostic_emitter,
+    iree_arena_allocator_t* arena, bool* out_valid) {
   *out_valid = false;
   loom_pipeline_invocation_t* invocation = &frame->invocation;
   const loom_pipeline_resources_t* resources = invocation->resources;
@@ -260,6 +260,7 @@ static iree_status_t loom_pipeline_invocations_collect(
   for (loom_pipeline_invocation_scope_t* scope = first; scope;
        scope = scope->next) {
     loom_pipeline_invocation_schedule_t* schedule = scope->schedule;
+    schedule->ordinal = (*next_scope)++;
     const loom_pipeline_schedule_t* source = schedule->source;
     const loom_pipeline_invocation_step_t** blocks = NULL;
     IREE_RETURN_IF_ERROR(
@@ -354,8 +355,9 @@ iree_status_t loom_pipeline_invocations_build(
   memset(active, 0, module->symbols.count * sizeof(*active));
   active[loom_func_like_callee(root_function).symbol_id] = true;
   bool collected = false;
+  iree_host_size_t next_scope = 0;
   IREE_RETURN_IF_ERROR(loom_pipeline_invocations_collect(
-      module, root, diagnostic_emitter, arena, &collected));
+      module, root, &next_scope, diagnostic_emitter, arena, &collected));
   if (!collected) {
     return iree_ok_status();
   }
@@ -432,7 +434,7 @@ iree_status_t loom_pipeline_invocations_build(
     last->ordered_next = child;
     last = child;
     IREE_RETURN_IF_ERROR(loom_pipeline_invocations_collect(
-        module, child, diagnostic_emitter, arena, &collected));
+        module, child, &next_scope, diagnostic_emitter, arena, &collected));
     if (!collected) {
       return iree_ok_status();
     }

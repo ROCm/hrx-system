@@ -100,6 +100,7 @@ class PipelineExecutionTest : public ::testing::Test {
     scope.bound_block = scope.bindings.data();
     scope.bound.source = &scope.source;
     scope.bound.blocks = &scope.bound_block;
+    scope.bound.ordinal = scopes_.size() - 1;
     return scope;
   }
 
@@ -211,6 +212,9 @@ TEST_F(PipelineExecutionTest, SerialChildrenReuseEnginesAcrossNestedScopes) {
   EXPECT_EQ(Participant(second, 0), 2u);
   EXPECT_EQ(Participant(second, 1), 3u);
   EXPECT_EQ(execution_.schedule_count, 2u);
+  EXPECT_EQ(execution_.schedules[nested.bound.ordinal].source, &nested.bound);
+  EXPECT_EQ(execution_.schedules[outer.bound.ordinal].source,
+            &root.schedules[0]);
   const auto* nested_workers =
       loom_pipeline_execution_schedule(&execution_, &nested.bound)
           ->participants;
