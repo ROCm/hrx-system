@@ -503,7 +503,11 @@ TEST_P(KfdReservationFragmentTest, PreservesExactRangesAndOnePublication) {
     uint64_t prefix;
   };
   const Range ranges[] = {
-      {0, 3 * fragment, 0},
+      {0, fragment, 0},
+      {0, 2 * fragment - page, 0},
+      {0, 2 * fragment, fragment},
+      {0, 2 * fragment + page, fragment},
+      {0, 3 * fragment, fragment},
       {page, fragment - page, 0},
       {page, fragment, 0},
       {page, 2 * fragment - page, fragment - page},
