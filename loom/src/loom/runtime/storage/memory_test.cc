@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <string>
+#include <thread>
 #include <utility>
 
 #include "loom/runtime/parameter/residency.h"
@@ -66,7 +67,7 @@ TEST_F(MemoryTest, DefaultAdmissionUsesPhysicalBackingAndOptionalBudget) {
   EXPECT_EQ(loom_runtime_memory_pool_limit(pool), capacity);
 }
 
-TEST_F(MemoryTest, UnknownPhysicalCapacityRequiresExplicitBudget) {
+TEST_F(MemoryTest, ExplicitBudgetControlsStartupWithUnknownPhysicalCapacity) {
   auto* queue = loom_runtime_device_transfer_queue(device);
   auto* hal_group = loom_runtime_device_group(device);
   iree_hal_pool_family_access_t family = {
@@ -103,13 +104,33 @@ TEST_F(MemoryTest, UnknownPhysicalCapacityRequiresExplicitBudget) {
   for (uint64_t budget : {uint64_t{0}, UINT64_MAX}) {
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_FAILED_PRECONDITION,
-        loom_runtime_memory_pool_allocate(hal_group, scope, supplied, queue,
-                                          geometry, geometry, budget,
-                                          iree_allocator_system(), &selected));
+        loom_runtime_memory_pool_allocate(
+            hal_group, scope, supplied, queue, geometry, geometry,
+            {.limit_bytes = budget}, iree_allocator_system(), &selected));
     ASSERT_EQ(selected, nullptr);
   }
+  // Fail one native acquisition after acceptance and let the sibling finish.
+  // The caller gets the original error and can immediately retry creation.
+  supplied->defer = true;
+  std::thread completion([&] {
+    supplied->WaitForAcquisition();
+    supplied->FailOne();
+    supplied->WaitForAcquisition();
+    supplied->CompleteOne();
+  });
+  iree::Status failure = loom_runtime_memory_pool_allocate(
+      hal_group, scope, supplied, queue, geometry, geometry,
+      {.limit_bytes = 2 * kSlabSize, .prewarm_bytes = 2 * kSlabSize},
+      iree_allocator_system(), &selected);
+  completion.join();
+  EXPECT_EQ(failure.code(), iree::StatusCode::kResourceExhausted);
+  EXPECT_THAT(failure.ToString(),
+              ::testing::HasSubstr("native allocation failed"));
+  ASSERT_EQ(selected, nullptr);
+  supplied->defer = false;
   IREE_ASSERT_OK(loom_runtime_memory_pool_allocate(
-      hal_group, scope, supplied, queue, geometry, geometry, kSlabSize,
+      hal_group, scope, supplied, queue, geometry, geometry,
+      {.limit_bytes = kSlabSize, .prewarm_bytes = kSlabSize},
       iree_allocator_system(), &selected));
   const auto release_pool = [](loom_runtime_memory_pool_t* pool) {
     loom_runtime_memory_pool_trim(pool, 0);

@@ -70,7 +70,7 @@ TEST_F(DeviceConfigurationOptionsTest, RequiresExactlyOneSource) {
 TEST_F(DeviceConfigurationOptionsTest,
        NamedConfigurationRejectsEverySingleDeviceOption) {
   iree_string_view_t device_uri = IREE_SV("task");
-  loom_serve_device_configuration_options_t cases[7] = {};
+  loom_serve_device_configuration_options_t cases[8] = {};
   for (auto& options : cases) {
     options.configuration_path = IREE_SV("not-opened.json");
   }
@@ -84,6 +84,7 @@ TEST_F(DeviceConfigurationOptionsTest,
   cases[4].memory_bytes = IREE_SV("0");
   cases[5].workspace_idle_ms = IREE_SV("0");
   cases[6].parameter_idle_ms = IREE_SV("0");
+  cases[7].memory_prewarm_bytes = IREE_SV("0");
   const char* names[] = {
       "device",
       "pool_backing",
@@ -92,6 +93,7 @@ TEST_F(DeviceConfigurationOptionsTest,
       "memory_bytes",
       "workspace_idle_ms",
       "parameter_idle_ms",
+      "memory_prewarm_bytes",
   };
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(cases); ++i) {
     SCOPED_TRACE(names[i]);
@@ -140,6 +142,7 @@ TEST_F(DeviceConfigurationOptionsTest, MapsSingleDeviceValuesExactly) {
       .weight_slab_bytes = IREE_SV("1gb"),
       .state_slab_bytes = IREE_SV("64mib"),
       .memory_bytes = IREE_SV("64gib"),
+      .memory_prewarm_bytes = IREE_SV("1gib"),
       .workspace_idle_ms = IREE_SV("2000"),
       .parameter_idle_ms = IREE_SV("60000"),
   };
@@ -157,6 +160,7 @@ TEST_F(DeviceConfigurationOptionsTest, MapsSingleDeviceValuesExactly) {
   EXPECT_EQ(pool_options.weight_slab_size, UINT64_C(1000000000));
   EXPECT_EQ(pool_options.state_slab_size, UINT64_C(64) << 20);
   EXPECT_EQ(pool_options.memory_limit, UINT64_C(64) << 30);
+  EXPECT_EQ(pool_options.memory_prewarm_bytes, UINT64_C(1) << 30);
   EXPECT_EQ(configuration_.idle[0].workspace_timeout,
             iree_make_duration_ms(2000));
   EXPECT_EQ(configuration_.idle[0].parameter_timeout,
@@ -243,7 +247,7 @@ TEST_F(DeviceConfigurationOptionsTest, RejectsIdleIntervalOverflow) {
 }
 
 TEST_F(DeviceConfigurationOptionsTest,
-       FixedBackingRejectsOnlyNonzeroPhysicalBudget) {
+       FixedBackingRejectsNonzeroBudgetOrPrewarm) {
   iree_string_view_t device_uri = IREE_SV("task");
   loom_serve_device_configuration_options_t options = {
       .device_uris = {.count = 1, .values = &device_uri},
@@ -254,6 +258,10 @@ TEST_F(DeviceConfigurationOptionsTest,
                 "a physical budget requires elastic backing");
 
   options.memory_bytes = IREE_SV("0");
+  options.memory_prewarm_bytes = IREE_SV("1");
+  ExpectFailure(options, iree::StatusCode::kInvalidArgument,
+                "prewarming requires elastic backing");
+  options.memory_prewarm_bytes = IREE_SV("0");
   IREE_ASSERT_OK(Initialize(options));
   ASSERT_EQ(configuration_.pool_count, 1u);
   EXPECT_FALSE(configuration_.pools[0].options.elastic);

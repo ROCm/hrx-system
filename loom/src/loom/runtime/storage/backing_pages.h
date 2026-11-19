@@ -54,6 +54,13 @@ iree_status_t loom_runtime_backing_pages_allocate(
     loom_runtime_backing_pages_t** out_pages);
 void loom_runtime_backing_pages_free(loom_runtime_backing_pages_t* pages);
 
+// Seeds a newly created inventory with ready, unclaimed packed-page parents.
+// Reserves the complete native cost before submission and joins all accepted
+// acquisitions before returning, including on failure.
+iree_status_t loom_runtime_backing_pages_prewarm(
+    loom_runtime_backing_pages_t* pages, iree_hal_memory_budget_t* budget,
+    uint64_t minimum_bytes);
+
 // Complete additional physical cost after reusable slots/whole parents. The
 // dedicated cost is captured from the source at buffer-geometry construction.
 uint64_t loom_runtime_backing_pages_growth_cost(
@@ -106,8 +113,9 @@ uint64_t loom_runtime_backing_pages_cached(
     const loom_runtime_backing_pages_t* pages);
 bool loom_runtime_backing_pages_is_pending(
     const loom_runtime_backing_pages_t* pages);
-// Outer-thread join only. Native failures remain on their operations/accounts.
-void loom_runtime_backing_pages_await(loom_runtime_backing_pages_t* pages);
+// Outer-thread join. Publishes all pending parents and returns their status.
+iree_status_t loom_runtime_backing_pages_await(
+    loom_runtime_backing_pages_t* pages);
 
 #ifdef __cplusplus
 }  // extern "C"

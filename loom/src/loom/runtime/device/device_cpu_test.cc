@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <array>
+#include <memory>
 
 #include "iree/base/threading/notification.h"
 #include "iree/testing/gtest.h"
@@ -161,6 +162,63 @@ TEST_P(CpuDeviceTest, GroupProgressRetiresIndependentElasticPools) {
       EXPECT_EQ(value, 0x12340000u + i);
     }
   }
+}
+
+TEST_P(CpuDeviceTest, PrewarmedSlabsServeDemandAndTrimToZero) {
+  const loom_runtime_device_options_t device = {
+      .driver = loom_runtime_host_task_driver(host_),
+      .uri = IREE_SV("task"),
+  };
+  IREE_ASSERT_OK(loom_runtime_device_group_allocate(
+      host_, 1, &device, iree_allocator_system(), &group_));
+  constexpr uint64_t kSlab = 512 * 1024;
+  loom_runtime_pool_options_t options = {
+      .elastic = true,
+      .weight_slab_size = 4 * kSlab,
+      .state_slab_size = kSlab,
+      .memory_limit = kSlab + 1,
+      .memory_prewarm_bytes = kSlab + 1,
+  };
+  const loom_runtime_pool_binding_t binding = {IREE_SV("sessions"), 1};
+  loom_runtime_pool_t* pool = nullptr;
+  // The requested bytes fit exactly, but two whole slabs do not.
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_runtime_device_group_create_pool(group_, binding, &options, &pool));
+  EXPECT_EQ(pool, nullptr);
+  EXPECT_EQ(loom_runtime_device_group_pool_count(group_), 0u);
+  options.memory_limit = 3 * kSlab;
+  IREE_ASSERT_OK(
+      loom_runtime_device_group_create_pool(group_, binding, &options, &pool));
+  auto* memory = loom_runtime_pool_memory(pool);
+  const auto initial = loom_runtime_memory_pool_statistics(memory);
+  EXPECT_EQ(initial.cached_bytes, 2 * kSlab);
+  EXPECT_EQ(initial.committed_bytes, initial.cached_bytes);
+  EXPECT_EQ(loom_runtime_memory_pool_live_bytes(memory), 0u);
+
+  const auto geometry = loom_runtime_pool_state_geometry(pool);
+  loom_runtime_storage_statistics_t usage = {};
+  loom_runtime_virtual_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      memory, geometry, 3 * kSlab, geometry.granularity, &usage, &buffer));
+  const auto release = [](loom_runtime_virtual_buffer_t* buffer) {
+    IREE_EXPECT_OK(loom_runtime_virtual_buffer_free(buffer));
+  };
+  std::unique_ptr<loom_runtime_virtual_buffer_t, decltype(release)> owner(
+      buffer, release);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(buffer, 0, 2 * kSlab));
+  const auto reused = loom_runtime_memory_pool_statistics(memory);
+  EXPECT_EQ(reused.committed_bytes, initial.committed_bytes);
+  EXPECT_EQ(reused.cached_bytes, 0u);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(buffer, 2 * kSlab, kSlab));
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(memory).committed_bytes,
+            3 * kSlab);
+  owner.reset();
+  IREE_ASSERT_OK(loom_runtime_pool_trim(pool, 0));
+  IREE_ASSERT_OK(loom_runtime_memory_pool_await(memory));
+  const auto trimmed = loom_runtime_memory_pool_statistics(memory);
+  EXPECT_EQ(trimmed.cached_bytes, 0u);
+  EXPECT_EQ(trimmed.committed_bytes, 0u);
 }
 
 TEST_P(CpuDeviceTest, DevicesUseApplicationWorkerBudgetAndOneGroup) {

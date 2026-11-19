@@ -47,6 +47,10 @@ IREE_FLAG(string, memory_bytes, "",
           "snapshots, other host allocations, and driver overhead are outside "
           "this budget. "
           "Accepts byte counts or size strings such as 64gib.");
+IREE_FLAG(string, memory_prewarm_bytes, "",
+          "Acquire reusable elastic state-page backing before serving, e.g. "
+          "1gib. Rounded up to whole physical slabs within --memory_bytes. "
+          "Pressure or explicit trim can release idle slabs. Default zero.");
 IREE_FLAG(string, workspace_idle_ms, "",
           "Single-device workspace idle expiry in milliseconds; default zero "
           "disables automatic release.");
@@ -69,8 +73,8 @@ static iree_status_t loom_serve_device_configuration_initialize_options_impl(
   if (options->configuration_path.size) {
     if (options->device_uris.count || options->pool_backing.size ||
         options->weight_slab_bytes.size || options->state_slab_bytes.size ||
-        options->memory_bytes.size || options->workspace_idle_ms.size ||
-        options->parameter_idle_ms.size) {
+        options->memory_bytes.size || options->memory_prewarm_bytes.size ||
+        options->workspace_idle_ms.size || options->parameter_idle_ms.size) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "--devices cannot be combined with --device or "
@@ -110,18 +114,22 @@ static iree_status_t loom_serve_device_configuration_initialize_options_impl(
     }
     const iree_string_view_t values[] = {
         options->weight_slab_bytes, options->state_slab_bytes,
-        options->memory_bytes, options->workspace_idle_ms,
-        options->parameter_idle_ms};
+        options->memory_bytes,      options->memory_prewarm_bytes,
+        options->workspace_idle_ms, options->parameter_idle_ms};
     const char* names[] = {"weight_slab_bytes", "state_slab_bytes",
-                           "memory_bytes", "workspace_idle_ms",
-                           "parameter_idle_ms"};
+                           "memory_bytes",      "memory_prewarm_bytes",
+                           "workspace_idle_ms", "parameter_idle_ms"};
     uint64_t numbers[] = {pool_options->weight_slab_size,
-                          pool_options->state_slab_size, 0, 0, 0};
+                          pool_options->state_slab_size,
+                          0,
+                          0,
+                          0,
+                          0};
     iree_status_t status = iree_ok_status();
     for (iree_host_size_t i = 0;
          i < IREE_ARRAYSIZE(values) && iree_status_is_ok(status); ++i) {
       if (values[i].size) {
-        if (i < 3) {
+        if (i < 4) {
           iree_device_size_t size = 0;
           status = iree_string_view_parse_device_size(values[i], &size);
           numbers[i] = size;
@@ -134,20 +142,18 @@ static iree_status_t loom_serve_device_configuration_initialize_options_impl(
       }
     }
     IREE_RETURN_IF_ERROR(status);
-    if (numbers[3] > INT64_MAX / 1000000 || numbers[4] > INT64_MAX / 1000000) {
+    if (numbers[4] > INT64_MAX / 1000000 || numbers[5] > INT64_MAX / 1000000) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "pool idle interval is out of range");
-    }
-    if (!pool_options->elastic && numbers[2]) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "a physical budget requires elastic backing");
     }
     pool_options->weight_slab_size = (iree_device_size_t)numbers[0];
     pool_options->state_slab_size = (iree_device_size_t)numbers[1];
     pool_options->memory_limit = numbers[2];
+    pool_options->memory_prewarm_bytes = numbers[3];
+    IREE_RETURN_IF_ERROR(loom_runtime_pool_options_validate(pool_options));
     out_configuration->idle[0] = (loom_runtime_pool_idle_policy_t){
-        .workspace_timeout = (iree_duration_t)numbers[3] * 1000000,
-        .parameter_timeout = (iree_duration_t)numbers[4] * 1000000};
+        .workspace_timeout = (iree_duration_t)numbers[4] * 1000000,
+        .parameter_timeout = (iree_duration_t)numbers[5] * 1000000};
   }
   if (options->wait_mode.size) {
     IREE_RETURN_IF_ERROR(loom_serve_device_configuration_set_wait_mode(
@@ -187,6 +193,7 @@ iree_status_t loom_serve_device_group_allocate_from_flags(
       .weight_slab_bytes = iree_make_cstring_view(FLAG_weight_slab_bytes),
       .state_slab_bytes = iree_make_cstring_view(FLAG_state_slab_bytes),
       .memory_bytes = iree_make_cstring_view(FLAG_memory_bytes),
+      .memory_prewarm_bytes = iree_make_cstring_view(FLAG_memory_prewarm_bytes),
       .workspace_idle_ms = iree_make_cstring_view(FLAG_workspace_idle_ms),
       .parameter_idle_ms = iree_make_cstring_view(FLAG_parameter_idle_ms),
   };

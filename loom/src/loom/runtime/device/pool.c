@@ -135,8 +135,11 @@ static iree_status_t loom_runtime_pool_initialize_elastic(
   if (iree_status_is_ok(status)) {
     status = loom_runtime_memory_pool_allocate(
         group, scope, source_pool, allocation_queue, pool->weight_geometry,
-        pool->state_geometry, options->memory_limit, pool->host_allocator,
-        &pool->memory);
+        pool->state_geometry,
+        (loom_runtime_memory_pool_options_t){
+            .limit_bytes = options->memory_limit,
+            .prewarm_bytes = options->memory_prewarm_bytes},
+        pool->host_allocator, &pool->memory);
   }
   iree_hal_pool_release(source_pool);
   IREE_RETURN_IF_ERROR(status);
@@ -164,21 +167,31 @@ static iree_status_t loom_runtime_pool_initialize_elastic(
       group, pool->virtual_pool, range, pool->host_allocator, &pool->workspace);
 }
 
-iree_status_t loom_runtime_pool_allocate(
-    iree_hal_device_group_t* group, iree_hal_pool_scope_t scope,
-    iree_hal_queue_t* allocation_queue,
-    const loom_runtime_pool_options_t* options, iree_allocator_t host_allocator,
-    loom_runtime_pool_t** out_pool) {
-  *out_pool = NULL;
+iree_status_t loom_runtime_pool_options_validate(
+    const loom_runtime_pool_options_t* options) {
   if (!options->elastic && options->memory_limit) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "a physical budget requires elastic backing");
+  }
+  if (!options->elastic && options->memory_prewarm_bytes) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "prewarming requires elastic backing");
   }
   if (options->elastic &&
       iree_hal_asan_pool_options_is_enabled(&options->asan)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "address-sanitized pools require fixed backing");
   }
+  return iree_ok_status();
+}
+
+iree_status_t loom_runtime_pool_allocate(
+    iree_hal_device_group_t* group, iree_hal_pool_scope_t scope,
+    iree_hal_queue_t* allocation_queue,
+    const loom_runtime_pool_options_t* options, iree_allocator_t host_allocator,
+    loom_runtime_pool_t** out_pool) {
+  *out_pool = NULL;
+  IREE_RETURN_IF_ERROR(loom_runtime_pool_options_validate(options));
   iree_hal_pool_placement_t placement;
   IREE_RETURN_IF_ERROR(loom_runtime_pool_resolve_placement(
       group, options->placement, &placement));

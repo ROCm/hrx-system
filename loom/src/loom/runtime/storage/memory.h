@@ -57,21 +57,30 @@ void loom_runtime_memory_demand_add(loom_runtime_memory_demand_t* demand,
 // Logical bytes represented by this demand, excluding native source padding.
 uint64_t loom_runtime_memory_demand_total(loom_runtime_memory_demand_t demand);
 
+// Physical budget and startup inventory for an elastic pool.
+typedef struct loom_runtime_memory_pool_options_t {
+  // Maximum physical charge, including native retirement and backing loss.
+  // Zero uses source capacity. An unknown capacity requires a finite limit.
+  uint64_t limit_bytes;
+  // Ready packed-page capacity requested at creation, rounded up to physical
+  // parents and charged to the limit. Idle parents remain reclaimable.
+  uint64_t prewarm_bytes;
+} loom_runtime_memory_pool_options_t;
+
 // Retains the mapping-source pool and copies the exact virtual-target scope.
 // The sealed group and selected transfer queue outlive this pool. Geometries
-// have been qualified by query_geometry for this source and scope. limit_bytes
-// bounds physical commitment, including pending native release and permanent
-// backing loss. storage_pool is an exclusive native slab source without its own
-// idle backing cache, and this owner controls it for the budget's entire
-// lifetime. Zero selects the source's physical capacity; an explicit budget can
-// tighten that ceiling. Unknown physical capacity requires a finite budget.
+// have been qualified by query_geometry for this source and scope. The owner
+// controls the exclusive native slab source for its entire budget lifetime.
+// An explicit budget can tighten source capacity. Creation waits for any
+// requested initial backing before publishing the pool.
 // Each reservation borrows this pool and is destroyed before the pool.
 iree_status_t loom_runtime_memory_pool_allocate(
     iree_hal_device_group_t* group, iree_hal_pool_scope_t scope,
     iree_hal_pool_t* storage_pool, iree_hal_queue_t* queue,
     loom_runtime_memory_geometry_t weight_geometry,
-    loom_runtime_memory_geometry_t state_geometry, uint64_t limit_bytes,
-    iree_allocator_t host_allocator, loom_runtime_memory_pool_t** out_pool);
+    loom_runtime_memory_geometry_t state_geometry,
+    loom_runtime_memory_pool_options_t options, iree_allocator_t host_allocator,
+    loom_runtime_memory_pool_t** out_pool);
 
 void loom_runtime_memory_pool_free(loom_runtime_memory_pool_t* pool);
 

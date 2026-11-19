@@ -49,13 +49,13 @@ typedef struct loom_serve_device_configuration_fields_t {
   // Decoder owning storage for string values in one device or pool entry.
   loom_serve_device_configuration_parser_t* parser;
   // Decoded strings or raw JSON values; null data marks omission.
-  iree_string_view_t values[8];
+  iree_string_view_t values[9];
 } loom_serve_device_configuration_fields_t;
 
 static const char* const loom_serve_device_configuration_field_names[] = {
-    "devices",           "pool_backing", "weight_slab_bytes",
-    "state_slab_bytes",  "memory_bytes", "workspace_idle_ms",
-    "parameter_idle_ms", "placement"};
+    "devices",           "pool_backing",      "weight_slab_bytes",
+    "state_slab_bytes",  "memory_bytes",      "memory_prewarm_bytes",
+    "workspace_idle_ms", "parameter_idle_ms", "placement"};
 
 static iree_status_t loom_serve_device_configuration_field(
     void* self, iree_string_view_t key, iree_json_value_type_t type,
@@ -75,9 +75,9 @@ static iree_status_t loom_serve_device_configuration_field(
   }
   const bool type_allowed =
       (type == IREE_JSON_VALUE_TYPE_ARRAY && i == 0) ||
-      (type == IREE_JSON_VALUE_TYPE_STRING && i > 0 && i < 5) ||
-      (type == IREE_JSON_VALUE_TYPE_NUMBER && i >= 2 && i < 7) ||
-      (type == IREE_JSON_VALUE_TYPE_OBJECT && i == 7);
+      (type == IREE_JSON_VALUE_TYPE_STRING && i > 0 && i < 6) ||
+      (type == IREE_JSON_VALUE_TYPE_NUMBER && i >= 2 && i < 8) ||
+      (type == IREE_JSON_VALUE_TYPE_OBJECT && i == 8);
   if (fields->values[i].data || !type_allowed) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "duplicate or wrongly typed pool field '%s'",
@@ -284,11 +284,11 @@ static iree_status_t loom_serve_device_configuration_pool(
   }
   pool.binding.device_mask = members.mask;
   loom_runtime_pool_options_t* options = &pool.options;
-  if (fields.values[7].data) {
+  if (fields.values[8].data) {
     loom_serve_device_configuration_placement_t placement = {.parser = parser};
     IREE_RETURN_IF_ERROR(
         iree_json_enumerate_object_typed(
-            fields.values[7], loom_serve_device_configuration_placement,
+            fields.values[8], loom_serve_device_configuration_placement,
             &placement),
         "pool '%.*s' placement", (int)pool.binding.name.size,
         pool.binding.name.data);
@@ -306,13 +306,13 @@ static iree_status_t loom_serve_device_configuration_pool(
                               "pool_backing must be elastic or fixed");
     }
   }
-  uint64_t numbers[] = {options->weight_slab_size, options->state_slab_size, 0,
-                        0, 0};
+  uint64_t numbers[] = {
+      options->weight_slab_size, options->state_slab_size, 0, 0, 0, 0};
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(numbers) && iree_status_is_ok(status); ++i) {
     if (fields.values[i + 2].data) {
-      if (i < 3) {
+      if (i < 4) {
         iree_device_size_t size = 0;
         status =
             iree_string_view_parse_device_size(fields.values[i + 2], &size);
@@ -329,17 +329,15 @@ static iree_status_t loom_serve_device_configuration_pool(
     }
   }
   IREE_RETURN_IF_ERROR(status);
-  if (numbers[3] > INT64_MAX / 1000000 || numbers[4] > INT64_MAX / 1000000) {
+  if (numbers[4] > INT64_MAX / 1000000 || numbers[5] > INT64_MAX / 1000000) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "pool idle interval is out of range");
-  }
-  if (!options->elastic && numbers[2]) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "a physical budget requires elastic backing");
   }
   options->weight_slab_size = (iree_device_size_t)numbers[0];
   options->state_slab_size = (iree_device_size_t)numbers[1];
   options->memory_limit = numbers[2];
+  options->memory_prewarm_bytes = numbers[3];
+  IREE_RETURN_IF_ERROR(loom_runtime_pool_options_validate(options));
   IREE_RETURN_IF_ERROR(iree_allocator_realloc_array(
       configuration->host_allocator, index + 1, sizeof(*configuration->pools),
       (void**)&configuration->pools));
@@ -348,8 +346,8 @@ static iree_status_t loom_serve_device_configuration_pool(
       (void**)&configuration->idle));
   configuration->pools[index] = pool;
   configuration->idle[index] = (loom_runtime_pool_idle_policy_t){
-      .workspace_timeout = (iree_duration_t)numbers[3] * 1000000,
-      .parameter_timeout = (iree_duration_t)numbers[4] * 1000000};
+      .workspace_timeout = (iree_duration_t)numbers[4] * 1000000,
+      .parameter_timeout = (iree_duration_t)numbers[5] * 1000000};
   ++configuration->pool_count;
   return iree_ok_status();
 }

@@ -98,7 +98,7 @@ void BM_TransitionBacking(benchmark::State& state) {
   loom_runtime_memory_pool_t* pool = nullptr;
   IREE_CHECK_OK(loom_runtime_memory_pool_allocate(
       hal_group, scope, source, queue, weight_geometry, geometry,
-      iree_max(kParentBytes, length), allocator, &pool));
+      {.limit_bytes = iree_max(kParentBytes, length)}, allocator, &pool));
   loom_runtime_storage_statistics_t statistics = {};
   loom_runtime_virtual_buffer_t* buffer = nullptr;
   IREE_CHECK_OK(loom_runtime_virtual_buffer_allocate(

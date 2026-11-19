@@ -387,7 +387,7 @@ class MemoryTest : public ::testing::Test {
     if (iree_status_is_ok(status)) {
       status = loom_runtime_memory_pool_allocate(
           hal_group, scope, backing, queue, geometries[0], geometries[1],
-          limit_bytes, host_allocator, &owned_pool);
+          {.limit_bytes = limit_bytes}, host_allocator, &owned_pool);
     }
     iree_hal_pool_release(backing);
     IREE_ASSERT_OK(status);
