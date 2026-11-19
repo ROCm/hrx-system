@@ -39,8 +39,10 @@ struct NativeQueue : iree_hal_queue_t {
 
   // Public point must remain pending until submit relinquishes its arguments.
   iree_hal_semaphore_t* completion = nullptr;
-  // Counts the native copy and final cache boundary separately.
+  // Sequential native submission ordinal used as the completion epoch.
   uint32_t submissions = 0;
+  // Submission carrying the caller's consumer boundary, or zero if absent.
+  uint32_t consumer_submission = 0;
   // Selected native rejection, or zero when every operation is accepted.
   uint32_t reject_submission = 0;
   // Completion may occur on a different CPU before submit returns.
@@ -99,6 +101,10 @@ struct NativeQueue : iree_hal_queue_t {
       queue->submitting = false;
       return iree_make_status(IREE_STATUS_UNAVAILABLE,
                               "native submit rejected");
+    }
+    if (after) {
+      EXPECT_EQ(queue->consumer_submission, 0u);
+      queue->consumer_submission = queue->submissions;
     }
     if (queue->defer_retirement) {
       queue->pending_callback = callback;
@@ -252,7 +258,9 @@ class FileTransferTest : public ::testing::Test {
   }
 
   void Transfer(iree_hal_memory_access_t access, bool concurrent,
-                uint32_t reject = 0, bool deferred = false) {
+                uint32_t reject = 0, bool deferred = false,
+                amdf_queue_publication_modes_t mode =
+                    AMDF_QUEUE_PUBLICATION_MODE_KERNEL) {
     Device device;
     iree_hal_queue_family_t family = {.device = device.get()};
     NativeQueue queue;
@@ -277,6 +285,7 @@ class FileTransferTest : public ::testing::Test {
         .begin = NativeQueue::Begin,
         .end = NativeQueue::End,
         .waits = &waits_,
+        .publication_mode = mode,
         .transfer_site = IREE_HAL_MEMORY_SITE_QUEUE,
         .barrier_size = sizeof(uint64_t),
         .submit = NativeQueue::Submit,
@@ -324,14 +333,20 @@ class FileTransferTest : public ::testing::Test {
     } else {
       IREE_ASSERT_OK(iree_hal_semaphore_query(completion_, &completed_value));
       EXPECT_EQ(completed_value, 1u);
-      EXPECT_EQ(queue.submissions, 2u);
+      const uint32_t expected_submissions =
+          mode == AMDF_QUEUE_PUBLICATION_MODE_KERNEL &&
+                  access == IREE_HAL_MEMORY_ACCESS_READ
+              ? 1u
+              : 2u;
+      EXPECT_EQ(queue.submissions, expected_submissions);
+      EXPECT_EQ(queue.consumer_submission, expected_submissions);
       iree_async_single_frontier_t frontier = {};
       EXPECT_EQ(iree_async_semaphore_query_frontier(
                     reinterpret_cast<iree_async_semaphore_t*>(completion_), 1,
                     iree_async_single_frontier_as_frontier(&frontier)),
                 1u);
       EXPECT_EQ(frontier.entries[0].axis, 7u);
-      EXPECT_EQ(frontier.entries[0].epoch, 2u);
+      EXPECT_EQ(frontier.entries[0].epoch, expected_submissions);
       const auto& actual = access == IREE_HAL_MEMORY_ACCESS_READ
                                ? buffer->device_contents
                                : contents_;
@@ -366,6 +381,11 @@ TEST_F(FileTransferTest, InlineReadJoinsSubmitBeforeAdvancing) {
   Transfer(IREE_HAL_MEMORY_ACCESS_READ, false);
 }
 
+TEST_F(FileTransferTest, UserQueuePublishesConsumerBoundaryAfterCopy) {
+  Transfer(IREE_HAL_MEMORY_ACCESS_READ, false, 0, false,
+           AMDF_QUEUE_PUBLICATION_MODE_USER);
+}
+
 void FileTransferTest::DeviceStorage(iree_hal_memory_access_t access,
                                      bool allow_access) {
   Device device;
@@ -382,6 +402,7 @@ void FileTransferTest::DeviceStorage(iree_hal_memory_access_t access,
       .begin = NativeQueue::Begin,
       .end = NativeQueue::End,
       .waits = &waits_,
+      .publication_mode = AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
       .transfer_site = IREE_HAL_MEMORY_SITE_QUEUE,
       .barrier_size = sizeof(uint64_t),
       .submit = NativeQueue::Submit,
@@ -433,11 +454,11 @@ void FileTransferTest::DeviceStorage(iree_hal_memory_access_t access,
     EXPECT_EQ(copy.type, IREE_HAL_TRANSFER_OPERATION_TYPE_COPY);
     NativeQueue::Copy(&copy);
   }
-  // Final publication can now retire inline. The file remains owned until
-  // after the copy's deferred terminal notification, not merely acceptance.
-  queue.defer_retirement = false;
+  // This device-to-device copy owns both the file and its consumer boundary.
+  EXPECT_EQ(queue.consumer_submission, 1u);
   queue.pending_callback.fn(queue.pending_callback.user_data, iree_ok_status(),
                             nullptr, true);
+  EXPECT_EQ(queue.submissions, 1u);
   EXPECT_TRUE(file.destroyed);
   EXPECT_EQ(queue.host_owners.load(), 0);
   IREE_ASSERT_OK(iree_hal_semaphore_query(completion_, &value));
@@ -486,7 +507,7 @@ TEST_F(FileTransferTest, RejectedCopyFailsPublicCompletion) {
   Transfer(IREE_HAL_MEMORY_ACCESS_READ, false, 1);
 }
 TEST_F(FileTransferTest, RejectedReturnBoundaryFailsPublicCompletion) {
-  Transfer(IREE_HAL_MEMORY_ACCESS_READ, false, 2);
+  Transfer(IREE_HAL_MEMORY_ACCESS_WRITE, false, 2);
 }
 TEST_F(FileTransferTest, DeferredDependencyRetainsParentThroughCompletion) {
   Transfer(IREE_HAL_MEMORY_ACCESS_READ, true, 0, true);
@@ -515,6 +536,7 @@ void FileTransferTest::FailedNativeWork(iree_hal_memory_access_t access) {
       .begin = NativeQueue::Begin,
       .end = NativeQueue::End,
       .waits = &waits_,
+      .publication_mode = AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
       .transfer_site = IREE_HAL_MEMORY_SITE_QUEUE,
       .barrier_size = sizeof(uint64_t),
       .submit = NativeQueue::Submit,
@@ -600,6 +622,7 @@ TEST_F(FileTransferTest, UnqualifiedMemoryFileFailsBeforeNativeSubmission) {
       .begin = NativeQueue::Begin,
       .end = NativeQueue::End,
       .waits = &waits_,
+      .publication_mode = AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
       .transfer_site = IREE_HAL_MEMORY_SITE_QUEUE,
       .barrier_size = sizeof(uint64_t),
       .submit = NativeQueue::Submit,
@@ -644,6 +667,7 @@ void FileTransferTest::IndirectCountWithoutRecords(uint64_t count) {
       .begin = NativeQueue::Begin,
       .end = NativeQueue::End,
       .waits = &waits_,
+      .publication_mode = AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
       .transfer_site = IREE_HAL_MEMORY_SITE_QUEUE,
       .barrier_size = sizeof(uint64_t),
       .submit = NativeQueue::Submit,
