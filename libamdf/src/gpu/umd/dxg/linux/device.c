@@ -8,11 +8,20 @@
 
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/dxg/linux/api.h"
+#include "libamdf/src/gpu/umd/dxg/linux/memory.h"
 #include "libamdf/src/gpu/umd/dxg/linux/memory_profile.h"
 #include "libamdf/src/gpu/umd/dxg/wsl/api.h"
 
 static amdf_status_t amdf_gpu_linux_dxg_device_release_native(
     amdf_gpu_umd_device_t* device) {
+  const amdf_gpu_dxg_memory_device_t memory =
+      amdf_gpu_linux_dxg_memory_device(device);
+  const amdf_status_t mapping_status =
+      amdf_gpu_dxg_mapping_context_deinitialize(
+          &device->mapping_context, device->logical_device.kmt, &memory);
+  if (!amdf_status_is_ok(mapping_status)) {
+    return mapping_status;
+  }
   amdf_status_t status = AMDF_STATUS_OK;
   if (device->paging_queue.native != 0) {
     status = amdf_gpu_linux_dxg_paging_queue_consume(&device->paging_queue);
@@ -46,6 +55,11 @@ amdf_status_t amdf_gpu_linux_dxg_device_create(
     return status;
   }
   device->host_allocator = host_allocator;
+  const int error = pthread_mutex_init(&device->mapping_lock, NULL);
+  if (error != 0) {
+    amdf_free(host_allocator, device);
+    return amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, (uint32_t)error);
+  }
   amdf_gpu_linux_dxg_device_status_initialize(&device->status);
   device->adapter = endpoint->adapter;
   device->adapter_luid =
@@ -102,6 +116,9 @@ amdf_status_t amdf_gpu_linux_dxg_device_create(
     if (!amdf_status_is_ok(release_status)) {
       status = release_status;
     }
+    const int destroy_error = pthread_mutex_destroy(&device->mapping_lock);
+    amdf_assert(destroy_error == 0);
+    (void)destroy_error;
     amdf_free(host_allocator, device);
   }
   return status;
@@ -111,6 +128,9 @@ amdf_status_t amdf_gpu_linux_dxg_device_destroy(amdf_gpu_umd_device_t* device) {
   const amdf_status_t status = amdf_gpu_linux_dxg_device_release_native(device);
   if (amdf_status_is_ok(status)) {
     const amdf_allocator_t host_allocator = device->host_allocator;
+    const int destroy_error = pthread_mutex_destroy(&device->mapping_lock);
+    amdf_assert(destroy_error == 0);
+    (void)destroy_error;
     amdf_free(host_allocator, device);
   }
   return status;

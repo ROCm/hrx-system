@@ -139,6 +139,10 @@ bool amdf_kmt_api_supports_gpu_kernel_execution(const amdf_kmt_api_t* api);
 // Returns true when the complete XDNA kernel-submission procedure set exists.
 bool amdf_kmt_api_supports_xdna_kernel_execution(const amdf_kmt_api_t* api);
 
+// Returns whether a synchronization-only context can publish GPU address
+// updates.
+bool amdf_kmt_api_supports_mapping_context(const amdf_kmt_api_t* api);
+
 // Returns true for immediate success and queued asynchronous acceptance.
 bool amdf_kmt_status_is_success_or_pending(NTSTATUS status);
 

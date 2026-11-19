@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "libamdf/src/gpu/umd/memory.h"
+#include "libamdf/src/gpu/umd/wddm/memory.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -13,6 +13,8 @@
 
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
+#include "libamdf/src/gpu/umd/dxg/mapping_context.h"
+#include "libamdf/src/gpu/umd/memory.h"
 #include "libamdf/src/gpu/umd/memory_reservation.h"
 #include "libamdf/src/gpu/umd/wddm/device.h"
 
@@ -578,6 +580,47 @@ TEST_F(WindowsGpuMemoryTest, ReservationBorrowsTheExactCommonProcessAddress) {
   EXPECT_EQ(information.State, MEM_RESERVE);
   EXPECT_EQ(information.AllocationBase, process_address);
   EXPECT_NE(VirtualFree(process_address, 0, MEM_RELEASE), 0);
+}
+
+TEST_F(WindowsGpuMemoryTest, RetainsPartialMappingContextForCheckedRelease) {
+  kmt_.create_context_virtual =
+      [](D3DKMT_CREATECONTEXTVIRTUAL* create) -> NTSTATUS {
+    EXPECT_EQ(create->Flags.SynchronizationOnly, 1u);
+    create->hContext = 0x71;
+    return 0;
+  };
+  kmt_.create_synchronization_object =
+      [](D3DKMT_CREATESYNCHRONIZATIONOBJECT2*) -> NTSTATUS {
+    return kStatusNoMemory;
+  };
+  D3DDDI_UPDATEGPUVIRTUALADDRESS_OPERATION operation = {};
+  operation.OperationType = D3DDDI_UPDATEGPUVIRTUALADDRESS_UNMAP;
+  operation.Unmap.SizeInBytes = 65536;
+  operation.Unmap.Protection.NoAccess = 1;
+  amdf_gpu_dxg_mapping_point_t point = {};
+  bool mutated = false;
+  const auto memory = amdf_gpu_wddm_memory_device(&device_);
+  EXPECT_EQ(amdf_gpu_dxg_mapping_context_submit(&device_.mapping_context, &kmt_,
+                                                device_.device, 0, 1,
+                                                &operation, &mutated, &point),
+            amdf_kmt_make_status(kStatusNoMemory));
+  EXPECT_FALSE(mutated);
+  EXPECT_EQ(point.value, 0u);
+  kmt_.destroy_context = [](const D3DKMT_DESTROYCONTEXT* destroy) -> NTSTATUS {
+    EXPECT_EQ(destroy->hContext, 0x71u);
+    return kStatusNoMemory;
+  };
+  EXPECT_EQ(amdf_gpu_dxg_mapping_context_deinitialize(&device_.mapping_context,
+                                                      &kmt_, &memory),
+            amdf_kmt_make_status(kStatusNoMemory));
+  kmt_.destroy_context = [](const D3DKMT_DESTROYCONTEXT* destroy) -> NTSTATUS {
+    EXPECT_EQ(destroy->hContext, 0x71u);
+    return 0;
+  };
+  EXPECT_EQ(amdf_gpu_dxg_mapping_context_deinitialize(&device_.mapping_context,
+                                                      &kmt_, &memory),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(device_.mapping_context.handle, 0u);
 }
 
 TEST_F(WindowsGpuMemoryTest,

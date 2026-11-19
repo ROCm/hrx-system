@@ -15,6 +15,7 @@
 #include "libamdf/src/gpu/umd/dxg/linux/device.h"
 #include "libamdf/src/gpu/umd/dxg/linux/kernel_queue.h"
 #include "libamdf/src/gpu/umd/dxg/linux/memory.h"
+#include "libamdf/src/gpu/umd/dxg/mapping_context.h"
 
 namespace {
 
@@ -61,6 +62,16 @@ struct FakeReservationState {
   volatile uint64_t queue_progress = 0;
   uint64_t mapping_predecessor = 0;
   uint64_t ordering_point = 0;
+  volatile uint64_t mapping_progress = 0;
+  uint32_t mapping_context_creations = 0;
+  uint32_t mapping_context_removals = 0;
+  NTSTATUS create_context_status = 0;
+  NTSTATUS mapping_wait_status = 0;
+  NTSTATUS mapping_issue_status = 0;
+  NTSTATUS destroy_context_status = 0;
+  uint32_t mapping_fence_removals = 0;
+  std::vector<uint64_t> mapping_predecessors;
+  std::vector<uint64_t> mapping_waits;
   uint32_t queue_destroy_count = 0;
   D3DDDI_UPDATEGPUVIRTUALADDRESS_OPERATION mapping_operation = {};
   std::vector<Operation> operations;
@@ -166,10 +177,55 @@ extern "C" uint32_t __wrap_amdf_linux_dxg_connection_invoke(void* context,
               arguments);
       EXPECT_EQ(wait->hDevice, 0x10u);
       EXPECT_EQ(wait->ObjectCount, 1u);
+      if (wait->ObjectHandleArray[0] == 0x61) {
+        const uint64_t value = wait->FenceValueArray[0];
+        current_state->mapping_waits.push_back(value);
+        if (current_state->mapping_wait_status == 0) {
+          current_state->mapping_progress = value;
+        }
+        return static_cast<uint32_t>(current_state->mapping_wait_status);
+      }
       EXPECT_EQ(wait->ObjectHandleArray[0], 0x50u);
       const uint64_t target = wait->FenceValueArray[0];
       current_state->waits.push_back(target);
       current_state->paging_progress = target;
+      return 0;
+    }
+    case 0x04: {
+      auto* create = static_cast<D3DKMT_CREATECONTEXTVIRTUAL*>(arguments);
+      EXPECT_EQ(create->hDevice, 0x10u);
+      EXPECT_EQ(create->EngineAffinity, 1u << 3);
+      EXPECT_EQ(create->Flags.SynchronizationOnly, 1u);
+      EXPECT_EQ(create->Flags.HwQueueSupported, 0u);
+      EXPECT_EQ(create->PrivateDriverDataSize, 0u);
+      ++current_state->mapping_context_creations;
+      if (current_state->create_context_status == 0) {
+        create->hContext = 0x71;
+      }
+      return static_cast<uint32_t>(current_state->create_context_status);
+    }
+    case 0x10: {
+      auto* create =
+          static_cast<D3DKMT_CREATESYNCHRONIZATIONOBJECT2*>(arguments);
+      EXPECT_EQ(create->hDevice, 0x10u);
+      EXPECT_EQ(create->Info.Type, D3DDDI_MONITORED_FENCE);
+      EXPECT_EQ(create->Info.MonitoredFence.EngineAffinity, 1u << 3);
+      create->hSyncObject = 0x61;
+      create->Info.MonitoredFence.FenceValueCPUVirtualAddress =
+          const_cast<uint64_t*>(&current_state->mapping_progress);
+      return 0;
+    }
+    case 0x05: {
+      EXPECT_EQ(static_cast<D3DKMT_DESTROYCONTEXT*>(arguments)->hContext,
+                0x71u);
+      ++current_state->mapping_context_removals;
+      return static_cast<uint32_t>(current_state->destroy_context_status);
+    }
+    case 0x1D: {
+      ++current_state->mapping_fence_removals;
+      EXPECT_EQ(static_cast<D3DKMT_DESTROYSYNCHRONIZATIONOBJECT*>(arguments)
+                    ->hSyncObject,
+                0x61u);
       return 0;
     }
     case 0x39: {
@@ -177,6 +233,21 @@ extern "C" uint32_t __wrap_amdf_linux_dxg_connection_invoke(void* context,
       const auto* update =
           static_cast<D3DKMT_UPDATEGPUVIRTUALADDRESS*>(arguments);
       EXPECT_EQ(update->hDevice, 0x10u);
+      if (update->hContext == 0x71) {
+        EXPECT_EQ(update->hFenceObject, 0x61u);
+        EXPECT_EQ(update->NumOperations, 2u);
+        current_state->mapping_predecessors.push_back(update->FenceValue);
+        for (uint32_t i = 0; i < update->NumOperations; ++i) {
+          const auto& operation = update->Operations[i];
+          EXPECT_EQ(operation.OperationType,
+                    D3DDDI_UPDATEGPUVIRTUALADDRESS_UNMAP);
+          EXPECT_EQ(operation.Unmap.BaseAddress,
+                    current_state->automatic_address + i * 8192);
+          EXPECT_EQ(operation.Unmap.SizeInBytes, 4096u);
+          EXPECT_EQ(operation.Unmap.Protection.NoAccess, 1u);
+        }
+        return static_cast<uint32_t>(current_state->mapping_issue_status);
+      }
       EXPECT_EQ(update->hContext, 0x70u);
       EXPECT_EQ(update->hFenceObject, 0x60u);
       EXPECT_EQ(update->NumOperations, 1u);
@@ -235,12 +306,18 @@ class LinuxDxgMemoryReservationTest : public ::testing::Test {
                 .progress_fence = &state_.paging_progress,
             },
     };
+    ASSERT_EQ(pthread_mutex_init(&device_.mapping_lock, nullptr), 0);
     device_.logical_device.provider_adapter.api = &provider_;
     device_.logical_device.provider_adapter.native =
         reinterpret_cast<amdf_dxg_provider_gpu_adapter_t*>(&state_);
   }
 
   void TearDown() override {
+    const auto memory = amdf_gpu_linux_dxg_memory_device(&device_);
+    EXPECT_EQ(amdf_gpu_dxg_mapping_context_deinitialize(
+                  &device_.mapping_context, &kmt_, &memory),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(pthread_mutex_destroy(&device_.mapping_lock), 0);
     current_connection = nullptr;
     current_state = nullptr;
   }
@@ -254,6 +331,16 @@ class LinuxDxgMemoryReservationTest : public ::testing::Test {
                   common_address, &reservation),
               AMDF_STATUS_OK);
     return reservation;
+  }
+
+  amdf_status_t UnmapTwoPages(amdf_gpu_umd_memory_reservation_t* reservation,
+                              bool* mutated) {
+    const amdf_gpu_umd_mapping_update_t updates[] = {
+        {.target_byte_offset = 0, .byte_length = 4096},
+        {.target_byte_offset = 8192, .byte_length = 4096},
+    };
+    return amdf_gpu_linux_dxg_memory_reservation_update(reservation, 0, 2,
+                                                        updates, mutated);
   }
 
   FakeReservationState state_;
@@ -394,6 +481,96 @@ TEST_F(LinuxDxgMemoryReservationTest,
                 Operation::kReserve, Operation::kUpdate, Operation::kOrder,
                 Operation::kMap, Operation::kWait, Operation::kQueryDeviceState,
                 Operation::kFree}));
+}
+
+TEST_F(LinuxDxgMemoryReservationTest, SharesOneContextAndJoinsBeforeDetach) {
+  auto* first = CreateReservation();
+  auto* second = CreateReservation();
+  bool mutated = false;
+  ASSERT_EQ(UnmapTwoPages(first, &mutated), AMDF_STATUS_OK);
+  EXPECT_TRUE(mutated);
+  state_.mapping_wait_status = kStatusNoMemory;
+  mutated = false;
+  EXPECT_EQ(UnmapTwoPages(second, &mutated),
+            amdf_make_status(AMDF_STATUS_DOMAIN_NTSTATUS,
+                             static_cast<uint32_t>(kStatusNoMemory)));
+  EXPECT_TRUE(mutated);
+  EXPECT_EQ(state_.mapping_context_creations, 1u);
+  EXPECT_EQ(state_.mapping_predecessors, (std::vector<uint64_t>{0, 1}));
+  EXPECT_EQ(state_.mapping_waits, (std::vector<uint64_t>{1, 2}));
+  EXPECT_TRUE(state_.maps.empty());
+
+  EXPECT_NE(amdf_gpu_linux_dxg_memory_reservation_detach(second, 0),
+            AMDF_STATUS_OK);
+  EXPECT_TRUE(state_.maps.empty());
+  state_.mapping_wait_status = 0;
+  EXPECT_EQ(amdf_gpu_linux_dxg_memory_reservation_destroy(second),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(state_.mapping_waits, (std::vector<uint64_t>{1, 2, 2, 2}));
+  EXPECT_EQ(state_.maps.size(), 1u);
+  EXPECT_EQ(amdf_gpu_linux_dxg_memory_reservation_destroy(first),
+            AMDF_STATUS_OK);
+  const auto memory = amdf_gpu_linux_dxg_memory_device(&device_);
+  EXPECT_EQ(amdf_gpu_dxg_mapping_context_deinitialize(&device_.mapping_context,
+                                                      &kmt_, &memory),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(state_.mapping_context_removals, 1u);
+}
+
+TEST_F(LinuxDxgMemoryReservationTest,
+       RetriesPreparationFailuresAndRemembersMissingCapability) {
+  auto* reservation = CreateReservation();
+  bool mutated = false;
+  state_.create_context_status = kStatusNoMemory;
+  EXPECT_EQ(UnmapTwoPages(reservation, &mutated),
+            amdf_make_status(AMDF_STATUS_DOMAIN_NTSTATUS,
+                             static_cast<uint32_t>(kStatusNoMemory)));
+  EXPECT_FALSE(mutated);
+  EXPECT_TRUE(state_.maps.empty());
+  state_.create_context_status =
+      static_cast<NTSTATUS>(0xC00000BBu);  // STATUS_NOT_SUPPORTED
+  for (int i = 0; i < 2; ++i) {
+    ASSERT_EQ(UnmapTwoPages(reservation, &mutated), AMDF_STATUS_OK);
+    EXPECT_TRUE(mutated);
+  }
+  EXPECT_EQ(state_.mapping_context_creations, 2u);
+  EXPECT_EQ(state_.maps.size(), 4u);
+  EXPECT_TRUE(state_.mapping_predecessors.empty());
+  EXPECT_EQ(amdf_gpu_linux_dxg_memory_reservation_destroy(reservation),
+            AMDF_STATUS_OK);
+}
+
+TEST_F(LinuxDxgMemoryReservationTest, FailedIssueKeepsTheLastAcceptedPoint) {
+  auto* first = CreateReservation();
+  auto* second = CreateReservation();
+  bool mutated = false;
+  state_.mapping_issue_status = static_cast<NTSTATUS>(0xC00000BBu);
+  EXPECT_EQ(UnmapTwoPages(first, &mutated),
+            amdf_make_status(AMDF_STATUS_DOMAIN_NTSTATUS, 0xC00000BBu));
+  EXPECT_TRUE(mutated);
+  EXPECT_TRUE(state_.maps.empty());
+  EXPECT_TRUE(state_.mapping_waits.empty());
+  state_.mapping_issue_status = 0;
+  ASSERT_EQ(UnmapTwoPages(second, &mutated), AMDF_STATUS_OK);
+  EXPECT_EQ(state_.mapping_predecessors, (std::vector<uint64_t>{0, 0}));
+  EXPECT_EQ(state_.mapping_waits, (std::vector<uint64_t>{1}));
+  ASSERT_EQ(amdf_gpu_linux_dxg_memory_reservation_destroy(first),
+            AMDF_STATUS_OK);
+  ASSERT_EQ(amdf_gpu_linux_dxg_memory_reservation_destroy(second),
+            AMDF_STATUS_OK);
+
+  const auto memory = amdf_gpu_linux_dxg_memory_device(&device_);
+  state_.destroy_context_status = kStatusNoMemory;
+  EXPECT_EQ(amdf_gpu_dxg_mapping_context_deinitialize(&device_.mapping_context,
+                                                      &kmt_, &memory),
+            amdf_make_status(AMDF_STATUS_DOMAIN_NTSTATUS,
+                             static_cast<uint32_t>(kStatusNoMemory)));
+  EXPECT_EQ(state_.mapping_fence_removals, 0u);
+  EXPECT_EQ(amdf_gpu_dxg_mapping_context_deinitialize(&device_.mapping_context,
+                                                      &kmt_, &memory),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(state_.mapping_context_removals, 1u);
+  EXPECT_EQ(state_.mapping_fence_removals, 1u);
 }
 
 TEST_F(LinuxDxgMemoryReservationTest, PreservesAnExactCommonAddress) {

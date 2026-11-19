@@ -9,6 +9,7 @@
 
 #include "libamdf/src/gpu/umd/device.h"
 #include "libamdf/src/gpu/umd/dxg/adapter.h"
+#include "libamdf/src/gpu/umd/dxg/mapping_context.h"
 #include "libamdf/src/gpu/umd/wddm/memory_profile.h"
 #include "libamdf/src/platform/windows/device_status.h"
 #include "libamdf/src/platform/windows/kmt_api.h"
@@ -35,6 +36,11 @@ struct amdf_gpu_umd_device_t {
   D3DKMT_HANDLE device;
   // Confirmed execution failure shared by every queue on this device.
   amdf_kmt_device_status_t status;
+  // Serializes mapping context preparation and issue, independently of host
+  // waits.
+  SRWLOCK mapping_lock;
+  // Private synchronization-only context, created on the first mapping vector.
+  amdf_gpu_dxg_mapping_context_t mapping_context;
   // Paging queue owned by this logical device.
   D3DKMT_HANDLE paging_queue;
   // Synchronization object owned by the paging queue.

@@ -8,6 +8,7 @@
 
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/atomics.h"
+#include "libamdf/src/gpu/umd/dxg/mapping_context.h"
 #include "libamdf/src/gpu/umd/wddm/device.h"
 #include "libamdf/src/platform/native_event.h"
 #include "libamdf/src/platform/wait.h"
@@ -175,16 +176,10 @@ amdf_status_t amdf_gpu_wddm_kernel_queue_update_memory(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  D3DKMT_UPDATEGPUVIRTUALADDRESS update = {0};
-  update.hDevice = queue->device->device;
-  update.hContext = queue->context;
-  update.hFenceObject = queue->progress_fence;
-  update.NumOperations = operation_count;
-  update.Operations = operations;
-  update.FenceValue = submission - 1;
   *mutation_started = true;
-  status = amdf_kmt_make_status(
-      queue->device->kmt->update_gpu_virtual_address(&update));
+  status = amdf_gpu_dxg_mapping_operations_submit(
+      queue->device->kmt, queue->device->device, queue->context,
+      queue->progress_fence, submission - 1, operation_count, operations);
   if (!amdf_status_is_ok(status)) {
     return amdf_kmt_device_status_observe_error(&queue->device->status,
                                                 queue->device->kmt,

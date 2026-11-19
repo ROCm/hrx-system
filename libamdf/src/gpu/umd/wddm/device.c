@@ -10,6 +10,7 @@
 
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/wddm/device.h"
+#include "libamdf/src/gpu/umd/wddm/memory.h"
 #include "libamdf/src/gpu/umd/wddm/memory_profile.h"
 #include "libamdf/src/gpu/umd/wddm/provider/api.h"
 #include "libamdf/src/platform/windows/endpoint.h"
@@ -17,6 +18,14 @@
 
 static amdf_status_t amdf_gpu_wddm_device_release_native(
     amdf_gpu_umd_device_t* device) {
+  const amdf_gpu_dxg_memory_device_t memory =
+      amdf_gpu_wddm_memory_device(device);
+  const amdf_status_t mapping_status =
+      amdf_gpu_dxg_mapping_context_deinitialize(&device->mapping_context,
+                                                device->kmt, &memory);
+  if (!amdf_status_is_ok(mapping_status)) {
+    return mapping_status;
+  }
   if (device->provider_adapter.native != NULL) {
     const amdf_status_t status =
         amdf_gpu_dxg_adapter_deinitialize(&device->provider_adapter);
@@ -76,6 +85,7 @@ amdf_status_t amdf_gpu_umd_device_create(
     return status;
   }
   device->host_allocator = host_allocator;
+  InitializeSRWLock(&device->mapping_lock);
   amdf_kmt_device_status_initialize(&device->status);
   device->kmt = &endpoint->instance->kmt;
   device->adapter = endpoint->adapter;

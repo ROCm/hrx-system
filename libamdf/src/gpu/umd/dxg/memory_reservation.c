@@ -13,6 +13,8 @@ typedef struct amdf_gpu_dxg_memory_reservation_attachment_t {
   void* native_context;
   // Native operation table selected by this device provider.
   const amdf_gpu_dxg_memory_native_api_t* native_api;
+  // Vector publisher, cleared if this attachment cannot open a mapping context.
+  amdf_gpu_dxg_publish_mapping_batch_fn_t publish_batch;
   // CPU mapping of paging progress, or NULL when native waiting is required.
   const volatile uint64_t* paging_progress_fence;
   // Query adapter owning GPU virtual-address reservations.
@@ -42,6 +44,8 @@ struct amdf_gpu_dxg_memory_reservation_t {
   amdf_memory_access_t required_access;
   // Device whose paging timeline owns the latest mutation.
   uint32_t publisher_ordinal;
+  // Accepted vector still requiring a checked host join, including after error.
+  amdf_gpu_dxg_mapping_point_t pending;
   // Compact live device attachments borrowed through destruction.
   amdf_gpu_dxg_memory_reservation_attachment_t attachments[];
 };
@@ -127,6 +131,7 @@ amdf_status_t amdf_gpu_dxg_memory_reservation_create(
         (amdf_gpu_dxg_memory_reservation_attachment_t){
             .native_context = device.native_context,
             .native_api = device.native_api,
+            .publish_batch = device.publish_batch,
             .paging_progress_fence = device.paging_progress_fence,
             .adapter_handle = device.adapter_handle,
             .device_handle = device.device_handle,
@@ -198,15 +203,52 @@ static amdf_status_t amdf_gpu_dxg_memory_reservation_map(
   return AMDF_STATUS_OK;
 }
 
+static amdf_status_t amdf_gpu_dxg_memory_reservation_join_batch(
+    amdf_gpu_dxg_memory_reservation_t* reservation) {
+  const amdf_gpu_dxg_memory_reservation_attachment_t* attachment =
+      &reservation->attachments[reservation->publisher_ordinal];
+  const amdf_gpu_dxg_mapping_point_t point = reservation->pending;
+  const amdf_status_t status = attachment->native_api->wait_for_paging(
+      attachment->native_context, attachment->device_handle, point.fence,
+      point.progress, point.value);
+  if (amdf_status_is_ok(status)) {
+    reservation->pending.value = 0;
+  }
+  return status;
+}
+
 amdf_status_t amdf_gpu_dxg_memory_reservation_update(
     amdf_gpu_dxg_memory_reservation_t* reservation, uint32_t access_ordinal,
     uint32_t update_count, const amdf_gpu_umd_mapping_update_t* updates,
     bool* mutation_started) {
-  const amdf_gpu_dxg_memory_reservation_attachment_t* attachment =
+  amdf_gpu_dxg_memory_reservation_attachment_t* attachment =
       &reservation->attachments[access_ordinal];
-  reservation->publisher_ordinal = access_ordinal;
+  if (attachment->publish_batch) {
+    const uint64_t count =
+        amdf_gpu_dxg_memory_reservation_mapping_operation_count(
+            reservation, update_count, updates);
+    if (count > 1) {
+      const amdf_status_t status = attachment->publish_batch(
+          attachment->native_context, reservation, update_count, updates, count,
+          mutation_started, &reservation->pending);
+      if (*mutation_started) {
+        reservation->publisher_ordinal = access_ordinal;
+      }
+      if (amdf_status_is_ok(status)) {
+        return amdf_gpu_dxg_memory_reservation_join_batch(reservation);
+      }
+      // An older driver can support scalar paging without a synchronization
+      // context. Only a capability rejection before publication is replayable.
+      if (*mutation_started ||
+          status != amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
+        return status;
+      }
+      attachment->publish_batch = NULL;
+    }
+  }
   uint64_t fence = 0;
   amdf_status_t status = AMDF_STATUS_OK;
+  reservation->publisher_ordinal = access_ordinal;
   *mutation_started = true;
   for (uint32_t i = 0; i < update_count && amdf_status_is_ok(status); ++i) {
     const amdf_gpu_umd_mapping_update_t* entry = &updates[i];
@@ -242,6 +284,15 @@ amdf_status_t amdf_gpu_dxg_memory_reservation_update(
 amdf_status_t amdf_gpu_dxg_memory_reservation_detach(
     amdf_gpu_dxg_memory_reservation_t* reservation, uint32_t access_ordinal) {
   (void)access_ordinal;
+  // Detach uses the ordinary paging queue. A failed host wait on the distinct
+  // companion context must be joined before removal can certify reuse.
+  if (reservation->pending.value != 0) {
+    const amdf_status_t status =
+        amdf_gpu_dxg_memory_reservation_join_batch(reservation);
+    if (!amdf_status_is_ok(status)) {
+      return status;
+    }
+  }
   const amdf_gpu_dxg_memory_reservation_attachment_t* attachment =
       &reservation->attachments[reservation->publisher_ordinal];
   uint64_t fence = 0;
