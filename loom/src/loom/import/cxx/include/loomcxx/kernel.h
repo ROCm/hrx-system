@@ -37,8 +37,9 @@
 // added.
 #define LOOM_KERNEL [[loom::kernel]]
 #define LOOM_DEVICE [[loom::device]]
-// Declares uninitialized scalar, vector, or fixed scalar-array storage shared
-// by every invocation in the enclosing kernel workgroup.
+// Declares fixed-size, uninitialized storage shared by every invocation in a
+// workgroup. The kernel or LOOM_TEMPLATE_DEF body owns the declaration.
+// Helpers receive a pointer to the storage.
 #define LOOM_WORKGROUP [[loom::workgroup]]
 #define LOOM_INLINE [[loom::inline]] inline
 

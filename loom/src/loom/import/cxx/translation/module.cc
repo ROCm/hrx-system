@@ -35,6 +35,7 @@
 #include <vector>
 
 #include "iree/base/api.h"
+#include "loom/error/error_catalog.h"
 #include "loom/import/cxx/binding/assumptions.h"
 #include "loom/import/cxx/binding/command_programs.h"
 #include "loom/import/cxx/binding/config.h"
@@ -1978,12 +1979,12 @@ class Translator final : private Initialization::Evaluation,
     if (!variable || variable->isExtern() || variable->isThreadLocal()) {
       fail(owner, "local storage duration must be automatic or __shared__");
     }
-    if (annotated(declaration->symbol, "workgroup")) {
+    if (annotated(variable, "workgroup")) {
+      auto spelling = cxx::to_string(variable->name());
       if (current_function_.kind != FunctionKind::Kernel &&
           current_function_.kind != FunctionKind::TemplateDefinition) {
-        fail(declaration,
-             "workgroup storage requires a kernel or template definition "
-             "body");
+        diagnostics_.reject(variable->location(), LOOM_ERR_LOWERING_075,
+                            spelling);
       }
       if (initializer) {
         fail(declaration, "workgroup storage cannot have an initializer");
@@ -1996,7 +1997,6 @@ class Translator final : private Initialization::Evaluation,
       auto allocation =
           storage_.allocate(source_type, LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
                             variable->explicitAlignment(), declaration);
-      auto spelling = cxx::to_string(declaration->symbol->name());
       if (array) {
         values_.set(declaration->symbol,
                     name(Value(allocation.pointer), spelling));
