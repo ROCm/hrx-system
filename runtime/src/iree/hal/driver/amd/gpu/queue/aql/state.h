@@ -21,11 +21,11 @@
 #include "iree/hal/driver/amd/gpu/queue/byte_storage_pool.h"
 #include "iree/hal/driver/amd/gpu/queue/file_transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/host_call.h"
-#include "iree/hal/driver/amd/gpu/queue/host_wait.h"
 #include "iree/hal/driver/amd/gpu/queue/input_memory.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/commands.h"
 #include "iree/hal/driver/amd/gpu/queue/user_queue.h"
 #include "iree/hal/driver/amd/status.h"
+#include "iree/hal/utils/host_wait.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -208,7 +208,7 @@ struct iree_hal_amd_gpu_aql_queue_t {
     // Deferred work plus callback borrowers, separate from native retirement.
     iree_atomic_int64_t host_owners;
     // Failure-cancellable dependency registrations.
-    iree_hal_amd_gpu_host_wait_set_t waits;
+    iree_hal_host_wait_set_t waits;
     // Joins a callback's final count drop and shutdown notification.
     iree_slim_mutex_t completion_mutex;
   } pending;

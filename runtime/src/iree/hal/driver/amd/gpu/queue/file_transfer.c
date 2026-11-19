@@ -82,7 +82,7 @@ typedef struct iree_hal_amd_gpu_file_transfer_t {
   // Joins serial initialization/finalization submissions with their callbacks.
   iree_atomic_int32_t pending;
   // Next serial step, invoked after submit and completion relinquish use.
-  iree_hal_amd_gpu_host_wait_fn_t resume;
+  iree_hal_host_wait_fn_t resume;
   // Result transferred by the serial completion borrow.
   iree_status_t status;
   // Last retired native epoch, attached to public completion.
@@ -94,7 +94,7 @@ typedef struct iree_hal_amd_gpu_file_transfer_t {
   // Initial public dependency join with capture-local tracker storage.
   struct {
     // Initial public wait join, finalized before file/native work starts.
-    iree_hal_amd_gpu_host_wait_t wait;
+    iree_hal_host_wait_t wait;
     // Inline tracker allocation sized to the captured wait list.
     iree_allocator_inline_storage_t storage;
   } dependency;
@@ -129,7 +129,7 @@ static void iree_hal_amd_gpu_file_transfer_native_complete(
 static void iree_hal_amd_gpu_file_transfer_submit_native(
     iree_hal_amd_gpu_file_transfer_t* operation, iree_host_size_t count,
     const iree_hal_amd_gpu_transfer_operation_t* transfers, const void* after,
-    iree_hal_amd_gpu_host_wait_fn_t resume) {
+    iree_hal_host_wait_fn_t resume) {
   const void* before = operation->before;
   operation->before = NULL;
   operation->resume = resume;
@@ -1304,7 +1304,7 @@ iree_status_t iree_hal_amd_gpu_file_transfer_submit_batch(
   }
   executor->begin(executor->queue);
   if (waits.count) {
-    status = iree_hal_amd_gpu_host_wait_begin(
+    status = iree_hal_host_wait_begin(
         executor->waits, operation->waits, iree_hal_amd_gpu_file_transfer_start,
         operation, iree_allocator_inline_arena(&operation->dependency.storage),
         &operation->dependency.wait);

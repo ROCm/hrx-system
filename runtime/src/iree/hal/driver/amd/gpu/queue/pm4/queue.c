@@ -20,7 +20,6 @@
 #include "iree/hal/driver/amd/gpu/queue/dma_transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/file_transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/host_call.h"
-#include "iree/hal/driver/amd/gpu/queue/host_wait.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/backing.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/command_buffer.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/commands.h"
@@ -35,6 +34,7 @@
 #include "iree/hal/driver/amd/gpu/queue/transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/user_queue.h"
 #include "iree/hal/driver/amd/status.h"
+#include "iree/hal/utils/host_wait.h"
 
 typedef enum iree_hal_amd_gpu_pm4_wait_kind_e {
   IREE_HAL_AMD_GPU_PM4_WAIT_READY,
@@ -46,7 +46,7 @@ typedef enum iree_hal_amd_gpu_pm4_wait_kind_e {
 // inline tracker completion before returning this storage to the capture.
 typedef struct iree_hal_amd_gpu_pm4_pending_t {
   // Queue cancellation membership and terminal capture ownership.
-  iree_hal_amd_gpu_host_wait_entry_t entry;
+  iree_hal_host_wait_entry_t entry;
   // Queue whose accepted capture dominates this sidecar's lifetime.
   iree_hal_amd_gpu_pm4_queue_t* queue;
   // Owned captured operation awaiting admission.
@@ -721,7 +721,7 @@ static void iree_hal_amd_gpu_pm4_pending_begin(
     }
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_amd_gpu_host_wait_set_begin(
+    status = iree_hal_host_wait_set_begin(
         &queue->pending.waits,
         (iree_hal_semaphore_list_t){1, &pending->semaphore, &pending->value},
         iree_hal_amd_gpu_pm4_pending_resume, pending,
@@ -1185,7 +1185,7 @@ static bool iree_hal_amd_gpu_pm4_progress(void* user_data) {
   iree_hal_amd_gpu_pm4_wake_shutdown(queue);
   iree_status_t failure = iree_hal_amd_gpu_pm4_check_failure(queue);
   if (!iree_status_is_ok(failure)) {
-    iree_hal_amd_gpu_host_wait_set_cancel(&queue->pending.waits);
+    iree_hal_host_wait_set_cancel(&queue->pending.waits);
   }
   iree_status_free(failure);
   return more;
@@ -2030,8 +2030,8 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_create(
                             &iree_hal_amd_gpu_pm4_queue_vtable, &queue->base);
   iree_hal_amd_gpu_publisher_initialize(&queue->publisher);
   iree_async_semaphore_wait_context_initialize(&queue->wait_context);
-  iree_hal_amd_gpu_host_wait_set_initialize(&queue->wait_context,
-                                            &queue->pending.waits);
+  iree_hal_host_wait_set_initialize(&queue->wait_context,
+                                    &queue->pending.waits);
   iree_slim_mutex_initialize(&queue->pending.completion_mutex);
   queue->growth = (iree_hal_amd_gpu_pm4_growth_context_t){
       .context = context,

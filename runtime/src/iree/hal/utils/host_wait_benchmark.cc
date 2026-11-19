@@ -9,8 +9,8 @@
 
 #include "benchmark/benchmark.h"
 #include "iree/async/proactor_platform.h"
-#include "iree/hal/driver/amd/gpu/queue/host_wait.h"
 #include "iree/hal/utils/host_semaphore.h"
+#include "iree/hal/utils/host_wait.h"
 
 namespace {
 
@@ -31,13 +31,13 @@ void HostWait(benchmark::State& state, bool include_completion) {
     IREE_CHECK_OK(iree_hal_host_semaphore_create(
         proactor, 0, iree_allocator_system(), &semaphore));
   }
-  iree_hal_amd_gpu_host_wait_t wait;
+  iree_hal_host_wait_t wait;
   std::binary_semaphore complete{0};
   for (auto _ : state) {
     for (auto& value : values) {
       ++value;
     }
-    IREE_CHECK_OK(iree_hal_amd_gpu_host_wait_begin(
+    IREE_CHECK_OK(iree_hal_host_wait_begin(
         &context, {count, semaphores.data(), values.data()},
         [](void* data, iree_status_t status) {
           IREE_CHECK_OK(status);

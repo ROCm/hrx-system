@@ -230,7 +230,7 @@ void iree_hal_amd_gpu_pm4_queue_destroy(iree_hal_queue_t* base) {
                   !queue->control.handle && !queue->grid.memory,
               "parent must join native ownership before final queue release");
   iree_hal_amd_gpu_publisher_deinitialize(&queue->publisher);
-  iree_hal_amd_gpu_host_wait_set_deinitialize(&queue->pending.waits);
+  iree_hal_host_wait_set_deinitialize(&queue->pending.waits);
   iree_slim_mutex_deinitialize(&queue->pending.completion_mutex);
   iree_async_semaphore_wait_context_deinitialize(&queue->wait_context);
   iree_hal_amd_gpu_capture_pool_deinitialize(&queue->captures);

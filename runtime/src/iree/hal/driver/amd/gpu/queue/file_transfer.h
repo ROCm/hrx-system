@@ -12,9 +12,9 @@
 #include "iree/hal/driver/amd/gpu/profile.h"
 #include "iree/hal/driver/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/driver/amd/gpu/queue/file_staging.h"
-#include "iree/hal/driver/amd/gpu/queue/host_wait.h"
 #include "iree/hal/driver/amd/gpu/queue/transfer.h"
 #include "iree/hal/utils/file_transfer.h"
+#include "iree/hal/utils/host_wait.h"
 
 #ifdef __cplusplus
 extern "C" {

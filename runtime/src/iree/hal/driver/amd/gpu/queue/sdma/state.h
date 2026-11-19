@@ -9,10 +9,10 @@
 
 #include "iree/hal/driver/amd/gpu/queue/file_transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/host_call.h"
-#include "iree/hal/driver/amd/gpu/queue/host_wait.h"
 #include "iree/hal/driver/amd/gpu/queue/sdma/operation.h"
 #include "iree/hal/driver/amd/gpu/queue/sdma/queue.h"
 #include "iree/hal/driver/amd/gpu/queue/sdma/transfer.h"
+#include "iree/hal/utils/host_wait.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -76,7 +76,7 @@ struct iree_hal_amd_gpu_sdma_queue_t {
   // Deferred dependency associations on the existing async infrastructure.
   iree_async_semaphore_wait_context_t wait_context;
   // Cancellation joins every dependency callback before releasing captures.
-  iree_hal_amd_gpu_host_wait_set_t waits;
+  iree_hal_host_wait_set_t waits;
   // Joins callback tails with cold idle observation and shutdown notification.
   iree_slim_mutex_t host_mutex;
   // Unpublished operations and allocation/wait/file callback borrowers.

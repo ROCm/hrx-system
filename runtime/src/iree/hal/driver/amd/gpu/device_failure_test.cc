@@ -13,9 +13,9 @@
 #include <thread>
 
 #include "iree/async/proactor_platform.h"
-#include "iree/hal/driver/amd/gpu/queue/host_wait.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/state.h"
 #include "iree/hal/driver/amd/gpu/queue/semaphore.h"
+#include "iree/hal/utils/host_wait.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -125,8 +125,8 @@ class DeviceFailureTest : public ::testing::Test {
                                                &queue.captures);
       iree_slim_mutex_initialize(&queue.pending.completion_mutex);
       iree_async_semaphore_wait_context_initialize(&queue.wait_context);
-      iree_hal_amd_gpu_host_wait_set_initialize(&queue.wait_context,
-                                                &queue.pending.waits);
+      iree_hal_host_wait_set_initialize(&queue.wait_context,
+                                        &queue.pending.waits);
       provisioned_[i] = &queue.base;
       publication_sources_[i] =
           iree_hal_amd_gpu_pm4_queue_publication_source(&queue.base);
@@ -152,7 +152,7 @@ class DeviceFailureTest : public ::testing::Test {
     for (auto& queue : queues_) {
       iree_hal_amd_gpu_capture_pool_deinitialize(&queue.captures);
       iree_hal_amd_gpu_publisher_deinitialize(&queue.publisher);
-      iree_hal_amd_gpu_host_wait_set_deinitialize(&queue.pending.waits);
+      iree_hal_host_wait_set_deinitialize(&queue.pending.waits);
       iree_async_semaphore_wait_context_deinitialize(&queue.wait_context);
       iree_slim_mutex_deinitialize(&queue.pending.completion_mutex);
     }

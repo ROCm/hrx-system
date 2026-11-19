@@ -18,7 +18,6 @@
 #include "iree/hal/driver/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/driver/amd/gpu/queue/file_transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/host_call.h"
-#include "iree/hal/driver/amd/gpu/queue/host_wait.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/backing.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/command_buffer.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/commands.h"
@@ -32,6 +31,7 @@
 #include "iree/hal/driver/amd/gpu/queue/transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/user_queue.h"
 #include "iree/hal/driver/amd/status.h"
+#include "iree/hal/utils/host_wait.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -160,7 +160,7 @@ struct iree_hal_amd_gpu_pm4_queue_t {
     // use the published/completed prefixes instead of modifying this count.
     iree_atomic_int64_t host_owners;
     // Failure-cancellable waits, independent of publication ownership.
-    iree_hal_amd_gpu_host_wait_set_t waits;
+    iree_hal_host_wait_set_t waits;
     // Joins each callback's final count drop and shutdown notification. Neither
     // wait registration nor resumed publication holds this cold mutex.
     iree_slim_mutex_t completion_mutex;

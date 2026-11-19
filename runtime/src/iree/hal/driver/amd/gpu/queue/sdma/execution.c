@@ -121,7 +121,7 @@ static void iree_hal_amd_gpu_sdma_wait(
     iree_hal_semaphore_retain(pending->semaphore);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_amd_gpu_host_wait_set_begin(
+    status = iree_hal_host_wait_set_begin(
         &queue->waits,
         (iree_hal_semaphore_list_t){1, &pending->semaphore, &pending->value},
         iree_hal_amd_gpu_sdma_pending_ready, pending,
