@@ -1,0 +1,93 @@
+// RUN: emit pipeline-transport @test
+
+// Both workers visit their channel once per iteration. Opposite loop
+// directions and different formal positions bind to the same runtime value.
+func.def @publish(%records: channel<tile<1xi32>>, %count: index) {
+  %c0 = index.constant 0 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%c0: index)
+^header(%i: index):
+  %more = index.cmp ult, %i, %count : index
+  cfg.cond_br %more, ^record, ^done
+^record:
+  %slot, %view = channel.reserve %records : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  channel.publish %slot : write<tile<1xi32>>
+  %next = index.add %i, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+func.def @consume(%count: index, %records: channel<tile<1xi32>>) {
+  %c0 = index.constant 0 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%count: index)
+^header(%remaining: index):
+  %more = index.cmp sgt, %remaining, %c0 : index
+  cfg.cond_br %more, ^record, ^done
+^record:
+  %read = channel.accept %records : channel<tile<1xi32>> -> read<tile<1xi32>>
+  channel.release %read : read<tile<1xi32>>
+  %next = index.sub %remaining, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def public @test() run(%storage: buffer, %length: index) {
+  %count = index.assume %length [range(%length, 0, 256), multiple_of(%length, 4)] : index
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x1xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<2x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @publish(%records, %count) : (channel<tile<1xi32>>, index)
+  }
+  pipeline.strand workers([1], [1], [1]) {
+    func.call @consume(%count, %records) : (index, channel<tile<1xi32>>)
+  }
+}
+
+// ----
+worker 0: channel_count=%count argument=1 range=[0,256] multiple=4
+worker 0: transport=unproven execution_counts=unknown batches=0 streams=0
+worker 1: channel_count=%count argument=0 range=[0,256] multiple=4
+worker 1: transport=unproven execution_counts=unknown batches=0 streams=0
+
+// ====
+
+// RUN: emit pipeline-transport @test
+
+// The extra publication after the loop makes the channel rate count + 1.
+// Its finite upper bound cannot authorize exactly count transfers.
+func.def @publish_tail(%count: index, %records: channel<tile<1xi32>>) {
+  %c0 = index.constant 0 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%c0: index)
+^header(%i: index):
+  %more = index.cmp slt, %i, %count : index
+  cfg.cond_br %more, ^record, ^done
+^record:
+  %slot, %view = channel.reserve %records : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  channel.publish %slot : write<tile<1xi32>>
+  %next = index.add %i, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  %last, %last_view = channel.reserve %records : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  channel.publish %last : write<tile<1xi32>>
+  func.return
+}
+
+pipeline.def public @test() run(%storage: buffer, %length: index) {
+  %count = index.assume %length [range(%length, 0, 1)] : index
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x1xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<2x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @publish_tail(%count, %records) : (index, channel<tile<1xi32>>)
+  }
+}
+
+// ----
+worker 0: transport=unproven execution_counts=unknown batches=0 streams=0

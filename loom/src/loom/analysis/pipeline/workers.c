@@ -1029,6 +1029,73 @@ static iree_status_t loom_pipeline_worker_transport(
   return iree_ok_status();
 }
 
+// A unit-stride traversal from zero to a nonnegative capture, or the reverse
+// traversal to zero, visits its body exactly as many times as that capture.
+// Requiring every channel site in the body excludes once-only entry/exit
+// actions and the extra final visit to the header.
+static iree_status_t loom_pipeline_worker_channel_repeat(
+    const loom_module_t* module, iree_arena_allocator_t* arena,
+    const loom_value_fact_cfg_region_t* structure,
+    loom_pipeline_worker_t* worker) {
+  const loom_value_fact_induction_t* induction = &structure->inductions[0];
+  if (induction->value == LOOM_VALUE_ID_INVALID ||
+      induction->update != LOOM_VALUE_FACT_INDUCTION_UPDATE_ADDITIVE ||
+      (induction->flags & ~LOOM_VALUE_FACT_INDUCTION_SUBTRACT_STEP) ||
+      (induction->bound_flags & LOOM_LOOP_BOUND_INCLUSIVE)) {
+    return iree_ok_status();
+  }
+  const bool descending =
+      iree_any_bit_set(induction->bound_flags, LOOM_LOOP_BOUND_DESCENDING);
+  const loom_value_fact_recurrence_operand_t limit =
+      descending ? induction->initial_value : induction->bound;
+  const loom_value_fact_recurrence_operand_t zero =
+      descending ? induction->bound : induction->initial_value;
+  int64_t endpoint, step;
+  if (limit.is_literal ||
+      !loom_value_facts_as_exact_i64(
+          loom_value_fact_recurrence_operand_facts(&worker->facts, zero),
+          &endpoint) ||
+      endpoint != 0 ||
+      !loom_value_facts_as_exact_i64(
+          loom_value_fact_induction_step_facts(&worker->facts, induction),
+          &step) ||
+      step != (descending ? -1 : 1)) {
+    return iree_ok_status();
+  }
+  const loom_value_t* count = loom_module_value(module, limit.value);
+  const loom_value_facts_t facts =
+      loom_value_fact_table_lookup(&worker->facts, limit.value);
+  if (!loom_value_is_block_arg(count) ||
+      loom_value_def_block(count) !=
+          loom_region_const_entry_block(
+              loom_func_like_body(worker->function)) ||
+      facts.range_lo < 0) {
+    return iree_ok_status();
+  }
+  const uint16_t header = structure->loops.loops[0].header_index;
+  for (iree_host_size_t i = 0; i < worker->channels.action_count; ++i) {
+    const uint16_t block =
+        worker->channels.actions[i].op->parent_block->region_index;
+    if (block == header ||
+        loom_cfg_loop_nest_innermost(&structure->loops, block) != 0) {
+      return iree_ok_status();
+    }
+  }
+  const uint16_t argument = loom_value_def_index(count);
+  loom_pipeline_channel_repeat_t* repeat;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(arena, sizeof(*repeat), (void**)&repeat));
+  *repeat = (loom_pipeline_channel_repeat_t){
+      .count = loom_func_call_operands(worker->source->call).values[argument],
+      .argument = argument,
+      .minimum = (uint64_t)facts.range_lo,
+      .maximum = worker->loop_trip_bounds[0],
+      .multiple = (uint64_t)facts.known_divisor,
+  };
+  worker->channel_repeat = repeat;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_pipeline_worker_execution_counts(
     loom_module_t* module, iree_arena_allocator_t* arena,
     const loom_value_fact_cfg_region_t* structure,
@@ -1048,8 +1115,13 @@ static iree_status_t loom_pipeline_worker_execution_counts(
   if (worker->execution_counts.values) {
     worker->loop_trip_bounds = trip_bounds;
   }
-  if (worker->execution_counts.single_path) {
+  if (worker->execution_counts.path == LOOM_CFG_EXECUTION_PATH_FIXED) {
     worker->block_execution_counts = counts;
+  } else if (worker->execution_counts.path ==
+                 LOOM_CFG_EXECUTION_PATH_VARIABLE_TRIPS &&
+             structure->loops.loop_count == 1) {
+    return loom_pipeline_worker_channel_repeat(module, arena, structure,
+                                               worker);
   }
   return iree_ok_status();
 }
