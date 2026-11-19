@@ -100,3 +100,28 @@ func.def public @capture_overloads() -> (i32, i32, i32) {
   %53 = scalar.constant 11 : i32
   func.return %54, %53, %53 : i32, i32, i32
 }
+
+// ====
+// The branch updates the captured objects through storage. Only the mutable
+// value capture carries a new binding into the next invocation.
+struct Totals { int positive, negative, count; };
+
+Totals split_signs() {
+  int positive = 0, negative = 0;
+  auto add = [&, count = 0](int value) mutable {
+    if (value > 0) { positive += value; ++count; }
+    else { negative += value; }
+    return count;
+  };
+  add(4);
+  int count = add(-3);
+  return {positive, negative, count};
+}
+
+// ----
+func.def public @split_signs() -> (i32, i32, i32) {
+  %68 = scalar.constant 4 : i32
+  %count = scalar.constant 1 : i32
+  %70 = scalar.constant -3 : i32
+  func.return %68, %70, %count : i32, i32, i32
+}
