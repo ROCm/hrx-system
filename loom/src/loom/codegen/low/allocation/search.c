@@ -149,8 +149,7 @@ static bool loom_low_allocation_search_has_active_conflict(
 static loom_low_allocation_search_location_query_t
 loom_low_allocation_search_location_query(
     const loom_low_allocation_search_context_t* context,
-    const loom_low_allocation_search_query_t* prepared_query,
-    const loom_low_allocation_assignment_t* candidate) {
+    const loom_low_allocation_search_query_t* prepared_query) {
   loom_low_allocation_search_location_query_t query = {
       .identity =
           {
@@ -168,12 +167,10 @@ loom_low_allocation_search_location_query(
         LOOM_VALUE_ORDINAL_INVALID, context->preference_workspace);
   }
   if (!loom_target_residency_model_is_empty(context->residency.model)) {
-    const uint16_t reg_class = candidate->descriptor_reg_class_id;
-    const uint32_t* extents =
-        context->target_constraints->max_assigned_location_end_by_reg_class;
-    query.tier_limit =
-        loom_target_residency_evaluate_tier_with_direct_resource_override(
-            context->residency, extents, reg_class, extents[reg_class]);
+    query.tier_limit = loom_target_residency_evaluate_tier(
+        context->residency,
+        context->target_constraints->max_assigned_location_end_by_reg_class,
+        context->residency.model->direct_resources.resource_count);
   }
   return query;
 }
@@ -549,6 +546,25 @@ uint32_t loom_low_allocation_search_assignment_residency_tier(
       context->residency, extents, reg_class, units);
 }
 
+// The committed register extents stay fixed while this search ranks locations.
+// A placement inside the committed extent has exactly the query's tier,
+// including any shared-resource limits derived from multiple register classes.
+static uint32_t loom_low_allocation_search_candidate_tier(
+    const loom_low_allocation_search_context_t* context,
+    const loom_low_allocation_search_location_query_t* query,
+    uint16_t reg_class_id, uint32_t pressure_extent) {
+  if (query->tier_limit == 0) {
+    return 0;
+  }
+  const uint32_t* extents =
+      context->target_constraints->max_assigned_location_end_by_reg_class;
+  if (pressure_extent <= extents[reg_class_id]) {
+    return query->tier_limit;
+  }
+  return loom_target_residency_evaluate_tier_with_direct_resource_override(
+      context->residency, extents, reg_class_id, pressure_extent);
+}
+
 // Evaluates one linear candidate selected in the caller's semantic order.
 // Returns true when no later candidate can improve the selected choice.
 static bool loom_low_allocation_search_consider_linear_location(
@@ -574,11 +590,9 @@ static bool loom_low_allocation_search_consider_linear_location(
   const uint32_t preference_penalty =
       loom_low_allocation_search_location_preference_penalty(context, query,
                                                              &candidate);
-  const uint32_t tier =
-      query->tier_limit != 0
-          ? loom_low_allocation_search_assignment_residency_tier(context,
-                                                                 &candidate)
-          : 0;
+  const uint32_t tier = loom_low_allocation_search_candidate_tier(
+      context, query, candidate.descriptor_reg_class_id,
+      iree_math_saturating_add_u32(base, candidate.location_count));
   if (out_choice->found &&
       (tier < out_choice->residency_tier ||
        (tier == out_choice->residency_tier &&
@@ -1044,11 +1058,8 @@ loom_low_allocation_search_find_explicit_physical_register_for_release_policy(
     const uint32_t preference_penalty =
         loom_low_allocation_search_location_preference_penalty(context, query,
                                                                &candidate);
-    const uint32_t tier =
-        query->tier_limit != 0
-            ? loom_low_allocation_search_assignment_residency_tier(context,
-                                                                   &candidate)
-            : 0;
+    const uint32_t tier = loom_low_allocation_search_candidate_tier(
+        context, query, reg_class_id, pressure_extent);
     const uint32_t first_candidate_ordinal =
         out_choice->found
             ? iree_min(out_choice->first_candidate_ordinal, candidate_ordinal)
@@ -1101,33 +1112,6 @@ static void loom_low_allocation_search_find_for_release_policy(
   }
 }
 
-static uint32_t loom_low_allocation_search_location_residency_tier(
-    const loom_low_allocation_search_context_t* context,
-    const loom_low_allocation_assignment_t* candidate_template,
-    const loom_low_allocation_search_location_choice_t* choice) {
-  loom_low_allocation_assignment_t choice_assignment = *candidate_template;
-  choice_assignment.location_base = choice->base;
-  return loom_low_allocation_search_assignment_residency_tier(
-      context, &choice_assignment);
-}
-
-static bool loom_low_allocation_search_location_crosses_residency_cliff(
-    const loom_low_allocation_search_context_t* context,
-    const loom_low_allocation_assignment_t* candidate_template,
-    const loom_low_allocation_search_location_choice_t* choice,
-    uint32_t* out_choice_tier) {
-  const uint16_t reg_class_id = candidate_template->descriptor_reg_class_id;
-  const uint32_t* current_units_by_reg_class =
-      context->target_constraints->max_assigned_location_end_by_reg_class;
-  const uint32_t current_tier =
-      loom_target_residency_evaluate_tier_with_direct_resource_override(
-          context->residency, current_units_by_reg_class, reg_class_id,
-          current_units_by_reg_class[reg_class_id]);
-  *out_choice_tier = loom_low_allocation_search_location_residency_tier(
-      context, candidate_template, choice);
-  return *out_choice_tier < current_tier;
-}
-
 bool loom_low_allocation_search_find_physical_location(
     loom_low_allocation_search_context_t* context,
     const loom_low_allocation_search_query_t* prepared_query,
@@ -1154,8 +1138,7 @@ bool loom_low_allocation_search_find_physical_location(
       prepared_query->candidate;
   candidate_template.location_base = 0;
   loom_low_allocation_search_location_query_t location_query =
-      loom_low_allocation_search_location_query(context, prepared_query,
-                                                &candidate_template);
+      loom_low_allocation_search_location_query(context, prepared_query);
   if (context->retained_assignments_by_value_ordinal != NULL &&
       location_query.identity.value_ordinal != LOOM_VALUE_ORDINAL_INVALID) {
     const loom_low_allocation_assignment_t* retained =
@@ -1272,48 +1255,28 @@ bool loom_low_allocation_search_find_physical_location(
   const bool has_storage_release_records =
       prepared_query->allow_storage_lease_release &&
       loom_low_allocation_search_has_storage_release_records(context);
-  loom_low_allocation_search_location_choice_t release_allowed = {0};
-  bool searched_release_allowed = false;
-  if (release_free.found && has_storage_release_records &&
-      !loom_target_residency_model_is_empty(context->residency.model)) {
-    uint32_t release_free_tier = 0;
-    if (loom_low_allocation_search_location_crosses_residency_cliff(
-            context, &candidate_template, &release_free, &release_free_tier)) {
-      loom_low_allocation_search_find_for_release_policy(
-          context, &candidate_template, &location_query,
-          uses_explicit_physical_registers, explicit_candidate_count, last_base,
-          alignment, scalar_packing_frontier,
-          LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED, &release_allowed);
-      searched_release_allowed = true;
-      if (release_allowed.found &&
-          release_allowed.candidate_ordinal < release_free.candidate_ordinal &&
-          loom_low_allocation_search_location_residency_tier(
-              context, &candidate_template, &release_allowed) >
-              release_free_tier) {
-        *out_base = release_allowed.base;
-        return true;
-      }
-    }
-  }
-  if (release_free.found) {
-    *out_base = release_free.base;
-    return true;
-  }
-  if (!has_storage_release_records) {
-    return false;
-  }
-  if (!searched_release_allowed) {
+  if (has_storage_release_records &&
+      (!release_free.found ||
+       release_free.residency_tier < location_query.tier_limit)) {
+    loom_low_allocation_search_location_choice_t release_allowed = {0};
     loom_low_allocation_search_find_for_release_policy(
         context, &candidate_template, &location_query,
         uses_explicit_physical_registers, explicit_candidate_count, last_base,
         alignment, scalar_packing_frontier,
         LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED, &release_allowed);
+    if (release_allowed.found &&
+        (!release_free.found ||
+         (release_allowed.candidate_ordinal < release_free.candidate_ordinal &&
+          release_allowed.residency_tier > release_free.residency_tier))) {
+      *out_base = release_allowed.base;
+      return true;
+    }
   }
-  if (release_allowed.found) {
-    *out_base = release_allowed.base;
-    return true;
+  if (!release_free.found) {
+    return false;
   }
-  return false;
+  *out_base = release_free.base;
+  return true;
 }
 
 bool loom_low_allocation_search_find_free_location(
