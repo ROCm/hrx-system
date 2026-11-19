@@ -628,12 +628,32 @@ TEST_F(ElasticTextServiceTest,
     IREE_ASSERT_OK(
         loom_serve_text_row_prefill(row, IREE_ARRAYSIZE(tokens), tokens));
   }
+  EXPECT_FALSE(loom_serve_text_model_prepare_reclaim(source));
   const auto before = loom_serve_text_model_memory_statistics(source);
   IREE_ASSERT_OK(
       loom_serve_text_row_reset(loom_serve_text_model_row(source, 0)));
+  ASSERT_TRUE(loom_serve_text_model_prepare_reclaim(source));
+  auto* live = loom_serve_text_model_row(source, 2);
+  const int32_t suffix = 1;
+  loom_serve_text_checkpoint_t* checkpoint = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_row_try_pin(live, &checkpoint));
+  ASSERT_NE(checkpoint, nullptr);
+  const std::unique_ptr<loom_serve_text_checkpoint_t,
+                        decltype(&loom_serve_text_checkpoint_release)>
+      endpoint(checkpoint, loom_serve_text_checkpoint_release);
+  loom_runtime_execution_frontier_t epoch;
+  IREE_ASSERT_OK(loom_serve_text_row_submit_prefill(live, 1, &suffix, &epoch));
+  const uint32_t retiring_tail = live->state->retiring_tail;
+  ASSERT_NE(retiring_tail, UINT32_MAX);
+  const uint32_t references =
+      source->state.cache.pool.references[retiring_tail];
   const auto frontier = loom_runtime_execution_frontier(source->execution);
   IREE_ASSERT_OK(loom_serve_text_model_submit_reclaim(source));
   ASSERT_TRUE(loom_serve_text_model_is_reclaiming(source));
+  // Capture only consumes dead ownership. The epoch's COW source remains live
+  // until its own completion, even though logical preparation preceded it.
+  EXPECT_EQ(live->state->retiring_tail, retiring_tail);
+  EXPECT_EQ(source->state.cache.pool.references[retiring_tail], references);
   const auto unchanged = loom_runtime_execution_frontier(source->execution);
   for (size_t i = 0; i < IREE_ARRAYSIZE(frontier.values); ++i) {
     EXPECT_EQ(unchanged.semaphores[i], frontier.semaphores[i]);
@@ -645,14 +665,13 @@ TEST_F(ElasticTextServiceTest,
   IREE_ASSERT_OK(loom_serve_text_model_prepare_resize(source, 4, &resize));
   EXPECT_EQ(resize, nullptr);
   loom_serve_text_resize_free(resize);
+  ASSERT_NO_FATAL_FAILURE(WaitFrontier(epoch));
+  IREE_ASSERT_OK(loom_serve_text_row_complete_step(live));
 
   // A second retired row releases after capture. The older operation cannot
   // acknowledge it, even when admission has already collected native results.
   IREE_ASSERT_OK(
       loom_serve_text_row_reset(loom_serve_text_model_row(source, 1)));
-  auto* live = loom_serve_text_model_row(source, 2);
-  const int32_t suffix = 1;
-  IREE_ASSERT_OK(loom_serve_text_row_prefill(live, 1, &suffix));
   Oracle reference;
   reference.Consume("abxb");
   EXPECT_EQ(loom_serve_text_row_token(live), reference.Predict());
@@ -664,6 +683,7 @@ TEST_F(ElasticTextServiceTest,
   const auto first = loom_serve_text_model_memory_statistics(source);
   EXPECT_LT(first.committed_bytes, before.committed_bytes);
 
+  ASSERT_TRUE(loom_serve_text_model_prepare_reclaim(source));
   IREE_ASSERT_OK(loom_serve_text_model_submit_reclaim(source));
   ASSERT_TRUE(loom_serve_text_model_is_reclaiming(source));
   loom_runtime_memory_operation_await(source->state.memory.reclaim);
@@ -682,6 +702,7 @@ TEST_F(ElasticTextServiceTest,
   EXPECT_FALSE(loom_serve_text_model_needs_compaction(source));
   IREE_ASSERT_OK(loom_serve_text_row_reset(live));
   EXPECT_TRUE(loom_serve_text_model_needs_compaction(source));
+  ASSERT_TRUE(loom_serve_text_model_prepare_reclaim(source));
   IREE_ASSERT_OK(loom_serve_text_model_submit_reclaim(source));
   // The outer model owner joins this final independent borrower at destruction.
 }

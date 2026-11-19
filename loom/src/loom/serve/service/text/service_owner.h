@@ -24,6 +24,8 @@
 typedef enum loom_serve_text_work_e {
   TEXT_WORK_NONE,
   TEXT_WORK_EPOCH,
+  // Accepted epoch allocations precede independent native reclamation.
+  TEXT_WORK_EPOCH_ALLOCATIONS,
   TEXT_WORK_CHECKPOINT,
   TEXT_WORK_TRIM,
   TEXT_WORK_RESERVE,

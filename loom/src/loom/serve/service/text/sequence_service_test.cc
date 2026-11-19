@@ -481,7 +481,7 @@ class CachedSequenceCohortTest : public SourceSequenceServiceTest {
   }
 };
 
-TEST_F(CachedSequenceCohortTest, FittingCachedCohortTrimsAtEpochBoundary) {
+TEST_F(CachedSequenceCohortTest, FittingCachedCohortNeedsNoMaintenance) {
   const auto options = ServiceOptions();
   loom_serve_text_service_t* value = nullptr;
   IREE_ASSERT_OK(loom_serve_text_service_allocate(model_, &options, nullptr,
@@ -552,15 +552,14 @@ TEST_F(CachedSequenceCohortTest, FittingCachedCohortTrimsAtEpochBoundary) {
       const std::string event = record.event->name;
       if (event == "admit") {
         ++admitted;
-      } else if (event == "state_trim" && !epochs) {
-        EXPECT_EQ(admitted, 4u);
+      } else if (event == "state_trim") {
         ++trims;
       } else if (event == "epoch") {
         ++epochs;
       }
     }
     EXPECT_EQ(admitted, 4u);
-    EXPECT_EQ(trims, 1u);
+    EXPECT_EQ(trims, 0u);
     EXPECT_EQ(epochs, 1u);
   }
   EXPECT_EQ(interface.telemetry.counters->completed, 24u);

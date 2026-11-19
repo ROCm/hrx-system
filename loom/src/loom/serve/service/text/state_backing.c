@@ -537,6 +537,24 @@ static void loom_serve_text_backing_update_range(
     loom_serve_text_state_t* state, iree_hal_buffer_binding_t range,
     bool binding);
 
+bool loom_serve_text_state_prepare_reclaim(loom_serve_text_state_t* state) {
+  loom_serve_text_state_complete_backing(state);
+  const loom_serve_text_backing_t* backing = state->memory.index;
+  if (!backing) {
+    return false;
+  }
+  uint32_t index = loom_serve_text_backing_next(
+      &backing->row_layout, backing->rows, (uint32_t)state->row_count, 0);
+  while (index != LOOM_INDEX_SET_NONE) {
+    // Completed prefix copies can retire their old COW sources here. A later
+    // epoch may establish new borrowers before physical release is captured.
+    loom_serve_text_state_row_complete_reserve(state->rows[index]);
+    index = loom_serve_text_backing_next(&backing->row_layout, backing->rows,
+                                         (uint32_t)state->row_count, index + 1);
+  }
+  return loom_serve_text_backing_has_releases(state);
+}
+
 static iree_status_t loom_serve_text_release_backing(
     loom_serve_text_state_t* state, iree_hal_semaphore_t* readiness,
     uint64_t value, loom_runtime_memory_operation_t** out_operation) {
@@ -548,9 +566,6 @@ static iree_status_t loom_serve_text_release_backing(
       &backing->row_layout, backing->rows, (uint32_t)state->row_count, 0);
   while (row_index != LOOM_INDEX_SET_NONE && iree_status_is_ok(status)) {
     loom_serve_text_state_row_t* row = state->rows[row_index];
-    // Prefix capture can finish a COW source before the next epoch. Retire it
-    // before compaction can move its ID and before considering release ranges.
-    loom_serve_text_state_row_complete_reserve(row);
     if (row->recurrent.slot == UINT32_MAX) {
       for (iree_host_size_t binding = TEXT_CONTROL;
            binding <= TEXT_PROGRESS && iree_status_is_ok(status); ++binding) {
@@ -662,7 +677,6 @@ iree_status_t loom_serve_text_state_submit_reclaim(
   if (!state->memory.index) {
     return iree_ok_status();
   }
-  loom_serve_text_state_complete_backing(state);
   return loom_serve_text_release_backing(state, NULL, 0,
                                          &state->memory.reclaim);
 }
@@ -810,7 +824,7 @@ static void loom_serve_text_plan_compaction_copies(
 iree_status_t loom_serve_text_state_submit_trim(
     loom_serve_text_state_t* state, loom_serve_text_trim_result_t* out_result) {
   *out_result = (loom_serve_text_trim_result_t){0};
-  loom_serve_text_state_complete_backing(state);
+  loom_serve_text_state_prepare_reclaim(state);
   state->memory.trim.released_before = state->memory.statistics.released_bytes;
   state->memory.trim.phase = LOOM_SERVICE_TEXT_TRIM_COMPLETE;
   if (!state->memory.index) {

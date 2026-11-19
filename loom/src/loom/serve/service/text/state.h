@@ -457,9 +457,15 @@ iree_status_t loom_serve_text_state_complete_trim(
     loom_serve_text_state_t* state, loom_serve_text_trim_result_t* result,
     bool* out_complete);
 
-// Captures released ownership at a completed model frontier. Native retirement
-// proceeds independently of subsequent execution; overlapping admission defers.
-// No prior reclaim may remain uncollected. Accepted work survives failure.
+// Publishes completed backing and COW ownership at a retired model frontier.
+// Visits only changed rows; no native operation or release plan is allocated.
+// Returns whether released ownership still requires capture afterward.
+bool loom_serve_text_state_prepare_reclaim(loom_serve_text_state_t* state);
+
+// Captures already-released ownership, independently of active device work.
+// New COW sources remain owned until their completion; overlapping admission
+// defers. No prior reclaim may remain uncollected. Accepted work survives
+// failure.
 iree_status_t loom_serve_text_state_submit_reclaim(
     loom_serve_text_state_t* state);
 

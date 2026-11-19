@@ -246,6 +246,8 @@ TEST_P(WorkspaceTest, RejectedBatchPublishesNoPrefixOrTimelineEdge) {
   };
   iree_hal_buffer_t* buffers[IREE_ARRAYSIZE(requests)] = {};
   const auto before = loom_runtime_execution_frontier(producer_.execution);
+  const auto allocation_before =
+      loom_runtime_execution_allocation_frontier(producer_.execution);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       loom_runtime_execution_alloca(
@@ -257,9 +259,47 @@ TEST_P(WorkspaceTest, RejectedBatchPublishesNoPrefixOrTimelineEdge) {
   const auto after = loom_runtime_execution_frontier(producer_.execution);
   EXPECT_EQ(after.values[0], before.values[0]);
   EXPECT_EQ(after.values[1], before.values[1]);
+  const auto allocation_after =
+      loom_runtime_execution_allocation_frontier(producer_.execution);
+  EXPECT_EQ(allocation_after.values[0], allocation_before.values[0]);
+  EXPECT_EQ(allocation_after.values[1], 0u);
   EXPECT_TRUE(loom_runtime_execution_is_retired(producer_.execution));
   EXPECT_EQ(loom_runtime_workspace_statistics(workspace_).reserve_count, 0u);
   IREE_ASSERT_OK(CompleteIndependentWork());
+}
+
+TEST_P(WorkspaceTest, AllocationReadinessDoesNotWaitForLaterWork) {
+  IREE_ASSERT_OK(Allocate(producer_));
+  const auto allocated =
+      loom_runtime_execution_allocation_frontier(producer_.execution);
+  const auto work = loom_runtime_execution_frontier(producer_.execution);
+  EXPECT_EQ(allocated.semaphores[0], work.semaphores[0]);
+  EXPECT_EQ(allocated.values[0], work.values[0]);
+  EXPECT_EQ(allocated.values[1], 0u);
+
+  uint64_t gate_value = 1;
+  IREE_ASSERT_OK(loom_runtime_execution_barrier(producer_.execution,
+                                                {1, &gate_, &gate_value}));
+  const auto pending = loom_runtime_execution_frontier(producer_.execution);
+  EXPECT_GT(pending.values[0], allocated.values[0]);
+  const auto unchanged =
+      loom_runtime_execution_allocation_frontier(producer_.execution);
+  EXPECT_EQ(unchanged.values[0], allocated.values[0]);
+  IREE_ASSERT_OK(
+      loom_runtime_execution_wait(producer_.execution, allocated.values[0]));
+  uint64_t completed = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(pending.semaphores[0], &completed));
+  EXPECT_LT(completed, pending.values[0]);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, gate_value, nullptr));
+  uint64_t released = 0;
+  IREE_ASSERT_OK(loom_runtime_execution_dealloca(producer_.execution,
+                                                 producer_.buffer, &released));
+  iree_hal_buffer_release(producer_.buffer);
+  producer_.buffer = nullptr;
+  IREE_ASSERT_OK(Allocate(producer_));
+  const auto next =
+      loom_runtime_execution_allocation_frontier(producer_.execution);
+  EXPECT_GT(next.values[0], pending.values[0]);
 }
 
 TEST_P(WorkspaceTest, BatchReusesInputWhileOutputRemainsLive) {
@@ -359,6 +399,9 @@ TEST_P(WorkspaceTest, FailedBatchViewKeepsAcceptedRootsUntilQueueRetirement) {
   }
   auto accepted = loom_runtime_execution_frontier(producer_.execution);
   EXPECT_EQ(accepted.values[0], before.values[0] + 1);
+  EXPECT_EQ(
+      loom_runtime_execution_allocation_frontier(producer_.execution).values[0],
+      accepted.values[0]);
   EXPECT_TRUE(loom_runtime_execution_is_retired(producer_.execution));
   IREE_ASSERT_OK(loom_runtime_execution_barrier(
       consumer_.execution, {1, &accepted.semaphores[0], &accepted.values[0]}));
@@ -489,6 +532,10 @@ TEST_P(WorkspaceTest, PersistentStateDoesNotKeepTransientWorkspaceActive) {
       iree_hal_make_pool_reservation_request(sizeof(consumer_.output), 16);
   IREE_ASSERT_OK(loom_runtime_execution_alloca_from_pool(
       producer_.execution, storage, 1, &request, &consumer_.buffer));
+  const auto allocated =
+      loom_runtime_execution_allocation_frontier(producer_.execution);
+  EXPECT_EQ(allocated.values[0],
+            loom_runtime_execution_frontier(producer_.execution).values[0]);
   const uint32_t pattern = 0x2468ACE0;
   iree_hal_transfer_operation_t fill = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
@@ -505,6 +552,10 @@ TEST_P(WorkspaceTest, PersistentStateDoesNotKeepTransientWorkspaceActive) {
       loom_runtime_execution_transfer(producer_.execution, 1, &fill, &value));
   IREE_ASSERT_OK(loom_runtime_execution_wait(producer_.execution, value));
   // Storage is live, but no command workspace has been acquired yet.
+  EXPECT_LT(allocated.values[0], value);
+  EXPECT_EQ(allocated.values[0],
+            loom_runtime_execution_allocation_frontier(producer_.execution)
+                .values[0]);
   EXPECT_FALSE(
       loom_runtime_workspace_trim_idle(workspace_, iree_time_now(), timeout));
 

@@ -991,6 +991,15 @@ const loom_serve_packing_shape_t* loom_serve_text_model_shapes(
   return model->shapes;
 }
 
+bool loom_serve_text_model_prepare_reclaim(loom_serve_text_model_t* model) {
+  return loom_serve_text_state_prepare_reclaim(&model->state);
+}
+
+loom_runtime_execution_frontier_t loom_serve_text_model_allocation_frontier(
+    loom_serve_text_model_t* model) {
+  return loom_runtime_execution_allocation_frontier(model->execution);
+}
+
 iree_status_t loom_serve_text_model_submit_reclaim(
     loom_serve_text_model_t* model) {
   return loom_serve_text_state_submit_reclaim(&model->state);

@@ -830,7 +830,8 @@ iree_status_t loom_serve_text_media_lookahead(
   if (!service->media_preparation_end || service->pending.prepared.session ||
       service->cpu_work != TEXT_CPU_WORK_NONE ||
       (service->completion.work != TEXT_WORK_NONE &&
-       service->completion.work != TEXT_WORK_EPOCH)) {
+       service->completion.work != TEXT_WORK_EPOCH &&
+       service->completion.work != TEXT_WORK_EPOCH_ALLOCATIONS)) {
     return iree_ok_status();
   }
   iree_status_t status = iree_ok_status();

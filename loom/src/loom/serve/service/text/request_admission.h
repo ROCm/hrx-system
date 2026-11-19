@@ -21,7 +21,8 @@ void loom_serve_text_pending_cancel_failed(loom_serve_text_service_t* service,
                                            bool* out_progress);
 
 // Captures pending dead-page releases without waiting on model execution.
-// Called at a completed model boundary before the next ready epoch submits.
+// Called after completed logical ownership is published, once the next epoch's
+// accepted allocations are ready or no foreground work remains.
 iree_status_t loom_serve_text_submit_reclaim(loom_serve_text_service_t* service,
                                              bool* out_progress);
 

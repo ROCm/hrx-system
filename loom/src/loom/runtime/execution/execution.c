@@ -27,6 +27,9 @@ struct loom_runtime_execution_t {
   loom_runtime_workspace_t* workspace;
   // Ordered commands and input transfers for this model.
   loom_runtime_execution_timeline_t work;
+  // Work value of the latest accepted allocation, independent of later
+  // commands.
+  uint64_t allocation_value;
   // Ordered downloads consuming produced results without gating model work.
   loom_runtime_execution_timeline_t feedback;
   // Protects timeline reservation through queue acceptance, never device waits.
@@ -111,6 +114,7 @@ iree_status_t loom_runtime_execution_alloca(
   }
   if (iree_status_is_ok(status)) {
     execution->work.submitted_value = next_value;
+    execution->allocation_value = next_value;
     // Capture the complete accepted batch before wrapping caller views. Every
     // raw root borrows its source pool independently of its siblings.
     for (iree_host_size_t i = 0; i < count; ++i) {
@@ -171,6 +175,7 @@ iree_status_t loom_runtime_execution_alloca_from_pool(
   }
   if (iree_status_is_ok(status)) {
     execution->work.submitted_value = next_value;
+    execution->allocation_value = next_value;
     for (iree_host_size_t i = 0; i < count; ++i) {
       iree_hal_pool_retain(pool);
       loom_runtime_workspace_scope_capture(execution->storage_scope, pool,
@@ -250,6 +255,17 @@ loom_runtime_execution_frontier_t loom_runtime_execution_frontier(
       .semaphores = {execution->work.semaphore, execution->feedback.semaphore},
       .values = {execution->work.submitted_value,
                  execution->feedback.submitted_value},
+  };
+  iree_slim_mutex_unlock(&execution->mutex);
+  return frontier;
+}
+
+loom_runtime_execution_frontier_t loom_runtime_execution_allocation_frontier(
+    loom_runtime_execution_t* execution) {
+  iree_slim_mutex_lock(&execution->mutex);
+  const loom_runtime_execution_frontier_t frontier = {
+      .semaphores = {execution->work.semaphore, execution->feedback.semaphore},
+      .values = {execution->allocation_value, 0},
   };
   iree_slim_mutex_unlock(&execution->mutex);
   return frontier;

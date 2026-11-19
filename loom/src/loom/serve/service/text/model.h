@@ -329,8 +329,19 @@ typedef struct loom_serve_text_trim_result_t {
   uint64_t released_bytes;
 } loom_serve_text_trim_result_t;
 
-// Captures dead backing at a completed model frontier without making future
-// execution wait for its native retirement. Overlapping admissions defer;
+// Publishes completed backing and COW ownership before submitting new model
+// work. This bounded logical retirement does not plan or submit native release.
+// Returns whether released ownership still requires capture afterward.
+bool loom_serve_text_model_prepare_reclaim(loom_serve_text_model_t* model);
+
+// Captures accepted allocation readiness independently of later device work.
+// The semaphores remain borrowed through model retirement.
+loom_runtime_execution_frontier_t loom_serve_text_model_allocation_frontier(
+    loom_serve_text_model_t* model);
+
+// Captures dead backing without making execution wait for native retirement.
+// May follow submission of the next epoch: its new owners remain live,
+// including COW sources awaiting completion. Overlapping admissions defer;
 // disjoint ready data stays usable. No prior reclaim may remain uncollected.
 iree_status_t loom_serve_text_model_submit_reclaim(
     loom_serve_text_model_t* model);
