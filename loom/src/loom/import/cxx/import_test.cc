@@ -669,11 +669,12 @@ TEST_F(ImportTest, EmbeddedFacadeAndExternalProviderAgree) {
   // include root; preprocessing and binding resolution remain identical.
   for (const char* name :
        {"type_traits", "hip/hip_runtime.h", "hip/hip_vector_types.h",
-        "hip/hip_fp16.h", "loomcxx/kernel.h", "loomcxx/atomic.h",
-        "loomcxx/buffer.h", "loomcxx/cache.h", "loomcxx/math.h",
-        "loomcxx/predicate.h", "loomcxx/scalar.h", "loomcxx/view.h",
-        "loomcxx/encoding_type.h", "loomcxx/index.h", "loomcxx/shape.h",
-        "loomcxx/target.h", "loomcxx/target/amdgpu.h", "loomcxx/template.h"}) {
+        "hip/hip_fp16.h", "loomcxx/kernel.h", "loomcxx/kernel_ref.h",
+        "loomcxx/atomic.h", "loomcxx/buffer.h", "loomcxx/cache.h",
+        "loomcxx/math.h", "loomcxx/predicate.h", "loomcxx/scalar.h",
+        "loomcxx/view.h", "loomcxx/encoding_type.h", "loomcxx/index.h",
+        "loomcxx/shape.h", "loomcxx/target.h", "loomcxx/target/amdgpu.h",
+        "loomcxx/template.h"}) {
     auto contents = loom::cxx_import::builtin_include(name);
     ASSERT_TRUE(contents.has_value());
     headers_[std::string("/edited/") + name] = *contents;
