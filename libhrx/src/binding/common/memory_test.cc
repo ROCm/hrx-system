@@ -342,6 +342,26 @@ class CpuStreamingMemoryTest : public ::testing::Test {
     iree_hal_streaming_host_callback_queue_deinitialize(&host_callbacks_);
   }
 
+  // Exercise the native download contract independently of cached-source
+  // selection. A task allocation is otherwise directly readable by the CPU.
+  iree_status_t DownloadViaQueue(void* target, iree_device_size_t length) {
+    const iree_hal_transfer_region_t region = {
+        .row_length = length,
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    const iree_hal_transfer_operation_t operation = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+        .download =
+            {
+                .source_buffer = buffer_->buffer,
+                .target = target,
+                .region = &region,
+            },
+    };
+    return iree_hal_streaming_direct_transfer_and_wait(stream_, 1, &operation);
+  }
+
   // Explicit frontend callout owner shared by this fixture's device contexts.
   iree_hal_streaming_host_callback_queue_t host_callbacks_ = {};
   // Lives through context teardown and every asynchronous completion callback.
@@ -817,7 +837,7 @@ TEST_F(CpuStreamingMemoryTest, PageableUploadValidationAndRejection) {
 }
 
 TEST_F(CpuStreamingMemoryTest,
-       PageableTransfersAcceptBeforeWaitingForPredecessor) {
+       NativeTransfersAcceptBeforeWaitingForPredecessor) {
   constexpr size_t kLength = 1024 * 1024 + 123;
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
       context_, kLength + 16, IREE_HAL_STREAMING_MEMORY_FLAG_NONE, &buffer_));
@@ -851,9 +871,7 @@ TEST_F(CpuStreamingMemoryTest,
       IREE_EXPECT_OK(upload ? iree_hal_streaming_memcpy_host_to_device(
                                   context_, device_pointer_, host_bytes.data(),
                                   kLength, stream_)
-                            : iree_hal_streaming_memcpy_device_to_host(
-                                  context_, host_bytes.data(), device_pointer_,
-                                  kLength, stream_));
+                            : DownloadViaQueue(host_bytes.data(), kLength));
       returned.store(true, std::memory_order_release);
     });
 
@@ -890,7 +908,47 @@ TEST_F(CpuStreamingMemoryTest,
   EXPECT_EQ(host_callbacks_.thread, nullptr);
 }
 
-TEST_F(CpuStreamingMemoryTest, PageableDownloadExtendsActiveStreamQueueLease) {
+TEST_F(CpuStreamingMemoryTest, CachedMappedDownloadSkipsNativeTransfer) {
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
+      context_, 128, IREE_HAL_STREAMING_MEMORY_FLAG_NONE, &buffer_));
+  for (size_t i = 0; i < 128; ++i) {
+    static_cast<uint8_t*>(buffer_->host_ptr)[i] = i;
+  }
+  std::array<uint8_t, 96> target;
+  target.fill(0xCD);
+  const iree_hal_transfer_region_t region = {
+      .row_length = 7,
+      .row_count = 3,
+      .slice_count = 2,
+      .source_strides = {.row_stride = 13, .slice_stride = 56},
+      .target_strides = {.row_stride = 11, .slice_stride = 41},
+  };
+  InjectedFlushQueue queue = {};
+  auto* original_queue = stream_->queue;
+  InitializeInjectedFlushQueue(original_queue, &queue);
+  EXPECT_EQ(original_queue, ReplaceStreamQueue(stream_, &queue.base));
+  iree_hal_queue_release(original_queue);
+  IREE_EXPECT_OK(iree_hal_streaming_memcpy_device_to_host_resolved(
+      context_, target.data(), {}, {buffer_, 9}, &region, stream_));
+  EXPECT_EQ(0, queue.accepted_transfer_count.load());
+  EXPECT_EQ(1u, stream_->pending_value);
+  std::array<uint8_t, 96> expected;
+  expected.fill(0xCD);
+  for (size_t slice = 0; slice < 2; ++slice) {
+    for (size_t row = 0; row < 3; ++row) {
+      for (size_t column = 0; column < 7; ++column) {
+        expected[slice * 41 + row * 11 + column] =
+            9 + slice * 56 + row * 13 + column;
+      }
+    }
+  }
+  EXPECT_EQ(expected, target);
+  EXPECT_EQ(nullptr, host_callbacks_.thread);
+  iree_hal_queue_retain(original_queue);
+  iree_hal_queue_release(ReplaceStreamQueue(stream_, original_queue));
+}
+
+TEST_F(CpuStreamingMemoryTest, NativeDownloadExtendsActiveStreamQueueLease) {
   constexpr size_t kLength = IREE_HAL_STREAMING_SMALL_TRANSFER_MAX_LENGTH + 1;
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
       context_, kLength, IREE_HAL_STREAMING_MEMORY_FLAG_NONE, &buffer_));
@@ -908,9 +966,7 @@ TEST_F(CpuStreamingMemoryTest, PageableDownloadExtendsActiveStreamQueueLease) {
   const uint64_t predecessor = stream_->pending_value;
   std::atomic<bool> returned(false);
   std::thread caller([&] {
-    IREE_EXPECT_OK(iree_hal_streaming_memcpy_device_to_host(
-        context_, destination.data(),
-        iree_hal_streaming_buffer_device_pointer(buffer_), kLength, stream_));
+    IREE_EXPECT_OK(DownloadViaQueue(destination.data(), kLength));
     returned.store(true, std::memory_order_release);
   });
   // Both accepted operations remain pending on the real task queue. The copy
@@ -1043,7 +1099,7 @@ TEST_F(CpuStreamingMemoryTest, SynchronizeRetainedDetachedStream) {
 }
 
 TEST_F(CpuStreamingMemoryTest,
-       PublicStreamFailureDoesNotReturnBorrowedDownloadEarly) {
+       PublicStreamFailureDoesNotReturnBorrowedNativeDownloadEarly) {
   constexpr size_t kLength = 16;
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
       context_, kLength, IREE_HAL_STREAMING_MEMORY_FLAG_NONE, &buffer_));
@@ -1065,10 +1121,7 @@ TEST_F(CpuStreamingMemoryTest,
   std::atomic<bool> returned(false);
   std::thread caller([&] {
     IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
-                          iree_hal_streaming_memcpy_device_to_host(
-                              context_, destination.data(),
-                              iree_hal_streaming_buffer_device_pointer(buffer_),
-                              kLength, stream_));
+                          DownloadViaQueue(destination.data(), kLength));
     returned.store(true, std::memory_order_release);
   });
   accepted.acquire();
@@ -1092,7 +1145,7 @@ TEST_F(CpuStreamingMemoryTest,
 }
 
 TEST_F(CpuStreamingMemoryTest,
-       PageableTransferFlushFailureJoinsBorrowedHostBytes) {
+       NativeTransferFlushFailureJoinsBorrowedHostBytes) {
   constexpr size_t kLength = 1024 * 1024 + 123;
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
       context_, kLength, IREE_HAL_STREAMING_MEMORY_FLAG_NONE, &buffer_));
@@ -1117,12 +1170,11 @@ TEST_F(CpuStreamingMemoryTest,
     std::atomic<bool> returned(false);
     std::thread caller([&] {
       IREE_EXPECT_STATUS_IS(IREE_STATUS_INTERNAL,
-                            upload ? iree_hal_streaming_memcpy_host_to_device(
-                                         context_, device_pointer_,
-                                         host_bytes.data(), kLength, stream_)
-                                   : iree_hal_streaming_memcpy_device_to_host(
-                                         context_, host_bytes.data(),
-                                         device_pointer_, kLength, stream_));
+                            upload
+                                ? iree_hal_streaming_memcpy_host_to_device(
+                                      context_, device_pointer_,
+                                      host_bytes.data(), kLength, stream_)
+                                : DownloadViaQueue(host_bytes.data(), kLength));
       returned.store(true, std::memory_order_release);
     });
     queue.flush_observed.acquire();

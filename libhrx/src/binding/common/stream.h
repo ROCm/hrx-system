@@ -345,8 +345,8 @@ iree_status_t iree_hal_streaming_launch_host_function(
 // Executes blocking host work in stream order. The caller waits for all prior
 // work, invokes |fn|, and publishes success or failure to a timeline point
 // reserved before the wait. Concurrent later submissions therefore remain
-// ordered after the operation. Intended only for cold fallback paths that
-// cannot be represented by one device queue. |fn| executes without the stream
+// ordered after the operation. Used for caller-owned host copies and operations
+// spanning devices without a common queue. |fn| executes without the stream
 // mutex held and must not submit to or wait on |stream| because its reserved
 // point remains unsignaled until |fn| returns.
 iree_status_t iree_hal_streaming_execute_host_operation(
