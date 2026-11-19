@@ -42,7 +42,6 @@ typedef enum loom_serve_text_load_phase_e {
   TEXT_LOAD_BIND,
   TEXT_LOAD_WEIGHTS,
   TEXT_LOAD_RESIDENCY,
-  TEXT_LOAD_ACTIVATE,
   TEXT_LOAD_RECORD,
   TEXT_LOAD_LINK,
   TEXT_LOAD_READY,
@@ -75,7 +74,7 @@ struct loom_serve_text_load_t {
   } control;
   // Independent tokenizer construction, joined before linking or retirement.
   loom_runtime_tokenizer_load_t* tokenizer_load;
-  // Terminal model outcome retained while tokenizer work is still retiring.
+  // Terminal model outcome retained while accepted preparation work retires.
   iree_status_t terminal_status;
   // Joins worker/proactor final publication with the owner's next advance.
   struct {
@@ -280,8 +279,12 @@ static iree_status_t loom_serve_text_load_bind(loom_serve_text_model_t* model) {
 }
 
 static iree_status_t loom_serve_text_load_activate(
-    loom_serve_text_load_t* load) {
+    loom_serve_text_load_t* load, loom_serve_text_load_flags_t flags) {
   loom_serve_text_model_t* model = load->model;
+  if (!model->residency || model->warmup ||
+      !iree_any_bit_set(flags, LOOM_SERVE_TEXT_LOAD_FLAG_DEMAND)) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(loom_serve_text_warmup_allocate(
       model->device_owner, model->pool, model->parameter_group,
       load->event.wake, load->event.user_data, load->host_allocator,
@@ -481,21 +484,28 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
   *out_complete = false;
   load->cancelled |= iree_any_bit_set(flags, LOOM_SERVE_TEXT_LOAD_FLAG_CANCEL);
   iree_slim_mutex_lock(&load->event.mutex);
-  if (load->event.pending) {
-    iree_slim_mutex_unlock(&load->event.mutex);
-    return iree_ok_status();
-  }
+  const bool pending = load->event.pending != 0;
   iree_status_t status =
       iree_status_join(load->terminal_status, load->event.status);
   load->terminal_status = iree_ok_status();
   load->event.status = iree_ok_status();
   const bool layouts_ready =
-      load->event.layout_count == load->model->stage_count;
+      !pending && load->event.layout_count == load->model->stage_count;
   const bool stages_compiling = load->event.stages_compiling;
   const bool control_compiling = load->event.control_compiling;
   iree_slim_mutex_unlock(&load->event.mutex);
   if (iree_status_is_ok(status) && load->cancelled) {
     status = iree_make_status(IREE_STATUS_CANCELLED, "model load cancelled");
+  }
+  // Demand can arrive after parameter preparation, including while recording
+  // or initialization owns a foreground callback. Warmup has independent
+  // execution ownership; accepted preparation still joins before retirement.
+  if (iree_status_is_ok(status) && load->phase != TEXT_LOAD_COMPLETE) {
+    status = loom_serve_text_load_activate(load, flags);
+  }
+  if (pending) {
+    load->terminal_status = status;
+    return iree_ok_status();
   }
   loom_serve_text_model_t* model = load->model;
   loom_runtime_host_t* host = loom_runtime_device_host(model->device_owner);
@@ -557,11 +567,8 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
         status = loom_runtime_residency_allocate(
             loom_runtime_pool_residency_cache(model->pool), model->execution, 1,
             &model->parameter_group, model->host_allocator, &model->residency);
-        load->phase = TEXT_LOAD_ACTIVATE;
-        break;
-      case TEXT_LOAD_ACTIVATE:
-        if (iree_any_bit_set(flags, LOOM_SERVE_TEXT_LOAD_FLAG_DEMAND)) {
-          status = loom_serve_text_load_activate(load);
+        if (iree_status_is_ok(status)) {
+          status = loom_serve_text_load_activate(load, flags);
         }
         load->phase = TEXT_LOAD_RECORD;
         break;
