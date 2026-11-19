@@ -372,32 +372,71 @@ static bool loom_cfg_converge_is_forwarding(const loom_block_t* block,
          loom_cfg_br_dest(block->last_op) == continuation;
 }
 
+// A source stores 1 + its selected successor index. Other touched blocks
+// reserve their place in the batch without contributing an edge to copy.
+enum { LOOM_CFG_CONVERGE_FORWARDING_BOUNDARY = UINT8_MAX };
+
 // A branch-only arm has no effects or local definitions to share. Preserve its
 // outgoing tuple on a private edge instead of moving the decision and carrying
 // live-ins through a predicate join. The original incoming conditional edge
 // has no arguments, so every outgoing value already dominates that edge.
-static iree_status_t loom_cfg_converge_isolate_forwarding_arm(
-    loom_rewriter_t* rewriter, const loom_value_fact_cfg_region_t* facts,
-    uint16_t source, loom_op_t* branch, bool* out_changed) {
-  *out_changed = false;
+static iree_status_t loom_cfg_converge_plan_forwarding_arm(
+    const loom_value_fact_cfg_region_t* facts, uint16_t source,
+    const loom_op_t* branch, iree_arena_allocator_t* arena,
+    uint8_t** inout_roles) {
   const loom_cfg_postdominance_t* postdominance =
       &facts->control_structure.postdominance;
   uint32_t continuation = postdominance->nodes[source].immediate_postdominator;
-  if (continuation == postdominance->exit_node) {
+  uint8_t* roles = *inout_roles;
+  if (continuation == postdominance->exit_node ||
+      (roles && (roles[source] || roles[continuation]))) {
     return iree_ok_status();
   }
-  for (uint16_t arm = 0; arm < 2; ++arm) {
-    loom_block_t* destination = loom_op_successors(branch)[arm];
+  for (uint8_t arm = 0; arm < 2; ++arm) {
+    const loom_block_t* destination = loom_op_const_successors(branch)[arm];
     if (loom_cfg_dominance_block_dominates(&facts->dominance, source,
                                            destination->region_index) ||
         !loom_cfg_converge_is_forwarding(
             destination, facts->graph.blocks[continuation].block)) {
       continue;
     }
+    // An earlier edit can give a shared destination a unique predecessor.
+    // Leave intersecting triples for the next dominance and control snapshot.
+    if (roles && roles[destination->region_index]) {
+      break;
+    }
+    if (!roles) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          arena, facts->graph.block_count, sizeof(*roles), (void**)&roles));
+      memset(roles, 0, facts->graph.block_count * sizeof(*roles));
+      *inout_roles = roles;
+    }
+    roles[source] = arm + 1;
+    roles[destination->region_index] = LOOM_CFG_CONVERGE_FORWARDING_BOUNDARY;
+    roles[continuation] = LOOM_CFG_CONVERGE_FORWARDING_BOUNDARY;
+    break;
+  }
+  return iree_ok_status();
+}
+
+// Apply disjoint edge copies in their original reverse postorder. Appending
+// blocks preserves the dense indices of all sources in the plan.
+static iree_status_t loom_cfg_converge_apply_forwarding_arms(
+    loom_rewriter_t* rewriter, const loom_cfg_graph_t* graph,
+    const uint8_t* roles, loom_cfg_converge_statistics_t* statistics) {
+  loom_builder_t* builder = &rewriter->builder;
+  for (iree_host_size_t i = 0; i < graph->reverse_postorder.count; ++i) {
+    const uint16_t source = graph->reverse_postorder.values[i];
+    if (!roles[source] ||
+        roles[source] == LOOM_CFG_CONVERGE_FORWARDING_BOUNDARY) {
+      continue;
+    }
+    const uint8_t arm = roles[source] - 1;
+    loom_op_t* branch = graph->blocks[source].block->last_op;
+    loom_block_t* destination = loom_op_successors(branch)[arm];
     loom_block_t* forwarding = NULL;
     IREE_RETURN_IF_ERROR(loom_region_append_block(
         rewriter->module, destination->parent_region, &forwarding));
-    loom_builder_t* builder = &rewriter->builder;
     builder->ip.parent_op = branch->parent_op;
     loom_builder_set_block(builder, forwarding);
     const loom_op_t* original = destination->last_op;
@@ -406,12 +445,10 @@ static iree_status_t loom_cfg_converge_isolate_forwarding_arm(
         builder, loom_cfg_br_dest(original), loom_op_const_operands(original),
         original->operand_count, original->location, &replacement));
     loom_op_successors(branch)[arm] = forwarding;
-    IREE_RETURN_IF_ERROR(
-        loom_rewriter_refresh_cfg_facts(rewriter, destination->parent_region));
-    *out_changed = true;
-    break;
+    ++statistics->forwarding_arms_isolated;
   }
-  return iree_ok_status();
+  return loom_rewriter_refresh_cfg_facts(rewriter,
+                                         graph->blocks[0].block->parent_region);
 }
 
 // Component order and the earliest reachable DFS node provide independent
@@ -1225,6 +1262,8 @@ static iree_status_t loom_cfg_converge_once(
     bool* out_changed) {
   *out_changed = false;
   const loom_cfg_graph_t* graph = &facts->graph;
+  // Allocated on the first eligible arm; planning ends before any edge moves.
+  uint8_t* forwarding_roles = NULL;
   for (iree_host_size_t i = 0; i < graph->reverse_postorder.count; ++i) {
     uint16_t source = graph->reverse_postorder.values[i];
     const loom_cfg_block_info_t* block = &graph->blocks[source];
@@ -1244,11 +1283,10 @@ static iree_status_t loom_cfg_converge_once(
             LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP)) {
       continue;
     }
-    IREE_RETURN_IF_ERROR(loom_cfg_converge_isolate_forwarding_arm(
-        rewriter, facts, source, branch, out_changed));
-    if (*out_changed) {
-      ++loom_cfg_converge_statistics(pass)->forwarding_arms_isolated;
-      return iree_ok_status();
+    IREE_RETURN_IF_ERROR(loom_cfg_converge_plan_forwarding_arm(
+        facts, source, branch, arena, &forwarding_roles));
+    if (forwarding_roles) {
+      continue;
     }
     iree_arena_reset(arena);
     loom_cfg_converge_plan_t plan = {
@@ -1277,6 +1315,11 @@ static iree_status_t loom_cfg_converge_once(
     if (!iree_status_is_ok(status) || *out_changed) {
       return status;
     }
+  }
+  if (forwarding_roles) {
+    *out_changed = true;
+    return loom_cfg_converge_apply_forwarding_arms(
+        rewriter, graph, forwarding_roles, loom_cfg_converge_statistics(pass));
   }
   return iree_ok_status();
 }
