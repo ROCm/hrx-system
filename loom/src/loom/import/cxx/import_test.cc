@@ -1081,6 +1081,26 @@ const offload::launch::info* host() {
   EXPECT_EQ(printed.find("@host"), std::string::npos) << printed;
 }
 
+TEST_F(KernelRefImportTest, SkipMutableGlobalsLeavesHostStorageOnTheHost) {
+  // A hosted unit is a host compile: mutable globals are host storage.
+  std::string source = std::string(kKernelRefSource) +
+                       "int host_counter = 0;\n"
+                       "void bump() { ++host_counter; }\n";
+  const auto view = iree_make_string_view(source.data(), source.size());
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_HOSTED;
+  options_.triple = IREE_SV("x86_64-linux-gnu");
+  IREE_ASSERT_OK(Import(view));
+  EXPECT_EQ(module_, nullptr);
+  EXPECT_GT(error_count_, 0);
+
+  error_count_ = 0;
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_SKIP_MUTABLE_GLOBALS;
+  IREE_ASSERT_OK(Import(view));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(error_count_, 0);
+  EXPECT_NE(Print().find("@_Z3runI4BodyEvT_"), std::string::npos);
+}
+
 // A unit is parsed once and imported from its existing translation unit, as
 // a single-source driver does after generating host code from it.
 TEST_F(KernelRefImportTest, ParsedUnitImportsWithoutReparsing) {

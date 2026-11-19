@@ -56,6 +56,10 @@ typedef enum loomc_cxx_import_flag_bits_e {
   /// with -fexceptions. Device import still rejects exception handling in the
   /// code it translates.
   LOOMC_CXX_IMPORT_FLAG_EXCEPTIONS = 1u << 2,
+  /// Skip mutable namespace-scope variable definitions instead of rejecting
+  /// them: in a unit that is also a host compile they are host storage that
+  /// device code cannot reference.
+  LOOMC_CXX_IMPORT_FLAG_SKIP_MUTABLE_GLOBALS = 1u << 3,
 } loomc_cxx_import_flag_bits_t;
 /// Bitmask of loomc_cxx_import_flag_bits_t values.
 typedef uint32_t loomc_cxx_import_flags_t;
