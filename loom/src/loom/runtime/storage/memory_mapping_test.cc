@@ -259,6 +259,36 @@ TEST_F(MemoryMappingTest, ColdGrowthPacksAlignedRunsBeforeExistingHoles) {
   CheckRetained(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
 }
 
+TEST_F(MemoryMappingTest, PackedClaimStopsAtLivePagesInsideOneParent) {
+  const auto geometry = loom_runtime_pool_state_geometry(storage_owner);
+  const uint64_t page = geometry.mapping_size;
+  const uint64_t parent = geometry.backing_size;
+  ASSERT_GE(parent, 8 * page);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool, geometry, parent, geometry.granularity, &statistics[0], &first));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, parent));
+  RoundTrip(loom_runtime_virtual_buffer_handle(first), 3 * page, 0x12345678);
+  IREE_ASSERT_OK(Trim(first, page, 2 * page));
+  IREE_ASSERT_OK(Trim(first, 4 * page, 3 * page));
+  mapping_queue.ClearMappings();
+
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool, geometry, 5 * page, geometry.granularity, &statistics[1], &second));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(second, 0, 5 * page));
+  const auto mappings = mapping_queue.WaitForMappings(1)[0].updates;
+  ASSERT_EQ(mappings.size(), 2u);
+  EXPECT_EQ(mappings[0].source, mappings[1].source);
+  EXPECT_EQ(mappings[0].target_range.byte_offset, 0u);
+  EXPECT_EQ(mappings[0].target_range.byte_length, 2 * page);
+  EXPECT_EQ(mappings[0].source_offset, page);
+  EXPECT_EQ(mappings[1].target_range.byte_offset, 2 * page);
+  EXPECT_EQ(mappings[1].target_range.byte_length, 3 * page);
+  EXPECT_EQ(mappings[1].source_offset, 4 * page);
+  RoundTrip(loom_runtime_virtual_buffer_handle(second), 2 * page, 0xaabbccdd);
+  CheckRetained(loom_runtime_virtual_buffer_handle(first), 3 * page,
+                0x12345678);
+}
+
 TEST_F(MemoryMappingTest, ContiguousRunKeepsIndependentPageOwnership) {
   const auto geometry = loom_runtime_pool_state_geometry(storage_owner);
   const uint64_t page = geometry.mapping_size;

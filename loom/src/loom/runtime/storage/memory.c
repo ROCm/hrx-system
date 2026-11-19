@@ -1224,8 +1224,10 @@ static void loom_runtime_memory_pool_collect(loom_runtime_memory_pool_t* pool) {
           loom_runtime_memory_slab_length(edit->buffer, edit->index);
       loom_runtime_backing_entry_t result = edit->result;
       if (!result.mapped) {
-        loom_runtime_backing_pages_return((loom_runtime_backing_slot_t){
-            result.physical, result.physical_offset});
+        loom_runtime_backing_pages_return(
+            (loom_runtime_backing_slot_t){result.physical,
+                                          result.physical_offset},
+            1);
         result.physical = NULL;
         result.physical_offset = 0;
       }
@@ -1470,34 +1472,59 @@ static iree_status_t loom_runtime_memory_operation_prepare_backing(
       status = loom_runtime_backing_pages_prepare_packed(
           pool->pages, additional.packed_count, &operation->growth);
     }
+    if (!(pass == 0 ? additional.weight_bytes
+                    : additional.packed_count || additional.dedicated_bytes)) {
+      continue;
+    }
     for (iree_host_size_t i = 0;
-         i < operation->count && iree_status_is_ok(status); ++i) {
+         i < operation->count && iree_status_is_ok(status);) {
       loom_runtime_memory_edit_t* edit = &operation->edits[i];
+      loom_runtime_virtual_buffer_t* buffer = edit->buffer;
       const loom_runtime_backing_kind_t kind =
-          edit->index + 1 == edit->buffer->slab_count
-              ? edit->buffer->tail_kind
-              : edit->buffer->regular_kind;
+          edit->index + 1 == buffer->slab_count ? buffer->tail_kind
+                                                : buffer->regular_kind;
       if ((kind == LOOM_RUNTIME_BACKING_WEIGHT) != (pass == 0)) {
+        ++i;
         continue;
       }
-      const iree_hal_pool_reservation_request_t request =
-          iree_hal_make_pool_reservation_request(
-              loom_runtime_memory_slab_length(edit->buffer, edit->index),
-              edit->buffer->geometry.granularity);
-      loom_runtime_backing_slot_t slot;
-      status = loom_runtime_backing_pages_claim(
-          pool->pages, kind, request,
-          loom_runtime_memory_slab_cost(edit->buffer, edit->index),
-          &operation->growth, &slot);
-      edit->result.physical = slot.parent;
-      edit->result.physical_offset = slot.offset;
+      iree_host_size_t end = i + 1;
+      if (kind == LOOM_RUNTIME_BACKING_PACKED) {
+        while (end < operation->count &&
+               operation->edits[end].buffer == buffer &&
+               operation->edits[end].index == edit->index + end - i &&
+               (operation->edits[end].index + 1 < buffer->slab_count ||
+                buffer->tail_kind == kind)) {
+          ++end;
+        }
+      }
+      while (i < end && iree_status_is_ok(status)) {
+        const iree_host_size_t index = operation->edits[i].index;
+        const iree_hal_pool_reservation_request_t request =
+            iree_hal_make_pool_reservation_request(
+                loom_runtime_memory_slab_length(buffer, index),
+                buffer->geometry.granularity);
+        loom_runtime_backing_slot_t slot;
+        iree_host_size_t claimed = 0;
+        status = loom_runtime_backing_pages_claim(
+            pool->pages, kind, request,
+            loom_runtime_memory_slab_cost(buffer, index), end - i,
+            &operation->growth, &slot, &claimed);
+        for (iree_host_size_t j = 0; j < claimed; ++j) {
+          operation->edits[i + j].result.physical = slot.parent;
+          operation->edits[i + j].result.physical_offset =
+              slot.offset + j * buffer->geometry.mapping_size;
+        }
+        i += claimed;
+      }
     }
   }
   if (!iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < operation->count; ++i) {
       loom_runtime_backing_entry_t* result = &operation->edits[i].result;
-      loom_runtime_backing_pages_return((loom_runtime_backing_slot_t){
-          result->physical, result->physical_offset});
+      loom_runtime_backing_pages_return(
+          (loom_runtime_backing_slot_t){result->physical,
+                                        result->physical_offset},
+          1);
       result->physical = NULL;
       result->physical_offset = 0;
     }
@@ -2128,7 +2155,8 @@ iree_status_t loom_runtime_virtual_buffer_free(
     IREE_ASSERT(entry->physical);
     const iree_host_size_t index = entry->index;
     loom_runtime_backing_pages_return(
-        (loom_runtime_backing_slot_t){entry->physical, entry->physical_offset});
+        (loom_runtime_backing_slot_t){entry->physical, entry->physical_offset},
+        1);
     const loom_runtime_backing_entry_t empty = {0};
     loom_runtime_memory_slab_publish(buffer, index, &empty);
   }

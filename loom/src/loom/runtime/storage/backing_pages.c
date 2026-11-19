@@ -404,11 +404,54 @@ iree_status_t loom_runtime_backing_pages_prepare_packed(
   return status;
 }
 
+// Takes the first contiguous prefix of free slots from the chosen parent.
+// Empty leaf words clear their summary bit once, regardless of run length.
+static iree_host_size_t loom_runtime_backing_parent_claim_packed(
+    loom_runtime_backing_parent_t* parent, iree_host_size_t maximum_count,
+    iree_host_size_t* out_index) {
+  iree_host_size_t index = 0;
+  for (iree_host_size_t level = parent->level_count; level-- > 0;) {
+    index = index * 64 + iree_math_count_trailing_zeros_u64(
+                             loom_runtime_backing_words(parent, level)[index]);
+  }
+  *out_index = index;
+  const iree_host_size_t limit =
+      iree_min(maximum_count, parent->slot_count - index);
+  uint64_t* leaves = loom_runtime_backing_words(parent, 0);
+  iree_host_size_t count = 0;
+  while (count < limit) {
+    iree_host_size_t position = (index + count) / 64;
+    const int32_t bit = (int32_t)((index + count) % 64);
+    const int32_t width =
+        (int32_t)iree_min(limit - count, (iree_host_size_t)(64 - bit));
+    const int32_t take = iree_math_count_trailing_zeros_u64_width(
+        ~(leaves[position] >> bit), width);
+    leaves[position] &= ~(iree_math_mask_low_bits_u64(UINT64_MAX, take) << bit);
+    if (take && !leaves[position]) {
+      for (iree_host_size_t level = 1; level < parent->level_count; ++level) {
+        uint64_t* word =
+            &loom_runtime_backing_words(parent, level)[position / 64];
+        *word &= ~(UINT64_C(1) << (position % 64));
+        if (*word) {
+          break;
+        }
+        position /= 64;
+      }
+    }
+    count += take;
+    if (take < width) {
+      break;
+    }
+  }
+  return count;
+}
+
 iree_status_t loom_runtime_backing_pages_claim(
     loom_runtime_backing_pages_t* pages, loom_runtime_backing_kind_t kind,
     iree_hal_pool_reservation_request_t request, uint64_t dedicated_cost,
-    loom_runtime_backing_growth_t* growth,
-    loom_runtime_backing_slot_t* out_slot) {
+    iree_host_size_t maximum_count, loom_runtime_backing_growth_t* growth,
+    loom_runtime_backing_slot_t* out_slot, iree_host_size_t* out_count) {
+  *out_count = 0;
   *out_slot = (loom_runtime_backing_slot_t){0};
   loom_runtime_backing_class_t* category =
       kind == LOOM_RUNTIME_BACKING_DEDICATED
@@ -452,6 +495,7 @@ iree_status_t loom_runtime_backing_pages_claim(
                                 offsetof(loom_runtime_backing_parent_t, idle));
   }
   iree_host_size_t index = 0;
+  iree_host_size_t count = 1;
   if (kind != LOOM_RUNTIME_BACKING_PACKED) {
     parent->whole = true;
     parent->occupied = parent->slot_count;
@@ -462,52 +506,57 @@ iree_status_t loom_runtime_backing_pages_claim(
       }
     }
   } else {
-    for (iree_host_size_t level = parent->level_count; level-- > 0;) {
-      index =
-          index * 64 + iree_math_count_trailing_zeros_u64(
-                           loom_runtime_backing_words(parent, level)[index]);
+    count =
+        loom_runtime_backing_parent_claim_packed(parent, maximum_count, &index);
+    parent->occupied += count;
+    category->free_count -= count;
+    if (parent->state == LOOM_RUNTIME_BACKING_READY) {
+      category->ready_free_count -= count;
     }
-    iree_host_size_t position = index;
-    for (iree_host_size_t level = 0; level < parent->level_count; ++level) {
-      uint64_t* word =
-          &loom_runtime_backing_words(parent, level)[position / 64];
-      *word &= ~(UINT64_C(1) << (position % 64));
-      if (*word) {
-        break;
-      }
-      position /= 64;
-    }
-    ++parent->occupied;
-    --category->free_count;
-    category->ready_free_count -= parent->state == LOOM_RUNTIME_BACKING_READY;
   }
   if (parent->occupied == parent->slot_count) {
     loom_runtime_backing_unlink(
         &parent->available, offsetof(loom_runtime_backing_parent_t, available));
   }
+  *out_count = count;
   *out_slot = (loom_runtime_backing_slot_t){
       parent, category ? index * category->slot_size : 0};
   return iree_ok_status();
 }
 
-void loom_runtime_backing_pages_return(loom_runtime_backing_slot_t slot) {
+void loom_runtime_backing_pages_return(loom_runtime_backing_slot_t slot,
+                                       iree_host_size_t slot_count) {
   loom_runtime_backing_parent_t* parent = slot.parent;
   if (!parent) {
     return;
   }
-  const uint64_t count = parent->whole ? parent->slot_count : 1;
+  const uint64_t count = parent->whole ? parent->slot_count : slot_count;
   if (parent->whole) {
     parent->whole = false;
   } else {
     iree_host_size_t index = slot.offset / parent->category->slot_size;
-    for (iree_host_size_t level = 0; level < parent->level_count; ++level) {
-      uint64_t* word = &loom_runtime_backing_words(parent, level)[index / 64];
-      const uint64_t previous = *word;
-      *word |= UINT64_C(1) << (index % 64);
-      if (previous) {
-        break;
+    uint64_t* leaves = loom_runtime_backing_words(parent, 0);
+    for (iree_host_size_t remaining = slot_count; remaining;) {
+      iree_host_size_t position = index / 64;
+      const int32_t bit = (int32_t)(index % 64);
+      const int32_t width =
+          (int32_t)iree_min(remaining, (iree_host_size_t)(64 - bit));
+      const uint64_t previous = leaves[position];
+      leaves[position] |= iree_math_mask_low_bits_u64(UINT64_MAX, width) << bit;
+      if (!previous) {
+        for (iree_host_size_t level = 1; level < parent->level_count; ++level) {
+          uint64_t* word =
+              &loom_runtime_backing_words(parent, level)[position / 64];
+          const uint64_t occupied = *word;
+          *word |= UINT64_C(1) << (position % 64);
+          if (occupied) {
+            break;
+          }
+          position /= 64;
+        }
       }
-      index /= 64;
+      index += width;
+      remaining -= width;
     }
   }
   parent->occupied -= count;

@@ -67,16 +67,19 @@ iree_status_t loom_runtime_backing_pages_prepare_packed(
     loom_runtime_backing_pages_t* pages, uint64_t packed_count,
     loom_runtime_backing_growth_t* growth);
 
-// Claims existing capacity or prepares a parent from the supplied admission.
+// Claims up to maximum_count consecutive logical slots from one parent.
+// Whole-parent and dedicated leases each satisfy one logical slot.
 // Submitting growth is separate so metadata failure cannot start partial IO.
 iree_status_t loom_runtime_backing_pages_claim(
     loom_runtime_backing_pages_t* pages, loom_runtime_backing_kind_t kind,
     iree_hal_pool_reservation_request_t request, uint64_t dedicated_cost,
-    loom_runtime_backing_growth_t* growth,
-    loom_runtime_backing_slot_t* out_slot);
+    iree_host_size_t maximum_count, loom_runtime_backing_growth_t* growth,
+    loom_runtime_backing_slot_t* out_slot, iree_host_size_t* out_count);
 void loom_runtime_backing_pages_submit(loom_runtime_backing_growth_t* growth);
 void loom_runtime_backing_pages_abort(loom_runtime_backing_growth_t* growth);
-void loom_runtime_backing_pages_return(loom_runtime_backing_slot_t slot);
+// Returns consecutive leases to their original parent after native retirement.
+void loom_runtime_backing_pages_return(loom_runtime_backing_slot_t slot,
+                                       iree_host_size_t slot_count);
 
 // One observation per pending parent per owner transaction. The returned
 // semaphore is borrowed through the slot lifetime. Ready parents need no wait.
