@@ -10,6 +10,7 @@
 #include "loom/analysis/pipeline/invocations.h"
 #include "loom/analysis/pipeline/resources.h"
 #include "loom/analysis/pipeline/schedule.h"
+#include "loom/analysis/pipeline/source_stability.h"
 #include "loom/analysis/pipeline/workers.h"
 #include "loom/analysis/source_storage_packing.h"
 #include "loom/ir/context.h"
@@ -684,8 +685,8 @@ static iree_status_t loom_check_test_pipeline_transport_execute(
     return iree_ok_status();
   }
   if (!resources.schedule_count && !resources.composition_count) {
-    IREE_RETURN_IF_ERROR(loom_pipeline_workers_prove_sources(
-        &storage_access, workers, resources.strand_count));
+    IREE_RETURN_IF_ERROR(loom_pipeline_prove_source_stability(
+        &storage_access, NULL, workers, resources.strand_count));
   }
   if (resources.schedule_count) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(

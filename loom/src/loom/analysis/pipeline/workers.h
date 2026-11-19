@@ -246,8 +246,8 @@ typedef struct loom_pipeline_transport_t {
   // repeated body; NULL for straight-line or nonuniform scoped execution.
   // Borrowed from the worker's retained CFG snapshot.
   const loom_value_fact_induction_t* induction;
-  // External source roots cannot change during this closed execution. This
-  // proof includes every strand's effects and scoped alias contracts.
+  // External source roots stay stable until this worker completes, including
+  // the effects of every strand whose construction can coexist with it.
   bool sources_stable;
   // Concatenating each batch's complete dynamic visits preserves copy order.
   // Otherwise a repeated loop interleaves batches; physical sharing must use
@@ -371,19 +371,6 @@ iree_status_t loom_pipeline_workers_build(
     loom_storage_access_scope_t* storage_access,
     iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
     loom_pipeline_worker_t* workers, bool* out_valid);
-
-// Proves repeated transport sources immutable across a complete concurrent
-// execution. The invocation owner supplies every worker occurrence in that
-// closed execution, including children receiving incoming channels. An open
-// child or a construction with unresolved compositions cannot close this proof.
-// Call once after construction and before physical selection or source
-// mutation. Uses the same canonical access scope as worker construction;
-// modified roots and alias partitions are indexed once for all source queries.
-// Unproven sources keep sources_stable false. Status carries arena allocation
-// failure.
-iree_status_t loom_pipeline_workers_prove_sources(
-    loom_storage_access_scope_t* storage_access,
-    loom_pipeline_worker_t* workers, iree_host_size_t worker_count);
 
 #ifdef __cplusplus
 }  // extern "C"

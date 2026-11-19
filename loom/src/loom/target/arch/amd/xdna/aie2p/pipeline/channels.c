@@ -176,10 +176,21 @@ iree_status_t loom_aie2p_native_cursor_advance(
       builder, &cursor, 1, predicates, IREE_ARRAYSIZE(predicates), &offset_type,
       1, location, &bounded));
   *out_record = loom_index_assume_results(bounded).values[0];
-  loom_op_t *stride, *limit, *next, *wrap, *selected;
+  loom_op_t* stride;
   IREE_RETURN_IF_ERROR(
       loom_index_constant_build(builder, loom_attr_i64(channel->byte_stride),
                                 offset_type, location, &stride));
+  if (channel->source->capacity == 2) {
+    // The only legal offsets are zero and stride. Their difference from
+    // stride selects the other slot, including for non-power-of-two records.
+    loom_op_t* next;
+    IREE_RETURN_IF_ERROR(
+        loom_index_sub_build(builder, loom_index_constant_result(stride),
+                             *out_record, offset_type, location, &next));
+    *out_next = loom_index_sub_result(next);
+    return iree_ok_status();
+  }
+  loom_op_t *limit, *next, *wrap, *selected;
   IREE_RETURN_IF_ERROR(loom_index_constant_build(
       builder, loom_attr_i64(channel->byte_stride * channel->source->capacity),
       offset_type, location, &limit));

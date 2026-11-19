@@ -307,6 +307,15 @@ TEST_F(PipelineLifetimeLayoutTest, NestedBranchesFollowRequestOrder) {
       EXPECT_EQ(
           loom_pipeline_lifetimes_common_ancestor(&lifetimes, first, second),
           expected);
+      if (first != second &&
+          nodes[first].kind == LOOM_PIPELINE_LIFETIME_OWNER &&
+          nodes[second].kind == LOOM_PIPELINE_LIFETIME_OWNER) {
+        const auto& a = lifetimes.ancestry[first];
+        const auto& b = lifetimes.ancestry[second];
+        EXPECT_EQ((a.preorder < b.preorder) !=
+                      (a.concurrent_preorder < b.concurrent_preorder),
+                  nodes[expected].kind == LOOM_PIPELINE_LIFETIME_CONCURRENT);
+      }
     }
   }
 }
