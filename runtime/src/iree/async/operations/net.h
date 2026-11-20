@@ -667,9 +667,10 @@ static inline void iree_async_socket_recvfrom_operation_initialize(
 
 // Closes a socket asynchronously.
 //
-// Consumes the caller's reference: the socket must not be accessed after
-// submit. On completion, the socket is destroyed and the callback reports
-// whether the close succeeded.
+// An accepted close consumes one caller reference at terminal completion.
+// A rejected submission leaves that reference with the caller. If a linked
+// close is cancelled before it executes, other owners still hold an open
+// socket. The callback reports the native outcome when close executes.
 //
 // Availability:
 //   generic | io_uring | IOCP | kqueue
@@ -690,7 +691,7 @@ static inline void iree_async_socket_recvfrom_operation_initialize(
 typedef struct iree_async_socket_close_operation_t {
   iree_async_operation_t base;
 
-  // The socket to close. Consumed on submit.
+  // The socket to close. A successful submission transfers one reference.
   iree_async_socket_t* socket;
 } iree_async_socket_close_operation_t;
 

@@ -231,9 +231,11 @@ typedef struct iree_async_file_write_operation_t {
 
 // Closes a file asynchronously.
 //
-// Consumes the caller's reference: the file must not be accessed after
-// submit. On completion, the file is destroyed and the callback reports
-// whether the close succeeded.
+// An accepted close consumes one caller reference at terminal completion.
+// A rejected submission leaves that reference with the caller. If a linked
+// close is cancelled before it executes, other owners still hold an open
+// file. Once the native close executes, the callback reports its outcome,
+// including deferred write errors; the caller must not retry the close.
 //
 // Availability:
 //   generic | io_uring | IOCP | kqueue
@@ -244,17 +246,14 @@ typedef struct iree_async_file_write_operation_t {
 //   may report deferred write errors at close time. Local filesystems
 //   typically don't fail close, but the status should still be checked.
 //
-//   Common errors:
-//     IREE_STATUS_IO_ERROR: NFS write-back failure or disk error.
-//     IREE_STATUS_RESOURCE_EXHAUSTED: Disk full (deferred from write).
+//   POSIX disk-full and quota errors report IREE_STATUS_RESOURCE_EXHAUSTED.
 //
 // Threading model:
-//   Callback fires on the poll thread after the file is closed.
-//   The file handle is invalid before the callback fires—do not use it.
+//   Callback fires on the poll thread after the consumed reference is released.
 typedef struct iree_async_file_close_operation_t {
   iree_async_operation_t base;
 
-  // The file to close. Consumed on submit.
+  // The file to close. A successful submission transfers one reference.
   iree_async_file_t* file;
 } iree_async_file_close_operation_t;
 

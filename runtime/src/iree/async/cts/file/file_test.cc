@@ -643,6 +643,48 @@ TEST_P(FileTest, AsyncClose) {
   // File reference was consumed by the close operation. Do not release.
 }
 
+// A failed predecessor consumes the close operation's reference. A separate
+// owner can still read the file because the native close was never issued.
+TEST_P(FileTest, CancelledLinkedClosePreservesRetainedFile) {
+  const std::string path = CreateTempFileWithContents("K", 1);
+  iree_async_file_t* file = ImportTempFileForRead(path);
+  ASSERT_NE(file, nullptr);
+  iree_async_file_retain(file);
+
+  iree::testing::TempFilePath missing("async_close_missing");
+  CompletionTracker opened, closed, read;
+  iree_async_file_open_operation_t open_op = {};
+  iree_async_operation_initialize(
+      &open_op.base, IREE_ASYNC_OPERATION_TYPE_FILE_OPEN,
+      IREE_ASYNC_OPERATION_FLAG_LINKED, CompletionTracker::Callback, &opened);
+  open_op.open_flags = IREE_ASYNC_FILE_OPEN_FLAG_READ;
+  open_op.path = missing.path().c_str();
+  iree_async_file_close_operation_t close_op = {};
+  iree_async_operation_initialize(
+      &close_op.base, IREE_ASYNC_OPERATION_TYPE_FILE_CLOSE,
+      IREE_ASYNC_OPERATION_FLAG_NONE, CompletionTracker::Callback, &closed);
+  close_op.file = file;
+  iree_async_operation_t* chain[] = {&open_op.base, &close_op.base};
+  IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, {chain, 2}));
+  PollUntil(2);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND, opened.ConsumeStatus());
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, closed.ConsumeStatus());
+
+  char value = 0;
+  iree_async_file_read_operation_t read_op = {};
+  iree_async_operation_initialize(
+      &read_op.base, IREE_ASYNC_OPERATION_TYPE_FILE_READ,
+      IREE_ASYNC_OPERATION_FLAG_NONE, CompletionTracker::Callback, &read);
+  read_op.file = file;
+  read_op.buffer = iree_async_span_from_ptr(&value, 1);
+  IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &read_op.base));
+  PollUntil(1);
+  IREE_EXPECT_OK(read.ConsumeStatus());
+  EXPECT_EQ(read_op.bytes_read, 1u);
+  EXPECT_EQ(value, 'K');
+  iree_async_file_release(file);
+}
+
 // Write, then close via async close, verify the write persisted.
 TEST_P(FileTest, WriteFlushClose) {
   std::string path = CreateEmptyTempFile();

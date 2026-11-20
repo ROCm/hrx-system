@@ -34,6 +34,7 @@ iree_runtime_cc_library(
     ],
     hdrs = [
         "api.h",
+        "close.h",
         "compat.h",
         "event_set.h",
         "fd_map.h",
@@ -95,6 +96,23 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "close_test",
+    srcs = ["close_test.cc"],
+    linkopts = [
+        "-Wl,--wrap=close",
+        "-Wl,--wrap=posix_close",
+    ],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":posix",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/cts/util:test_base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

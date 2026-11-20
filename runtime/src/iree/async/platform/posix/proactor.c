@@ -29,6 +29,7 @@
 #include "iree/async/operations/net.h"
 #include "iree/async/operations/scheduling.h"
 #include "iree/async/operations/semaphore.h"
+#include "iree/async/platform/posix/close.h"
 #include "iree/async/platform/posix/compat.h"
 #include "iree/async/platform/posix/fence.h"
 #include "iree/async/platform/posix/relay.h"
@@ -957,14 +958,9 @@ static void iree_async_proactor_posix_commit_socket_connect(
 static void iree_async_proactor_posix_commit_socket_close(
     iree_async_proactor_posix_t* proactor,
     iree_async_socket_close_operation_t* close_op) {
-  int fd = close_op->socket->primitive.value.fd;
-  int close_result = close(fd);
-  close_op->socket->primitive.value.fd = -1;
-  close_op->socket->state = IREE_ASYNC_SOCKET_STATE_CLOSED;
   iree_status_t close_status =
-      close_result == 0 ? iree_ok_status()
-                        : iree_make_status(iree_status_code_from_errno(errno),
-                                           "close() failed");
+      iree_async_posix_close_fd(&close_op->socket->primitive.value.fd);
+  close_op->socket->state = IREE_ASYNC_SOCKET_STATE_CLOSED;
   iree_async_proactor_posix_publish_completion(
       proactor, &close_op->base, close_status, IREE_ASYNC_COMPLETION_FLAG_NONE);
 }
@@ -3568,8 +3564,7 @@ static void iree_async_proactor_posix_destroy_file(
       iree_async_proactor_posix_cast(base_proactor);
   iree_allocator_t allocator = proactor->base.allocator;
 
-  // Close the file descriptor. Ignore errors during destroy - the fd may
-  // already be closed by a FILE_CLOSE operation.
+  // A close cancelled before issue leaves the descriptor with the file.
   int fd = file->primitive.value.fd;
   if (fd >= 0) {
     close(fd);
