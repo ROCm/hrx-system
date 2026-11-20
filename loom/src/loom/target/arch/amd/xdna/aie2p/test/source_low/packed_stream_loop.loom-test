@@ -1,0 +1,74 @@
+// RUN: emit source-low @read_groups target=amd.xdna.aie2p:core output=low
+
+// The last pop consumes the eighth operand and leaves an empty FIFO. The
+// next iteration can use its position directly while loading the next group.
+func.def noinline @last_records(%first: view<576xi8>, %destination: view<8x72xi8>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %size = index.constant 8 : index
+  %schema = encoding.define #encoding.operand<element_format=bfp16ebs8, payload_elements=64, payload_packing=target_fragment, payload_registers=18, rounding=flush_subnormal> : encoding<schema>
+  %after = scf.for %i = [%begin to %size step %step](%current = %first : view<576xi8>) -> (view<576xi8>) {
+    %bytes = vector.load %current[0] : view<576xi8> -> vector<576xi8>
+    %group = vector.fragment<lhs> %bytes shape [blocks(%size), %size, %size] using {schema = %schema : encoding<schema>} : vector<576xi8>
+    %last_bytes = vector.slice %group[504] : vector<576xi8> -> vector<72xi8>
+    %last = vector.fragment<lhs> %last_bytes shape [%size, %size] using {schema = %schema : encoding<schema>} : vector<72xi8>
+    vector.store %last, %destination[%i, 0] : vector<72xi8>, view<8x72xi8>
+    %next = view.subview %current[576] : view<576xi8> -> view<576xi8>
+    scf.yield %next : view<576xi8>
+  }
+  func.return
+}
+
+func.def @read_groups(%input: buffer, %output: buffer) {
+  %in, %out = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %start = buffer.view %in[%origin] : buffer -> view<576xi8>
+  %destination = buffer.view %out[%origin] : buffer -> view<8x72xi8>
+  func.call @last_records(%start, %destination) : (view<576xi8>, view<8x72xi8>)
+  func.return
+}
+
+// ----
+low.func.def noinline target<amd.xdna.aie2p.core> @last_records(%first: reg<aie2p.ep>, %destination: reg<aie2p.ep>) asm {
+  %33 = mov.load-fifo.pointer %first
+  %34 = mova.fifo.position 0
+  %begin = mov.short 0
+  %step = mov.short 1
+  %size = mov.short 8
+  low.br ^_bb1(%begin: reg<aie2p.er>, %33: reg<aie2p.eps>, %34: reg<aie2p.erf2>)
+^_bb1(%i: reg<aie2p.er>, %31: reg<aie2p.eps>, %32: reg<aie2p.erf2>):
+  %38 = lt %i, %size
+  low.cond_br %38, ^_bb2, ^_bb3 : reg<aie2p.er>
+^_bb2:
+  %39, %40, %41 = vldb.fill.512.empty %31, %32
+  %42, %43, %44, %45 = vldb.pop.bfp16ebs8.buffered64 %39, %40, %41
+  %46, %47, %48, %49 = vldb.pop.bfp16ebs8 %43, %44, %45
+  %50, %51, %52, %53 = vldb.pop.bfp16ebs8 %47, %48, %49
+  %54, %55, %56, %57 = vldb.pop.bfp16ebs8 %51, %52, %53
+  %58, %59, %60, %61 = vldb.pop.bfp16ebs8 %55, %56, %57
+  %62, %63, %64, %65 = vldb.pop.bfp16ebs8 %59, %60, %61
+  %66, %67, %68, %69 = vldb.pop.bfp16ebs8 %63, %64, %65
+  %70, %71, %72, %73 = vldb.pop.bfp16ebs8 %67, %68, %69
+  %76 = copy %destination : reg<aie2p.ep> -> reg<aie2p.ep>
+  %77 = mov.i32 72
+  %78 = mul %i, %77
+  %79 = mov.modifier %78
+  %80 = paddb.modifier %76, %79
+  %81 = mov.store-fifo.pointer %80
+  %82 = mova.fifo.store.position 0
+  %83, %84, %85 = vst.push.bfp16ebs8.empty %70, %81, %82
+  %86, %87, %88 = vst.flush.512 %83, %84, %85
+  %92 = add.nc %i, %step
+  low.br ^_bb1(%92: reg<aie2p.er>, %71: reg<aie2p.eps>, %73: reg<aie2p.erf2>)
+^_bb3:
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @read_groups() asm {
+  %in = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %out = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %start = copy %in : reg<aie2p.ep> -> reg<aie2p.ep>
+  %destination = copy %out : reg<aie2p.ep> -> reg<aie2p.ep>
+  low.func.call @last_records(%start, %destination) : (reg<aie2p.ep>, reg<aie2p.ep>)
+  return
+}

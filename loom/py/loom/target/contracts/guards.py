@@ -139,6 +139,7 @@ class GuardKind(Enum):
     VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES = "value_packed_integer_payload_from_lanes"
     VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD = "value_packed_integer_lanes_from_payload"
     VALUE_NO_USES = "value_no_uses"
+    VALUE_LOOP_CARRIED = "value_loop_carried"
     VALUE_NO_USES_AFTER = "value_no_uses_after"
     INSTANCE_FLAGS_HAS_ALL = "instance_flags_has_all"
     INSTANCE_FLAGS_HAS_NONE = "instance_flags_has_none"
@@ -1013,6 +1014,12 @@ class Guard:
         )
 
     @classmethod
+    def value_loop_carried(cls, field: str) -> Self:
+        """The repeated latch consumes this value directly from its loop header."""
+
+        return cls(kind=GuardKind.VALUE_LOOP_CARRIED, field=field)
+
+    @classmethod
     def value_no_uses(
         cls,
         field: str,
@@ -1284,6 +1291,7 @@ class Guard:
             return
         if self.kind in (
             GuardKind.VALUE_NO_USES,
+            GuardKind.VALUE_LOOP_CARRIED,
             GuardKind.VALUE_NO_USES_AFTER,
         ):
             _require_value(source_op, self.field, subject)

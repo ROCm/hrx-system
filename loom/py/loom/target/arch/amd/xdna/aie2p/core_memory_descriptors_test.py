@@ -348,6 +348,43 @@ def test_fifo_load_descriptors_preserve_fifo_state_and_recurrence() -> None:
             }
 
 
+def test_empty_fifo_fill_defines_only_the_low_half_in_the_selected_tuple() -> None:
+    descriptors = {row.key: row for row in AIE2P_CORE_DESCRIPTOR_SET.descriptors}
+    for lane in ("a", "b"):
+        for suffix in ("", ".volatile"):
+            key = f"amd.xdna.aie2p.load.{lane}.fifo.fill.512"
+            ordinary = descriptors[key + suffix]
+            empty = descriptors[key + ".empty" + suffix]
+            assert empty.asm_forms[0].operands == ("ptr", "pos")
+            assert empty.asm_forms[0].results == ordinary.asm_forms[0].results
+            assert empty.effects == ordinary.effects
+            operands = {operand.field_name: operand for operand in empty.operands}
+            assert operands["fifo_reg_out"].reg_alts[0].register_part == (
+                "aie2p.eldfiforeg.low512"
+            )
+            pairs = {
+                (
+                    constraint.kind,
+                    frozenset(
+                        (
+                            empty.operands[constraint.lhs_operand_index].field_name,
+                            empty.operands[constraint.rhs_operand_index].field_name,
+                        )
+                    ),
+                )
+                for constraint in empty.constraints
+            }
+            tied = ConstraintKind.TIED
+            same = ConstraintKind.SAME_REGISTER_ORDINAL
+            assert pairs == {
+                (tied, frozenset(("ptr", "ptr_out"))),
+                (tied, frozenset(("pos", "pos_out"))),
+                (same, frozenset(("ptr", "fifo_reg_out"))),
+                (same, frozenset(("ptr", "pos"))),
+                (same, frozenset(("fifo_reg_out", "pos"))),
+            }
+
+
 def test_buffered_bfp_pop_reads_only_initialized_fifo_storage() -> None:
     descriptors = {row.key: row for row in AIE2P_CORE_DESCRIPTOR_SET.descriptors}
     for lane in ("a", "b"):

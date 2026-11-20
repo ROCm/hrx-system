@@ -28,6 +28,19 @@ _MACHINE_ADAPTERS = {row.name: row for row in CORE_MACHINE_TABLE.register_adapte
 _INSTRUCTION_ENCODINGS = {row.name: row for row in CORE_ENCODING_TABLE.instructions}
 _ITINERARIES = {row.name: row for row in CORE_SCHEDULE_TABLE.itineraries}
 
+_LOAD_FIFO_UPDATE = ("ptr", "fifo_reg", "pos")
+
+
+def load_fifo_tuple_inputs(form: MachineForm) -> tuple[str, ...]:
+    """Physical FIFO inputs whose ordinal is selected by the encoded pointer."""
+
+    outputs = {operand.name for operand in form.outputs}
+    return (
+        _LOAD_FIFO_UPDATE
+        if all(f"{name}_out" in outputs for name in _LOAD_FIFO_UPDATE)
+        else ()
+    )
+
 
 def _native_class(operand: MachineOperand) -> str:
     return (
@@ -108,22 +121,25 @@ def descriptor_constraints(
     # direct state updates from the stable operand family and constrain every
     # tuple member pair: the allocator may visit the three classes in any
     # order, and each partial assignment must select the same aggregate row.
-    update_group = ("ptr", "fifo_reg", "pos")
-    output_names = tuple(f"{name}_out" for name in update_group)
-    if all(name in operand_indices for name in output_names):
+    update_group = load_fifo_tuple_inputs(form)
+    if update_group:
         existing_ties = {
             (constraint.lhs_operand_index, constraint.rhs_operand_index)
             for constraint in result
         }
-        for input_name, output_name in zip(update_group, output_names, strict=True):
+        tuple_operands = []
+        for input_name in update_group:
+            output_name = f"{input_name}_out"
+            if input_name in spec.overwritten_inputs:
+                tuple_operands.append(operand_indices[output_name])
+                continue
+            tuple_operands.append(operand_indices[input_name])
             pair = (operand_indices[output_name], operand_indices[input_name])
             if pair not in existing_ties:
                 result.append(Constraint(ConstraintKind.TIED, *pair))
         result.extend(
             Constraint(ConstraintKind.SAME_REGISTER_ORDINAL, lhs, rhs)
-            for lhs, rhs in combinations(
-                (operand_indices[name] for name in update_group), 2
-            )
+            for lhs, rhs in combinations(tuple_operands, 2)
         )
     return tuple(result)
 

@@ -514,6 +514,7 @@ def _bfp_group_load_rule(
     root_kind: SourceMemoryRootKind,
     memory_spaces: tuple[str, ...],
     volatile: bool,
+    loop_carried: bool,
 ) -> DescriptorRule:
     """Consumes complete FIFO groups without resetting their stream state."""
 
@@ -543,7 +544,11 @@ def _bfp_group_load_rule(
             results={"dst": pointer},
             result_types={"dst": DescriptorResultType()},
             source_memory=memory,
-            form=DescriptorEmitForm.OP,
+            form=(
+                DescriptorEmitForm.POST_INCREMENT_ADDRESS
+                if loop_carried and address_form is _MemoryAddressForm.IMMEDIATE
+                else DescriptorEmitForm.OP
+            ),
         )
     ]
     if address_form is not _MemoryAddressForm.IMMEDIATE:
@@ -560,9 +565,18 @@ def _bfp_group_load_rule(
     fifo = ValueRef.temporary("group_fifo")
     position = ValueRef.temporary("group_position")
     ordered_suffix = ".volatile" if volatile else ""
-    load = _descriptor("amd.xdna.aie2p.load.load-fifo.low512" + ordered_suffix)
-    emits.extend(
+    port = "b" if loop_carried else "a"
+    fill_key = f"amd.xdna.aie2p.load.{port}.fifo.fill.512"
+    load = _descriptor(
         (
+            fill_key + ".empty"
+            if loop_carried
+            else "amd.xdna.aie2p.load.load-fifo.low512"
+        )
+        + ordered_suffix
+    )
+    if not loop_carried:
+        emits.append(
             EmitDescriptorOp(
                 descriptor=load,
                 operands={"ptr": pointer},
@@ -571,30 +585,59 @@ def _bfp_group_load_rule(
                 result_types={"dst": DescriptorResultType()},
                 source_memory=memory,
                 form=DescriptorEmitForm.OP,
-            ),
-            EmitDescriptorOp(
-                descriptor=_descriptor("amd.xdna.aie2p.constant.i32.fifo-position"),
-                immediates={"i": 64},
-                results={"dst": position},
-                result_types={"dst": DescriptorResultType()},
-                form=DescriptorEmitForm.CONST,
+            )
+        )
+    emits.append(
+        EmitDescriptorOp(
+            descriptor=_descriptor("amd.xdna.aie2p.constant.i32.fifo-position"),
+            immediates={"i": 0 if loop_carried else 64},
+            results={"dst": position},
+            result_types={"dst": DescriptorResultType()},
+            form=(
+                DescriptorEmitForm.RESTORED_CONST
+                if loop_carried
+                else DescriptorEmitForm.CONST
             ),
         )
     )
+    fill = EmitDescriptorOp(
+        descriptor=_descriptor(
+            fill_key + (".empty" if loop_carried else "") + ordered_suffix
+        ),
+        operands={
+            "ptr": pointer,
+            **({} if loop_carried else {"fifo_reg": fifo}),
+            "pos": position,
+        },
+        results={"ptr_out": pointer, "fifo_reg_out": fifo, "pos_out": position},
+        result_types={
+            "ptr_out": DescriptorResultType(),
+            "fifo_reg_out": DescriptorResultType(),
+            "pos_out": DescriptorResultType(),
+        },
+        source_memory=memory,
+        form=DescriptorEmitForm.PER_LANE_SEQUENCE,
+        skip_last_lane=not loop_carried,
+    )
+    if loop_carried:
+        emits.append(fill)
     values = []
     for index in range(8):
         value = ValueRef.temporary(f"group_value_{index}")
+        next_fifo = ValueRef.temporary(f"group_fifo_{index}") if loop_carried else fifo
         suffix = ".buffered64" if index == 0 else ""
         emits.append(
             EmitDescriptorOp(
                 descriptor=_descriptor(
-                    "amd.xdna.aie2p.load.a.bfp16ebs8.fifo.pop" + suffix + ordered_suffix
+                    f"amd.xdna.aie2p.load.{port}.bfp16ebs8.fifo.pop"
+                    + suffix
+                    + ordered_suffix
                 ),
                 operands={"ptr": pointer, "fifo_reg": fifo, "pos": position},
                 results={
                     "dst": value,
                     "ptr_out": pointer,
-                    "fifo_reg_out": fifo,
+                    "fifo_reg_out": next_fifo,
                     "pos_out": position,
                 },
                 result_types={
@@ -608,33 +651,15 @@ def _bfp_group_load_rule(
             )
         )
         values.append(value)
-    emits.extend(
-        (
-            EmitDescriptorOp(
-                descriptor=_descriptor(
-                    "amd.xdna.aie2p.load.a.fifo.fill.512" + ordered_suffix
-                ),
-                operands={"ptr": pointer, "fifo_reg": fifo, "pos": position},
-                results={
-                    "ptr_out": pointer,
-                    "fifo_reg_out": fifo,
-                    "pos_out": position,
-                },
-                result_types={
-                    "ptr_out": DescriptorResultType(),
-                    "fifo_reg_out": DescriptorResultType(),
-                    "pos_out": DescriptorResultType(),
-                },
-                source_memory=memory,
-                form=DescriptorEmitForm.PER_LANE_SEQUENCE,
-                skip_last_lane=True,
-            ),
-            EmitRegisterConcat(
-                sources=values,
-                result=ValueRef.result("result", source_node="fragment"),
-                unit_count=8,
-                form=DescriptorEmitForm.PER_LANE_SEQUENCE,
-            ),
+        fifo = next_fifo
+    if not loop_carried:
+        emits.append(fill)
+    emits.append(
+        EmitRegisterConcat(
+            sources=values,
+            result=ValueRef.result("result", source_node="fragment"),
+            unit_count=8,
+            form=DescriptorEmitForm.PER_LANE_SEQUENCE,
         )
     )
     return DescriptorRule(
@@ -650,6 +675,7 @@ def _bfp_group_load_rule(
             ),
         ),
         guards=(
+            *((Guard.value_loop_carried("view"),) if loop_carried else ()),
             *(
                 (Guard.instance_flags_has_all("memory_flags", "volatile"),)
                 if volatile
@@ -661,9 +687,18 @@ def _bfp_group_load_rule(
             Guard.value_static_dim0_multiple("result", 576),
         ),
         emit=emits,
-        sequence_carried=(pointer.field, fifo.field, position.field),
-        priority=1,
-        report_key="native_memory_load_bfp16ebs8_group",
+        sequence_carried=(
+            (pointer.field, position.field)
+            if loop_carried
+            else (pointer.field, fifo.field, position.field)
+        ),
+        priority=2 if loop_carried else 1,
+        target_query=not loop_carried,
+        report_key=(
+            "native_memory_load_bfp16ebs8_carried_group"
+            if loop_carried
+            else "native_memory_load_bfp16ebs8_group"
+        ),
     )
 
 
@@ -1187,8 +1222,10 @@ AIE2P_BFP_GROUP_MEMORY_RULES: tuple[DescriptorRule, ...] = tuple(
         root_kind=root_kind,
         memory_spaces=memory_spaces,
         volatile=volatile,
+        loop_carried=loop_carried,
     )
     for volatile in (True, False)
+    for loop_carried in (True, False)
     for root_kind, memory_spaces in _memory_roots(SourceMemoryOperation.LOAD)
     for address_form, static_modifier in (
         (_MemoryAddressForm.IMMEDIATE, None),

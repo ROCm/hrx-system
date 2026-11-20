@@ -41,6 +41,7 @@ class LowerEmitKind(Enum):
 
     DESCRIPTOR_OP = "descriptor_op"
     DESCRIPTOR_CONST = "descriptor_const"
+    DESCRIPTOR_LOOP_FEEDBACK = "descriptor_loop_feedback"
     DESCRIPTOR_COND_BR = "descriptor_cond_br"
     DESCRIPTOR_OP_FIRST_LANE = "descriptor_op_first_lane"
     DESCRIPTOR_OP_PER_LANE = "descriptor_op_per_lane"

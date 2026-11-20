@@ -132,6 +132,8 @@ struct loom_low_lower_rule_match_context_t {
   // supplies one for the source operation's region; standalone queries omit it
   // and conservatively reject consumption-dependent optimization guards.
   loom_consumption_region_query_t* consumption_query;
+  // Source planning supplies loop placement facts. Standalone queries omit it.
+  const loom_low_lower_context_t* lowering_context;
   // Optional first related source operation retained while matching the exact
   // single-rule graph candidate that established it.
   const loom_op_t* resolved_first_source_node;

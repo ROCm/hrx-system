@@ -936,6 +936,8 @@ typedef enum loom_low_lower_guard_kind_e {
   // Every static or SSA coordinate in an indexed operand list must lie in
   // the inclusive payload range, using retained integer facts for SSA values.
   LOOM_LOW_LOWER_GUARD_INDEX_LIST_ELEMENTS_RANGE = 53,
+  // The repeated latch consumes a block argument of its uniform loop header.
+  LOOM_LOW_LOWER_GUARD_VALUE_LOOP_CARRIED = 54,
   // Maximum guard kind value plus one.
   LOOM_LOW_LOWER_GUARD_COUNT_,
 } loom_low_lower_guard_kind_t;
@@ -1078,6 +1080,9 @@ enum loom_low_lower_emit_kind_e {
   LOOM_LOW_LOWER_EMIT_REGISTER_SLICE_CLASS = 12,
   // Collects one fixed-width group from the final per-lane sequence action.
   LOOM_LOW_LOWER_EMIT_REGISTER_CONCAT_PER_LANE_SEQUENCE = 13,
+  // A sequence temporary whose final update restores a literal seed or
+  // advances its source address by the full contiguous access extent.
+  LOOM_LOW_LOWER_EMIT_DESCRIPTOR_LOOP_FEEDBACK = 14,
   // Maximum emit kind plus one.
   LOOM_LOW_LOWER_EMIT_COUNT_,
 };

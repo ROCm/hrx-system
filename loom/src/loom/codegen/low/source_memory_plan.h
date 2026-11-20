@@ -381,6 +381,12 @@ static inline loom_value_id_t loom_low_source_memory_access_address_value_id(
                                                 : plan->byte_origin_value_id;
 }
 
+// True when a contiguous access starts at its materialized root and advances
+// it to exactly the address of |next_view|. Consumes analyzed view projections.
+bool loom_low_source_memory_access_advances_root_to_view(
+    const loom_low_source_memory_access_plan_t* plan,
+    const loom_view_region_table_t* views, loom_value_id_t next_view);
+
 static inline const loom_low_source_memory_dynamic_term_t*
 loom_low_source_memory_access_single_dynamic_term(
     const loom_low_source_memory_access_plan_t* plan) {

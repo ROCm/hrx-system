@@ -77,6 +77,22 @@ def _fifo_load_descriptor_specs(
         )
         for lane in ("a", "b")
     ]
+    # With position zero the fill defines the low half from memory. The
+    # pointer selects the FIFO even though no previous FIFO bytes are read.
+    result.extend(
+        replace(
+            spec,
+            key=spec.key + ".empty",
+            semantic_tag=spec.semantic_tag + ".empty",
+            asm_mnemonic=spec.asm_mnemonic + ".empty",
+            overwritten_inputs=("fifo_reg",),
+            operand_register_parts=(("fifo_reg_out", "aie2p.eldfiforeg.low512"),),
+            schedule_alternatives=tuple(
+                key + ".empty" for key in spec.schedule_alternatives
+            ),
+        )
+        for spec in tuple(result)
+    )
     # Pops fetch 512 bits; packed payloads consume additional buffered bytes.
     for shape, width_bits in (
         *((f"{element}x{512 // bits}", 512) for element, bits in element_types),

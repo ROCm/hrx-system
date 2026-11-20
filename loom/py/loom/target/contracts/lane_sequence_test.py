@@ -31,6 +31,7 @@ from loom.target.contracts.lower_rule_tables import (
 )
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_I32_DESCRIPTOR,
+    TEST_LOW_CONST_I32_DESCRIPTOR,
     TEST_LOW_CORE_DESCRIPTOR_SET,
     TEST_LOW_IOTA_PAIR_I32_DESCRIPTOR,
 )
@@ -117,6 +118,39 @@ def test_sequence_rejects_missing_initial_state() -> None:
         ValueError, match="carried temporaries require a setup definition"
     ):
         replace(rule, emit=rule.emit[1:]).validate(TEST_LOW_CORE_DESCRIPTOR_SET)
+
+
+def test_sequence_can_forward_a_restored_literal_to_the_next_source_iteration() -> None:
+    rule = _pair_rule()
+    coordinate = ValueRef.temporary("coordinate")
+    seed = EmitDescriptorOp(
+        descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+        results={"dst": coordinate},
+        result_types={"dst": DescriptorResultType()},
+        immediates={"i32_value": 0},
+        form=DescriptorEmitForm.RESTORED_CONST,
+    )
+    step, update, collect = rule.emit[1:]
+    # Adding two copies of the zero position restores the seed on every lane.
+    update = replace(
+        update, operands={"lhs": coordinate, "rhs": coordinate}, skip_last_lane=False
+    )
+    rule = replace(rule, emit=(seed, step, update, collect))
+    fragment = ContractFragment(
+        name="test.restored", descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET, cases=(rule,)
+    )
+    table = compile_lower_rule_set(fragment, dialect_ops={"vector": ALL_VECTOR_OPS})
+    initialize, _, advance, _ = table.emits
+    assert initialize.kind is LowerEmitKind.DESCRIPTOR_LOOP_FEEDBACK
+    assert (
+        table.value_refs[initialize.result_bind_ref_start]
+        == table.value_refs[advance.result_bind_ref_start]
+    )
+
+    with pytest.raises(ValueError, match="final-lane update"):
+        replace(
+            rule, emit=(seed, step, replace(update, skip_last_lane=True), collect)
+        ).validate(TEST_LOW_CORE_DESCRIPTOR_SET)
 
 
 def test_sequence_rejects_undeclared_carried_state() -> None:

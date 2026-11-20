@@ -234,30 +234,40 @@ def test_fused_packet_memory_rules_cover_the_native_shape_matrix() -> None:
                 (_I32_MIN, _I32_MAX, 0, 0),
                 (_I32_MIN, _I32_MAX, None, 1),
             ):
-                expected_identities[
+                for report_key, descriptor_key in (
                     (
-                        vector.vector_load.name,
-                        vector.vector_fragment.name,
-                        SourceNodeRelation.EXCLUSIVE_USER,
                         "native_memory_load_bfp16ebs8_group",
-                        "amd.xdna.aie2p.load.load-fifo.low512" + volatile_suffix,
-                        SourceMemoryOperation.LOAD,
-                        root_kind,
-                        _expected_memory_spaces(
-                            SourceMemoryOperation.LOAD, memory_spaces
-                        ),
-                        1,
-                        None,
-                        64,
-                        static_minimum,
-                        static_maximum,
-                        dynamic_count,
-                        dynamic_minimum,
-                        SourceMemoryDynamicIndexSource.NONE,
-                        0,
-                        dynamic_count is None,
-                    )
-                ] += 1
+                        "amd.xdna.aie2p.load.load-fifo.low512",
+                    ),
+                    (
+                        "native_memory_load_bfp16ebs8_carried_group",
+                        "amd.xdna.aie2p.load.b.fifo.fill.512.empty",
+                    ),
+                ):
+                    expected_identities[
+                        (
+                            vector.vector_load.name,
+                            vector.vector_fragment.name,
+                            SourceNodeRelation.EXCLUSIVE_USER,
+                            report_key,
+                            descriptor_key + volatile_suffix,
+                            SourceMemoryOperation.LOAD,
+                            root_kind,
+                            _expected_memory_spaces(
+                                SourceMemoryOperation.LOAD, memory_spaces
+                            ),
+                            1,
+                            None,
+                            64,
+                            static_minimum,
+                            static_maximum,
+                            dynamic_count,
+                            dynamic_minimum,
+                            SourceMemoryDynamicIndexSource.NONE,
+                            0,
+                            dynamic_count is None,
+                        )
+                    ] += 1
             for (
                 source_op,
                 related_op,
@@ -384,7 +394,8 @@ def test_fused_packet_memory_rules_cover_the_native_shape_matrix() -> None:
 
 def test_fused_packet_memory_rules_preserve_graph_and_state_contracts() -> None:
     for rule in _FUSED_MEMORY_RULES:
-        assert rule.priority == 1
+        loop_carried = Guard.value_loop_carried("view") in rule.guards
+        assert rule.priority == (2 if loop_carried else 1)
         source_node = rule.source_nodes[0]
         memory_emit = _source_memory_emit(rule)
         assert any(
@@ -523,8 +534,7 @@ def test_bfp_group_address_setup_preserves_the_fifo_pointer_domain() -> None:
         preload = next(
             emit
             for emit in rule.emit
-            if isinstance(emit, EmitDescriptorOp)
-            and ".load.load-fifo.low512" in emit.descriptor.key
+            if isinstance(emit, EmitDescriptorOp) and emit.descriptor is rule.descriptor
         )
         first_pop = next(
             emit
@@ -533,7 +543,20 @@ def test_bfp_group_address_setup_preserves_the_fifo_pointer_domain() -> None:
             and ".fifo.pop.buffered64" in emit.descriptor.key
         )
         assert preload.operands["ptr"] == pointer
-        assert first_pop.operands["ptr"] == pointer
+        loop_carried = Guard.value_loop_carried("view") in rule.guards
+        direct = (
+            memory.static_byte_offset_maximum == 0 and memory.dynamic_term_count == 0
+        )
+        assert (pointer_move.form is DescriptorEmitForm.POST_INCREMENT_ADDRESS) == (
+            loop_carried and direct
+        )
+        if loop_carried:
+            assert first_pop.operands["ptr"] == preload.results["ptr_out"]
+            assert first_pop.operands["fifo_reg"] == preload.results["fifo_reg_out"]
+            assert first_pop.operands["pos"] == preload.results["pos_out"]
+        else:
+            assert first_pop.operands["ptr"] == pointer
+            assert first_pop.operands["fifo_reg"] == preload.results["dst"]
     assert forms == {"zero", "mova", "movxm", "dynamic"}
 
 
@@ -584,15 +607,15 @@ def test_bfp_group_consumes_each_byte_once_without_reading_padding(
             operands = {name: values[ref] for name, ref in emit.operands.items()}
             if key.endswith("move.load-fifo.pointer"):
                 results = {"dst": operands["src"]}
-            elif key.endswith("load.load-fifo.low512"):
-                results = {"dst": fetch(operands["ptr"] + emit.immediates["imm"])}
             elif key.endswith("constant.i32.fifo-position"):
                 results = {"dst": emit.immediates["i"]}
-            elif key.endswith("fifo.fill.512"):
-                pointer, fifo, position = (
-                    operands[name] for name in ("ptr", "fifo_reg", "pos")
-                )
-                assert fifo == () and position == 0
+            elif key.endswith("load.load-fifo.low512"):
+                results = {"dst": fetch(operands["ptr"] + emit.immediates["imm"])}
+            elif key.endswith(("fifo.fill.512.empty", "fifo.fill.512")):
+                pointer = operands["ptr"]
+                assert operands["pos"] == 0
+                if "fifo_reg" in operands:
+                    assert operands["fifo_reg"] == ()
                 results = {
                     "ptr_out": pointer,
                     "fifo_reg_out": fetch(pointer),

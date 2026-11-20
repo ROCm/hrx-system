@@ -25,6 +25,7 @@ from loom.dsl import (
 from loom.target.contracts.descriptors import _require_descriptor
 from loom.target.contracts.emits import (
     ContractEmit,
+    DescriptorEmitForm,
     DescriptorResultType,
     EmitDescriptorOp,
     EmitRegisterConcat,
@@ -631,6 +632,17 @@ class DescriptorRule:
                 f"{self.source_op.name}: carried temporaries require a setup definition"
             )
         updated = set[str]()
+        feedback = {
+            ref.field
+            for emit in self.emit[:sequence_start]
+            if isinstance(emit, EmitDescriptorOp)
+            and emit.form
+            in (
+                DescriptorEmitForm.RESTORED_CONST,
+                DescriptorEmitForm.POST_INCREMENT_ADDRESS,
+            )
+            for ref in emit.results.values()
+        }
         for sequence_index, emit in enumerate(sequence_emits):
             final = sequence_index + 1 == len(sequence_emits)
             if isinstance(emit, EmitRegisterConcat):
@@ -687,6 +699,12 @@ class DescriptorRule:
                 for ref in result_refs
                 if ref.kind is SourceValueKind.TEMPORARY
             )
+            if (
+                feedback
+                and isinstance(emit, EmitDescriptorOp)
+                and not emit.skip_last_lane
+            ):
+                feedback.difference_update(ref.field for ref in result_refs)
             if any(ref.materializer is not None for ref in operand_refs):
                 raise ValueError(
                     f"{self.source_op.name}: "
@@ -708,6 +726,10 @@ class DescriptorRule:
                     f"{self.source_op.name}: per-lane-sequence address geometry "
                     "must be materialized in shared setup"
                 )
+        if feedback:
+            raise ValueError(
+                f"{self.source_op.name}: loop feedback requires a final-lane update"
+            )
         if not carried <= updated:
             raise ValueError(
                 f"{self.source_op.name}: carried temporaries require a sequence update"

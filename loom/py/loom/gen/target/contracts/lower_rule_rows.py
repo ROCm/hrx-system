@@ -83,6 +83,7 @@ _GUARD_VALUE_REF_KINDS = frozenset(
         GuardKind.VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES,
         GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
         GuardKind.VALUE_NO_USES,
+        GuardKind.VALUE_LOOP_CARRIED,
         GuardKind.VALUE_NO_USES_AFTER,
         GuardKind.VECTOR_EXTRACT_SHAPE,
     )
@@ -128,6 +129,7 @@ _GUARD_NO_PAYLOAD_KINDS = frozenset(
         GuardKind.VALUE_I64_EQUALS_TARGET_SUBGROUP_SIZE,
         GuardKind.VALUE_STORAGE_OPERAND_SCHEMA,
         GuardKind.VALUE_NO_USES,
+        GuardKind.VALUE_LOOP_CARRIED,
         GuardKind.VALUE_NO_USES_AFTER,
         GuardKind.VECTOR_EXTRACT_SHAPE,
     )

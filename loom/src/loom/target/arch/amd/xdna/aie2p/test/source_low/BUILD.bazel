@@ -126,6 +126,7 @@ loom_check_test_suite(
         "packed_dot_integer.loom-test",
         "packed_i8_arithmetic.loom-test",
         "packed_integer_arithmetic.loom-test",
+        "packed_stream_loop.loom-test",
         "packed_vector_select.loom-test",
         "packet_snapshot_staging.loom-test",
         "packet_source_reads.loom-test",
