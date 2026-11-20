@@ -6,9 +6,14 @@
 
 #include "loom/import/cxx/import.h"
 
+#include <array>
+#include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <map>
+#include <sstream>
 #include <string>
+#include <vector>
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -16,6 +21,7 @@
 #include "loom/error/error_catalog.h"
 #include "loom/format/text/printer.h"
 #include "loom/import/cxx/source/catalog.h"
+#include "loom/import/cxx/unit.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/op_registry.h"
 #include "loom/target/test/descriptors.h"
@@ -69,6 +75,7 @@ class ImportTest : public ::testing::Test {
                                          const loom_diagnostic_t* diagnostic) {
     auto& self = *static_cast<ImportTest*>(user_data);
     ++self.diagnostic_count_;
+    if (diagnostic->severity == LOOM_DIAGNOSTIC_ERROR) ++self.error_count_;
     self.diagnostic_ref_ = loom_error_def_ref(diagnostic->error);
     auto filename = diagnostic->source_location.filename;
     self.diagnostic_filename_.assign(filename.data ? filename.data : "",
@@ -105,6 +112,8 @@ class ImportTest : public ::testing::Test {
   loom_cxx_preamble_t* preamble_ = nullptr;
   // Number of callbacks delivered by the source diagnostic boundary.
   int diagnostic_count_ = 0;
+  // Number of those callbacks with error severity.
+  int error_count_ = 0;
   // Structured identity of the most recently delivered diagnostic.
   loom_error_ref_t diagnostic_ref_ = LOOM_ERROR_REF_NONE;
   // Copied source identity retained after the frontend is destroyed.
@@ -725,6 +734,564 @@ TEST_F(ImportTest, TemplateFacadeNeedsOnlyOneHeader) {
   EXPECT_EQ(Print(), embedded);
   EXPECT_EQ(source_requests_.size(), 1u);
   EXPECT_EQ(source_requests_.at("/templates/loomcxx/template.h"), 1);
+}
+
+// Host code names kernels through offload::launch::kernel_ref<&K>, a variable
+// template the test declares as a driver would. Each requested
+// specialization is a kernel root, exported under K's Itanium symbol, with
+// launch facts reported under the specialization's Itanium symbol.
+// Body has a base, an array and two pointers; Other has one pointer; fixed
+// has an exact workgroup size.
+constexpr char kKernelRefSource[] = R"cxx(
+#include <loomcxx/kernel.h>
+
+// The driver's launch reference: the importer reads only the kernel argument.
+namespace offload::launch {
+struct info;
+template <auto Kernel>
+[[loom::kernel_ref]] extern const info kernel_ref;
+}  // namespace offload::launch
+
+static loom::kernel::configuration launch_config(unsigned groups) {
+  return {{groups, 1, 1}, {64, 1, 1}};
+}
+
+template <class T>
+[[loom::kernel(launch_config)]]
+void run(T tag) { tag(); }
+
+[[loom::kernel, loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void fixed(float* y) { y[0] = 1.0f; }
+
+struct Base { float scale; };
+struct Body : Base {
+  int pad[2];
+  const float* x;
+  float* y;
+  [[loom::inline]] void operator()() const {
+    unsigned i = static_cast<unsigned>(loom::kernel::workitem::id.x);
+    y[i] = scale * x[i] + static_cast<float>(pad[1]);
+  }
+};
+struct Other {
+  float* y;
+  [[loom::inline]] void operator()() const { y[0] = 1.0f; }
+};
+
+template <class T>
+const offload::launch::info* describe() {
+  return &offload::launch::kernel_ref<&run<T>>;
+}
+
+const offload::launch::info* host(bool other) {
+  if (other) return describe<Other>();
+  (void)&offload::launch::kernel_ref<&fixed>;
+  return describe<Body>();
+}
+)cxx";
+
+constexpr char kBodyReference[] =
+    "_ZN7offload6launch10kernel_refIXadL_Z3runI4BodyEvT_EEEE";
+constexpr char kOtherReference[] =
+    "_ZN7offload6launch10kernel_refIXadL_Z3runI5OtherEvT_EEEE";
+constexpr char kFixedReference[] =
+    "_ZN7offload6launch10kernel_refIXadL_Z5fixedPfEEEE";
+
+class KernelRefImportTest : public ImportTest {
+ protected:
+  void SetUp() override {
+    ImportTest::SetUp();
+    UseKernelRefs({kBodyReference, kOtherReference, kFixedReference});
+  }
+
+  void TearDown() override {
+    loom_cxx_unit_free(unit_);
+    ImportTest::TearDown();
+  }
+
+  // Exports the kernels of the kernel_ref specializations |names|, as
+  // A driver names the specializations its host code references.
+  void UseKernelRefs(std::vector<std::string> names) {
+    kernel_ref_names_ = std::move(names);
+    kernel_ref_views_.clear();
+    for (const auto& name : kernel_ref_names_) {
+      kernel_ref_views_.push_back(
+          iree_make_string_view(name.data(), name.size()));
+    }
+    options_.kernel_refs = kernel_ref_views_.data();
+    options_.kernel_ref_count = kernel_ref_views_.size();
+  }
+
+  // Parses |source| as a hosted unit and imports it, as a driver does, so the
+  // unit reports the host launch facts of its kernel_ref specializations.
+  iree_status_t ImportUnit(iree_string_view_t source) {
+    loom_module_free(module_);
+    module_ = nullptr;
+    loom_cxx_unit_free(unit_);
+    unit_ = nullptr;
+    options_.flags |= LOOM_CXX_IMPORT_FLAG_HOSTED;
+    options_.triple = IREE_SV("x86_64-linux-gnu");
+    IREE_RETURN_IF_ERROR(loom_cxx_unit_parse(source, IREE_SV("/app/source.cpp"),
+                                             &options_, iree_allocator_system(),
+                                             &unit_));
+    if (!unit_) {
+      return iree_ok_status();
+    }
+    return loom_cxx_import_unit(unit_, &context_, &pool_, &options_,
+                                iree_allocator_system(), &module_);
+  }
+
+  // The launch facts of the kernel_ref specialization |symbol|, or null.
+  const loom::cxx_import::KernelLaunch* Launch(
+      const std::string& symbol) const {
+    for (const auto& launch : loom::cxx_import::unit_kernel_launches(unit_)) {
+      if (launch.symbol == symbol) {
+        return &launch;
+      }
+    }
+    return nullptr;
+  }
+
+  std::vector<std::string> kernel_ref_names_;
+  std::vector<iree_string_view_t> kernel_ref_views_;
+  // Unit of the most recent ImportUnit().
+  loom_cxx_unit_t* unit_ = nullptr;
+};
+
+TEST_F(KernelRefImportTest, KernelRefRootsExportReferencedKernels) {
+  IREE_ASSERT_OK(Import(iree_make_cstring_view(kKernelRefSource)));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(error_count_, 0);
+  // Requested kernels are exported under their own Itanium symbols; the
+  // referencing host functions are not lowered.
+  const std::string printed = Print();
+  EXPECT_NE(printed.find("@_Z3runI4BodyEvT_"), std::string::npos) << printed;
+  EXPECT_NE(printed.find("@_Z3runI5OtherEvT_"), std::string::npos) << printed;
+  EXPECT_NE(printed.find("@_Z5fixedPf"), std::string::npos) << printed;
+  EXPECT_EQ(printed.find("@host"), std::string::npos) << printed;
+  EXPECT_EQ(printed.find("describe"), std::string::npos) << printed;
+}
+
+TEST_F(KernelRefImportTest, KernelRefRootsExportOnlyRequestedKernels) {
+  // Host code also references Other and fixed, but only Body is requested:
+  // the import reads no host body to find more.
+  UseKernelRefs({kBodyReference});
+  IREE_ASSERT_OK(ImportUnit(iree_make_cstring_view(kKernelRefSource)));
+  ASSERT_NE(module_, nullptr);
+  const std::string printed = Print();
+  EXPECT_NE(printed.find("@_Z3runI4BodyEvT_"), std::string::npos) << printed;
+  EXPECT_EQ(printed.find("_Z3runI5OtherEvT_"), std::string::npos) << printed;
+  EXPECT_EQ(printed.find("_Z5fixedPf"), std::string::npos) << printed;
+  EXPECT_EQ(loom::cxx_import::unit_kernel_launches(unit_).size(), 1u);
+}
+
+TEST_F(KernelRefImportTest, UnknownKernelRefRootIsRejected) {
+  UseKernelRefs(
+      {kBodyReference, "_ZN7offload6launch10kernel_refIXadL_Z4nopeEEE"});
+  IREE_ASSERT_OK(ImportUnit(iree_make_cstring_view(kKernelRefSource)));
+  EXPECT_EQ(module_, nullptr);
+  EXPECT_GT(error_count_, 0);
+}
+
+TEST_F(KernelRefImportTest, KernelRefRootsCombineWithFunctionRoots) {
+  // Source roots add to the kernel_ref roots. A source root that names a
+  // kernel_ref kernel exports it once, under its kernel_ref export name.
+  const std::string source = std::string(kKernelRefSource) +
+                             "int twice(int value) { return 2 * value; }\n";
+  UseKernelRefs({kBodyReference, kFixedReference});
+  const iree_string_view_t roots[] = {IREE_SV("twice"), IREE_SV("fixed")};
+  options_.roots = roots;
+  options_.root_count = IREE_ARRAYSIZE(roots);
+  IREE_ASSERT_OK(
+      ImportUnit(iree_make_string_view(source.data(), source.size())));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(error_count_, 0);
+  const std::string printed = Print();
+  EXPECT_NE(printed.find("@twice"), std::string::npos) << printed;
+  EXPECT_NE(printed.find("@_Z3runI4BodyEvT_"), std::string::npos) << printed;
+  EXPECT_NE(printed.find("@_Z5fixedPf"), std::string::npos) << printed;
+  EXPECT_EQ(printed.find("@fixed"), std::string::npos) << printed;
+  EXPECT_EQ(printed.find("@_Z3runI5OtherEvT_"), std::string::npos) << printed;
+  // Only kernel_ref roots have launch facts.
+  EXPECT_EQ(loom::cxx_import::unit_kernel_launches(unit_).size(), 2u);
+}
+
+TEST_F(KernelRefImportTest, KernelLaunchesNameKernelRefSpecializations) {
+  IREE_ASSERT_OK(ImportUnit(iree_make_cstring_view(kKernelRefSource)));
+  ASSERT_NE(module_, nullptr);
+  // One launch per specialization, under the Itanium symbol a host C++
+  // compiler references for kernel_ref<&K>.
+  EXPECT_EQ(loom::cxx_import::unit_kernel_launches(unit_).size(), 3u);
+  for (const char* symbol :
+       {kBodyReference, kOtherReference, kFixedReference}) {
+    EXPECT_NE(Launch(symbol), nullptr) << symbol;
+  }
+}
+
+// Closures as kernel_ref template arguments: a lambda in a function template
+// and one in an inline member function have Itanium closure names; one in an
+// ordinary function has internal linkage and a $_N name.
+constexpr char kLambdaKernelRefSource[] = R"cxx(
+#include <loomcxx/kernel.h>
+
+// The driver's launch reference: the importer reads only the kernel argument.
+namespace offload::launch {
+struct info;
+template <auto Kernel>
+[[loom::kernel_ref]] extern const info kernel_ref;
+}  // namespace offload::launch
+
+static loom::kernel::configuration launch_config(unsigned groups) {
+  return {{groups, 1, 1}, {64, 1, 1}};
+}
+
+template <class T>
+[[loom::kernel(launch_config)]]
+void run(T tag) { tag(); }
+
+template <class F>
+const offload::launch::info* launch(F f) {
+  return &offload::launch::kernel_ref<&run<F>>;
+}
+
+template <class T>
+const offload::launch::info* in_template(T* y) {
+  return launch([=] { y[0] = T(1); });
+}
+
+struct Owner {
+  const offload::launch::info* member(float* y) const {
+    return launch([=] { y[0] = 3.0f; });
+  }
+};
+
+const offload::launch::info* host(float* y) {
+  (void)launch([=] { y[0] = 2.0f; });
+  (void)Owner{}.member(y);
+  return in_template(y);
+}
+)cxx";
+
+TEST_F(KernelRefImportTest, KernelRefRootsResolveClosureSpecializations) {
+  // The names cxx's host code generation gives these specializations.
+  const std::vector<std::string> references = {
+      "_ZN7offload6launch10kernel_refIXadL_Z3runIZ11in_templateIfEPKNS0_"
+      "4infoEPT_EUlvE_EvS7_EEEE",
+      "_ZN7offload6launch10kernel_refIXadL_Z3runIZ4hostPfE3$_0EvT_EEEE",
+      "_ZN7offload6launch10kernel_refIXadL_Z3runIZNK5Owner6memberEPfEUlvE_"
+      "EvT_EEEE",
+  };
+  UseKernelRefs(references);
+  IREE_ASSERT_OK(ImportUnit(iree_make_cstring_view(kLambdaKernelRefSource)));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(error_count_, 0);
+  EXPECT_EQ(loom::cxx_import::unit_kernel_launches(unit_).size(), 3u);
+  for (const auto& symbol : references) {
+    EXPECT_NE(Launch(symbol), nullptr) << symbol;
+  }
+}
+
+TEST_F(KernelRefImportTest, KernelLaunchesFollowKernelArgumentFlattening) {
+  IREE_ASSERT_OK(ImportUnit(iree_make_cstring_view(kKernelRefSource)));
+  ASSERT_NE(module_, nullptr);
+  // (kind, source offset, size) of one leaf per kernel argument, in argument
+  // order: the base's field, each array element, then one buffer leaf per
+  // pointer. Source offsets are the host object's (LP64): Base at 0, pad at
+  // 4, x at 16, y at 24.
+  auto expect_leaves = [](const loom::cxx_import::KernelLaunch& launch,
+                          std::vector<std::array<uint64_t, 3>> expected) {
+    ASSERT_EQ(launch.leaves.size(), expected.size()) << launch.symbol;
+    for (size_t i = 0; i < expected.size(); ++i) {
+      EXPECT_EQ(launch.leaves[i].parameter, 0u) << i;
+      EXPECT_EQ(launch.leaves[i].kind, expected[i][0]) << i;
+      EXPECT_EQ(launch.leaves[i].source_offset, expected[i][1]) << i;
+      EXPECT_EQ(launch.leaves[i].size, expected[i][2]) << i;
+    }
+  };
+  const auto* body = Launch(kBodyReference);
+  ASSERT_NE(body, nullptr);
+  EXPECT_TRUE(body->available);
+  EXPECT_EQ(body->export_name, "_Z3runI4BodyEvT_");
+  // The configuration computes the workgroup size.
+  EXPECT_EQ(body->workgroup_size, (std::array<uint32_t, 3>{0, 0, 0}));
+  EXPECT_EQ(body->parameter_count, 1u);
+  expect_leaves(*body,
+                {{0, 0, 4}, {0, 4, 4}, {0, 8, 4}, {1, 16, 8}, {1, 24, 8}});
+  const auto* other = Launch(kOtherReference);
+  ASSERT_NE(other, nullptr);
+  expect_leaves(*other, {{1, 0, 8}});
+  // An exact workgroup_size annotation fixes the launch's size.
+  const auto* fixed = Launch(kFixedReference);
+  ASSERT_NE(fixed, nullptr);
+  EXPECT_EQ(fixed->workgroup_size, (std::array<uint32_t, 3>{64, 1, 1}));
+  EXPECT_EQ(fixed->export_name, "_Z5fixedPf");
+  expect_leaves(*fixed, {{1, 0, 8}});
+}
+
+// A unit is parsed once and imported from its existing translation unit, as
+// a single-source driver does after generating host code from it.
+TEST_F(KernelRefImportTest, ParsedUnitImportsWithoutReparsing) {
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_HOSTED;
+  options_.triple = IREE_SV("x86_64-linux-gnu");
+  const auto before = loom::cxx_import::frontend_statistics();
+  loom_cxx_unit_t* unit = nullptr;
+  IREE_ASSERT_OK(loom_cxx_unit_parse(iree_make_cstring_view(kKernelRefSource),
+                                     IREE_SV("/app/source.cpp"), &options_,
+                                     iree_allocator_system(), &unit));
+  ASSERT_NE(unit, nullptr);
+  const auto parsed = loom::cxx_import::frontend_statistics();
+  EXPECT_EQ(parsed.preprocess_count - before.preprocess_count, 1u);
+  EXPECT_EQ(parsed.parse_count - before.parse_count, 1u);
+
+  // Consumers see the unit's frontend state and hosted profile.
+  cxx::TranslationUnit& translation_unit =
+      loom::cxx_import::unit_translation_unit(unit);
+  EXPECT_NE(translation_unit.ast(), nullptr);
+  // The hosted profile parses as a host compile without exceptions, so host
+  // code generation from the unit emits no unwinding.
+  EXPECT_FALSE(loom::cxx_import::unit_toolchain(unit).exceptionsEnabled());
+  EXPECT_FALSE(translation_unit.config().exceptionsEnabled);
+  EXPECT_FALSE(loom::cxx_import::unit_has_error(unit));
+
+  IREE_ASSERT_OK(loom_cxx_import_unit(unit, &context_, &pool_, &options_,
+                                      iree_allocator_system(), &module_));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(error_count_, 0);
+  EXPECT_NE(Print().find("@_Z3runI4BodyEvT_"), std::string::npos);
+  auto body_available = [&] {
+    for (const auto& launch : loom::cxx_import::unit_kernel_launches(unit)) {
+      if (launch.symbol == kBodyReference) {
+        return launch.available;
+      }
+    }
+    return false;
+  };
+  EXPECT_TRUE(body_available());
+
+  // Importing again, for example without the root of a kernel the device
+  // compiler rejected, reuses the same translation unit.
+  loom_module_free(module_);
+  module_ = nullptr;
+  UseKernelRefs({kOtherReference, kFixedReference});
+  IREE_ASSERT_OK(loom_cxx_import_unit(unit, &context_, &pool_, &options_,
+                                      iree_allocator_system(), &module_));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(Print().find("@_Z3runI4BodyEvT_"), std::string::npos);
+  EXPECT_FALSE(body_available());
+  EXPECT_EQ(loom::cxx_import::unit_statistics(unit).import_count, 2u);
+  const auto imported = loom::cxx_import::frontend_statistics();
+  EXPECT_EQ(imported.preprocess_count, parsed.preprocess_count);
+  EXPECT_EQ(imported.parse_count, parsed.parse_count);
+  loom_cxx_unit_free(unit);
+}
+
+// Sub-word scalars mixed with pointers. The importer reports each kernel
+// argument's host object offset and size; it does not decide where the
+// argument lives in the native kernel argument segment.
+constexpr char kMixedReference[] =
+    "_ZN7offload6launch10kernel_refIXadL_Z3runI5MixedEvT_EEEE";
+
+TEST_F(KernelRefImportTest, KernelLaunchesCarryHostLeavesOfSubWordScalars) {
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_HOSTED;
+  options_.triple = IREE_SV("x86_64-linux-gnu");
+  std::string source = std::string(kKernelRefSource) + R"cxx(
+struct Mixed {
+  char c;
+  short s;
+  bool b;
+  float* y;
+  char c2;
+  double d;
+  int* z;
+  bool b2;
+  unsigned char u;
+  int i;
+  [[loom::inline]] void operator()() const {
+    y[0] = static_cast<float>(c) + static_cast<float>(s) +
+           static_cast<float>(c2) + static_cast<float>(d) + (b ? 1.0f : 0.0f);
+    z[0] = static_cast<int>(u) + i + (b2 ? 1 : 0);
+  }
+};
+const offload::launch::info* host_mixed() { return describe<Mixed>(); }
+)cxx";
+  UseKernelRefs(
+      {kBodyReference, kOtherReference, kFixedReference, kMixedReference});
+  loom_cxx_unit_t* unit = nullptr;
+  IREE_ASSERT_OK(loom_cxx_unit_parse(
+      iree_make_string_view(source.data(), source.size()),
+      IREE_SV("/app/source.cpp"), &options_, iree_allocator_system(), &unit));
+  ASSERT_NE(unit, nullptr);
+  IREE_ASSERT_OK(loom_cxx_import_unit(unit, &context_, &pool_, &options_,
+                                      iree_allocator_system(), &module_));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(error_count_, 0);
+
+  const loom::cxx_import::KernelLaunch* mixed = nullptr;
+  for (const auto& launch : loom::cxx_import::unit_kernel_launches(unit)) {
+    if (launch.symbol == kMixedReference) {
+      mixed = &launch;
+    }
+  }
+  ASSERT_NE(mixed, nullptr);
+  EXPECT_TRUE(mixed->available);
+  EXPECT_EQ(mixed->export_name, "_Z3runI5MixedEvT_");
+  EXPECT_EQ(mixed->parameter_count, 1u);
+  // (kind, source offset, size) in kernel argument order; LP64 host layout.
+  const std::vector<std::array<uint64_t, 3>> expected = {
+      {0, 0, 1},  {0, 2, 2},  {0, 4, 1},  {1, 8, 8},  {0, 16, 1},
+      {0, 24, 8}, {1, 32, 8}, {0, 40, 1}, {0, 41, 1}, {0, 44, 4},
+  };
+  ASSERT_EQ(mixed->leaves.size(), expected.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(mixed->leaves[i].parameter, 0u) << i;
+    EXPECT_EQ(mixed->leaves[i].kind, expected[i][0]) << i;
+    EXPECT_EQ(mixed->leaves[i].source_offset, expected[i][1]) << i;
+    EXPECT_EQ(mixed->leaves[i].size, expected[i][2]) << i;
+  }
+
+  loom_cxx_unit_free(unit);
+}
+
+TEST_F(ImportTest, ParsedUnitRejectsSourceErrorsOnce) {
+  loom_cxx_unit_t* unit = nullptr;
+  IREE_ASSERT_OK(loom_cxx_unit_parse(IREE_SV("int entry() { return x; }\n"),
+                                     IREE_SV("/app/source.cpp"), &options_,
+                                     iree_allocator_system(), &unit));
+  EXPECT_EQ(unit, nullptr);
+  EXPECT_GT(error_count_, 0);
+}
+
+TEST_F(ImportTest, ParsedUnitDiagnosticsFollowTheImportSink) {
+  // The parse sink belongs to the parse; an import reports through its own.
+  loom_cxx_unit_t* unit = nullptr;
+  IREE_ASSERT_OK(loom_cxx_unit_parse(IREE_SV("int counter = 0;\n"),
+                                     IREE_SV("/app/source.cpp"), &options_,
+                                     iree_allocator_system(), &unit));
+  ASSERT_NE(unit, nullptr);
+  EXPECT_EQ(diagnostic_count_, 0);
+  loom_cxx_unit_set_diagnostic_sink(unit, {});
+  // Mutable global storage is rejected when the unit is imported.
+  IREE_ASSERT_OK(loom_cxx_import_unit(unit, &context_, &pool_, &options_,
+                                      iree_allocator_system(), &module_));
+  EXPECT_EQ(module_, nullptr);
+  EXPECT_GT(error_count_, 0);
+  loom_cxx_unit_free(unit);
+}
+
+TEST_F(ImportTest, HostedFlagSelectsTheHostedProfile) {
+  const auto source = IREE_SV(
+      "#ifndef __linux__\n#error not hosted\n#endif\n"
+      "int entry(int value) { return value; }\n");
+  IREE_ASSERT_OK(Import(source));
+  EXPECT_EQ(module_, nullptr);
+  EXPECT_GT(error_count_, 0);
+
+  error_count_ = 0;
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_HOSTED;
+  options_.triple = IREE_SV("x86_64-linux-gnu");
+  IREE_ASSERT_OK(Import(source));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(error_count_, 0);
+}
+
+TEST_F(ImportTest, HostedProfileDisablesExceptions) {
+  const auto source = IREE_SV(
+      "#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)\n"
+      "#error exceptions enabled\n#endif\n"
+      "int entry(int value) { return value; }\n");
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_HOSTED;
+  options_.triple = IREE_SV("x86_64-linux-gnu");
+  IREE_ASSERT_OK(Import(source));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(error_count_, 0);
+}
+
+TEST_F(ImportTest, ExceptionsFlagEnablesHostedExceptions) {
+  // A driver whose host compile uses exceptions parses the unit with them.
+  const auto source = IREE_SV(
+      "#if !defined(__cpp_exceptions) || !defined(__EXCEPTIONS)\n"
+      "#error exceptions disabled\n#endif\n"
+      "int entry(int value) { return value; }\n");
+  options_.flags |=
+      LOOM_CXX_IMPORT_FLAG_HOSTED | LOOM_CXX_IMPORT_FLAG_EXCEPTIONS;
+  options_.triple = IREE_SV("x86_64-linux-gnu");
+  IREE_ASSERT_OK(Import(source));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(error_count_, 0);
+}
+
+TEST_F(ImportTest, ExceptionsFlagRequiresHosted) {
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_EXCEPTIONS;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Import(IREE_SV("int entry() { return 0; }\n")));
+  EXPECT_EQ(module_, nullptr);
+}
+
+TEST_F(ImportTest, HostedProfileDefaultsToCxx20) {
+  // Hosted import reads the platform's C++ library headers, which parse at
+  // C++20; an explicit standard still applies.
+  const auto source = IREE_SV(
+      "static_assert(__cplusplus == 202002L);\n"
+      "int entry(int value) { return value; }\n");
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_HOSTED;
+  options_.triple = IREE_SV("x86_64-linux-gnu");
+  options_.standard = iree_string_view_empty();
+  IREE_ASSERT_OK(Import(source));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(error_count_, 0);
+  options_.standard = IREE_SV("c++26");
+  IREE_ASSERT_OK(Import(source));
+  EXPECT_EQ(module_, nullptr);
+  EXPECT_GT(error_count_, 0);
+}
+
+TEST_F(ImportTest, HostedProfileRequiresALinuxTriple) {
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_HOSTED;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Import(IREE_SV("int entry() { return 0; }\n")));
+  EXPECT_EQ(module_, nullptr);
+}
+
+TEST_F(ImportTest, HostedProfileDoesNotMarkTheDevicePass) {
+  // Hosted source sees exactly the host compile's macros, so it cannot branch
+  // on the pass with the preprocessor.
+  const auto source = IREE_SV(
+      "#ifdef __loom__\n#error device pass is marked\n#endif\n"
+      "int entry(int value) { return value; }\n");
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_HOSTED;
+  options_.triple = IREE_SV("x86_64-linux-gnu");
+  IREE_ASSERT_OK(Import(source));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(error_count_, 0);
+}
+
+TEST_F(ImportTest, HostedProfileUsesTheHostLayout) {
+  // x86-64 Linux: 16-byte long double with a 64-bit significand, in both the
+  // layout and the macros, as in a host compile for the same triple.
+  const auto source = IREE_SV(
+      "static_assert(sizeof(long double) == 16);\n"
+      "static_assert(__SIZEOF_LONG_DOUBLE__ == 16);\n"
+      "static_assert(__LDBL_MANT_DIG__ == 64);\n"
+      "int entry(int value) { return value; }\n");
+  options_.flags |= LOOM_CXX_IMPORT_FLAG_HOSTED;
+  options_.triple = IREE_SV("x86_64-linux-gnu");
+  IREE_ASSERT_OK(Import(source));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(error_count_, 0);
+}
+
+TEST_F(ImportTest, RejectsUnknownImportFlags) {
+  options_.flags = LOOM_CXX_IMPORT_FLAG_ALL + 1;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Import(IREE_SV("int entry() { return 0; }\n")));
+  EXPECT_EQ(module_, nullptr);
+}
+
+TEST_F(ImportTest, RejectsKernelRefCountWithoutStorage) {
+  options_.kernel_ref_count = 1;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Import(IREE_SV("int entry() { return 0; }\n")));
+  EXPECT_EQ(module_, nullptr);
 }
 
 }  // namespace

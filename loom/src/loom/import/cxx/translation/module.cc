@@ -141,7 +141,8 @@ class Translator final : private Initialization::Evaluation,
                             loom_module_block(module_), &builder_);
   }
 
-  void translate() {
+  void translate(std::vector<KernelLaunch>* out_kernel_launches) {
+    functions_.set_import_options(&options_);
     functions_.select({options_.roots, options_.root_count}, types_);
     functions_.analyze(types_);
     for (size_t index = 0; index < functions_.pending().size(); ++index) {
@@ -151,6 +152,9 @@ class Translator final : private Initialization::Evaluation,
     functions_.build_benchmarks(locations_, &builder_);
     immutable_objects_.build(&builder_);
     assembly_fragments_.verify(module_, options_.diagnostic_sink);
+    if (out_kernel_launches) {
+      *out_kernel_launches = functions_.kernel_launches();
+    }
   }
 
  private:
@@ -8246,6 +8250,10 @@ class Translator final : private Initialization::Evaluation,
   }
 
   void effect(cxx::ExpressionAST* ast) override {
+    if (!ast->type) {
+      // Only an expression the frontend could not type has none.
+      fail(ast, "expression has no resolved C++ type");
+    }
     if (control_->object_requires_storage(ast) &&
         ast->valueCategory == cxx::ValueCategory::kPrValue &&
         unit_.typeTraits().is_class(ast->type)) {
@@ -8593,9 +8601,10 @@ class Translator final : private Initialization::Evaluation,
 }  // namespace
 
 void translate(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
-               loom_module_t* module,
-               const loom_cxx_import_options_t& options) {
-  Translator(unit, diagnostics, module, options).translate();
+               loom_module_t* module, const loom_cxx_import_options_t& options,
+               std::vector<KernelLaunch>* out_kernel_launches) {
+  Translator(unit, diagnostics, module, options)
+      .translate(out_kernel_launches);
 }
 
 }  // namespace loom::cxx_import

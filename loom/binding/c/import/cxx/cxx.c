@@ -34,6 +34,12 @@ IREE_STATIC_ASSERT_ENUM_EQ(
     LOOMC_CXX_IMPORT_FLAG_NO_BUILTIN_INCLUDES,
     LOOM_CXX_IMPORT_FLAG_NO_BUILTIN_INCLUDES,
     "public no-builtin-includes flag matches the native importer");
+IREE_STATIC_ASSERT_ENUM_EQ(LOOMC_CXX_IMPORT_FLAG_HOSTED,
+                           LOOM_CXX_IMPORT_FLAG_HOSTED,
+                           "public hosted flag matches the native importer");
+IREE_STATIC_ASSERT_ENUM_EQ(
+    LOOMC_CXX_IMPORT_FLAG_EXCEPTIONS, LOOM_CXX_IMPORT_FLAG_EXCEPTIONS,
+    "public exceptions flag matches the native importer");
 
 enum {
   LOOMC_CXX_SOURCE_PATH_BLOCK_SIZE = 8 * 1024,
@@ -232,10 +238,23 @@ static loomc_status_t loomc_cxx_resolve_options(
     out_options->module_name =
         iree_string_view_from_loomc(options->module_name);
   }
+  // kernel_ref roots follow module_name; a descriptor sized before them has
+  // none.
+  const loomc_string_view_t* kernel_refs_in = options->kernel_refs;
+  loomc_host_size_t kernel_ref_count = options->kernel_ref_count;
+  if (options->structure_size &&
+      options->structure_size <
+          offsetof(loomc_cxx_import_options_t, kernel_ref_count) +
+              sizeof(options->kernel_ref_count)) {
+    kernel_refs_in = NULL;
+    kernel_ref_count = 0;
+  }
   if ((!options->include_paths && options->include_path_count) ||
       (!options->system_include_paths && options->system_include_path_count) ||
       (!options->defines && options->define_count) ||
-      (!options->roots && options->root_count)) {
+      (!options->undefines && options->undefine_count) ||
+      (!options->roots && options->root_count) ||
+      (!kernel_refs_in && kernel_ref_count)) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "nonempty C/C++ option arrays require storage");
   }
@@ -249,10 +268,13 @@ static loomc_status_t loomc_cxx_resolve_options(
   out_options->system_include_path_count = options->system_include_path_count;
   out_options->root_count = options->root_count;
   out_options->define_count = options->define_count;
+  out_options->undefine_count = options->undefine_count;
+  out_options->kernel_ref_count = kernel_ref_count;
 
   iree_host_size_t allocation_size = 0;
   iree_host_size_t includes_offset = 0, system_offset = 0, roots_offset = 0;
-  iree_host_size_t defines_offset = 0;
+  iree_host_size_t defines_offset = 0, undefines_offset = 0;
+  iree_host_size_t kernel_refs_offset = 0;
   LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(IREE_STRUCT_LAYOUT(
       0, &allocation_size,
       IREE_STRUCT_FIELD(options->include_path_count, iree_string_view_t,
@@ -261,7 +283,11 @@ static loomc_status_t loomc_cxx_resolve_options(
                         &system_offset),
       IREE_STRUCT_FIELD(options->root_count, iree_string_view_t, &roots_offset),
       IREE_STRUCT_FIELD(options->define_count, loom_cxx_define_t,
-                        &defines_offset))));
+                        &defines_offset),
+      IREE_STRUCT_FIELD(options->undefine_count, iree_string_view_t,
+                        &undefines_offset),
+      IREE_STRUCT_FIELD(kernel_ref_count, iree_string_view_t,
+                        &kernel_refs_offset))));
   if (!allocation_size) {
     return loomc_ok_status();
   }
@@ -273,10 +299,16 @@ static loomc_status_t loomc_cxx_resolve_options(
   iree_string_view_t* system = (iree_string_view_t*)(storage + system_offset);
   iree_string_view_t* roots = (iree_string_view_t*)(storage + roots_offset);
   loom_cxx_define_t* defines = (loom_cxx_define_t*)(storage + defines_offset);
+  iree_string_view_t* undefines =
+      (iree_string_view_t*)(storage + undefines_offset);
+  iree_string_view_t* kernel_refs =
+      (iree_string_view_t*)(storage + kernel_refs_offset);
   out_options->include_paths = includes;
   out_options->system_include_paths = system;
   out_options->roots = roots;
   out_options->defines = defines;
+  out_options->undefines = undefines;
+  out_options->kernel_refs = kernel_refs;
   LOOMC_RETURN_IF_ERROR(loomc_cxx_copy_strings(
       options->include_path_count, options->include_paths, includes));
   LOOMC_RETURN_IF_ERROR(
@@ -284,6 +316,10 @@ static loomc_status_t loomc_cxx_resolve_options(
                              options->system_include_paths, system));
   LOOMC_RETURN_IF_ERROR(
       loomc_cxx_copy_strings(options->root_count, options->roots, roots));
+  LOOMC_RETURN_IF_ERROR(loomc_cxx_copy_strings(
+      options->undefine_count, options->undefines, undefines));
+  LOOMC_RETURN_IF_ERROR(loomc_cxx_copy_strings(
+      kernel_ref_count, kernel_refs_in, kernel_refs));
   loomc_status_t status = loomc_ok_status();
   for (loomc_host_size_t i = 0;
        i < options->define_count && loomc_status_is_ok(status); ++i) {
@@ -549,6 +585,205 @@ loomc_status_t loomc_module_import_cxx(
   loomc_module_release(module);
   loomc_result_release(invocation.result);
   loomc_source_release(invocation.provided_source);
+  loomc_allocator_free(allocator, option_storage);
+  return status;
+}
+
+loomc_status_t loomc_cxx_unit_parse(loomc_context_t* context,
+                                    const loomc_source_t* source,
+                                    const loomc_cxx_import_options_t* options,
+                                    loomc_allocator_t allocator,
+                                    loomc_cxx_unit_t** out_unit,
+                                    loomc_result_t** out_result) {
+  if (out_unit != NULL) {
+    *out_unit = NULL;
+  }
+  if (out_result != NULL) {
+    *out_result = NULL;
+  }
+  if (context == NULL || source == NULL || out_unit == NULL ||
+      out_result == NULL) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "context, source, out_unit, and out_result must not be NULL");
+  }
+  if (!loomc_allocator_is_valid(allocator)) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "allocator must be valid");
+  }
+  if (loomc_source_format(source) != LOOMC_SOURCE_FORMAT_UNKNOWN) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "C/C++ parsing requires UNKNOWN source format");
+  }
+
+  loom_cxx_import_options_t native_options;
+  void* option_storage = NULL;
+  loom_cxx_unit_t* native_unit = NULL;
+  loomc_cxx_invocation_t invocation = {0};
+  iree_arena_block_pool_t source_path_block_pool;
+  bool source_path_block_pool_initialized = false;
+  loomc_status_t status = loomc_cxx_resolve_options(
+      options, allocator, &native_options, &option_storage);
+  if (loomc_status_is_ok(status)) {
+    status = loomc_result_create(LOOMC_STATUS_OK,
+                                 loomc_context_source_retention(context),
+                                 allocator, &invocation.result);
+  }
+  if (loomc_status_is_ok(status)) {
+    const loomc_target_pass_environment_t* pass_environment =
+        loomc_context_target_pass_environment(context);
+    invocation.text_print_options =
+        pass_environment ? &pass_environment->diagnostic_type_print_options
+                         : NULL;
+  }
+  if (loomc_status_is_ok(status) && options != NULL &&
+      options->source_path_mapper.fn != NULL) {
+    invocation.source_path_mapper = options->source_path_mapper;
+    iree_arena_block_pool_initialize(LOOMC_CXX_SOURCE_PATH_BLOCK_SIZE,
+                                     iree_allocator_from_loomc(allocator),
+                                     &source_path_block_pool);
+    source_path_block_pool_initialized = true;
+    iree_arena_initialize(&source_path_block_pool,
+                          &invocation.source_path_arena);
+    invocation.source_path_arena_initialized = true;
+  }
+  if (loomc_status_is_ok(status)) {
+    native_options.diagnostic_sink =
+        (loom_diagnostic_sink_t){loomc_cxx_capture_diagnostic, &invocation};
+    if (options != NULL && options->source_provider.fn != NULL) {
+      invocation.provider = options->source_provider;
+      native_options.source_provider =
+          (loom_cxx_source_provider_t){loomc_cxx_provide_source, &invocation};
+    }
+    const loomc_byte_span_t contents = loomc_source_contents(source);
+    status = loomc_status_from_iree(loom_cxx_unit_parse(
+        iree_make_string_view((const char*)contents.data, contents.data_length),
+        iree_string_view_from_loomc(loomc_source_identifier(source)),
+        &native_options, iree_allocator_from_loomc(allocator), &native_unit));
+  }
+  if (native_unit != NULL) {
+    // The invocation ends here; later uses install their own sink.
+    loom_cxx_unit_set_diagnostic_sink(native_unit, (loom_diagnostic_sink_t){0});
+  }
+  if (loomc_status_is_ok(status) && native_unit == NULL) {
+    loomc_result_set_status_code(invocation.result,
+                                 LOOMC_STATUS_FAILED_PRECONDITION);
+  }
+  if (loomc_status_is_ok(status)) {
+    *out_unit = (loomc_cxx_unit_t*)native_unit;
+    native_unit = NULL;
+    *out_result = invocation.result;
+    invocation.result = NULL;
+  }
+  loom_cxx_unit_free(native_unit);
+  if (invocation.source_path_arena_initialized) {
+    iree_arena_deinitialize(&invocation.source_path_arena);
+  }
+  if (source_path_block_pool_initialized) {
+    iree_arena_block_pool_deinitialize(&source_path_block_pool);
+  }
+  loomc_result_release(invocation.result);
+  loomc_source_release(invocation.provided_source);
+  loomc_allocator_free(allocator, option_storage);
+  return status;
+}
+
+void loomc_cxx_unit_release(loomc_cxx_unit_t* unit) {
+  loom_cxx_unit_free((loom_cxx_unit_t*)unit);
+}
+
+loomc_status_t loomc_module_import_cxx_unit(
+    loomc_context_t* context, loomc_workspace_t* workspace,
+    loomc_cxx_unit_t* unit, const loomc_cxx_import_options_t* options,
+    loomc_allocator_t allocator, loomc_module_t** out_module,
+    loomc_result_t** out_result) {
+  if (out_module != NULL) {
+    *out_module = NULL;
+  }
+  if (out_result != NULL) {
+    *out_result = NULL;
+  }
+  if (context == NULL || workspace == NULL || unit == NULL ||
+      out_module == NULL || out_result == NULL) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "context, workspace, unit, out_module, and out_result must not be "
+        "NULL");
+  }
+  loom_cxx_unit_t* native_unit = (loom_cxx_unit_t*)unit;
+  loomc_module_t* module = NULL;
+  loom_module_t* internal_module = NULL;
+  loom_cxx_import_options_t native_options;
+  void* option_storage = NULL;
+  loomc_cxx_invocation_t invocation = {0};
+  loomc_status_t status = loomc_cxx_resolve_options(
+      options, allocator, &native_options, &option_storage);
+  if (loomc_status_is_ok(status)) {
+    status = loomc_result_create(LOOMC_STATUS_OK,
+                                 loomc_context_source_retention(context),
+                                 allocator, &invocation.result);
+  }
+  if (loomc_status_is_ok(status)) {
+    status = loomc_module_create_empty(context, workspace, allocator, &module);
+  }
+  if (loomc_status_is_ok(status)) {
+    invocation.module = module;
+    const loomc_target_pass_environment_t* pass_environment =
+        loomc_context_target_pass_environment(context);
+    invocation.text_print_options =
+        pass_environment ? &pass_environment->diagnostic_type_print_options
+                         : NULL;
+    if (options && options->source_path_mapper.fn) {
+      invocation.source_path_mapper = options->source_path_mapper;
+      iree_arena_initialize(loomc_module_block_pool(module),
+                            &invocation.source_path_arena);
+      invocation.source_path_arena_initialized = true;
+    }
+    native_options.diagnostic_sink =
+        (loom_diagnostic_sink_t){loomc_cxx_capture_diagnostic, &invocation};
+    if (loomc_context_source_retention(context) ==
+        LOOMC_SOURCE_RETENTION_EXACT) {
+      native_options.source_observer =
+          (loom_cxx_source_observer_t){loomc_cxx_capture_source, &invocation};
+    }
+    loomc_target_pass_environment_initialize_text_asm_environment(
+        pass_environment, &native_options.low_asm_environment);
+    status = loomc_status_from_iree(loom_cxx_import_unit(
+        native_unit, loomc_context_loom_context(context),
+        loomc_module_block_pool(module), &native_options,
+        iree_allocator_from_loomc(allocator), &internal_module));
+    // The invocation ends here; later uses install their own sink.
+    loom_cxx_unit_set_diagnostic_sink(native_unit, (loom_diagnostic_sink_t){0});
+  }
+  if (loomc_status_is_ok(status) && internal_module &&
+      invocation.source_path_mapper.fn) {
+    status = loomc_status_from_iree(
+        loomc_cxx_rewrite_module_source_paths(&invocation, internal_module));
+  }
+  if (loomc_status_is_ok(status)) {
+    if (internal_module) {
+      loomc_module_set_loom_module(module, internal_module,
+                                   LOOMC_MODULE_INPUT_STRUCTURALLY_VERIFIED);
+      internal_module = NULL;
+    } else {
+      loomc_result_set_status_code(invocation.result,
+                                   LOOMC_STATUS_FAILED_PRECONDITION);
+    }
+  }
+  if (loomc_status_is_ok(status)) {
+    if (loomc_result_succeeded(invocation.result)) {
+      *out_module = module;
+      module = NULL;
+    }
+    *out_result = invocation.result;
+    invocation.result = NULL;
+  }
+  loom_module_free(internal_module);
+  if (invocation.source_path_arena_initialized) {
+    iree_arena_deinitialize(&invocation.source_path_arena);
+  }
+  loomc_module_release(module);
+  loomc_result_release(invocation.result);
   loomc_allocator_free(allocator, option_storage);
   return status;
 }
