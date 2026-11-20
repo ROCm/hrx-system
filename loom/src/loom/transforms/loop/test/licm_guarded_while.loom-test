@@ -1,0 +1,126 @@
+// RUN: pass licm
+
+// Keep the descriptor reads and their address conversions behind the original
+// entry predicate. The unsigned recurrence retains its wrapping arithmetic.
+func.def @descriptor(%storage: buffer, %slot: i32, %begin: i32, %end: i32, %step: i32) -> (i32) {
+  %c0 = scalar.constant 0 : i32
+  %last, %sum = scf.while(%before = %begin : i32, %total = %c0 : i32) -> (i32, i32) {
+    %more = scalar.cmpi ult, %before, %end : i32
+    scf.condition %more, %before, %total : i1, i32, i32
+  } do(%i: i32, %carry: i32) {
+    %index = index.cast %slot : i32 to index
+    %c8 = index.constant 8 : index
+    %offset = index.mul %index, %c8 : index
+    %view = buffer.view %storage[%offset] : buffer -> view<2xi32>
+    %divisor = view.load %view[0] : view<2xi32> -> i32
+    %bias = view.load %view[1] : view<2xi32> -> i32
+    %remainder = scalar.remui %i, %divisor : i32
+    %biased = scalar.addi %remainder, %bias : i32
+    %next_sum = scalar.addi %carry, %biased : i32
+    %next = scalar.addi %i, %step : i32
+    scf.yield %next, %next_sum : i32, i32
+  }
+  func.return %sum : i32
+}
+
+// ----
+func.def @descriptor(%storage: buffer, %slot: i32, %begin: i32, %end: i32, %step: i32) -> (i32) {
+  %c0 = scalar.constant 0 : i32
+  %c8 = index.constant 8 : index
+  %more = scalar.cmpi ult, %begin, %end : i32
+  %last, %sum = scf.if %more -> (i32, i32) {
+    %index = index.cast %slot : i32 to index
+    %offset = index.mul %index, %c8 : index
+    %view = buffer.view %storage[%offset] : buffer -> view<2xi32>
+    %divisor = view.load %view[0] : view<2xi32> -> i32
+    %bias = view.load %view[1] : view<2xi32> -> i32
+    %last, %sum = scf.while(%before = %begin : i32, %total = %c0 : i32) -> (i32, i32) {
+      %more = scalar.cmpi ult, %before, %end : i32
+      scf.condition %more, %before, %total : i1, i32, i32
+    } do(%i: i32, %carry: i32) {
+      %remainder = scalar.remui %i, %divisor : i32
+      %biased = scalar.addi %remainder, %bias : i32
+      %next_sum = scalar.addi %carry, %biased : i32
+      %next = scalar.addi %i, %step : i32
+      scf.yield %next, %next_sum : i32, i32
+    }
+    scf.yield %last, %sum : i32, i32
+  } else {
+    scf.yield %begin, %c0 : i32, i32
+  }
+  func.return %sum : i32
+}
+
+// ====
+
+// Header and result tuples are independent. The empty result must be the
+// initial condition's computed payload, not the original header operand.
+func.def @condition_payload(%input: view<1xi32>, %begin: i32, %end: i32) -> (i32, i32) {
+  %last, %payload = scf.while(%before = %begin : i32) -> (i32, i32) {
+    %c1 = scalar.constant 1 : i32
+    %next = scalar.addi %before, %c1 : i32
+    %more = scalar.cmpi ult, %before, %end : i32
+    scf.condition %more, %before, %next : i1, i32, i32
+  } do(%i: i32, %next: i32) {
+    %increment = view.load %input[0] : view<1xi32> -> i32
+    %advanced = scalar.addi %next, %increment : i32
+    scf.yield %advanced : i32
+  }
+  func.return %last, %payload : i32, i32
+}
+
+// ----
+func.def @condition_payload(%input: view<1xi32>, %begin: i32, %end: i32) -> (i32, i32) {
+  %c1 = scalar.constant 1 : i32
+  %next = scalar.addi %begin, %c1 : i32
+  %more = scalar.cmpi ult, %begin, %end : i32
+  %last, %payload = scf.if %more -> (i32, i32) {
+    %increment = view.load %input[0] : view<1xi32> -> i32
+    %last, %payload = scf.while(%before = %begin : i32) -> (i32, i32) {
+      %c1 = scalar.constant 1 : i32
+      %next = scalar.addi %before, %c1 : i32
+      %more = scalar.cmpi ult, %before, %end : i32
+      scf.condition %more, %before, %next : i1, i32, i32
+    } do(%i: i32, %next: i32) {
+      %advanced = scalar.addi %next, %increment : i32
+      scf.yield %advanced : i32
+    }
+    scf.yield %last, %payload : i32, i32
+  } else {
+    scf.yield %begin, %next : i32, i32
+  }
+  func.return %last, %payload : i32, i32
+}
+
+// ====
+
+// A header read cannot be duplicated as an entry guard: the body changes the
+// condition's memory, including the final false-header observation.
+func.def @effectful_header(%input: view<2xi32>, %begin: i32, %end: i32) -> (i32) {
+  %last = scf.while(%before = %begin : i32) -> (i32) {
+    %limit = view.load %input[0] : view<2xi32> -> i32
+    %more = scalar.cmpi ult, %before, %limit : i32
+    scf.condition %more, %before : i1, i32
+  } do(%i: i32) {
+    %increment = view.load %input[1] : view<2xi32> -> i32
+    %next = scalar.addi %i, %increment : i32
+    view.store %end, %input[0] : i32, view<2xi32>
+    scf.yield %next : i32
+  }
+  func.return %last : i32
+}
+
+// ====
+
+// A varying address gives no invariant read to amortize the entry guard.
+func.def @varying_read(%input: view<64xi32>, %begin: index, %end: index) -> (index) {
+  %last = scf.while(%before = %begin : index) -> (index) {
+    %more = index.cmp slt, %before, %end : index
+    scf.condition %more, %before : i1, index
+  } do(%i: index) {
+    %loaded = view.load %input[%i] : view<64xi32> -> i32
+    %next = index.cast %loaded : i32 to index
+    scf.yield %next : index
+  }
+  func.return %last : index
+}

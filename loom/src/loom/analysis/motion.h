@@ -80,6 +80,9 @@ typedef struct loom_motion_analysis_t {
   loom_motion_memory_t* memory;
   // Reusable stack for subtree region walks.
   loom_motion_region_stack_t region_stack;
+  // Function-local value bits used while planning one guarded loop preheader.
+  // Only selected results are set; each plan clears its own bits afterward.
+  uint64_t* planned_values;
 } loom_motion_analysis_t;
 
 // Lazily constructed index of the block-local effect segments that ordinary
@@ -146,11 +149,41 @@ static inline bool loom_motion_loop_hoist_result_is_legal(
 // these identities may relocate without introducing a new execution path.
 // Ordinary unmasked view/vector loads may instead use a proven-nonempty loop
 // contract when every write in the loop is proven disjoint from the loaded byte
-// region. Loads nested under another predicate remain in place.
+// region. |on_entry_path| proves that no intervening control or execution
+// boundary can bypass the candidate. Loads under another predicate or after
+// possibly nonreturning nested control remain in place.
 iree_status_t loom_motion_subtree_evaluate_hoist_before_loop(
     loom_motion_analysis_t* analysis, loom_loop_like_t loop,
-    const loom_op_t* candidate_op, bool in_entry_prefix,
+    const loom_op_t* candidate_op, bool in_entry_prefix, bool on_entry_path,
     loom_motion_loop_hoist_result_t* out_result);
+
+// Whether the next operation shares this operation's entry execution path.
+// Nested control, calls, and ordered/identity effects end that guarantee.
+bool loom_motion_op_preserves_entry_execution(const loom_module_t* module,
+                                              const loom_op_t* op);
+
+// Direct-body leaves that may execute once before a loop under its entry
+// predicate. Their source order and complete SSA dependencies are preserved.
+typedef struct loom_motion_loop_entry_plan_t {
+  // Arena-owned selected operations, in dependency/source order.
+  loom_op_t** operations;
+  // Number of selected operations; zero when no ordinary read can move.
+  uint32_t count;
+  // Number of selected ordinary reads whose memory is invariant in the loop.
+  uint32_t read_count;
+} loom_motion_loop_entry_plan_t;
+
+// Plans a guarded preheader without mutating IR. The caller must preserve the
+// loop's first-body execution predicate, and any separate condition region
+// must consist of effect-free leaves. The plan stops at nested control or an
+// execution boundary, and retains only invariant effect-free leaves and
+// ordinary reads proven stable by the shared memory analysis. Operands and
+// maintained type/attribute dependencies are visited once in source order.
+// Plans remain valid until loop effects or their input identities change;
+// construct every plan before introducing new regions.
+iree_status_t loom_motion_plan_loop_entry(
+    loom_motion_analysis_t* analysis, loom_loop_like_t loop,
+    loom_motion_loop_entry_plan_t* out_plan);
 
 // Returns true when |op| is an ordinary unmasked view or vector load with no
 // write, ordering, convergence, identity, or nondeterministic semantics.

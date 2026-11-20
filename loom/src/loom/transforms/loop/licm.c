@@ -14,13 +14,16 @@
 #include "loom/pass/value_facts.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/target/function_version.h"
+#include "loom/transforms/loop/entry.h"
 #include "loom/util/walk.h"
 
 #define LOOM_LICM_STATISTICS(V, statistics_type)     \
   V(statistics_type, loops_visited, "loops-visited", \
     "Number of loop-like operations inspected.")     \
   V(statistics_type, ops_hoisted, "ops-hoisted",     \
-    "Number of loop-invariant operations hoisted.")
+    "Number of loop-invariant operations hoisted.")  \
+  V(statistics_type, entry_guards, "entry-guards",   \
+    "Number of guarded invariant-read preheaders.")
 
 LOOM_PASS_STATISTICS_DEFINE(loom_licm_statistics, loom_licm_statistics_t,
                             LOOM_LICM_STATISTICS)
@@ -80,6 +83,15 @@ static loom_region_t* loom_licm_region_stack_pop(
   return stack->count > 0 ? stack->regions[--stack->count] : NULL;
 }
 
+typedef struct loom_licm_entry_t {
+  // Loop whose original execution predicate will guard its preheader.
+  loom_loop_like_t loop;
+  // Completed shared motion plan, borrowing original operation identities.
+  loom_motion_loop_entry_plan_t plan;
+  // Next planned loop in child-before-parent order.
+  struct loom_licm_entry_t* next;
+} loom_licm_entry_t;
+
 typedef struct loom_licm_context_t {
   // Pass instance owning the scratch arena.
   loom_pass_t* pass;
@@ -99,6 +111,10 @@ typedef struct loom_licm_context_t {
   loom_licm_region_stack_t loop_stack;
   // Whether the current traversal moved any operation.
   bool changed;
+  // First guarded preheader; all plans precede structural mutation.
+  loom_licm_entry_t* first_entry;
+  // Last guarded preheader for constant-time append.
+  loom_licm_entry_t* last_entry;
 } loom_licm_context_t;
 
 //===----------------------------------------------------------------------===//
@@ -148,6 +164,7 @@ static iree_status_t loom_licm_hoist_from_loop_body(
     loom_region_for_each_block(region, block) {
       bool in_entry_prefix =
           region == body && block == loom_region_entry_block(body);
+      bool on_entry_path = in_entry_prefix;
       loom_op_t* op = block->first_op;
       while (op) {
         loom_op_t* next_op = op->next_op;
@@ -158,7 +175,11 @@ static iree_status_t loom_licm_hoist_from_loop_body(
 
         loom_motion_loop_hoist_result_t result;
         IREE_RETURN_IF_ERROR(loom_motion_subtree_evaluate_hoist_before_loop(
-            &context->motion, loop, op, in_entry_prefix, &result));
+            &context->motion, loop, op, in_entry_prefix, on_entry_path,
+            &result));
+        on_entry_path =
+            on_entry_path &&
+            loom_motion_op_preserves_entry_execution(context->module, op);
         // A fact identity in this prefix executes on every entry into a
         // nonempty loop. Effects, control regions, or other non-speculatable
         // work end that proof even when a later identity is invariant.
@@ -225,6 +246,36 @@ static iree_status_t loom_licm_process_loop(
   return iree_ok_status();
 }
 
+static iree_status_t loom_licm_plan_entry(
+    void* user_data, loom_op_t* op, const loom_walk_context_t* walk_context,
+    loom_walk_result_t* out_result) {
+  (void)walk_context;
+  *out_result = LOOM_WALK_CONTINUE;
+  loom_licm_context_t* context = (loom_licm_context_t*)user_data;
+  const loom_loop_like_t loop = loom_loop_like_cast(context->module, op);
+  if (!loom_loop_like_isa(loop) ||
+      !loom_loop_entry_can_guard(context->module, loop)) {
+    return iree_ok_status();
+  }
+  loom_motion_loop_entry_plan_t plan;
+  IREE_RETURN_IF_ERROR(
+      loom_motion_plan_loop_entry(&context->motion, loop, &plan));
+  if (!plan.count) {
+    return iree_ok_status();
+  }
+  loom_licm_entry_t* entry = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(context->pass->arena, sizeof(*entry),
+                                           (void**)&entry));
+  *entry = (loom_licm_entry_t){.loop = loop, .plan = plan};
+  if (context->last_entry) {
+    context->last_entry->next = entry;
+  } else {
+    context->first_entry = entry;
+  }
+  context->last_entry = entry;
+  return iree_ok_status();
+}
+
 iree_status_t loom_licm_run(loom_pass_t* pass, loom_module_t* module,
                             loom_func_like_t function) {
   loom_region_t* body = loom_func_like_body(function);
@@ -256,6 +307,24 @@ iree_status_t loom_licm_run(loom_pass_t* pass, loom_module_t* module,
                                                 .user_data = &context},
                          &walk_result);
     any_changed |= context.changed;
+  }
+
+  // Invariant address construction and ordinary reads need not speculate on
+  // empty loops. Plan them against the same immutable effects/CFG snapshot,
+  // then introduce entry guards after the last analysis query.
+  if (iree_status_is_ok(status) && context.motion.module) {
+    loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
+    status = loom_walk_region(module, body, LOOM_WALK_POST_ORDER,
+                              (loom_walk_callback_t){.fn = loom_licm_plan_entry,
+                                                     .user_data = &context},
+                              &walk_result);
+  }
+  for (loom_licm_entry_t* entry = context.first_entry;
+       entry && iree_status_is_ok(status); entry = entry->next) {
+    status = loom_loop_entry_hoist(&rewriter, entry->loop, &entry->plan);
+    any_changed = true;
+    context.statistics->ops_hoisted += entry->plan.count;
+    ++context.statistics->entry_guards;
   }
 
   if (iree_status_is_ok(status) && any_changed) {

@@ -6,6 +6,8 @@
 
 #include "loom/analysis/motion.h"
 
+#include <string.h>
+
 #include "loom/analysis/execution_condition.h"
 #include "loom/analysis/loop_domain.h"
 #include "loom/analysis/motion_memory.h"
@@ -601,9 +603,39 @@ static bool loom_motion_request_is_ordinary_load(
                                LOOM_MOVEMENT_REQUEST_IRREGULAR_OFFSETS);
 }
 
+static iree_status_t loom_motion_evaluate_invariant_read(
+    loom_motion_analysis_t* analysis, loom_loop_like_t loop,
+    const loom_op_t* candidate_op,
+    loom_motion_loop_hoist_result_t* out_result) {
+  bool movement_available = false;
+  IREE_RETURN_IF_ERROR(
+      loom_motion_analysis_ensure_movement(analysis, &movement_available));
+  if (!movement_available) {
+    loom_motion_loop_hoist_reject(
+        out_result, LOOM_MOTION_LOOP_HOIST_REJECTION_MOVEMENT_UNAVAILABLE,
+        candidate_op);
+    return iree_ok_status();
+  }
+
+  loom_movement_request_t request = {0};
+  loom_movement_diagnostic_t diagnostic = {0};
+  bool described = false;
+  IREE_RETURN_IF_ERROR(loom_movement_request_describe_op(
+      &analysis->movement, candidate_op, &request, &diagnostic, &described));
+  if (!described || !loom_motion_request_is_ordinary_load(&request)) {
+    out_result->movement_rejection_bits = diagnostic.rejection_bits;
+    loom_motion_loop_hoist_reject(
+        out_result, LOOM_MOTION_LOOP_HOIST_REJECTION_MOVEMENT_UNAVAILABLE,
+        candidate_op);
+    return iree_ok_status();
+  }
+  return loom_motion_memory_evaluate_loop(analysis->memory, loop.op,
+                                          &request.source, out_result);
+}
+
 iree_status_t loom_motion_subtree_evaluate_hoist_before_loop(
     loom_motion_analysis_t* analysis, loom_loop_like_t loop,
-    const loom_op_t* candidate_op, bool in_entry_prefix,
+    const loom_op_t* candidate_op, bool in_entry_prefix, bool on_entry_path,
     loom_motion_loop_hoist_result_t* out_result) {
   *out_result = (loom_motion_loop_hoist_result_t){0};
   if (!analysis || !analysis->module || !loom_loop_like_isa(loop) ||
@@ -629,7 +661,7 @@ iree_status_t loom_motion_subtree_evaluate_hoist_before_loop(
   }
 
   loom_region_t* loop_body = loom_loop_like_body(loop);
-  if (!loop_body || !candidate_op->parent_block ||
+  if (!on_entry_path || !loop_body || !candidate_op->parent_block ||
       candidate_op->parent_block->parent_region != loop_body) {
     loom_motion_loop_hoist_reject(
         out_result, LOOM_MOTION_LOOP_HOIST_REJECTION_PREDICATE_CROSSING,
@@ -654,28 +686,153 @@ iree_status_t loom_motion_subtree_evaluate_hoist_before_loop(
     return iree_ok_status();
   }
 
-  bool movement_available = false;
-  IREE_RETURN_IF_ERROR(
-      loom_motion_analysis_ensure_movement(analysis, &movement_available));
-  if (!movement_available) {
-    loom_motion_loop_hoist_reject(
-        out_result, LOOM_MOTION_LOOP_HOIST_REJECTION_MOVEMENT_UNAVAILABLE,
-        candidate_op);
-    return iree_ok_status();
-  }
+  return loom_motion_evaluate_invariant_read(analysis, loop, candidate_op,
+                                             out_result);
+}
 
-  loom_movement_request_t request = {0};
-  loom_movement_diagnostic_t diagnostic = {0};
-  bool described = false;
-  IREE_RETURN_IF_ERROR(loom_movement_request_describe_op(
-      &analysis->movement, candidate_op, &request, &diagnostic, &described));
-  if (!described || !loom_motion_request_is_ordinary_load(&request)) {
-    out_result->movement_rejection_bits = diagnostic.rejection_bits;
-    loom_motion_loop_hoist_reject(
-        out_result, LOOM_MOTION_LOOP_HOIST_REJECTION_MOVEMENT_UNAVAILABLE,
-        candidate_op);
-    return iree_ok_status();
+//===----------------------------------------------------------------------===//
+// Guarded loop entry planning
+//===----------------------------------------------------------------------===//
+
+bool loom_motion_op_preserves_entry_execution(const loom_module_t* module,
+                                              const loom_op_t* op) {
+  return op->region_count == 0 && op->successor_count == 0 &&
+         !iree_any_bit_set(
+             loom_op_effective_traits(module, op),
+             LOOM_TRAIT_TERMINATOR | LOOM_TRAIT_HINT | LOOM_TRAIT_CONVERGENT |
+                 LOOM_TRAIT_OBSERVABLE_EFFECT | LOOM_TRAIT_UNIQUE_IDENTITY |
+                 LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_UNKNOWN_EFFECTS |
+                 LOOM_TRAIT_CALLABLE_BOUNDARY) &&
+         !loom_op_requires_source_context(module, op);
+}
+
+static bool loom_motion_entry_value_is_available(
+    const loom_motion_analysis_t* analysis, loom_loop_like_t loop,
+    const loom_op_t* candidate, loom_value_id_t value) {
+  const loom_value_ordinal_t ordinal =
+      loom_local_value_domain_try_ordinal(analysis->value_domain, value);
+  if (ordinal != LOOM_VALUE_ORDINAL_INVALID &&
+      (analysis->planned_values[ordinal / 64] &
+       (UINT64_C(1) << (ordinal % 64)))) {
+    return true;
   }
-  return loom_motion_memory_evaluate_loop(analysis->memory, loop.op,
-                                          &request.source, out_result);
+  return loom_availability_value_is_available_before_op(
+      &analysis->availability, candidate, loop.op, value);
+}
+
+static bool loom_motion_entry_dependencies_are_available(
+    const loom_motion_analysis_t* analysis, loom_loop_like_t loop,
+    const loom_op_t* candidate, loom_type_use_iterator_t* dependencies) {
+  for (loom_value_id_t value = loom_type_dependencies_next(dependencies);
+       value != LOOM_VALUE_ID_INVALID;
+       value = loom_type_dependencies_next(dependencies)) {
+    if (!loom_motion_entry_value_is_available(analysis, loop, candidate,
+                                              value)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool loom_motion_entry_captures_are_available(
+    const loom_motion_analysis_t* analysis, loom_loop_like_t loop,
+    const loom_op_t* candidate) {
+  const loom_value_id_t* operands = loom_op_const_operands(candidate);
+  for (uint16_t i = 0; i < candidate->operand_count; ++i) {
+    if (!loom_motion_entry_value_is_available(analysis, loop, candidate,
+                                              operands[i])) {
+      return false;
+    }
+  }
+  const loom_value_id_t* results = loom_op_const_results(candidate);
+  for (uint16_t i = 0; i < candidate->result_count; ++i) {
+    loom_type_use_iterator_t dependencies;
+    loom_type_dependencies_begin(&analysis->module->type_uses, results[i],
+                                 &dependencies);
+    if (!loom_motion_entry_dependencies_are_available(analysis, loop, candidate,
+                                                      &dependencies)) {
+      return false;
+    }
+  }
+  const uint32_t* owners = loom_op_attribute_owners(candidate);
+  for (uint8_t i = 0; i < candidate->attribute_count; ++i) {
+    if (!owners[i]) {
+      continue;
+    }
+    loom_type_use_iterator_t dependencies;
+    loom_attribute_dependencies_begin(&analysis->module->type_uses, candidate,
+                                      i, &dependencies);
+    if (!loom_motion_entry_dependencies_are_available(analysis, loop, candidate,
+                                                      &dependencies)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+iree_status_t loom_motion_plan_loop_entry(
+    loom_motion_analysis_t* analysis, loom_loop_like_t loop,
+    loom_motion_loop_entry_plan_t* out_plan) {
+  *out_plan = (loom_motion_loop_entry_plan_t){0};
+  loom_block_t* body = loom_region_entry_block(loom_loop_like_body(loop));
+  if (!analysis->planned_values) {
+    const iree_host_size_t word_count =
+        ((uint64_t)analysis->value_domain->value_count + 63) / 64;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        analysis->arena, word_count, sizeof(*analysis->planned_values),
+        (void**)&analysis->planned_values));
+    memset(analysis->planned_values, 0,
+           word_count * sizeof(*analysis->planned_values));
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      analysis->arena, body->op_count, sizeof(*out_plan->operations),
+      (void**)&out_plan->operations));
+
+  iree_status_t status = iree_ok_status();
+  for (loom_op_t* op = body->first_op; op && iree_status_is_ok(status);
+       op = op->next_op) {
+    // A nested region may not return, and a callable, convergence, or identity
+    // boundary can make later execution depend on more than loop entry.
+    if (!loom_motion_op_preserves_entry_execution(analysis->module, op)) {
+      break;
+    }
+    const bool is_read = loom_motion_op_is_ordinary_load(analysis->module, op);
+    if ((!is_read &&
+         !loom_motion_op_can_relocate_effect_free(analysis->module, op)) ||
+        !loom_motion_entry_captures_are_available(analysis, loop, op)) {
+      continue;
+    }
+    loom_motion_loop_hoist_result_t result = {0};
+    if (is_read) {
+      status = loom_motion_evaluate_invariant_read(analysis, loop, op, &result);
+    }
+    if (!iree_status_is_ok(status) ||
+        !loom_motion_loop_hoist_result_is_legal(&result)) {
+      continue;
+    }
+    out_plan->operations[out_plan->count++] = op;
+    out_plan->read_count += is_read;
+    const loom_value_id_t* results = loom_op_const_results(op);
+    for (uint16_t i = 0; i < op->result_count; ++i) {
+      const loom_value_ordinal_t ordinal =
+          loom_local_value_domain_ordinal(analysis->value_domain, results[i]);
+      analysis->planned_values[ordinal / 64] |= UINT64_C(1) << (ordinal % 64);
+    }
+  }
+  // Reset only touched values. Clearing the whole function for every loop
+  // would make many small loops pay for each other's live domains.
+  for (uint32_t i = 0; i < out_plan->count; ++i) {
+    const loom_op_t* op = out_plan->operations[i];
+    const loom_value_id_t* results = loom_op_const_results(op);
+    for (uint16_t j = 0; j < op->result_count; ++j) {
+      const loom_value_ordinal_t ordinal =
+          loom_local_value_domain_ordinal(analysis->value_domain, results[j]);
+      analysis->planned_values[ordinal / 64] &=
+          ~(UINT64_C(1) << (ordinal % 64));
+    }
+  }
+  if (!out_plan->read_count) {
+    out_plan->count = 0;
+  }
+  return status;
 }

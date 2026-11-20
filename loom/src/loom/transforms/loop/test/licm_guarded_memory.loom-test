@@ -1,0 +1,139 @@
+// RUN: pass licm
+
+// Unsigned byte-offset ranges use an unsigned entry comparison. The scalar
+// address cast and the entire vector load remain inside that guard.
+func.def @offset_range(%input: buffer, %begin: offset, %end: offset, %slot: i32, %initial: vector<4xi32>) -> (vector<4xi32>) {
+  %step = index.constant 1 : offset
+  %result = scf.for %i = [%begin to %end step %step](%carry = %initial : vector<4xi32>) -> (vector<4xi32>) {
+    %position = index.cast %slot : i32 to index
+    %view = buffer.view %input[%position] : buffer -> view<4xi32>
+    %loaded = vector.load %view[0] : view<4xi32> -> vector<4xi32>
+    %sum = vector.addi %carry, %loaded : vector<4xi32>
+    scf.yield %sum : vector<4xi32>
+  }
+  func.return %result : vector<4xi32>
+}
+
+// ----
+func.def @offset_range(%input: buffer, %begin: offset, %end: offset, %slot: i32, %initial: vector<4xi32>) -> (vector<4xi32>) {
+  %step = index.constant 1 : offset
+  %14 = index.cmp ult, %begin, %end : offset
+  %result = scf.if %14 -> (vector<4xi32>) {
+    %position = index.cast %slot : i32 to index
+    %view = buffer.view %input[%position] : buffer -> view<4xi32>
+    %loaded = vector.load %view[0] : view<4xi32> -> vector<4xi32>
+    %result = scf.for %i = [%begin to %end step %step](%carry = %initial : vector<4xi32>) -> (vector<4xi32>) {
+      %sum = vector.addi %carry, %loaded : vector<4xi32>
+      scf.yield %sum : vector<4xi32>
+    }
+    scf.yield %result : vector<4xi32>
+  } else {
+    scf.yield %initial : vector<4xi32>
+  }
+  func.return %result : vector<4xi32>
+}
+
+// ====
+
+// Reuse the same byte-region proof as ordinary nonempty-loop motion.
+func.def @disjoint_write(%input: view<2xi32>, %end: index, %initial: i32) -> (i32) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %result = scf.for %i = [%c0 to %end step %c1](%carry = %initial : i32) -> (i32) {
+    %loaded = view.load %input[0] : view<2xi32> -> i32
+    %sum = scalar.addi %carry, %loaded : i32
+    view.store %sum, %input[1] : i32, view<2xi32>
+    scf.yield %sum : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @disjoint_write(%input: view<2xi32>, %end: index, %initial: i32) -> (i32) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %11 = index.cmp slt, %c0, %end : index
+  %result = scf.if %11 -> (i32) {
+    %loaded = view.load %input[0] : view<2xi32> -> i32
+    %result = scf.for %i = [%c0 to %end step %c1](%carry = %initial : i32) -> (i32) {
+      %sum = scalar.addi %carry, %loaded : i32
+      view.store %sum, %input[1] : i32, view<2xi32>
+      scf.yield %sum : i32
+    }
+    scf.yield %result : i32
+  } else {
+    scf.yield %initial : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+// The same address computation cannot turn a changing read into an invariant.
+func.def @aliasing_write(%input: view<2xi32>, %end: index, %initial: i32) -> (i32) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %result = scf.for %i = [%c0 to %end step %c1](%carry = %initial : i32) -> (i32) {
+    %loaded = view.load %input[0] : view<2xi32> -> i32
+    %sum = scalar.addi %carry, %loaded : i32
+    view.store %sum, %input[0] : i32, view<2xi32>
+    scf.yield %sum : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+// A body-entry guard does not establish the nested branch's predicate.
+func.def @nested_predicate(%input: view<1xi32>, %end: index, %enabled: i1, %initial: i32) -> (i32) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %result = scf.for %i = [%c0 to %end step %c1](%carry = %initial : i32) -> (i32) {
+    %next = scf.if %enabled -> (i32) {
+      %loaded = view.load %input[0] : view<1xi32> -> i32
+      scf.yield %loaded : i32
+    } else {
+      scf.yield %carry : i32
+    }
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+// Nested control need not return. A later read has a stronger execution
+// condition than entry to the outer loop.
+func.def @after_nested_control(%input: view<1xi32>, %end: index, %again: i1, %initial: i32) -> (i32) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %result = scf.for %i = [%c0 to %end step %c1](%carry = %initial : i32) -> (i32) {
+    scf.while {
+      scf.condition %again : i1
+    } do {
+      scf.yield
+    }
+    %loaded = view.load %input[0] : view<1xi32> -> i32
+    scf.yield %loaded : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+// Even an outer loop known to execute once cannot lift a later read before a
+// potentially nonreturning nested loop.
+func.def @nonempty_after_nested_control(%input: view<1xi32>, %again: i1, %initial: i32) -> (i32) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %result = scf.for %i = [%c0 to %c1 step %c1](%carry = %initial : i32) -> (i32) {
+    scf.while {
+      scf.condition %again : i1
+    } do {
+      scf.yield
+    }
+    %loaded = view.load %input[0] : view<1xi32> -> i32
+    scf.yield %loaded : i32
+  }
+  func.return %result : i32
+}

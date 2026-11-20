@@ -459,12 +459,29 @@ func.def @hoists_load_from_transformed_view(%input: buffer, %initial: i32) -> (i
 // A loop with an unknown trip count does not make the load address part of the
 // function's required valid-access domain, so the load remains guarded by the
 // loop predicate.
-func.def @keeps_load_in_maybe_empty_loop(%input: view<8xi32>, %n: index, %initial: i32) -> (i32) {
+func.def @guards_load_in_maybe_empty_loop(%input: view<8xi32>, %n: index, %initial: i32) -> (i32) {
   %loop_begin = index.constant 0 : index
   %loop_step = index.constant 1 : index
   %result = scf.for %iv = [%loop_begin to %n step %loop_step](%carry = %initial : i32) -> (i32) {
     %value = view.load %input[3] : view<8xi32> -> i32
     scf.yield %value : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @guards_load_in_maybe_empty_loop(%input: view<8xi32>, %n: index, %initial: i32) -> (i32) {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %10 = index.cmp slt, %loop_begin, %n : index
+  %result = scf.if %10 -> (i32) {
+    %value = view.load %input[3] : view<8xi32> -> i32
+    %result = scf.for %iv = [%loop_begin to %n step %loop_step](%carry = %initial : i32) -> (i32) {
+      scf.yield %value : i32
+    }
+    scf.yield %result : i32
+  } else {
+    scf.yield %initial : i32
   }
   func.return %result : i32
 }

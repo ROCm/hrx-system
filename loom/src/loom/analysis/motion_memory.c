@@ -12,7 +12,7 @@
 #include "loom/util/adaptive_sort.h"
 
 typedef struct loom_motion_memory_scope_t {
-  // Loop owning this body; used only as an identity in the completed index.
+  // Loop owning these repeated regions; identity in the completed index.
   const loom_op_t* loop;
   // First effect position in the body, including nested regions.
   uint32_t begin;
@@ -250,31 +250,29 @@ static iree_status_t loom_motion_memory_capture_region(
         IREE_RETURN_IF_ERROR(loom_motion_memory_capture_effect(memory, op));
       }
       const loom_loop_like_t loop = loom_loop_like_cast(module, (loom_op_t*)op);
-      const loom_region_t* loop_body = loom_loop_like_has_counted_range(loop)
-                                           ? loom_loop_like_body(loop)
-                                           : NULL;
+      const bool is_loop = loom_loop_like_isa(loop);
+      const iree_host_size_t scope_index = memory->scopes.count;
+      if (is_loop) {
+        IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+            memory->movement->expression_context.arena, memory->scopes.count,
+            memory->scopes.count + 1, sizeof(*memory->scopes.entries),
+            &memory->scopes.capacity, (void**)&memory->scopes.entries));
+        memory->scopes.entries[memory->scopes.count++] =
+            (loom_motion_memory_scope_t){
+                .loop = op,
+                .begin = memory->position,
+            };
+      }
       loom_region_t* const* children = loom_op_regions(op);
       for (uint8_t i = 0; i < op->region_count; ++i) {
         if (!children[i]) {
           continue;
         }
-        const iree_host_size_t scope_index = memory->scopes.count;
-        if (children[i] == loop_body) {
-          IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-              memory->movement->expression_context.arena, memory->scopes.count,
-              memory->scopes.count + 1, sizeof(*memory->scopes.entries),
-              &memory->scopes.capacity, (void**)&memory->scopes.entries));
-          memory->scopes.entries[memory->scopes.count++] =
-              (loom_motion_memory_scope_t){
-                  .loop = op,
-                  .begin = memory->position,
-              };
-        }
         IREE_RETURN_IF_ERROR(loom_motion_memory_capture_region(
-            memory, children[i], inside_loop || children[i] == loop_body));
-        if (children[i] == loop_body) {
-          memory->scopes.entries[scope_index].end = memory->position;
-        }
+            memory, children[i], inside_loop || is_loop));
+      }
+      if (is_loop) {
+        memory->scopes.entries[scope_index].end = memory->position;
       }
     }
   }
