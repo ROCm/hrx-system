@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/target/arch/amd/xdna/aie2p/emit/startup_records.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_plan.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/switch.h"
 
@@ -61,37 +62,6 @@ static iree_status_t loom_aie2p_catalog_routes(
   };
   return loom_aie2p_native_ingress_circuits(family, &intended, arena,
                                             out_switches);
-}
-
-static loom_aie2p_program_record_t loom_aie2p_catalog_write(uint32_t address,
-                                                            uint32_t value) {
-  return (loom_aie2p_program_record_t){
-      .type = LOOM_AIE2P_PROGRAM_RECORD_REGISTER_WRITE32,
-      .value.register_write32 = {address, value}};
-}
-
-static loom_aie2p_program_record_t loom_aie2p_catalog_block(
-    uint32_t address, const uint32_t* words, iree_host_size_t word_count) {
-  return (loom_aie2p_program_record_t){
-      .type = LOOM_AIE2P_PROGRAM_RECORD_REGISTER_BLOCK_WRITE32,
-      .value.register_block_write32 = {address, words, word_count}};
-}
-
-static loom_aie2p_program_record_t loom_aie2p_catalog_wait(uint32_t address,
-                                                           uint32_t mask,
-                                                           uint32_t value) {
-  return (loom_aie2p_program_record_t){
-      .type = LOOM_AIE2P_PROGRAM_RECORD_REGISTER_MASK_WAIT32,
-      .value.register_mask_wait32 = {address, mask, value}};
-}
-
-// All temporary resources use engine, descriptor, and hardware semaphore zero.
-static uint32_t loom_aie2p_catalog_address(
-    const loom_xdna_array_family_t* family, loom_xdna_tile_coordinate_t tile,
-    loom_xdna_register_field_id_t field) {
-  const uint16_t index = 0;
-  return (uint32_t)loom_xdna_register_field_address(family, field, tile,
-                                                    &index);
 }
 
 static iree_host_size_t loom_aie2p_catalog_select_columns(
@@ -245,7 +215,7 @@ iree_status_t loom_aie2p_catalog_upload_build(
     for (unsigned i = LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS;
          i <= LOOM_AIE2P_NATIVE_SWITCH_BANK_SLAVES; ++i) {
       const loom_aie2p_native_register_bank_t* bank = &state->banks[i];
-      records[position++] = loom_aie2p_catalog_block(bank->address, bank->words,
+      records[position++] = loom_aie2p_startup_block(bank->address, bank->words,
                                                      bank->word_count);
     }
   }
@@ -269,23 +239,23 @@ iree_status_t loom_aie2p_catalog_upload_build(
     const loom_aie2p_catalog_column_t* range = &ranges[column];
     const uint32_t size = range->contents_length;
     const uint32_t reset_address =
-        loom_aie2p_catalog_address(family, memory_tile, reset);
+        loom_aie2p_startup_address(family, memory_tile, reset);
     *setup++ = (loom_aie2p_program_record_t){
         .type = LOOM_AIE2P_PROGRAM_RECORD_REGISTER_MASK_WRITE32,
         .value.register_mask_write32 = {
-            loom_aie2p_catalog_address(family, source_tile, mux),
+            loom_aie2p_startup_address(family, source_tile, mux),
             loom_xdna_register_field_encode(mux, -1),
             loom_xdna_register_field_encode(mux, 1)}};
-    *setup++ = loom_aie2p_catalog_write(
+    *setup++ = loom_aie2p_startup_write(
         reset_address, loom_xdna_register_field_encode(reset, 1));
-    *setup++ = loom_aie2p_catalog_write(reset_address, 0);
-    *setup++ = loom_aie2p_catalog_write(
-        loom_aie2p_catalog_address(
+    *setup++ = loom_aie2p_startup_write(reset_address, 0);
+    *setup++ = loom_aie2p_startup_write(
+        loom_aie2p_startup_address(
             family, source_tile,
             LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_CONTROL_CONTROLLER_ID),
         0);
-    *setup++ = loom_aie2p_catalog_write(
-        loom_aie2p_catalog_address(family, memory_tile, lock), 0);
+    *setup++ = loom_aie2p_startup_write(
+        loom_aie2p_startup_address(family, memory_tile, lock), 0);
     uint32_t* receive = descriptors[index][0];
     loom_aie2p_native_encode_linear_descriptor(&memory->dma, memory->kind, size,
                                                receive);
@@ -298,8 +268,8 @@ iree_status_t loom_aie2p_catalog_upload_build(
                       loom_aie2p_sram_memory.local_lock_base) |
                   loom_xdna_register_field_encode(
                       loom_aie2p_sram_memory.locks.release_value, 1);
-    *setup++ = loom_aie2p_catalog_block(
-        loom_aie2p_catalog_address(family, memory_tile,
+    *setup++ = loom_aie2p_startup_block(
+        loom_aie2p_startup_address(family, memory_tile,
                                    loom_aie2p_sram_memory.descriptor_base),
         receive, 8);
     uint32_t* send = descriptors[index][1];
@@ -308,23 +278,23 @@ iree_status_t loom_aie2p_catalog_upload_build(
     patches[index] = (loom_aie2p_program_upload_patch_t){
         (uint32_t)(first_record + (setup - records)), range->source_offset,
         size};
-    *setup++ = loom_aie2p_catalog_block(
-        loom_aie2p_catalog_address(
+    *setup++ = loom_aie2p_startup_block(
+        loom_aie2p_startup_address(
             family, source_tile,
             LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD0_BUFFER_LENGTH),
         send, 8);
-    receivers[index] = loom_aie2p_catalog_write(
-        loom_aie2p_catalog_address(family, memory_tile,
+    receivers[index] = loom_aie2p_startup_write(
+        loom_aie2p_startup_address(family, memory_tile,
                                    loom_aie2p_sram_memory.directions[1].start),
         0);
-    senders[index] = loom_aie2p_catalog_write(
-        loom_aie2p_catalog_address(
+    senders[index] = loom_aie2p_startup_write(
+        loom_aie2p_startup_address(
             family, source_tile,
             LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_TASK_QUEUE_START_BD_ID),
         0);
     const uint32_t address =
-        loom_aie2p_catalog_address(family, memory_tile, lock);
-    *retire++ = loom_aie2p_catalog_wait(
+        loom_aie2p_startup_address(family, memory_tile, lock);
+    *retire++ = loom_aie2p_startup_wait(
         address, loom_xdna_register_field_encode(lock, -1),
         loom_xdna_register_field_encode(lock, 1));
     const loom_aie2p_native_queue_status_t sink =
@@ -336,10 +306,10 @@ iree_status_t loom_aie2p_catalog_upload_build(
             family, source_tile, NULL, 0,
             LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM);
     *retire++ =
-        loom_aie2p_catalog_wait((uint32_t)sink.address, sink.pending_mask, 0);
-    *retire++ = loom_aie2p_catalog_wait((uint32_t)source.address,
+        loom_aie2p_startup_wait((uint32_t)sink.address, sink.pending_mask, 0);
+    *retire++ = loom_aie2p_startup_wait((uint32_t)source.address,
                                         source.pending_mask, 0);
-    *retire++ = loom_aie2p_catalog_write(address, 0);
+    *retire++ = loom_aie2p_startup_write(address, 0);
     ++index;
   }
   IREE_ASSERT_EQ(retire - records, count * kRecordsPerColumn);

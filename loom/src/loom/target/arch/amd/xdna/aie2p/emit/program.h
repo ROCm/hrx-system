@@ -104,6 +104,11 @@ typedef struct loom_aie2p_program_record_t {
   } value;
 } loom_aie2p_program_record_t;
 
+// Fixed transaction bytes emitted for one register or control record. A tile
+// load expands into one block header plus its padded payload per section.
+uint32_t loom_aie2p_program_native_record_size(
+    const loom_aie2p_program_record_t* record);
+
 // Runtime shim-address relocation targeting a block-write word pair.
 typedef struct loom_aie2p_program_relocation_t {
   // Control-program record containing the target block write.
@@ -148,6 +153,9 @@ typedef struct loom_aie2p_program_upload_t {
   const loom_aie2p_program_upload_patch_t* patches;
   // Number of shim DMA descriptors referencing contents.
   iree_host_size_t patch_count;
+  // Linked entry section installed by DMA on each worker, or NULL when every
+  // worker is loaded inline. Other initial sections retain their own placement.
+  const bool* worker_entries;
 } loom_aie2p_program_upload_t;
 
 // Executable array initialization and invocation-control programs.

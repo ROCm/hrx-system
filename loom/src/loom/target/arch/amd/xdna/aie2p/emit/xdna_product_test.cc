@@ -491,6 +491,81 @@ TEST_F(XdnaProductTest, StaticLoaderAddressesPrecedeBothBindingRelocations) {
   }
 }
 
+TEST_F(XdnaProductTest, StreamedEntryPreservesOtherSectionAndWorkerLoads) {
+  SyntheticXdnaProduct fixture(1, 2);
+  auto product = *fixture.product();
+  auto entry = product.entries[0];
+  auto program = *entry.array_program;
+  auto linked = *entry.tiles[0].linked_tile;
+  std::vector<loom_native_section_t> sections(
+      linked.assembly.sections,
+      linked.assembly.sections + linked.assembly.section_count);
+  const uint8_t table[] = {0xa1, 0xb2, 0xc3, 0xd4};
+  sections[1].storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS;
+  sections[1].contents = iree_make_const_byte_span(table, sizeof(table));
+  sections[1].reservation_length = 0;
+  linked.assembly.sections = sections.data();
+  loom_aie2p_xdna_tile_t tiles[] = {entry.tiles[0], entry.tiles[1]};
+  for (auto& tile : tiles) {
+    tile.linked_tile = &linked;
+  }
+  entry.tiles = tiles;
+  entry.array_program = &program;
+  product.entries = &entry;
+  const uint8_t source[] = {0x44, 0x20, 0xc1, 0x20};
+  const uint32_t words[8] = {1, 0, 0, 0, 0, 0, 0, 1};
+  const loom_aie2p_program_record_t records[] = {
+      program.array_records[0],
+      program.array_records[1],
+      {
+          .type = LOOM_AIE2P_PROGRAM_RECORD_REGISTER_BLOCK_WRITE32,
+          .value = {.register_block_write32 = {0x1d000u, words, 8}},
+      },
+  };
+  const bool streamed[] = {true, false};
+  const loom_aie2p_program_upload_patch_t patch = {2, 0, sizeof(source)};
+  const loom_aie2p_program_upload_t upload = {
+      .records = records,
+      .record_count = IREE_ARRAYSIZE(records),
+      .contents = iree_make_const_byte_span(source, sizeof(source)),
+      .patches = &patch,
+      .patch_count = 1,
+      .worker_entries = streamed,
+  };
+  program.upload = &upload;
+  ASSERT_NO_FATAL_FAILURE(LoadOnNpu2(product, 1));
+  const auto* tables = iree_hal_amd_xdna_image_tables(image_);
+  const auto& allocation = tables->allocations[0];
+  std::vector<uint8_t> commands(allocation.byte_length);
+  IREE_ASSERT_OK(
+      iree_hal_amd_xdna_image_load_allocation(image_, 0, commands.data()));
+  // Each four-byte section is a 16-byte block header followed by its contents.
+  const size_t first = 16;
+  const size_t second = first + 20;
+  const size_t third = second + 20;
+  EXPECT_EQ(iree_unaligned_load_le_u32(commands.data() + 8), 4u);
+  EXPECT_EQ(iree_unaligned_load_le_u32(commands.data() + first + 16),
+            iree_unaligned_load_le_u32(table));
+  EXPECT_EQ(iree_unaligned_load_le_u32(commands.data() + second + 16),
+            iree_unaligned_load_le_u32(source));
+  EXPECT_EQ(iree_unaligned_load_le_u32(commands.data() + third + 16),
+            iree_unaligned_load_le_u32(table));
+  const auto* family =
+      loom_xdna_device_profile_array_family(product.device_profile);
+  const uint32_t first_row = static_cast<uint32_t>(tiles[0].coordinate.row)
+                             << family->row_shift;
+  const uint32_t second_row = static_cast<uint32_t>(tiles[1].coordinate.row)
+                              << family->row_shift;
+  const auto* facts = loom_xdna_array_tile_facts(family, tiles[0].coordinate);
+  EXPECT_EQ(iree_unaligned_load_le_u32(commands.data() + first + 8),
+            first_row | facts->memory.local_base);
+  EXPECT_EQ(iree_unaligned_load_le_u32(commands.data() + second + 8),
+            second_row | facts->memory.program_load_base);
+  EXPECT_EQ(iree_unaligned_load_le_u32(commands.data() + third + 8),
+            second_row | facts->memory.local_base);
+  EXPECT_EQ(tables->relocations[0].byte_offset, third + 20 + 16 + 4);
+}
+
 TEST_F(XdnaProductTest, InlineLoaderFitsDirectoryAtProgramHeaderLimit) {
   // Each inline entry has three segments. Its DMA alternative adds a trailing
   // descriptor fragment and a data segment. The same native code is shared by
@@ -524,11 +599,28 @@ TEST_F(XdnaProductTest, InlineLoaderFitsDirectoryAtProgramHeaderLimit) {
   for (auto& entry : entries) {
     entry.array_program = &program;
   }
+  // The joint directory limit also restores code that one entry would have
+  // installed from DMA. The fallback owns a complete runnable cold program.
+  const bool worker_entry[] = {true};
+  auto worker_upload = upload;
+  worker_upload.worker_entries = worker_entry;
+  auto worker_program = program;
+  worker_program.upload = &worker_upload;
+  entries[0].array_program = &worker_program;
   ASSERT_NO_FATAL_FAILURE(LoadOnNpu2(product, 1));
   const auto* tables = iree_hal_amd_xdna_image_tables(image_);
   EXPECT_EQ(tables->header.entry_count, kEntries);
   EXPECT_EQ(tables->header.allocation_count, kEntries);
   EXPECT_EQ(tables->header.relocation_count, 0u);
+  const auto& cold = tables->invocations[tables->entries[0].first_invocation];
+  EXPECT_EQ(cold.byte_length, 16u + 16u + 4u);
+  std::vector<uint8_t> contents(tables->allocations[0].byte_length);
+  IREE_ASSERT_OK(
+      iree_hal_amd_xdna_image_load_allocation(image_, 0, contents.data()));
+  const auto& code =
+      entries[0].tiles[0].linked_tile->assembly.sections[0].contents;
+  EXPECT_EQ(iree_unaligned_load_le_u32(contents.data() + 32),
+            iree_unaligned_load_le_u32(code.data));
 }
 
 TEST_F(XdnaProductTest, LoadsInitializedTileSectionsBeforeActivation) {

@@ -459,6 +459,7 @@ loom_cc_library(
 
 loom_cc_library(
     name = "program",
+    srcs = ["program.c"],
     hdrs = ["program.h"],
     visibility = ["//loom/src/loom/target/arch/amd/xdna/aie2p:implementation"],
     deps = [
@@ -530,12 +531,21 @@ loom_cc_library(
         "catalog_upload.c",
         "catalog_upload.h",
         "program_catalog.c",
+        "startup_records.h",
+        "worker_upload.c",
+        "worker_upload_plan.c",
+        "worker_upload_plan.h",
     ],
-    hdrs = ["program_catalog.h"],
+    hdrs = [
+        "program_catalog.h",
+        "worker_upload.h",
+    ],
     deps = [
         ":program",
+        ":program_broadcast",
         ":program_layout",
         ":tile_link",
+        ":xdna_product",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/array:plan",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/pipeline:dma_plan",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/pipeline:execution_plan",
@@ -631,6 +641,17 @@ loom_cc_test(
         ":program_catalog",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "worker_upload_test",
+    srcs = ["worker_upload_test.cc"],
+    deps = [
+        ":program_catalog",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/pipeline:dma_plan",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
