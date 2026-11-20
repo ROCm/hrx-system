@@ -823,8 +823,8 @@ IDs, unknown fields and image-input extensions reject.
 ## Count a chat before generating
 
 `POST /v1/chat/completions/input_tokens` accepts the same JSON body as chat
-completions and returns one `{"input_tokens":N}` response. It applies the
-deployment's source-defined chat template, tool catalog, thinking options,
+completions and returns `{"object":"response.input_tokens","input_tokens":N}`.
+It applies the deployment's source-defined chat template, tool catalog, thinking options,
 generation framing, and image-position accounting. It counts the complete
 fresh input, including positions that a later generation might reuse from cache.
 

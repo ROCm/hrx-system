@@ -571,7 +571,7 @@ TEST_F(ReconfigurationTextServiceTest,
   ASSERT_TRUE(selection_.called);
   IREE_ASSERT_OK(TakeSelectionStatus());
   EXPECT_EQ(selection_.id, id);
-  EXPECT_NE(Read(client).find("{\"input_tokens\":4}"), std::string::npos);
+  ExpectInputTokens(Read(client), 4);
   EXPECT_EQ(loom_serve_text_model_parameter_activity(model_).activations, 0u);
 }
 

@@ -133,7 +133,8 @@ iree_status_t loom_serve_text_input_count_complete(
   status = iree_string_builder_append_format(
       scratch,
       "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-      "Connection: close\r\n\r\n{\"input_tokens\":%zu}",
+      "Connection: close\r\n\r\n"
+      "{\"object\":\"response.input_tokens\",\"input_tokens\":%zu}",
       queue->input_tokens);
   if (iree_status_is_ok(status)) {
     iree_status_t sent = loom_serve_http_connection_send(
