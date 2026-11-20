@@ -219,7 +219,8 @@ trusted-network boundary as model registration.
 
 ## Chat completions
 
-`POST /v1/chat/completions` accepts a text deployment and a message history:
+`POST /v1/chat/completions` requires a registered text model ID and at least one
+message. `GET /v1/models` lists the deployment IDs accepted by the server.
 
 ```json
 {

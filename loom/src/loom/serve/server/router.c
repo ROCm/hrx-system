@@ -359,9 +359,13 @@ static iree_status_t loom_serve_router_model_visit(void* user_data,
     }
     return iree_ok_status();
   }
-  if (model->data || type != IREE_JSON_VALUE_TYPE_STRING) {
+  if (model->data) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "model must occur exactly once as a string");
+                            "duplicate model field");
+  }
+  if (type != IREE_JSON_VALUE_TYPE_STRING) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "model must be a string");
   }
   *model = value;
   return iree_ok_status();
@@ -402,8 +406,19 @@ static iree_status_t loom_serve_router_model(
   iree_string_view_t object;
   loom_serve_router_selector_t selector = {
       .control = control, .removal = removal, .component = component};
-  IREE_RETURN_IF_ERROR(iree_json_consume_object(&cursor, &object));
-  IREE_RETURN_IF_ERROR(iree_json_consume_insignificant(&cursor));
+  iree_status_t status = iree_json_consume_object(&cursor, &object);
+  if (iree_status_is_ok(status)) {
+    status = iree_json_consume_insignificant(&cursor);
+  }
+  if (!iree_status_is_ok(status)) {
+    const iree_string_view_t cause = iree_status_message(status);
+    iree_status_t error = iree_make_status(
+        iree_status_code(status),
+        "invalid request JSON near byte %" PRIhsz " (%.*s)",
+        request->body.size - cursor.size, (int)cause.size, cause.data);
+    iree_status_free(status);
+    return error;
+  }
   if (cursor.size) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "trailing request JSON");
@@ -760,9 +775,9 @@ static iree_status_t loom_serve_router_logs(
       }
     }
     if (!service) {
-      return loom_serve_http_response_reject(
-          router->server, connection, 404, "Not Found",
-          IREE_SV("model is not registered"), &router->output);
+      return loom_serve_http_response_error(
+          router->server, connection, loom_serve_http_model_not_found(name),
+          &router->output);
     }
     if (!service->telemetry.stream) {
       return loom_serve_http_response_reject(
@@ -1142,9 +1157,9 @@ static iree_status_t loom_serve_router_inspect(
     }
   }
   if (!model) {
-    return loom_serve_http_response_reject(
-        router->server, connection, 404, "Not Found",
-        IREE_SV("model is not registered"), &router->output);
+    return loom_serve_http_response_error(router->server, connection,
+                                          loom_serve_http_model_not_found(name),
+                                          &router->output);
   }
   if (model->phase != LOOM_SERVE_REGISTRATION_READY) {
     return loom_serve_http_response_reject(
@@ -1395,16 +1410,8 @@ static iree_status_t loom_serve_router_accept(
         unregister ? &removal : NULL,
         activate || deactivate || pin || unpin ? &component : NULL, output);
     if (!iree_status_is_ok(status)) {
-      if (!iree_status_is_invalid_argument(status) &&
-          !iree_status_is_out_of_range(status)) {
-        loom_serve_http_connection_abort(connection);
-        return status;
-      }
-      loom_serve_http_server_record_error(router->server, status);
-      iree_status_free(status);
-      return loom_serve_http_response_reject(
-          router->server, connection, 400, "Bad Request",
-          IREE_SV("invalid model selector or request body"), output);
+      return loom_serve_http_response_error(router->server, connection, status,
+                                            output);
     }
     name = iree_string_builder_view(output);
   }
@@ -1518,9 +1525,9 @@ static iree_status_t loom_serve_router_accept(
       return loom_serve_router_admit(router, i, connection, request);
     }
   }
-  return loom_serve_http_response_reject(
-      router->server, connection, 404, "Not Found",
-      IREE_SV("model is not registered"), output);
+  return loom_serve_http_response_error(router->server, connection,
+                                        loom_serve_http_model_not_found(name),
+                                        output);
 }
 
 static iree_status_t loom_serve_router_observe_model(void* self,

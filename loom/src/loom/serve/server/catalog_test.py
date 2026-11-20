@@ -796,13 +796,11 @@ def check_empty_server(server_command, directory, driver, backing):
             ):
                 client.request("/v1/pools/trim", value, status=400)
             for target in ("/v1/embeddings", "/tokenize", "/detokenize"):
-                rejected = client.request(target, {"model": "absent"}, status=404)
-                assert rejected == {
-                    "error": {
-                        "message": "model is not registered",
-                        "type": "loom_route_error",
-                    }
-                }
+                error = client.request(target, {"model": "absent"}, status=404)["error"]
+                assert error["type"] == "loom_route_error", error
+                assert (
+                    "absent" in error["message"] and "/v1/models" in error["message"]
+                ), error
             observer = LogClient("http://" + address, timeout=None)
             assert observer.models() == []
             batch = observer.poll()

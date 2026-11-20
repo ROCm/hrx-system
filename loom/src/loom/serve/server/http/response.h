@@ -13,6 +13,10 @@
 extern "C" {
 #endif
 
+// Returns an owned model lookup error naming the selector and the discovery
+// endpoint. The selector may borrow the scratch buffer used for the response.
+iree_status_t loom_serve_http_model_not_found(iree_string_view_t name);
+
 // Copies a complete management response into transport and relinquishes the
 // claim. Peer/send failures are recorded and abort only this connection. No
 // response or model storage remains borrowed by network completion.
@@ -27,7 +31,7 @@ iree_status_t loom_serve_http_response_reject(
     int code, const char* reason, iree_string_view_t message,
     iree_string_builder_t* scratch);
 
-// Consumes an owned management failure, records it and sends the corresponding
+// Consumes an owned request failure, records it and sends the corresponding
 // HTTP error. The operation failure does not terminate shared serving.
 iree_status_t loom_serve_http_response_error(
     loom_serve_http_server_t* server, loom_serve_http_connection_t* connection,

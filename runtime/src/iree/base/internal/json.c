@@ -400,7 +400,11 @@ static iree_status_t iree_json_consume_value_impl(
     case 'n':
       return iree_json_consume_keyword(str, IREE_SV("null"), out_value);
     default:
-      return iree_json_consume_number(str, out_value);
+      if (str->data[0] == '-' || iree_json_is_digit(str->data[0])) {
+        return iree_json_consume_number(str, out_value);
+      }
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "expected JSON value");
   }
 }
 
