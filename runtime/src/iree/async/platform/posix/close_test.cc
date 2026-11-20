@@ -86,6 +86,9 @@ class CloseTest : public ::testing::TestWithParam<int> {
       IREE_ASSERT_OK(iree_async_proactor_poll(
           proactor_, iree_infinite_timeout(), nullptr));
     }
+    // Formatting the saved status can open symbol files on the released
+    // descriptor number. Native retirement is complete at the callback.
+    watched_fd.store(-1);
     EXPECT_EQ(tracker.call_count, 1);
     EXPECT_EQ(attempts.load(), 1);
 #if IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS
