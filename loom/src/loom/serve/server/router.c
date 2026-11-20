@@ -371,10 +371,13 @@ static iree_status_t loom_serve_router_model_visit(void* user_data,
   return iree_ok_status();
 }
 
-static iree_status_t loom_serve_router_model(
+// Returns the selector borrowed from the request or decoded into |scratch|.
+// An omitted JSON field has NULL data. A present selector must be nonempty.
+static iree_status_t loom_serve_router_read_model(
     const loom_serve_http_request_t* request, bool control,
     loom_serve_removal_t* removal, loom_serve_model_component_t* component,
-    iree_string_builder_t* output) {
+    iree_string_builder_t* scratch, iree_string_view_t* out_model) {
+  *out_model = iree_string_view_empty();
   if (request->multipart) {
     if (control) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -399,8 +402,8 @@ static iree_status_t loom_serve_router_model(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "multipart model field is required");
     }
-    iree_string_builder_reset(output);
-    return iree_string_builder_append_string(output, model);
+    *out_model = model;
+    return iree_ok_status();
   }
   iree_string_view_t cursor = request->body;
   iree_string_view_t object;
@@ -426,18 +429,22 @@ static iree_status_t loom_serve_router_model(
   IREE_RETURN_IF_ERROR(iree_json_enumerate_object_typed(
       object, loom_serve_router_model_visit, &selector));
   const iree_string_view_t model = selector.model;
+  if (!model.data) {
+    return iree_ok_status();
+  }
   if (!model.size) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "request requires a nonempty model string");
   }
-  iree_string_builder_reset(output);
+  iree_string_builder_reset(scratch);
   char* data = NULL;
   iree_host_size_t capacity = 0, length = 0;
   IREE_RETURN_IF_ERROR(iree_string_builder_reserve_for_append(
-      output, model.size, &data, &capacity));
+      scratch, model.size, &data, &capacity));
   IREE_RETURN_IF_ERROR(
       iree_json_unescape_string(model, capacity, data, &length));
-  iree_string_builder_commit_append(output, length);
+  iree_string_builder_commit_append(scratch, length);
+  *out_model = iree_string_builder_view(scratch);
   return iree_ok_status();
 }
 
@@ -985,13 +992,17 @@ static iree_status_t loom_serve_router_logs_advance(loom_serve_router_t* router,
   return status;
 }
 
+static bool loom_serve_router_is_tokenization(iree_string_view_t target) {
+  return iree_string_view_equal(target, IREE_SV("/tokenize")) ||
+         iree_string_view_equal(target, IREE_SV("/detokenize"));
+}
+
 static iree_status_t loom_serve_router_admit(
     loom_serve_router_t* router, iree_host_size_t service_index,
     loom_serve_http_connection_t* connection,
     const loom_serve_http_request_t* request) {
   if (iree_string_view_equal(request->method, IREE_SV("POST")) &&
-      (iree_string_view_equal(request->target, IREE_SV("/tokenize")) ||
-       iree_string_view_equal(request->target, IREE_SV("/detokenize")))) {
+      loom_serve_router_is_tokenization(request->target)) {
     return loom_serve_router_tokenization_accept(router, service_index,
                                                  connection, request);
   }
@@ -1297,8 +1308,6 @@ static iree_status_t loom_serve_router_inference_readiness(
 static iree_status_t loom_serve_router_accept(
     loom_serve_router_t* router, loom_serve_http_connection_t* connection,
     const loom_serve_http_request_t* request) {
-  const iree_host_size_t service_count =
-      loom_serve_registry_count(router->driver.registry);
   iree_string_builder_t* output = &router->output;
   const bool get = iree_string_view_equal(request->method, IREE_SV("GET"));
   if (get && loom_serve_dashboard_handles(request->target)) {
@@ -1462,43 +1471,53 @@ static iree_status_t loom_serve_router_accept(
     return loom_serve_router_trim(router, connection, request, true);
   }
   iree_string_view_t name;
+  bool has_name;
   loom_serve_removal_t removal = LOOM_SERVE_REMOVAL_DRAIN;
   loom_serve_model_component_t component = LOOM_SERVE_MODEL_COMPONENT_PRIMARY;
   if (checkpoint) {
-    if (!loom_serve_http_request_lookup_header(request, IREE_SV("X-Loom-Model"),
-                                               &name)) {
-      if (service_count != 1) {
-        return loom_serve_http_response_reject(
-            router->server, connection, 400, "Bad Request",
-            IREE_SV("checkpoint operations require X-Loom-Model"), output);
-      }
-      for (iree_host_size_t i = 0; i < router->driver.runtime.capacity; ++i) {
-        const iree_string_view_t candidate =
-            loom_serve_router_model_at(router, i)->service.name;
-        if (candidate.size) {
-          name = candidate;
-          break;
-        }
-      }
+    has_name = loom_serve_http_request_lookup_header(
+        request, IREE_SV("X-Loom-Model"), &name);
+    if (!has_name && loom_serve_registry_count(router->driver.registry) != 1) {
+      return loom_serve_http_response_reject(
+          router->server, connection, 400, "Bad Request",
+          IREE_SV("checkpoint operations require X-Loom-Model"), output);
     }
   } else {
-    iree_status_t status = loom_serve_router_model(
+    iree_status_t status = loom_serve_router_read_model(
         request,
         drain || undrain || unregister || deactivate || activate || pin ||
             unpin,
         unregister ? &removal : NULL,
-        activate || deactivate || pin || unpin ? &component : NULL, output);
+        activate || deactivate || pin || unpin ? &component : NULL, output,
+        &name);
+    has_name = name.data != NULL;
+    if (iree_status_is_ok(status) && !has_name) {
+      const iree_host_size_t count =
+          loom_serve_registry_count(router->driver.registry);
+      if (!loom_serve_router_is_tokenization(request->target)) {
+        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "request requires a nonempty model string");
+      } else if (count == 0) {
+        status =
+            iree_make_status(IREE_STATUS_NOT_FOUND, "no models are registered");
+      } else if (count > 1) {
+        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "multiple models are registered. Specify a "
+                                  "model ID from GET /v1/models");
+      }
+    }
     if (!iree_status_is_ok(status)) {
       return loom_serve_http_response_error(router->server, connection, status,
                                             output);
     }
-    name = iree_string_builder_view(output);
   }
+  // An omitted selector reaches this lookup only for a single registration.
+  // Its ordinary admission and lifetime rules still apply.
   for (iree_host_size_t i = 0; i < router->driver.runtime.capacity; ++i) {
     loom_serve_registered_model_t* state =
         loom_serve_router_model_at(router, i);
     if (state->service.name.size &&
-        iree_string_view_equal(name, state->service.name)) {
+        (!has_name || iree_string_view_equal(name, state->service.name))) {
       if (unregister) {
         iree_status_t status = loom_serve_registry_remove(state, removal);
         if (!iree_status_is_ok(status)) {
@@ -1553,8 +1572,7 @@ static iree_status_t loom_serve_router_accept(
             IREE_SV("model is unavailable; inspect /v1/status"), output);
       }
       if (!state->service.endpoint &&
-          !iree_string_view_equal(request->target, IREE_SV("/tokenize")) &&
-          !iree_string_view_equal(request->target, IREE_SV("/detokenize"))) {
+          !loom_serve_router_is_tokenization(request->target)) {
         return loom_serve_http_response_reject(
             router->server, connection, 404, "Not Found",
             IREE_SV("model has no HTTP inference endpoint"), output);

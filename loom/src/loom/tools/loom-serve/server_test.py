@@ -25,6 +25,68 @@ FORMAT = Path(sys.argv.pop(1)).resolve()
 
 
 class ServerTest(unittest.TestCase):
+    def test_raw_tokenization_tracks_the_single_registered_model(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            document = json.loads((PACKAGE / "model.json").read_text())
+            document["base_directory"] = str(PACKAGE)
+            vocabulary = json.loads((PACKAGE / "tokenizer.json").read_text())
+            vocabulary["model"]["vocab"].update(a=1, b=0)
+            (directory / "tokenizer.json").write_text(json.dumps(vocabulary))
+            other = {
+                **document,
+                "name": "other",
+                "admission": "drained",
+                "definition": {**document["definition"], "assets": str(directory)},
+            }
+            log = directory / "server.log"
+            with running_server(
+                [
+                    str(SERVER),
+                    "--device=task",
+                    "--pool_backing=fixed",
+                    "--workers=1",
+                    "--listen=127.0.0.1:0",
+                ],
+                log,
+            ) as (process, bound_address):
+                self.assertIsNotNone(bound_address, log.read_text())
+                address = urlsplit(f"http://{bound_address}")
+                text = {"content": "ab"}
+                self.post(address, "/tokenize", text, expected=404)
+                self.post(address, "/v1/models/register", document, expected=202)
+                tokens = self.post(address, "/tokenize", text)
+                self.assertEqual(tokens, {"tokens": [0, 1]})
+                self.assertEqual(self.post(address, "/detokenize", tokens), text)
+                self.post(address, "/tokenize", {**text, "model": ""}, expected=400)
+                self.post(
+                    address, "/tokenize", {**text, "model": "absent"}, expected=404
+                )
+                self.post(address, "/v1/embeddings", {"input": "ab"}, expected=400)
+                self.post(address, "/v1/models/drain", {}, expected=400)
+
+                # The vocabulary is ambiguous even while the peer is drained.
+                self.post(address, "/v1/models/register", other, expected=202)
+                for path, body in (("/tokenize", text), ("/detokenize", tokens)):
+                    error = self.post(address, path, body, expected=400)["error"]
+                    self.assertIn("/v1/models", error["message"])
+                first = {"model": document["name"]}
+                self.assertEqual(
+                    self.post(address, "/tokenize", {**text, **first}), tokens
+                )
+                self.post(address, "/v1/models/undrain", {"model": "other"})
+                self.assertEqual(
+                    self.post(address, "/detokenize", {**tokens, "model": "other"}),
+                    {"content": "ba"},
+                )
+                self.post(address, "/v1/models/unregister", first, expected=202)
+                while len(control(address, "GET", "/v1/status", 200)["data"]) != 1:
+                    pass
+                tokens = self.post(address, "/tokenize", text)
+                self.assertEqual(tokens, {"tokens": [1, 0]})
+                self.assertEqual(self.post(address, "/detokenize", tokens), text)
+            self.assertEqual(process.returncode, 0, log.read_text())
+
     def test_embeddings_upload_waits_for_continue(self):
         with tempfile.TemporaryDirectory() as temporary:
             log = Path(temporary) / "server.log"
