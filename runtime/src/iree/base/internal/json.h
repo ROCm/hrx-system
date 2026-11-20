@@ -120,12 +120,14 @@ iree_status_t iree_json_consume_string(iree_string_view_t* str,
                                        iree_string_view_t* out_value);
 
 // Consumes a JSON object from |str|, including all nested content.
-// The returned value includes the surrounding braces: {"key": value}
+// Skips leading JSON whitespace and comments. The returned span begins at the
+// opening brace and ends immediately after the closing brace.
 iree_status_t iree_json_consume_object(iree_string_view_t* str,
                                        iree_string_view_t* out_value);
 
 // Consumes a JSON array from |str|, including all nested content.
-// The returned value includes the surrounding brackets: [value, ...]
+// Skips leading JSON whitespace and comments. The returned span begins at the
+// opening bracket and ends immediately after the closing bracket.
 iree_status_t iree_json_consume_array(iree_string_view_t* str,
                                       iree_string_view_t* out_value);
 
