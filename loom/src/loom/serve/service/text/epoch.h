@@ -116,9 +116,9 @@ typedef struct loom_serve_text_epoch_t {
   } planning;
 } loom_serve_text_epoch_t;
 
-// Allocates one reusable host block for a positive maximum cohort width. This
-// width describes the prepared dispatch catalog, not resident session count.
-// Partial/zero initialization may be deinitialized; no preparation allocates.
+// Allocates one reusable host block for up to span_capacity spans in a single
+// submission. The planner reuses this storage for each admitted cohort.
+// Zero-initialized or partially initialized state can be deinitialized.
 iree_status_t loom_serve_text_epoch_initialize(
     iree_host_size_t span_capacity, iree_allocator_t host_allocator,
     loom_serve_text_epoch_t* out_epoch);
