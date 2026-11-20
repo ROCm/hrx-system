@@ -27,8 +27,12 @@ static inline iree_status_t iree_async_posix_close_fd(int* owned_fd) {
 #endif  // POSIX_CLOSE_RESTART
   if (IREE_UNLIKELY(result < 0)) {
     int error = errno;
-    return iree_make_status(iree_status_code_from_errno(error),
-                            "close(%d) failed (errno %d): %s", fd, error,
+    // Caller cancellation happens before issuing close. ECANCELED from the
+    // syscall is a native error even when the caller accepts cancellation.
+    iree_status_code_t code = error == ECANCELED
+                                  ? IREE_STATUS_ABORTED
+                                  : iree_status_code_from_errno(error);
+    return iree_make_status(code, "close(%d) failed (errno %d): %s", fd, error,
                             strerror(error));
   }
   return iree_ok_status();
