@@ -14,9 +14,11 @@ curl --fail --silent --show-error http://127.0.0.1:8080/v1/models
 ```
 
 `/v1/status` includes every registration and the server's actual resources.
-`/v1/models` lists prepared deployments and their capabilities; a prepared but
-drained model remains listed. `/readyz` describes the server, not readiness of
-every model. The status fields answer different questions:
+`/v1/models` lists prepared deployments and their capabilities, including
+drained models. Use `/readyz` when a provisioner needs to register the first
+model. Use `/ready` when a client needs to send its first inference request.
+It returns HTTP 503 until a model with an HTTP inference endpoint is prepared
+and open for admission. Polling either probe leaves weight residency alone.
 
 | Field on each model | Question |
 | --- | --- |

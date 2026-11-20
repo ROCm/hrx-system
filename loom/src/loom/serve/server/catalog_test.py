@@ -307,6 +307,17 @@ def check_parameter_residency(client, backing, workers):
 
 def check_workload_replay(client):
     """Use the benchmark client against source models and independent oracles."""
+    catalog = client.request("/models")["data"]
+
+    def model_for(output):
+        matches = [
+            model["id"]
+            for model in catalog
+            if output in model["architecture"]["output_modalities"]
+        ]
+        assert len(matches) == 1, (output, matches)
+        return matches[0]
+
     root = [{"role": "user", "content": "abxa"}]
     seed, _ = complete(root, 2)
     history = root + [
@@ -345,13 +356,13 @@ def check_workload_replay(client):
         (
             "vectors",
             "/v1/embeddings",
-            {"model": "vectors", "input": "ab", "dimensions": 2},
+            {"model": model_for("embedding"), "input": "ab", "dimensions": 2},
         ),
         (
             "pixels",
             "/v1/images/generations",
             {
-                "model": "pixels",
+                "model": model_for("image"),
                 "prompt": "ab",
                 "seed": 1,
                 "response_format": "b64_json",
@@ -361,7 +372,7 @@ def check_workload_replay(client):
             "judge",
             "/v1/systemone",
             {
-                "model": "judge",
+                "model": model_for("decisions"),
                 "state": "a",
                 "questions": {
                     "truth": {
@@ -642,6 +653,8 @@ def check_startup_failures(server_command, directory, catalog):
                 else:
                     raise AssertionError("failed models cannot become idle")
                 assert client.request("/readyz") == {"status": "ready"}
+                if name == "missing-controls":
+                    client.request("/ready", status=503)
                 # The provider failure occurs after three peer models have
                 # registered. It cannot terminate their serving path.
                 if name == "missing-provider":
@@ -650,6 +663,7 @@ def check_startup_failures(server_command, directory, catalog):
                         {"model": "vectors", "input": "ab", "dimensions": 2},
                     )
                     assert result["data"][0]["embedding"] == [3, 2], result
+                    assert client.request("/health") == {"status": "ok"}
             diagnostic = log_path.read_text()
             assert (
                 "Sanitizer" not in diagnostic and "runtime error:" not in diagnostic

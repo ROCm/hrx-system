@@ -36,8 +36,10 @@ the first body bytes. It routes the request after the complete body arrives.
 
 | Method and path | Input or result |
 | --- | --- |
-| `GET /healthz`, `GET /readyz` | Server availability: `{"status":"ready"}`. |
-| `GET /v1/models` | Prepared deployments not being removed, with input/output modalities and a `loom` capability object. |
+| `GET /healthz`, `GET /readyz` | The server is accepting management requests, including on an empty catalog. Returns `{"status":"ready"}`. |
+| `GET /health`, `GET /v1/health` | Returns `{"status":"ok"}` when a prepared deployment accepts HTTP inference, or HTTP 503 while none do. |
+| `GET /ready`, `GET /v1/ready` | The same inference readiness check. Returns `{"status":"ready","model":"name"}` for a single eligible deployment and `{"status":"ready"}` for several. |
+| `GET /v1/models`, `GET /models` | Lists prepared deployments with their input/output modalities and a `loom` capability object. |
 | `GET /v1/status` | Every registration, progress/errors, admission, scheduler state and shared server resources. |
 | `POST /v1/models/register` | Complete model document, optionally with uploaded source files; HTTP 202 accepts registration intent. |
 | `POST /v1/models/drain`, `POST /v1/models/undrain` | `{"model":"name"}`; HTTP 200 acknowledges the gate change. |
@@ -55,6 +57,10 @@ the first body bytes. It routes the request after the complete body arrives.
 | `GET /v1/requests`, `GET /v1/sessions` | Bounded live owner inspection; sessions require a retained-text service. |
 
 Prepared but drained or weight-evicted models remain discoverable.
+Clients can select a deployment through `architecture.input_modalities` and
+`architecture.output_modalities`. These report the same capabilities as the
+top-level modality arrays. Decision models advertise `"decisions"` in the
+architecture object and `"decision"` in the top-level array.
 `created` is the registration timestamp; `owned_by` is `"local"`.
 `loom.kind`, optional `loom.endpoint`, and `loom.tokenize` describe the deployment
 role, HTTP inference route, and loaded tokenizer. Native-only activity models

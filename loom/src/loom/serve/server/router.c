@@ -554,13 +554,9 @@ static iree_status_t loom_serve_router_describe_parameters(
 }
 
 static iree_status_t loom_serve_router_describe_modalities(
-    const char* key, iree_string_view_list_t modalities,
-    iree_string_builder_t* output) {
-  if (!modalities.count) {
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_format(output, ",\"%s\":[", key));
+    const char* prefix, iree_string_view_list_t modalities,
+    bool architecture_output, iree_string_builder_t* output) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, prefix));
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < modalities.count && iree_status_is_ok(status); ++i) {
@@ -568,7 +564,13 @@ static iree_status_t loom_serve_router_describe_modalities(
       status = iree_string_builder_append_cstring(output, ",");
     }
     if (iree_status_is_ok(status)) {
-      status = loom_serve_router_quote(output, modalities.values[i]);
+      iree_string_view_t value = modalities.values[i];
+      // llama.cpp clients select decision endpoints using the plural spelling.
+      if (architecture_output &&
+          iree_string_view_equal(value, IREE_SV("decision"))) {
+        value = IREE_SV("decisions");
+      }
+      status = loom_serve_router_quote(output, value);
     }
   }
   if (iree_status_is_ok(status)) {
@@ -587,10 +589,24 @@ static iree_status_t loom_serve_router_describe_service(
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output, ",\"created\":%" PRId64 ",\"owned_by\":\"local\"",
       admission->registered_unix_seconds));
-  IREE_RETURN_IF_ERROR(loom_serve_router_describe_modalities(
-      "input_modalities", service->capabilities.input_modalities, output));
-  IREE_RETURN_IF_ERROR(loom_serve_router_describe_modalities(
-      "output_modalities", service->capabilities.output_modalities, output));
+  const iree_string_view_list_t inputs = service->capabilities.input_modalities;
+  const iree_string_view_list_t outputs =
+      service->capabilities.output_modalities;
+  if (inputs.count || outputs.count) {
+    IREE_RETURN_IF_ERROR(loom_serve_router_describe_modalities(
+        ",\"architecture\":{\"input_modalities\":[", inputs, false, output));
+    IREE_RETURN_IF_ERROR(loom_serve_router_describe_modalities(
+        ",\"output_modalities\":[", outputs, true, output));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "}"));
+  }
+  if (inputs.count) {
+    IREE_RETURN_IF_ERROR(loom_serve_router_describe_modalities(
+        ",\"input_modalities\":[", inputs, false, output));
+  }
+  if (outputs.count) {
+    IREE_RETURN_IF_ERROR(loom_serve_router_describe_modalities(
+        ",\"output_modalities\":[", outputs, false, output));
+  }
   const loom_serve_reasoning_t reasoning = service->capabilities.reasoning;
   if (reasoning.support != LOOM_SERVE_REASONING_UNKNOWN) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
@@ -1222,6 +1238,62 @@ static iree_status_t loom_serve_router_inspect(
   return status;
 }
 
+static bool loom_serve_router_model_is_published(
+    const loom_serve_registered_model_t* model) {
+  return model->phase == LOOM_SERVE_REGISTRATION_READY &&
+         model->removal == LOOM_SERVE_REMOVAL_NONE &&
+         iree_status_is_ok(model->status);
+}
+
+static iree_status_t loom_serve_router_inference_readiness(
+    loom_serve_router_t* router, loom_serve_http_connection_t* connection,
+    bool identify_model) {
+  // A second eligible model rules out naming a single deployment.
+  const iree_host_size_t limit = identify_model ? 2 : 1;
+  iree_host_size_t count = 0;
+  iree_string_view_t name = iree_string_view_empty();
+  for (iree_host_size_t i = 0;
+       i < router->driver.runtime.capacity && count < limit; ++i) {
+    const loom_serve_registered_model_t* model =
+        loom_serve_router_model_at(router, i);
+    if (!loom_serve_router_model_is_published(model) || model->closed ||
+        !model->service.endpoint) {
+      continue;
+    }
+    name = model->service.name;
+    ++count;
+  }
+  iree_string_builder_t* output = &router->output;
+  if (!count) {
+    return loom_serve_http_response_reject(
+        router->server, connection, 503, "Service Unavailable",
+        IREE_SV("No model is ready for HTTP inference. See /v1/status."),
+        output);
+  }
+  iree_string_builder_reset(output);
+  iree_status_t status = iree_string_builder_append_format(
+      output,
+      "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+      "Connection: close\r\n\r\n{\"status\":\"%s\"",
+      identify_model ? "ready" : "ok");
+  if (iree_status_is_ok(status) && identify_model && count == 1) {
+    status = iree_string_builder_append_cstring(output, ",\"model\":");
+    if (iree_status_is_ok(status)) {
+      status = loom_serve_router_quote(output, name);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_cstring(output, "}");
+  }
+  if (iree_status_is_ok(status)) {
+    loom_serve_http_response_send(router->server, connection,
+                                  iree_string_builder_view(output));
+  } else {
+    loom_serve_http_connection_abort(connection);
+  }
+  return status;
+}
+
 static iree_status_t loom_serve_router_accept(
     loom_serve_router_t* router, loom_serve_http_connection_t* connection,
     const loom_serve_http_request_t* request) {
@@ -1298,8 +1370,17 @@ static iree_status_t loom_serve_router_accept(
   }
   const bool include_status =
       iree_string_view_equal(request->target, IREE_SV("/v1/status"));
-  if (get && (include_status ||
-              iree_string_view_equal(request->target, IREE_SV("/v1/models")))) {
+  bool list_models = false;
+  if (get) {
+    iree_string_view_t target = request->target;
+    iree_string_view_consume_prefix(&target, IREE_SV("/v1"));
+    const bool ready = iree_string_view_equal(target, IREE_SV("/ready"));
+    if (ready || iree_string_view_equal(target, IREE_SV("/health"))) {
+      return loom_serve_router_inference_readiness(router, connection, ready);
+    }
+    list_models = iree_string_view_equal(target, IREE_SV("/models"));
+  }
+  if (get && (include_status || list_models)) {
     iree_string_builder_reset(output);
     iree_status_t status = iree_string_builder_append_cstring(
         output,
@@ -1312,9 +1393,7 @@ static iree_status_t loom_serve_router_accept(
       const loom_serve_registered_model_t* model =
           loom_serve_router_model_at(router, i);
       if (!model->service.name.size ||
-          (!include_status && (model->phase != LOOM_SERVE_REGISTRATION_READY ||
-                               model->removal != LOOM_SERVE_REMOVAL_NONE ||
-                               !iree_status_is_ok(model->status)))) {
+          (!include_status && !loom_serve_router_model_is_published(model))) {
         continue;
       }
       if (!first) {
