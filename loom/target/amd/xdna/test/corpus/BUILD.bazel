@@ -12,6 +12,7 @@ package(default_visibility = ["//visibility:public"])
 
 loom_corpus_test(
     name = "execution",
+    args = ["--execution-progress"],
     catalog = LOOM_CORPUS,
     excludes = {
         "numeric/vector/integer_widening.loom": "Quarantined after an NPU firmware context timeout during partial-width widening execution.",
