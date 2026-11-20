@@ -26,7 +26,11 @@ IREE_FLAG(string, response, "",
           "Optional raw generated text file to complete.");
 IREE_FLAG(bool, response_truncated, false,
           "The generated response stopped at its token limit instead of EOS.");
-IREE_FLAG(int32_t, capacity, 262144, "Maximum complete prompt token count.");
+IREE_FLAG(bool, count_only, false,
+          "Report the fresh input position count and media spans.");
+IREE_FLAG(
+    int32_t, capacity, 262144,
+    "Execution window offered to the model's input policy, in positions.");
 IREE_FLAG(
     int32_t, response_chunk_size, 0,
     "Incremental decoded output bytes per policy call; zero completes once.");
@@ -51,17 +55,22 @@ static iree_status_t loom_serve_text_request_check_report(
       &object, IREE_SV("model"), chat->policy->name));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &object, IREE_SV("prompt"), iree_string_builder_view(&chat->prompt)));
-  IREE_RETURN_IF_ERROR(
-      loom_json_object_begin_field(&object, IREE_SV("tokens")));
   loom_json_array_writer_t array;
-  IREE_RETURN_IF_ERROR(loom_json_array_begin(&stream, &array));
   iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0; i < token_count && iree_status_is_ok(status);
-       ++i) {
-    status = loom_json_array_write_int32_element(&array, tokens[i]);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_json_array_end(&array);
+  if (FLAG_count_only) {
+    status = loom_json_object_write_host_size_field(
+        &object, IREE_SV("input_tokens"), token_count);
+  } else {
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(&object, IREE_SV("tokens")));
+    IREE_RETURN_IF_ERROR(loom_json_array_begin(&stream, &array));
+    for (iree_host_size_t i = 0; i < token_count && iree_status_is_ok(status);
+         ++i) {
+      status = loom_json_array_write_int32_element(&array, tokens[i]);
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_json_array_end(&array);
+    }
   }
   if (iree_status_is_ok(status)) {
     status = loom_json_object_begin_field(&object, IREE_SV("media_spans"));
@@ -200,7 +209,8 @@ static iree_status_t loom_serve_text_request_check_run(
     status = loom_serve_text_chat_prepare_input(
         &chat, 0, LOOM_SERVE_TEXT_CHAT_INPUT_RENDERED,
         LOOM_SERVE_TEXT_CHAT_BOUNDARY_FRESH, FLAG_capacity, 0, host_allocator,
-        &tokens, &token_count, &media_spans, &media_span_count);
+        FLAG_count_only ? NULL : &tokens, &token_count, &media_spans,
+        &media_span_count);
   }
   iree_io_file_contents_t* response = NULL;
   if (iree_status_is_ok(status) && FLAG_response[0]) {
@@ -250,8 +260,8 @@ static iree_status_t loom_serve_text_request_check_run(
   iree_arena_block_pool_deinitialize(&block_pool);
   if (iree_status_is_ok(status)) {
     status = loom_serve_text_request_check_report(
-        &chat, token_count, iree_vm_buffer_const_data(tokens), media_span_count,
-        media_spans, response ? &completion : NULL,
+        &chat, token_count, tokens ? iree_vm_buffer_const_data(tokens) : NULL,
+        media_span_count, media_spans, response ? &completion : NULL,
         iree_string_builder_view(&tool_calls));
   }
   loom_serve_text_chat_completion_deinitialize(&completion);

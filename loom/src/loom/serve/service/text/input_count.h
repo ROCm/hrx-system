@@ -58,8 +58,9 @@ iree_status_t loom_serve_text_input_count_enqueue(
     loom_serve_text_telemetry_t* telemetry);
 
 // Finite CPU work with the model's exclusive source invocation loan. Counts
-// full fresh input, bounded by context_capacity but without output credit.
-// No request-local VM, row selection, or image projection is performed.
+// full fresh input, including source-measured positions beyond
+// context_capacity. No request-local VM, row selection, or image projection is
+// performed.
 iree_status_t loom_serve_text_input_count_run(
     loom_serve_text_input_count_t* queue,
     const loom_serve_text_chat_policy_t* policy, iree_string_view_t name,

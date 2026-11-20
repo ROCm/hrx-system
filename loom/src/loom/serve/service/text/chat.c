@@ -935,6 +935,32 @@ static iree_status_t loom_serve_text_chat_render_message(
   return status;
 }
 
+// The returned buffers borrow references in |results|. Resetting the results
+// releases them before another call on the same source invocation.
+static iree_status_t loom_serve_text_chat_invoke_input(
+    const loom_serve_text_chat_policy_t* policy, iree_vm_buffer_t* input,
+    iree_vm_buffer_t* media_plan, iree_host_size_t marker_count,
+    loom_serve_text_chat_input_format_t format,
+    loom_serve_text_chat_boundary_t boundary, int64_t capacity,
+    iree_vm_variant_span_t results, iree_vm_buffer_t** out_tokens,
+    int64_t* out_count, iree_vm_buffer_t** out_spans) {
+  iree_vm_variant_t arguments[] = {
+      iree_vm_buffer_variant_from_ptr_borrowed(&policy->types, input),
+      iree_vm_buffer_variant_from_ptr_borrowed(&policy->types, media_plan),
+      iree_vm_variant_from_i64((int64_t)marker_count),
+      iree_vm_variant_from_i32(format),
+      iree_vm_variant_from_i32(boundary),
+      iree_vm_variant_from_i64(capacity)};
+  IREE_RETURN_IF_ERROR(
+      iree_vm_invoke(policy->invocation, policy->prepare_input,
+                     iree_vm_variant_span_from_array(arguments), results));
+  IREE_RETURN_IF_ERROR(iree_vm_buffer_ptr_from_variant_borrowed(
+      &policy->types, results.data[0], out_tokens));
+  IREE_RETURN_IF_ERROR(iree_vm_i64_from_variant(results.data[1], out_count));
+  return iree_vm_buffer_ptr_from_variant_borrowed(&policy->types,
+                                                  results.data[2], out_spans);
+}
+
 iree_status_t loom_serve_text_chat_prepare_input(
     const loom_serve_text_chat_t* chat, iree_host_size_t prompt_offset,
     loom_serve_text_chat_input_format_t format,
@@ -970,41 +996,45 @@ iree_status_t loom_serve_text_chat_prepare_input(
       IREE_VM_BUFFER_ACCESS_FLAG_READ,
       iree_make_byte_span((void*)text.data, text.size),
       iree_vm_buffer_release_callback_null(), host_allocator, &input);
-  iree_vm_variant_t arguments[] = {
-      iree_vm_buffer_variant_from_ptr_move(&policy->types, &input),
-      iree_vm_buffer_variant_from_ptr_borrowed(&policy->types, media_plan),
-      iree_vm_variant_from_i64((int64_t)marker_count),
-      iree_vm_variant_from_i32(format),
-      iree_vm_variant_from_i32(boundary),
-      iree_vm_variant_from_i64(capacity)};
   iree_vm_variant_t results[3] = {0};
-  if (iree_status_is_ok(status)) {
-    status = iree_vm_invoke(policy->invocation, policy->prepare_input,
-                            iree_vm_variant_span_from_array(arguments),
-                            iree_vm_variant_span_from_array(results));
-  }
   iree_vm_buffer_t* output = NULL;
   iree_vm_buffer_t* media_spans = NULL;
   int64_t count = 0;
   if (iree_status_is_ok(status)) {
-    status = iree_vm_buffer_ptr_from_variant_borrowed(&policy->types,
-                                                      results[0], &output);
+    status = loom_serve_text_chat_invoke_input(
+        policy, input, media_plan, marker_count, format, boundary, capacity,
+        iree_vm_variant_span_from_array(results), &output, &count,
+        &media_spans);
   }
-  if (iree_status_is_ok(status)) {
-    status = iree_vm_i64_from_variant(results[1], &count);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_vm_buffer_ptr_from_variant_borrowed(&policy->types,
-                                                      results[2], &media_spans);
+  int64_t minimum_count = 0;
+  if (iree_status_is_ok(status) && count > 0 && (uint64_t)count > capacity &&
+      output && !iree_vm_buffer_length(output) && media_spans &&
+      !iree_vm_buffer_length(media_spans)) {
+    if (out_tokens) {
+      status =
+          iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                           "input exceeds the available context size of "
+                           "%zu tokens; compact history or shorten the prompt",
+                           capacity);
+    } else {
+      minimum_count = count;
+      iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+      status = loom_serve_text_chat_invoke_input(
+          policy, input, media_plan, marker_count, format, boundary, -1,
+          iree_vm_variant_span_from_array(results), &output, &count,
+          &media_spans);
+    }
   }
   if (iree_status_is_ok(status) &&
-      (!output || !media_spans || count < 0 || (uint64_t)count > capacity ||
+      (!output || !media_spans || count < minimum_count ||
+       (minimum_count ? iree_vm_buffer_length(output) != 0
+                      : (uint64_t)count > capacity) ||
        (uint64_t)count > SIZE_MAX / sizeof(int32_t) - input_shift)) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "source input returned invalid token storage");
   }
   iree_const_byte_span_t bytes = iree_const_byte_span_empty();
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && !minimum_count) {
     status =
         iree_vm_buffer_map_read(output, 0, count * sizeof(int32_t), &bytes);
   }
@@ -1044,7 +1074,7 @@ iree_status_t loom_serve_text_chat_prepare_input(
     iree_allocator_free(host_allocator, parsed_spans);
   }
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
-  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+  iree_vm_buffer_release(input);
   iree_vm_buffer_release(media_plan);
   IREE_RETURN_AND_END_ZONE(z0, status);
 }

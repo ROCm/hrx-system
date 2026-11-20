@@ -18,7 +18,9 @@ CONTROL = Path(sys.argv.pop(1)).resolve()
 
 
 class ToolPolicyTest(unittest.TestCase):
-    def execute(self, calls, stream=True, messages=None, tools=None, **options):
+    def execute(
+        self, calls, stream=True, messages=None, tools=None, checker_args=(), **options
+    ):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             tokenizer = directory / "tokenizer.json"
@@ -29,7 +31,18 @@ class ToolPolicyTest(unittest.TestCase):
                             "type": "BPE",
                             "vocab": {chr(index): index for index in range(128)},
                             "merges": [],
-                        }
+                        },
+                        "post_processor": {
+                            "type": "TemplateProcessing",
+                            "single": [
+                                {"SpecialToken": {"id": "^", "type_id": 0}},
+                                {"Sequence": {"id": "A", "type_id": 0}},
+                            ],
+                            "pair": [],
+                            "special_tokens": {
+                                "^": {"id": "^", "ids": [94], "tokens": ["^"]}
+                            },
+                        },
                     }
                 ),
                 encoding="utf-8",
@@ -68,12 +81,29 @@ class ToolPolicyTest(unittest.TestCase):
                     f"--request={request}",
                     f"--response={response}",
                     "--response_chunk_size=7",
+                    *checker_args,
                 ],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 check=False,
             )
+
+    def test_count_includes_source_selected_beginning_of_sequence(self):
+        result = self.execute("[]")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        prepared = json.loads(result.stdout)
+        self.assertEqual(prepared["tokens"], [ord("^"), *map(ord, prepared["prompt"])])
+        # Exactly the rendered characters fit. Only the source's BOS puts
+        # this prompt over the window.
+        result = self.execute(
+            "[]",
+            checker_args=("--count_only=true", f"--capacity={len(prepared['prompt'])}"),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(result.stdout)["input_tokens"], len(prepared["tokens"])
+        )
 
     @staticmethod
     def call(name="read", arguments='{"path":"a"}'):

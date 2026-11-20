@@ -112,6 +112,14 @@ TEST_F(InputCountTest, SourceMediaRowsNeedNoProjectionOrComponent) {
   ExpectCold();
 }
 
+TEST_F(InputCountTest, CountsProjectedPositionsPastTheExecutionWindow) {
+  const std::string text(768, 'a');
+  const auto body = Request(
+      ImageMessage(text, "image/x-portable-arbitrarymap", kPam, "low", "b"));
+  ExpectInputTokens(Count(body), text.size() + 2);
+  ExpectCold();
+}
+
 TEST_F(InputCountTest, ToolsAndOptionsUseTheSameSourcePolicy) {
   const auto tools = Count(
       R"({"model":"fixture-text","messages":[{"role":"user","content":"abxa"}],"tools":[{"type":"function","function":{"name":"read","parameters":{"type":"object","properties":{}}}}]})");
@@ -269,7 +277,7 @@ TEST_F(InputCountTest, InvalidInputDoesNotPoisonTheModel) {
   for (
       const std::string& body :
       {Request(Message("user", "?")),
-       Request(Message("user", std::string(97, 'a'))),
+       Request(Message("user", std::string(192, 'a') + "?")),
        std::string(
            R"({"model":"fixture-text","enable_thinking":true,"messages":[{"role":"user","content":"a"}]})"),
        std::string(R"({"model":"fixture-text","messages":false})")}) {
