@@ -580,6 +580,13 @@ static iree_status_t loom_target_artifact_manifest_format_interface_json(
         &object, IREE_SV("constant_byte_length"),
         interface->constant_byte_length));
   }
+  if (iree_any_bit_set(
+          interface->flags,
+          LOOM_TARGET_ARTIFACT_MANIFEST_INTERFACE_FLAG_ARGUMENT_BYTE_LENGTH)) {
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+        &object, IREE_SV("argument_byte_length"),
+        interface->argument_byte_length));
+  }
   if (loom_target_artifact_manifest_mode_includes_details(mode)) {
     IREE_RETURN_IF_ERROR(loom_target_artifact_manifest_format_parameters_json(
         interface, &object));

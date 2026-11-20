@@ -1,0 +1,22 @@
+// RUN: verify
+// The host arm of a runtime condition is imported, and its variadic call is
+// rejected.
+#include <loomcxx/target.h>
+// ERROR@+1: LOWERING/059 "variadic functions are not admitted"
+extern "C" int printf(const char* format, ...);
+int entry(int value) {
+  if (value > 0) printf("host %d\n", value);
+  return value;
+}
+
+// ====
+// `if constexpr` is a required constant expression and keeps the host value,
+// so it selects the host arm.
+#include <loomcxx/target.h>
+// ERROR@+1: LOWERING/059 "variadic functions are not admitted"
+extern "C" int printf(const char* format, ...);
+int entry(int value) {
+  if constexpr (loom::target::is_device()) return value;
+  else printf("host %d\n", value);
+  return value;
+}
