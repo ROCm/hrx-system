@@ -10,6 +10,7 @@
 
 #include "iree/async/operation.h"
 #include "iree/async/operations/file.h"
+#include "iree/async/operations/message.h"
 #include "iree/async/region.h"
 #include "iree/base/api.h"
 #include "iree/testing/gtest.h"
@@ -285,6 +286,33 @@ TEST_F(ContinuationTest, SuppressedCompletionIsNotCounted) {
   ASSERT_EQ(context_.completions.size(), 2u);
   EXPECT_EQ(context_.completions[0].operation, &operations_[0]);
   EXPECT_EQ(context_.completions[1].operation, &operations_[2]);
+}
+
+TEST_F(ContinuationTest,
+       FailedChainReturnsSuppressedMessageBeforeItsPredecessorCallback) {
+  for (bool submit_fails : {false, true}) {
+    SCOPED_TRACE(submit_fails);
+    iree_async_message_operation_t message = {};
+    iree_async_operation_initialize(
+        &message.base, IREE_ASYNC_OPERATION_TYPE_MESSAGE,
+        IREE_ASYNC_OPERATION_FLAG_NONE, nullptr, nullptr);
+    message.message_flags = IREE_ASYNC_MESSAGE_FLAG_SKIP_SOURCE_COMPLETION;
+    iree_async_operation_acquire_resources(&message.base);
+    operations_[0].linked_next = &message.base;
+    operations_[0].user_data = &message;
+    operations_[0].completion_fn = +[](void* user_data, iree_async_operation_t*,
+                                       iree_status_t status,
+                                       iree_async_completion_flags_t) {
+      auto* message = static_cast<iree_async_message_operation_t*>(user_data);
+      EXPECT_FALSE(message->base.resources_acquired);
+      iree_status_free(status);
+    };
+    context_.submit_status_code = IREE_STATUS_RESOURCE_EXHAUSTED;
+    iree_async_continuation_t continuation = iree_async_continuation_begin(
+        SubmitChain, &context_, &operations_[0],
+        submit_fails ? IREE_STATUS_OK : IREE_STATUS_ABORTED);
+    EXPECT_EQ(iree_async_continuation_finish(&continuation), 1u);
+  }
 }
 
 TEST_F(ContinuationTest, FailedSuppressedTailIsConsumedDuringBegin) {

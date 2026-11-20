@@ -97,6 +97,11 @@ static inline iree_async_operation_t* iree_async_continuation_take(
   return chain_head;
 }
 
+// Detaches the cancelled suffix. A terminal fire-and-forget message is
+// consumed here because its predecessor's callback can immediately reuse it.
+iree_async_operation_t* iree_async_continuation_take_cancelled(
+    iree_async_operation_t* operation);
+
 // Completes an unsubmitted continuation chain with fresh CANCELLED statuses.
 // Returns the number of user callbacks invoked directly.
 //

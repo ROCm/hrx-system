@@ -163,7 +163,8 @@ void iree_async_io_uring_fail_chain(iree_async_proactor_io_uring_t* proactor,
       iree_async_io_uring_publish_close(proactor, operation);
       return;
     }
-    iree_async_operation_t* next = iree_async_continuation_take(operation);
+    iree_async_operation_t* next =
+        iree_async_continuation_take_cancelled(operation);
     if (operation->completion_fn) {
       iree_async_proactor_io_uring_push_software_operation(proactor, operation,
                                                            status);

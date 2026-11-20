@@ -34,6 +34,18 @@ iree_status_t iree_async_continuation_prepare_batch(
   return iree_ok_status();
 }
 
+iree_async_operation_t* iree_async_continuation_take_cancelled(
+    iree_async_operation_t* operation) {
+  iree_async_operation_t* next = iree_async_continuation_take(operation);
+  if (next && !next->completion_fn && !next->linked_next) {
+    iree_async_operation_complete(next,
+                                  iree_status_from_code(IREE_STATUS_CANCELLED),
+                                  IREE_ASYNC_COMPLETION_FLAG_NONE);
+    return NULL;
+  }
+  return next;
+}
+
 static iree_host_size_t iree_async_continuation_cancel_with(
     iree_async_operation_t* chain_head,
     iree_async_continuation_defer_cancel_fn_t defer_cancel, void* user_data) {
@@ -43,8 +55,8 @@ static iree_host_size_t iree_async_continuation_cancel_with(
     if (defer_cancel && defer_cancel(user_data, operation)) {
       break;
     }
-    iree_async_operation_t* next = operation->linked_next;
-    operation->linked_next = NULL;
+    iree_async_operation_t* next =
+        iree_async_continuation_take_cancelled(operation);
     callback_count += iree_async_operation_complete(
         operation, iree_status_from_code(IREE_STATUS_CANCELLED),
         IREE_ASYNC_COMPLETION_FLAG_NONE);
@@ -121,8 +133,8 @@ iree_host_size_t iree_async_continuation_finish_with(
                                                user_data);
   }
 
-  iree_async_operation_t* remaining_chain = chain_head->linked_next;
-  chain_head->linked_next = NULL;
+  iree_async_operation_t* remaining_chain =
+      iree_async_continuation_take_cancelled(chain_head);
   iree_host_size_t callback_count = iree_async_operation_complete(
       chain_head, submit_status, IREE_ASYNC_COMPLETION_FLAG_NONE);
   callback_count += iree_async_continuation_cancel_with(
