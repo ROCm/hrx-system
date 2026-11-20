@@ -311,17 +311,19 @@ static iree_status_t loom_serve_text_load_link(loom_serve_text_load_t* load) {
   }
   IREE_RETURN_IF_ERROR(status);
   const iree_host_size_t span_capacity = iree_max(model->span_capacity, 1u);
-  iree_host_size_t total = 0, indices_offset = 0, extents_offset = 0;
+  iree_host_size_t total = 0, grants_offset = 0, extents_offset = 0;
   iree_host_size_t next_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       0, &total,
-      IREE_STRUCT_FIELD(span_capacity, iree_host_size_t, &indices_offset),
+      IREE_STRUCT_FIELD(span_capacity, loom_serve_text_epoch_grant_t,
+                        &grants_offset),
       IREE_STRUCT_FIELD(span_capacity, uint32_t, &extents_offset),
       IREE_STRUCT_FIELD(span_capacity, uint32_t, &next_offset)));
   uint8_t* storage = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(model->host_allocator, total, (void**)&storage));
-  model->invocation.row_indices = (iree_host_size_t*)(storage + indices_offset);
+  model->invocation.grants =
+      (loom_serve_text_epoch_grant_t*)(storage + grants_offset);
   model->invocation.extents = (uint32_t*)(storage + extents_offset);
   model->invocation.next_indices = (uint32_t*)(storage + next_offset);
   if (model->state.checkpoints.capacity) {
@@ -791,7 +793,7 @@ iree_status_t loom_serve_text_model_free_retired(
   loom_serve_text_control_deinitialize(&model->control);
   iree_allocator_free(model->host_allocator, model->rows);
   iree_arena_deinitialize(&model->row_records);
-  iree_allocator_free(model->host_allocator, model->invocation.row_indices);
+  iree_allocator_free(model->host_allocator, model->invocation.grants);
   iree_allocator_free(model->host_allocator, model->checkpoints);
   loom_runtime_execution_release(model->execution);
   loom_serve_text_source_deinitialize(&model->source);
@@ -1289,6 +1291,15 @@ iree_status_t loom_serve_text_model_submit_epoch(
                                 "invalid speculative text span %zu", i);
       }
     }
+    const uint32_t credit = output_limits ? output_limits[i] : 0;
+    model->invocation.grants[i] = (loom_serve_text_epoch_grant_t){
+        .row_index = (uint32_t)span->row_index,
+        .known_limit = credit ? 0 : (uint32_t)span->token_count,
+        .output_limit =
+            credit ? (uint32_t)iree_min(credit, width)
+                   : iree_any_bit_set(span->flags,
+                                      LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT),
+    };
     extents[i] = (uint32_t)span->token_count;
     model->rows[span->row_index]->planning.first = i;
     token_count += span->token_count;
@@ -1323,6 +1334,7 @@ iree_status_t loom_serve_text_model_submit_epoch(
             "continuation must use distinct first-plan rows");
       }
       const loom_serve_text_span_t* prior = &spans[first];
+      loom_serve_text_epoch_grant_t* grant = &model->invocation.grants[first];
       const uint32_t limit = continuation->output_limits[i];
       const iree_host_size_t remaining =
           model->context_capacity -
@@ -1346,6 +1358,10 @@ iree_status_t loom_serve_text_model_submit_epoch(
             output_limits[first] ? iree_min(2 * width, limit + width - 2)
                                  : prior->token_count + width;
         extents[first] = (uint32_t)iree_min(remaining, extent);
+        // The first submission may retire alone. If the continuation runs,
+        // both submissions spend its total credit.
+        grant->output_limit = (uint32_t)iree_max(
+            grant->output_limit, iree_min(limit, grant->output_limit + width));
         iree_unaligned_store_le_u32(continued + first * sizeof(uint32_t), 1);
         continued_speculative = true;
       } else {
@@ -1361,6 +1377,9 @@ iree_status_t loom_serve_text_model_submit_epoch(
                                   "continuation span %zu exceeds context", i);
         }
         extents[first] += (uint32_t)span->token_count;
+        grant->known_limit += (uint32_t)span->token_count;
+        grant->output_limit =
+            iree_any_bit_set(span->flags, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT);
       }
       next_indices[i] = (uint32_t)first;
       resident->planning.next = i;
@@ -1422,9 +1441,6 @@ iree_status_t loom_serve_text_model_submit_epoch(
   model->invocation.span_count = span_count;
   model->invocation.flags = (output_limits ? TEXT_EPOCH_FLAG_VERIFY : 0) |
                             (continuation ? TEXT_EPOCH_FLAG_CONTINUATION : 0);
-  for (iree_host_size_t i = 0; i < span_count; ++i) {
-    model->invocation.row_indices[i] = spans[i].row_index;
-  }
   status =
       loom_serve_text_state_grow(&model->state, span_count, spans, extents);
   if (iree_status_is_ok(status)) {
@@ -1636,9 +1652,13 @@ iree_status_t loom_serve_text_model_complete_epoch(
       loom_serve_text_invoke(model, model->control.publish_epoch,
                              iree_vm_variant_span_from_array(publish_arguments),
                              iree_vm_variant_span_empty()));
+  const uint8_t* records = model->control.host.bytes[TEXT_HOST_PROGRESS].data;
+  IREE_RETURN_IF_ERROR(loom_serve_text_epoch_plan_validate_progress(
+      model->invocation.span_count, model->invocation.grants,
+      model->invocation.extents, records));
   for (iree_host_size_t i = 0; i < model->invocation.span_count; ++i) {
-    const uint8_t* record = model->control.host.bytes[TEXT_HOST_PROGRESS].data +
-                            i * TEXT_PROGRESS_FIELD_COUNT * sizeof(int32_t);
+    const uint8_t* record =
+        records + i * TEXT_PROGRESS_FIELD_COUNT * sizeof(int32_t);
     loom_serve_text_result_t result;
     uint32_t source_position = 0;
     loom_serve_text_epoch_plan_read_progress(record, &result, &source_position);
@@ -1648,7 +1668,8 @@ iree_status_t loom_serve_text_model_complete_epoch(
     if (out_results) {
       out_results[i] = result;
     }
-    loom_serve_text_row_t* row = model->rows[model->invocation.row_indices[i]];
+    loom_serve_text_row_t* row =
+        model->rows[model->invocation.grants[i].row_index];
     row->state->position += result.consumed_count;
     row->state->source_position = source_position;
     loom_serve_text_state_row_trim(row->state);

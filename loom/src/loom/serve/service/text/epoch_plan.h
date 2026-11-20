@@ -15,6 +15,16 @@ extern "C" {
 
 struct loom_serve_text_state_row_t;
 
+// Native bounds retained until the model publishes both submissions.
+typedef struct loom_serve_text_epoch_grant_t {
+  // Resident owner of this first-plan span.
+  uint32_t row_index;
+  // Maximum caller-supplied inputs the owner may report consuming.
+  uint32_t known_limit;
+  // Shared output credit for the owner, bounded by the native result capacity.
+  uint32_t output_limit;
+} loom_serve_text_epoch_grant_t;
+
 // Source-visible little-endian u32 request and publication record layouts.
 // Causal and source positions are distinct; neither may be reconstructed from
 // token IDs or the other's increment.
@@ -53,8 +63,13 @@ iree_host_size_t loom_serve_text_epoch_plan_write(
     const uint32_t* first_indices, iree_host_size_t record_begin,
     iree_host_size_t input_begin);
 
-// Decodes one completed source publication. The source owns acceptance and
-// position semantics; the caller commits these values only after readiness.
+// Checks the complete VM publication against native reservations before any
+// caller-visible result or resident position is committed.
+iree_status_t loom_serve_text_epoch_plan_validate_progress(
+    iree_host_size_t span_count, const loom_serve_text_epoch_grant_t* grants,
+    const uint32_t* extents, const uint8_t* records);
+
+// Decodes a validated record. Only the live prefix of token IDs is published.
 void loom_serve_text_epoch_plan_read_progress(
     const uint8_t* record, loom_serve_text_result_t* out_result,
     uint32_t* out_source_position);

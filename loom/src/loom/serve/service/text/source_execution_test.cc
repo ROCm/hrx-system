@@ -452,6 +452,46 @@ TEST_F(SourceTextServiceTest, IndependentParameterPreparationJoinsAllDomains) {
   }
 }
 
+TEST_F(RegisteredSourceTextServiceTest, InvalidLaterPublicationCommitsNoRows) {
+  const auto control =
+      iree::testing::MakeTempFilePath("invalid_text_publication", ".loom");
+  ASSERT_NO_FATAL_FAILURE(
+      EditNativeProvider(directory_ + "/control.loom", control,
+                         "view.store %selected_count, %published[%i, 2]",
+                         "view.store %consumed, %published[%i, 2]"));
+  auto options = ModelOptions();
+  options.sources.control = iree_make_cstring_view(control.c_str());
+  IREE_ASSERT_OK(loom_serve_text_model_allocate(
+      device_, storage_owner_, &options, host_allocator_, &model_));
+  const int32_t inputs[] = {Oracle::Id('a'), Oracle::Id('b')};
+  const loom_serve_text_span_t spans[] = {
+      {3, 1, inputs, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT},
+      {0, 2, inputs, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT},
+  };
+  loom_runtime_execution_frontier_t ready;
+  IREE_ASSERT_OK(loom_serve_text_model_submit_epoch(model_, 2, spans, nullptr,
+                                                    nullptr, nullptr, &ready));
+  for (size_t i = 0; i < IREE_ARRAYSIZE(ready.semaphores); ++i) {
+    IREE_ASSERT_OK(
+        loom_runtime_workspace_wait(loom_runtime_pool_workspace(storage_owner_),
+                                    ready.semaphores[i], ready.values[i]));
+  }
+  loom_serve_text_result_t results[] = {{.output_count = 17},
+                                        {.output_count = 23}};
+  iree_status_t status = loom_serve_text_model_complete_epoch(model_, results);
+  EXPECT_NE(iree::Status::ToString(status).find(
+                "row 0 published 2 outputs with credit 1"),
+            std::string::npos);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, status);
+  EXPECT_EQ(results[0].output_count, 17u);
+  EXPECT_EQ(results[1].output_count, 23u);
+  for (const auto& span : spans) {
+    EXPECT_EQ(loom_serve_text_row_position(
+                  loom_serve_text_model_row(model_, span.row_index)),
+              0u);
+  }
+}
+
 TEST_F(SourceTextServiceTest, FailedControlCompileRetiresNativePreparation) {
   auto* pool = loom_runtime_pool_memory(storage_owner_);
   if (pool) {

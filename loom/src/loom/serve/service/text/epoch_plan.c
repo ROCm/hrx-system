@@ -54,6 +54,38 @@ iree_host_size_t loom_serve_text_epoch_plan_write(
   return input_begin;
 }
 
+iree_status_t loom_serve_text_epoch_plan_validate_progress(
+    iree_host_size_t span_count, const loom_serve_text_epoch_grant_t* grants,
+    const uint32_t* extents, const uint8_t* records) {
+  for (iree_host_size_t i = 0; i < span_count; ++i) {
+    const uint8_t* record = records + i * TEXT_PROGRESS_FIELD_COUNT * 4;
+    const uint32_t outputs = iree_unaligned_load_le_u32(
+        record + TEXT_PROGRESS_FIELD_OUTPUT_COUNT * 4);
+    if (outputs > grants[i].output_limit) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "text row %u published %u outputs with credit %u",
+                              grants[i].row_index, outputs,
+                              grants[i].output_limit);
+    }
+    const uint32_t consumed = iree_unaligned_load_le_u32(
+        record + TEXT_PROGRESS_FIELD_CONSUMED_COUNT * 4);
+    const uint32_t known = iree_unaligned_load_le_u32(
+        record + TEXT_PROGRESS_FIELD_KNOWN_COUNT * 4);
+    const uint32_t verified = iree_unaligned_load_le_u32(
+        record + TEXT_PROGRESS_FIELD_VERIFICATION_COUNT * 4);
+    if (consumed > extents[i] || known > grants[i].known_limit ||
+        known > consumed || verified > consumed - known) {
+      return iree_make_status(
+          IREE_STATUS_DATA_LOSS,
+          "text row %u published %u consumed inputs, %u known inputs, and %u "
+          "verifications with reservations for %u inputs and %u known inputs",
+          grants[i].row_index, consumed, known, verified, extents[i],
+          grants[i].known_limit);
+    }
+  }
+  return iree_ok_status();
+}
+
 void loom_serve_text_epoch_plan_read_progress(
     const uint8_t* record, loom_serve_text_result_t* out_result,
     uint32_t* out_source_position) {
@@ -69,7 +101,7 @@ void loom_serve_text_epoch_plan_read_progress(
   };
   *out_source_position = iree_unaligned_load_le_u32(
       record + TEXT_PROGRESS_FIELD_SOURCE_POSITION * sizeof(int32_t));
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(out_result->tokens); ++i) {
+  for (iree_host_size_t i = 0; i < out_result->output_count; ++i) {
     out_result->tokens[i] = (int32_t)iree_unaligned_load_le_u32(
         record + (TEXT_PROGRESS_FIELD_TOKENS + i) * sizeof(int32_t));
   }

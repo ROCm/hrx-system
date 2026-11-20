@@ -95,9 +95,9 @@ struct loom_serve_text_model_t {
   struct {
     // Number of first-plan spans, zero after successful completion.
     iree_host_size_t span_count;
-    // Resident identities in caller order; owns this planning allocation.
-    iree_host_size_t* row_indices;
-    // Temporary worst-case state growth in first-plan order.
+    // Publication bounds in caller order. Owns this planning allocation.
+    struct loom_serve_text_epoch_grant_t* grants;
+    // Maximum state growth reserved for each first-plan owner.
     uint32_t* extents;
     // First-plan ordinals for the compact continuation plan.
     uint32_t* next_indices;

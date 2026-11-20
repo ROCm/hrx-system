@@ -7,6 +7,7 @@
 #include "loom/serve/service/text/epoch_plan.h"
 
 #include "iree/testing/gtest.h"
+#include "iree/testing/status_matchers.h"
 #include "loom/serve/service/text/state.h"
 
 namespace {
@@ -89,6 +90,44 @@ TEST(TextEpochPlanTest, PublicationKeepsOpaquePositionSeparateFromCounts) {
   for (size_t i = 0; i < 4; ++i) {
     EXPECT_EQ(result.tokens[i], 10 + i);
   }
+}
+
+TEST(TextEpochPlanTest, PublicationCountsStayWithinBothSubmissions) {
+  // Row 9 finishes three prompt inputs, then consumes a verified continuation.
+  // Row 1 verifies twice using a single four-token output allowance.
+  const loom_serve_text_epoch_grant_t grants[] = {{9, 3, 3}, {1, 0, 4}};
+  const uint32_t extents[] = {6, 8};
+  uint32_t fields[2][TEXT_PROGRESS_FIELD_COUNT] = {};
+  auto store = [&](size_t row, size_t field, uint32_t value) {
+    iree_unaligned_store_le_u32(&fields[row][field], value);
+  };
+  auto validate = [&] {
+    return loom_serve_text_epoch_plan_validate_progress(
+        2, grants, extents, reinterpret_cast<const uint8_t*>(fields));
+  };
+  store(0, TEXT_PROGRESS_FIELD_CONSUMED_COUNT, 5);
+  store(0, TEXT_PROGRESS_FIELD_KNOWN_COUNT, 3);
+  store(0, TEXT_PROGRESS_FIELD_OUTPUT_COUNT, 3);
+  store(0, TEXT_PROGRESS_FIELD_VERIFICATION_COUNT, 1);
+  store(1, TEXT_PROGRESS_FIELD_CONSUMED_COUNT, 4);
+  store(1, TEXT_PROGRESS_FIELD_OUTPUT_COUNT, 4);
+  store(1, TEXT_PROGRESS_FIELD_VERIFICATION_COUNT, 2);
+  IREE_ASSERT_OK(validate());
+  for (const uint32_t count : {5u, UINT32_MAX}) {
+    store(1, TEXT_PROGRESS_FIELD_OUTPUT_COUNT, count);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, validate());
+  }
+  store(1, TEXT_PROGRESS_FIELD_OUTPUT_COUNT, 4);
+  store(1, TEXT_PROGRESS_FIELD_CONSUMED_COUNT, 9);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, validate());
+  store(1, TEXT_PROGRESS_FIELD_CONSUMED_COUNT, 4);
+  store(1, TEXT_PROGRESS_FIELD_KNOWN_COUNT, 1);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, validate());
+  store(1, TEXT_PROGRESS_FIELD_KNOWN_COUNT, 0);
+  store(0, TEXT_PROGRESS_FIELD_CONSUMED_COUNT, 2);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, validate());
+  store(0, TEXT_PROGRESS_FIELD_CONSUMED_COUNT, 3);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, validate());
 }
 
 }  // namespace
