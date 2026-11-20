@@ -194,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--list",
         action="store_true",
-        help="list declared choices without acquiring payloads",
+        help="list choices in SOURCE or the SDK catalog without fetching payloads",
     )
     parser.add_argument(
         "--json", action="store_true", help="emit structured JSON on stdout"
@@ -224,7 +224,8 @@ def main(argv: list[str] | None = None) -> int:
         action="append",
         default=[],
         metavar="NAME=ROOT",
-        help="replace one source root with a local directory or HTTP(S) directory",
+        help="read a named origin's files from a local directory or HTTP(S) mirror "
+        "(for example, --origin=checkpoint=/path/to/weights)",
     )
     parser.add_argument(
         "--output", type=Path, help="installation directory (default: ./MODEL_ID)"
@@ -360,6 +361,12 @@ def main(argv: list[str] | None = None) -> int:
         if snapshot is not None:
             if args.model is None and args.list:
                 _list_catalog(snapshot, json_output=args.json)
+                if not (args.card or args.catalog or args.json or args.quiet):
+                    sys.stderr.write(
+                        "Showing the SDK catalog. Find community model cards at\n"
+                        "https://rocm.github.io/hrx-system/loom/serving/workflows/"
+                        "fetch-and-serve/#discover-other-models-and-services\n"
+                    )
                 return 0
             if args.model is None:
                 args.model = _catalog_model(snapshot.content, picker)

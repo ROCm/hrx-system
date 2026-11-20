@@ -13,7 +13,7 @@ the `hf` extra, fetch Moonshine Streaming Tiny and start it on an AMD GPU:
 <div class="loom-quickstart" markdown>
 
 ```sh
-loom-fetch https://raw.githubusercontent.com/ROCm/hrx-loom-library/4317508bf5adb251a284ea8dc4e5a24a11bd1c17/model/moonshine-ai/moonshine-streaming-tiny/model.json --preset=streaming --output=./moonshine
+loom-fetch --model=moonshine-ai/moonshine-streaming-tiny --preset=streaming --output=./moonshine
 loom-serve --device=amdgpu --workers=4 --listen=127.0.0.1:8080 --model=./moonshine
 ```
 
@@ -29,20 +29,54 @@ To share your own programs and model cards, the
 [Hugging Face publishing guide](../sharing/hugging-face.md) provides a small
 copyable repository, explicit metadata refresh, and an end-to-end smoke test.
 
-## Fetch a published repository
+## Discover other models and services
 
-A publisher can share a repository URL, without a `model.json` suffix or an
-installation-directory flag:
+`loom-fetch --list` shows the library catalog pinned by your SDK release. Bare
+`loom-fetch` opens the same catalog in a terminal picker. Publishers can also
+distribute runnable model cards directly. The
+[loom-fun collection on Hugging Face](https://huggingface.co/loom-fun/models)
+includes community ports with device and memory guidance in their READMEs.
+For a first request on a Vulkan device, [try the tiny text model](#try-vulkan).
+
+To see which presets a card offers before downloading weights, pass its
+repository to `--list`. Then fetch the preset that matches your hardware.
 
 ```sh
-loom-fetch https://huggingface.co/benvanik/hrx-loom-serve-example
+loom-fetch huggingface:loom-fun/unsloth-Qwen3-0.6B-loom --list
+loom-fetch huggingface:loom-fun/unsloth-Qwen3-0.6B-loom:chat --output=./qwen3
 ```
 
-This arithmetic text example installs into `./example/tiny-text`, matching its
-model ID. The equivalent provider-explicit command is:
+### Use a GGUF you already have
+
+The Qwen3 card above uses `Qwen3-0.6B-Q4_K_M.gguf` from its `checkpoint`
+origin. If you have that file from a browser download or another inference
+tool, point fetch at the directory containing it. This works on the first
+install with an empty cache.
 
 ```sh
-loom-fetch huggingface:benvanik/hrx-loom-serve-example
+loom-fetch huggingface:loom-fun/unsloth-Qwen3-0.6B-loom:chat "--origin=checkpoint=/path/to/my weights" --output=./qwen3
+```
+
+Fetch verifies the local file against the size and SHA-256 in the publisher's
+lock and downloads the programs and tokenizer. On Windows the same argument
+can be written as `"--origin=checkpoint=D:\Models"`. Keeping the installation
+on the same filesystem lets fetch share weights by hardlink when available.
+
+An override supplies every selected file from that origin. For a vision
+model this can include a separate projection file alongside the language
+weights. If you have only the language weights, run the preset with
+`--dry-run --json` to find their installation path in `files[].path`. Place
+or link your GGUF there under the output directory, then fetch to that directory
+without the override. Fetch verifies the file in place and retrieves the
+missing files. A different quantization needs a card that accepts those weights.
+
+## Fetch a published repository
+
+A publisher can share an ordinary repository URL. This installs the same
+Qwen3 chat preset into `./Qwen/Qwen3-0.6B`, the model ID from the card.
+
+```sh
+loom-fetch https://huggingface.co/loom-fun/unsloth-Qwen3-0.6B-loom --preset=chat
 ```
 
 Both providers use the same selectors:
@@ -81,20 +115,18 @@ learned weights, use the [arithmetic embedding walkthrough](serve-models.md).
 
 ## Inspect the available choices
 
-The example pins a published library commit so the card, lock, programs, and
-sample recording come from the same revision. The following commands use a POSIX
-shell; the Windows acquisition command follows below.
+The SDK release catalog pins the library revision for the card, lock, and
+programs. Listing a model by ID uses that catalog on both Linux and Windows.
 
 ```sh
-model_url=https://raw.githubusercontent.com/ROCm/hrx-loom-library/4317508bf5adb251a284ea8dc4e5a24a11bd1c17/model/moonshine-ai/moonshine-streaming-tiny
-loom-fetch "$model_url/model.json" --list
+loom-fetch --model=moonshine-ai/moonshine-streaming-tiny --list
 ```
 
 The choices include the `original` parameter variant, `transcription` service,
 and `streaming` preset. Inspect the same facts as JSON, optionally with `jq`:
 
 ```sh
-loom-fetch "$model_url/model.json" --list --json | jq '{presets, variants, origins}'
+loom-fetch --model=moonshine-ai/moonshine-streaming-tiny --list --json | jq '{presets, variants, origins}'
 ```
 
 Listing reads the card without downloading weights or programs. Presets combine
@@ -106,7 +138,7 @@ does not select a file format.
 ## Fetch the selected files
 
 ```sh
-loom-fetch "$model_url/model.json" --preset=streaming --output=./moonshine
+loom-fetch --model=moonshine-ai/moonshine-streaming-tiny --preset=streaming --output=./moonshine
 ```
 
 Some model cards publish compiled programs as `.loombc.xz`. The same fetch
@@ -131,7 +163,7 @@ stdout contains only the installed card path, or the final JSON result with
 `--json`:
 
 ```sh
-loom-fetch "$model_url/model.json" --preset=streaming --output=./moonshine --no-input --json >installed.json 2>fetch.log
+loom-fetch --model=moonshine-ai/moonshine-streaming-tiny --preset=streaming --output=./moonshine --no-input --json >installed.json 2>fetch.log
 ```
 
 Use `--quiet` to suppress progress while retaining errors and access guidance.
@@ -145,13 +177,6 @@ no ETA. Verification reports bytes checked, including cache hits. Ongoing
 updates are limited to one line every thirty seconds, while new phases and final
 completion appear promptly. A complete installation is reported only after its
 model card has been published.
-
-On Windows PowerShell, the same acquisition is:
-
-```powershell
-$modelUrl = 'https://raw.githubusercontent.com/ROCm/hrx-loom-library/4317508bf5adb251a284ea8dc4e5a24a11bd1c17/model/moonshine-ai/moonshine-streaming-tiny'
-loom-fetch "$modelUrl/model.json" --preset=streaming --output=./moonshine
-```
 
 Fetch reads the adjacent `model.json.lock`, resolves the selected dependencies,
 and verifies identities within the lock's declared scope before publishing the
@@ -272,7 +297,7 @@ so no `--preset` or separate `serve.json` is needed here.
 In another terminal, download the small reference recording and submit it:
 
 ```sh
-curl --fail --location https://raw.githubusercontent.com/ROCm/hrx-loom-library/4317508bf5adb251a284ea8dc4e5a24a11bd1c17/model/moonshine-ai/moonshine-streaming-tiny/test/short.pcm --output=short.pcm
+curl --fail --location https://raw.githubusercontent.com/ROCm/hrx-loom-library/v0.2.0/model/moonshine-ai/moonshine-streaming-tiny/test/short.pcm --output=short.pcm
 curl --fail-with-body http://127.0.0.1:8080/v1/audio/transcriptions -F model=moonshine-ai/moonshine-streaming-tiny -F 'file=@short.pcm;headers="Content-Type: audio/pcm;rate=16000;channels=1"'
 ```
 
@@ -280,7 +305,7 @@ On Windows PowerShell, download the same recording and preserve the multipart
 header's quotes with the `--%` stop-parsing token:
 
 ```powershell
-curl.exe --fail --location https://raw.githubusercontent.com/ROCm/hrx-loom-library/4317508bf5adb251a284ea8dc4e5a24a11bd1c17/model/moonshine-ai/moonshine-streaming-tiny/test/short.pcm --output=short.pcm
+curl.exe --fail --location https://raw.githubusercontent.com/ROCm/hrx-loom-library/v0.2.0/model/moonshine-ai/moonshine-streaming-tiny/test/short.pcm --output=short.pcm
 curl.exe --% --fail-with-body http://127.0.0.1:8080/v1/audio/transcriptions -F model=moonshine-ai/moonshine-streaming-tiny -F "file=@short.pcm;headers=\"Content-Type: audio/pcm;rate=16000;channels=1\""
 ```
 
@@ -300,14 +325,45 @@ decoding; it does not provide speaker diarization or word alignment.
 Ctrl-C in the server terminal stops admission and joins accepted work before
 exiting. The fetched model remains available for the next run.
 
-## Discover other models and services
+## Try Vulkan
 
-A release SDK can name a compatible library catalog. With that association,
-`loom-fetch --list` shows its models and bare `loom-fetch` opens the terminal
-picker. A development SDK requires a card URL or explicit catalog:
+`loom-run --list_devices=vulkan` prints the devices visible to the Vulkan
+driver. Use `--device=vulkan` to serve a model with Vulkan-compatible kernels,
+or pass a device URI from that list to select a particular GPU. The
+[target guide](../../targets/index.md#select-a-target) lists the native AMD
+families and the Vulkan execution requirements. Check each model publisher's
+supported backends when choosing a port.
+
+The tiny text model uses a four-byte parameter and runs on both Vulkan and CPU.
+Fetch it from the tag matching your installed SDK. These commands use
+`hrx-loom==0.2.0`.
 
 ```sh
-loom-fetch --catalog=github:ROCm/hrx-loom-library@4317508bf5adb251a284ea8dc4e5a24a11bd1c17 --list --json
+loom-run --list_devices=vulkan
+loom-fetch https://raw.githubusercontent.com/ROCm/hrx-system/v0.2.0/loom/docs/examples/serving/model-publication/model/tiny-text/model.json --output=./tiny-text
+loom-serve --device=vulkan --pool_backing=fixed --listen=127.0.0.1:8081 --model=./tiny-text
+```
+
+In another terminal, send a chat request. The expected reply to `abxa` is
+`bx`, with four prompt tokens and two completion tokens.
+
+```sh
+curl --fail-with-body http://127.0.0.1:8081/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"example/tiny-text","messages":[{"role":"user","content":"abxa"}],"max_tokens":2}'
+```
+
+In Windows PowerShell, send the same JSON with `Invoke-RestMethod`.
+
+```powershell
+(Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8081/v1/chat/completions -ContentType 'application/json' -Body '{"model":"example/tiny-text","messages":[{"role":"user","content":"abxa"}],"max_tokens":2}').choices[0].message.content
+```
+
+## Inspect the SDK library catalog
+
+To select a specific library revision, including from a development SDK,
+pass its catalog explicitly.
+
+```sh
+loom-fetch --catalog=github:ROCm/hrx-loom-library@v0.2.0 --list --json
 ```
 
 This snapshot includes Moonshine speech recognition, Pocket speech synthesis,
@@ -317,7 +373,7 @@ Anna; `streaming-noncommercial` adds Jean.
 
 Each catalog entry identifies a runnable package with published programs and
 asset sources. The
-[model map](https://github.com/ROCm/hrx-loom-library/tree/4317508bf5adb251a284ea8dc4e5a24a11bd1c17/model)
+[model map](https://github.com/ROCm/hrx-loom-library/tree/v0.2.0/model)
 records each package's supported devices and presets.
 
 Acquisition and startup are the same across modalities. The selected service
@@ -337,17 +393,15 @@ A program set can contain several Loom text or bytecode files and libraries.
 The server links the selected providers together and specializes them for the
 device. A publisher may offer source or bytecode sets; `--programs`
 overrides a preset only when another compatible set is actually published.
-The source checkout in this example publishes the source set. Its bytecode
-choices require a separately built publication.
 
 ## Reuse local assets and configure a deployment
 
-After a successful fetch, `--offline` forbids all network requests and reuses
-cached documents and payloads. An origin override can use an already provisioned
-checkpoint directory while retaining lock verification:
+After a successful fetch, `--offline` uses cached documents and payloads
+and forbids network requests. It can also use a provisioned checkpoint
+directory through the same [origin override](#use-a-gguf-you-already-have).
 
 ```sh
-loom-fetch "$model_url/model.json" --preset=streaming --offline --origin=checkpoint=/srv/checkpoints/moonshine --output=./moonshine-local
+loom-fetch --model=moonshine-ai/moonshine-streaming-tiny --preset=streaming --offline --origin=checkpoint=/srv/checkpoints/moonshine --output=./moonshine-local
 ```
 
 That directory must supply the paths relative to the named origin, including

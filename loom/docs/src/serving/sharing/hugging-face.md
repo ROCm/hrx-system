@@ -9,27 +9,28 @@ This guide uses a tiny text model to prove the whole path before introducing
 large checkpoints. It performs deterministic arithmetic through real JIT kernels
 and the text service. It is not a trained chatbot.
 
-The [published example](https://huggingface.co/benvanik/hrx-loom-serve-example)
-contains the same files as the downloadable template below.
-
 ## Start from a working publication
 
 Install the [Loom SDK](../../getting-started/acquiring-loom.md), including the
 `hf` extra for Hugging Face acquisition. The example's smoke test requires
 `loom-serve` with the x86 CPU JIT and `task` device enabled.
 
-Download the [ready-to-copy template](../../generated/examples/serving/model-publication.zip)
-and extract it:
+Use the template from the same release as your SDK. Its model card and
+programs use that release's serving interface. For `hrx-loom==0.2.0`, the
+[publication files](https://github.com/ROCm/hrx-system/tree/v0.2.0/loom/docs/examples/serving/model-publication)
+are available with a sparse checkout.
 
 ```sh
-curl --fail --location https://rocm.github.io/hrx-system/loom/generated/examples/serving/model-publication.zip --output=model-publication.zip
-python -m zipfile -e model-publication.zip .
-cd model-publication
+git clone --depth=1 --filter=blob:none --sparse --branch=v0.2.0 https://github.com/ROCm/hrx-system.git loom-template
+git -C loom-template sparse-checkout set loom/docs/examples/serving/model-publication
+cd loom-template/loom/docs/examples/serving/model-publication
 python smoke.py
 ```
 
-In Windows PowerShell, use `curl.exe` to select curl instead of a shell alias.
-The Python commands are the same. The final JSON reports `"status": "ok"` and
+For an SDK built from the same revision as this documentation, the
+[template ZIP](../../generated/examples/serving/model-publication.zip) packages
+the same directory. Extract it and run `python smoke.py` from `model-publication`.
+The final JSON reports `"status": "ok"` and
 includes the checked completion. Diagnostics and fetch progress use stderr.
 The script starts a private CPU server on an automatically selected loopback
 port, submits a request, then stops that disposable server.
