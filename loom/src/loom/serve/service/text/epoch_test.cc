@@ -256,7 +256,8 @@ TEST(TextEpochTest, IsolatedStagesScheduleOnlyTheFirstInput) {
 
 TEST(TextEpochTest, CohortCapacityIsIndependentOfResidentIdentity) {
   const int32_t tokens[10] = {};
-  for (iree_host_size_t depth = 1; depth <= 7; ++depth) {
+  for (iree_host_size_t depth = 1; depth < LOOM_SERVICE_TEXT_MAX_EPOCH_OUTPUTS;
+       ++depth) {
     for (iree_host_size_t count :
          {1u, 2u, 3u, 15u, 16u, 17u, 31u, 32u, 33u, 64u, 100u, 129u}) {
       Epoch epoch(count);
@@ -268,7 +269,7 @@ TEST(TextEpochTest, CohortCapacityIsIndependentOfResidentIdentity) {
             .chunk_size = 8,
             .continuation_epochs = epochs,
             .draft_depth = depth,
-            .token_capacity = count * 8,
+            .token_capacity = count * LOOM_SERVICE_TEXT_MAX_EPOCH_OUTPUTS,
             .span_capacity = count,
         };
         std::vector<loom_serve_text_epoch_row_t> rows(count);
@@ -298,6 +299,8 @@ TEST(TextEpochTest, CohortCapacityIsIndependentOfResidentIdentity) {
           EXPECT_EQ(epoch.positions[i], i);
           EXPECT_EQ(epoch.prefill[i], i % 2 == 0);
           EXPECT_LE(epoch.output_limits[i], rows[i].output_count);
+          EXPECT_LE(epoch.output_limits[i],
+                    LOOM_SERVICE_TEXT_MAX_EPOCH_OUTPUTS);
           EXPECT_EQ(epoch.results[i].output_count, 0);
           if (i % 2) {
             EXPECT_EQ(epoch.spans[i].token_ids, &epoch.decode_tokens[i]);
@@ -313,6 +316,7 @@ TEST(TextEpochTest, CohortCapacityIsIndependentOfResidentIdentity) {
           ASSERT_LT(first, count);
           EXPECT_EQ(span.row_index, scheduled[first].row_index);
           EXPECT_LE(next.output_limits[i], rows[first].output_count);
+          EXPECT_LE(next.output_limits[i], LOOM_SERVICE_TEXT_MAX_EPOCH_OUTPUTS);
           continued_tokens += span.token_count;
         }
         EXPECT_LE(continued_tokens, options.token_capacity);
@@ -324,7 +328,8 @@ TEST(TextEpochTest, CohortCapacityIsIndependentOfResidentIdentity) {
 }
 
 TEST(TextEpochTest, DraftWidthControlsContinuationCreditAndContextFrontier) {
-  for (iree_host_size_t depth = 1; depth <= 7; ++depth) {
+  for (iree_host_size_t depth = 1; depth < LOOM_SERVICE_TEXT_MAX_EPOCH_OUTPUTS;
+       ++depth) {
     const iree_host_size_t width = depth + 1;
     const loom_serve_text_epoch_options_t options = {
         .context_capacity = 64,
@@ -335,7 +340,7 @@ TEST(TextEpochTest, DraftWidthControlsContinuationCreditAndContextFrontier) {
         .span_capacity = 16,
     };
     loom_serve_text_epoch_row_t rows[] = {
-        {.output_count = 16, .position = 64 - width - 1, .token = 21}};
+        {.output_count = 2 * width, .position = 64 - width - 1, .token = 21}};
     const loom_serve_packed_span_t scheduled[] = {{0, width}};
     const loom_serve_packing_plan_t plan = {
         .span_count = 1,
@@ -346,10 +351,12 @@ TEST(TextEpochTest, DraftWidthControlsContinuationCreditAndContextFrontier) {
     loom_serve_text_epoch_prepare(&options, rows, 1, &plan, scheduled, &epoch,
                                   &next);
     EXPECT_EQ(epoch.spans[0].flags, kSelect | kPropose);
-    EXPECT_EQ(epoch.output_limits[0], 2 * width);
+    const auto credit =
+        iree_min(2 * width, LOOM_SERVICE_TEXT_MAX_EPOCH_OUTPUTS);
+    EXPECT_EQ(epoch.output_limits[0], credit);
     ASSERT_EQ(next.span_count, 1);
     EXPECT_EQ(next.spans[0].token_count, width);
-    EXPECT_EQ(next.output_limits[0], 2 * width);
+    EXPECT_EQ(next.output_limits[0], credit);
     ++rows[0].position;
     loom_serve_text_epoch_prepare(&options, rows, 1, &plan, scheduled, &epoch,
                                   &next);
@@ -360,7 +367,8 @@ TEST(TextEpochTest, DraftWidthControlsContinuationCreditAndContextFrontier) {
 
 TEST(TextEpochTest, ContinuationLeavesFinalOutputToOrdinaryDecode) {
   const int32_t input[] = {20, 21, 22};
-  for (iree_host_size_t depth = 1; depth <= 7; ++depth) {
+  for (iree_host_size_t depth = 1; depth < LOOM_SERVICE_TEXT_MAX_EPOCH_OUTPUTS;
+       ++depth) {
     SCOPED_TRACE(depth);
     const iree_host_size_t width = depth + 1;
     const loom_serve_text_epoch_options_t options = {
@@ -395,10 +403,14 @@ TEST(TextEpochTest, ContinuationLeavesFinalOutputToOrdinaryDecode) {
         const bool continues = credit >= 3;
         EXPECT_EQ(epoch.device_epochs, continues ? 2 : 1);
         ASSERT_EQ(next.span_count, continues ? 1 : 0);
+        EXPECT_EQ(
+            epoch.output_limits[0],
+            known ? 0u : iree_min(credit, LOOM_SERVICE_TEXT_MAX_EPOCH_OUTPUTS));
         if (continues) {
           EXPECT_EQ(next.spans[0].token_count, width);
           EXPECT_EQ(next.output_limits[0],
-                    iree_min(credit, known ? width + 1 : 2 * width));
+                    iree_min(LOOM_SERVICE_TEXT_MAX_EPOCH_OUTPUTS,
+                             iree_min(credit, known ? width + 1 : 2 * width)));
         }
       }
     }

@@ -364,12 +364,14 @@ Native capacity fields are:
 | `cache_target_bytes` | automatic | Soft sizing target for additional initial cache storage. Omission uses 2 GiB, reduced to 1/16 of a configured shared physical-memory budget. Zero disables automatic counts without changing explicit counts. |
 | `admission_overtakes` | `rows` | Successful fitting admissions allowed to pass a blocked oldest request; zero selects FIFO. |
 | `max_tokens` | `512` | Default request output limit, fitting a positive signed 32-bit count. Prompt and output together must fit the configured context. |
-| `draft_depth` | `0` | Proposed tokens after each anchor, from 0 through 7; requires matching source support. |
+| `draft_depth` | `0` | Maximum proposals after each anchor, from 0 through 15. The model source determines how many it can supply from its predictor or accepted history. |
 | `continuation_epochs` | `1` | Device-fed epochs per scheduling turn, either 1 or 2. |
 
 Context and prefill capacities fit positive signed 32-bit counts. Packed token capacity may exceed
 an individual context limit: one epoch can combine many short sessions. It must
-fit an anchor plus every draft proposal.
+fit an anchor plus every draft proposal. Each request can publish up to 16
+output tokens per scheduling turn. A device-fed continuation consumes the
+credit left by the first verification.
 
 Cache addressability is serving policy, not a model field. Fixed backing
 reserves one `context_capacity` shared across the model's resident rows.

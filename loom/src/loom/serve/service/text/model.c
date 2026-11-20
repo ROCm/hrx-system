@@ -410,17 +410,18 @@ iree_status_t loom_serve_text_load_allocate(
   if (options->prefill_capacity < 1 || options->prefill_capacity > INT32_MAX ||
       options->context_capacity < 1 || options->context_capacity > INT32_MAX ||
       options->span_capacity > options->prefill_capacity ||
-      options->draft_depth > 7 ||
+      options->draft_depth >= LOOM_SERVICE_TEXT_MAX_EPOCH_OUTPUTS ||
       (options->draft_depth && !options->span_capacity) ||
       (uint64_t)options->pool_capacity > INT64_MAX ||
       options->checkpoint_capacity > INT32_MAX ||
       (options->checkpoint_capacity && !pooled) ||
       (options->pool_capacity && options->cache_limit_bytes) ||
       (pooled && !options->span_capacity)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "invalid model capacities; pooled KV and drafting "
-                            "require a positive span budget, "
-                            "and draft depth must be in [0, 7]");
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "invalid model capacities; pooled KV and drafting "
+        "require a positive span budget, "
+        "and draft depth must fit the result token capacity");
   }
   loom_serve_text_load_t* load = NULL;
   IREE_RETURN_IF_ERROR(
@@ -1238,6 +1239,8 @@ iree_status_t loom_serve_text_model_submit_epoch(
   bool continued_speculative = false;
   const iree_host_size_t epoch_count = continuation ? 2 : 1;
   const iree_host_size_t width = model->draft_depth + 1;
+  const iree_host_size_t output_capacity =
+      iree_min(width * epoch_count, LOOM_SERVICE_TEXT_MAX_EPOCH_OUTPUTS);
   bool proposes = false;
   bool has_media_input = false;
   for (iree_host_size_t i = 0; i < span_count; ++i) {
@@ -1278,8 +1281,7 @@ iree_status_t loom_serve_text_model_submit_epoch(
     }
     if (output_limits && output_limits[i]) {
       const loom_serve_text_row_t* row = model->rows[span->row_index];
-      if (output_limits[i] > width * epoch_count ||
-          span->token_count != width ||
+      if (output_limits[i] > output_capacity || span->token_count != width ||
           !iree_any_bit_set(span->flags, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT) ||
           !row->has_prediction || row->transfer.progress[7] ||
           span->token_ids[0] != row->transfer.token) {
@@ -1326,7 +1328,8 @@ iree_status_t loom_serve_text_model_submit_epoch(
           model->context_capacity -
           model->rows[span->row_index]->state->position;
       if (limit) {
-        if (limit < 3 || limit > 2 * width || span->token_count != width ||
+        if (limit < 3 || limit > output_capacity ||
+            span->token_count != width ||
             span->flags != (LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT |
                             LOOM_SERVICE_TEXT_SPAN_FLAG_PROPOSE) ||
             span->media ||

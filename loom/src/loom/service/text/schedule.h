@@ -11,6 +11,10 @@
 extern "C" {
 #endif
 
+// The text publication record has this many token IDs per request. A queued
+// continuation shares the same record and consumes the remaining credit.
+enum { LOOM_SERVICE_TEXT_MAX_EPOCH_OUTPUTS = 16 };
+
 typedef enum loom_service_text_schedule_mode_e {
   // One shared weight traversal for all admitted prompt and decode spans.
   LOOM_SERVICE_TEXT_SCHEDULE_PACKED = 0,

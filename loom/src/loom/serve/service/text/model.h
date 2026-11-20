@@ -21,6 +21,7 @@
 #include "loom/serve/service/text/chat.h"
 #include "loom/serve/service/text/media_input.h"
 #include "loom/serve/service/text/warmup.h"
+#include "loom/service/text/schedule.h"
 #include "loomc/sanitizer.h"
 
 #ifdef __cplusplus
@@ -222,7 +223,7 @@ typedef struct loom_serve_text_result_t {
   // tokens, excluding pending anchors. Summed across completed verifications.
   uint32_t proposal_count;
   // Valid prefix of output_count IDs across at most two device-fed epochs.
-  int32_t tokens[16];
+  int32_t tokens[LOOM_SERVICE_TEXT_MAX_EPOCH_OUTPUTS];
 } loom_serve_text_result_t;
 
 typedef struct loom_serve_text_metrics_t {
@@ -603,17 +604,18 @@ iree_host_size_t loom_serve_text_model_span_capacity(
 // drafting and mixes known input with spans of draft_depth + 1 speculative
 // inputs. An optional continuation enqueues a second mixed plan without an
 // intermediate host wait. A zero output limit denotes known input. Limits 1
-// through draft_depth + 1 (twice that with continuation) denote speculative
-// input, require SELECT and a pending non-EOS prediction, and cap the number of
-// new selected outputs. PROPOSE spans supply only the pending token: source
-// draft commands publish directly into the verifier input buffer. Other
-// speculative spans supply the pending token followed by proposals themselves.
-// Greedy acceptance stops at the first mismatch, EOS, or limit. Only accepted
-// state is published; catch-up pairs accepted inputs with target hidden state.
-// Proposal, verification, commit and catch-up have no intermediate host wait or
-// readback. Each known input chunk executes once. Continuation advances known
-// chunks or promotes a selected first result to speculation, stopping
-// speculative work at EOS, output credit or context bound.
+// through draft_depth + 1 (twice that with continuation, capped at the shared
+// result capacity) denote speculative input. They require SELECT and a pending
+// non-EOS prediction and cap the number of new selected outputs. PROPOSE spans
+// supply only the pending token: source draft commands publish directly into
+// the verifier input buffer. Other speculative spans supply the pending token
+// followed by proposals themselves. Greedy acceptance stops at the first
+// mismatch, EOS, or limit. Only accepted state is published; catch-up pairs
+// accepted inputs with target hidden state. Proposal, verification, commit and
+// catch-up have no intermediate host wait or readback. Each known input chunk
+// executes once. Continuation advances known chunks or promotes a selected
+// first result to speculation, stopping speculative work at EOS, output credit
+// or context bound.
 //
 // Known-input models require out_capture and reject selection, proposal, media,
 // and continuation. Their source capture plan is checked before row mutation;

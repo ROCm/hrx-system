@@ -72,6 +72,8 @@ static iree_host_size_t loom_serve_text_epoch_prepare_continuation(
   loom_serve_text_span_t* next_spans = epoch->planning.spans;
   uint32_t* next_limits = epoch->planning.output_limits;
   const iree_host_size_t width = options->draft_depth + 1;
+  const iree_host_size_t prefill_credit =
+      iree_min(width + 1, LOOM_SERVICE_TEXT_MAX_EPOCH_OUTPUTS);
   loom_serve_ready_span_t* ready = epoch->planning.ready;
   memset(ready, 0, count * sizeof(*ready));
   for (iree_host_size_t i = 0; i < count; ++i) {
@@ -135,11 +137,10 @@ static iree_host_size_t loom_serve_text_epoch_prepare_continuation(
                         : rows[first].input_offset + spans[first].token_count,
         .media = speculative ? NULL : rows[first].media,
     };
+    const iree_host_size_t credit =
+        output_limits[first] ? output_limits[first] : prefill_credit;
     next_limits[i] =
-        speculative
-            ? (uint32_t)iree_min(output_limits[first] ? 2 * width : width + 1,
-                                 rows[first].output_count)
-            : 0;
+        speculative ? (uint32_t)iree_min(credit, rows[first].output_count) : 0;
   }
   *out_continuation = (loom_serve_text_continuation_t){
       .span_count = next_count,
@@ -179,6 +180,9 @@ iree_host_size_t loom_serve_text_epoch_prepare(
   uint32_t* output_limits = epoch->output_limits;
   iree_host_size_t proposal_count = 0;
   const iree_host_size_t width = options->draft_depth + 1;
+  const iree_host_size_t output_capacity =
+      iree_min(width * options->continuation_epochs,
+               LOOM_SERVICE_TEXT_MAX_EPOCH_OUTPUTS);
   for (iree_host_size_t i = 0; i < count; ++i) {
     const iree_host_size_t row = scheduled[i].row_index;
     const loom_serve_text_epoch_row_t* input = &rows[i];
@@ -192,8 +196,8 @@ iree_host_size_t loom_serve_text_epoch_prepare(
       decode_tokens[i] = input->token;
       if (options->draft_depth && scheduled[i].token_count == width) {
         ++proposal_count;
-        output_limits[i] = (uint32_t)iree_min(
-            width * options->continuation_epochs, input->output_count);
+        output_limits[i] =
+            (uint32_t)iree_min(output_capacity, input->output_count);
       }
     }
     spans[i] = (loom_serve_text_span_t){

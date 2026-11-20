@@ -923,7 +923,7 @@ TEST_F(ConfigurationTest, NativeCapacitiesAreNotOneModelShape) {
         Parse(Text(std::string(R"(,"rows":)") + std::to_string(rows))));
     EXPECT_EQ(model_.text.rows, rows);
   }
-  for (unsigned depth = 0; depth <= 7; ++depth) {
+  for (unsigned depth = 0; depth < 16; ++depth) {
     IREE_ASSERT_OK(
         Parse(Text(std::string(R"(,"draft_depth":)") + std::to_string(depth) +
                    R"(,"prefill_capacity":)" + std::to_string(depth + 1) +
@@ -945,7 +945,7 @@ TEST_F(ConfigurationTest, RejectsInvalidAndWrongModalityFields) {
         R"(,"variant_capacity":-1)",
         R"(,"variant_capacity":2147483648)",
         R"(,"rows":2,"rows":4)",
-        R"(,"draft_depth":8)",
+        R"(,"draft_depth":16)",
         R"(,"continuation_epochs":2)",
         R"(,"prefill_capacity":2,"draft_depth":3)",
         R"(,"prefill_capacity":2147483648)",

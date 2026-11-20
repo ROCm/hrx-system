@@ -14,6 +14,7 @@
 #include "iree/io/file_contents.h"
 #include "loom/serve/service/text/cache_policy.h"
 #include "loom/service/kind.h"
+#include "loom/service/text/schedule.h"
 
 typedef struct loom_serve_model_configuration_field_t {
   // Literal model key; escaped keys are rejected.
@@ -327,7 +328,8 @@ static iree_status_t loom_serve_model_configuration_text(
   IREE_RETURN_IF_ERROR(loom_serve_model_configuration_size(
       &fields[DEFINITION_MAX_TOKENS], 1, INT32_MAX, &text->max_tokens));
   IREE_RETURN_IF_ERROR(loom_serve_model_configuration_size(
-      &fields[DEFINITION_DRAFT_DEPTH], 0, 7, &text->draft_depth));
+      &fields[DEFINITION_DRAFT_DEPTH], 0,
+      LOOM_SERVICE_TEXT_MAX_EPOCH_OUTPUTS - 1, &text->draft_depth));
   IREE_RETURN_IF_ERROR(loom_serve_model_configuration_size(
       &fields[DEFINITION_CONTINUATION_EPOCHS], 1, 2,
       &text->continuation_epochs));

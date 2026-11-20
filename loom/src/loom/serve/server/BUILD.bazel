@@ -327,6 +327,7 @@ loom_cc_library(
         "//loom/src/loom/runtime/program:variant_pool",
         "//loom/src/loom/serve/service/text:cache_policy",
         "//loom/src/loom/service:kind",
+        "//loom/src/loom/service/text:schedule",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/base/internal:path",
