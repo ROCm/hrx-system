@@ -24,10 +24,25 @@ static iree_status_t loom_serve_text_chat_field_visit(
     if (!iree_string_view_equal(key, iree_make_cstring_view(field->name))) {
       continue;
     }
-    if (field->value.data || !(field->types & (1u << type))) {
+    if (field->value.data) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "duplicate or wrongly typed chat field '%s'",
-                              field->name);
+                              "duplicate chat field '%s'", field->name);
+    }
+    if (!(field->types & (1u << type))) {
+      static const iree_bitfield_string_mapping_t type_names[] = {
+          {LOOM_SERVE_TEXT_CHAT_STRING, IREE_SVL("string")},
+          {LOOM_SERVE_TEXT_CHAT_NUMBER, IREE_SVL("number")},
+          {LOOM_SERVE_TEXT_CHAT_OBJECT, IREE_SVL("object")},
+          {LOOM_SERVE_TEXT_CHAT_ARRAY, IREE_SVL("array")},
+          {LOOM_SERVE_TEXT_CHAT_BOOL, IREE_SVL("boolean")},
+          {LOOM_SERVE_TEXT_CHAT_NULL, IREE_SVL("null")},
+      };
+      iree_bitfield_string_temp_t storage;
+      iree_string_view_t types = iree_bitfield_format_inline(
+          field->types, IREE_ARRAYSIZE(type_names), type_names, &storage);
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "chat field '%s' expects JSON type %.*s",
+                              field->name, (int)types.size, types.data);
     }
     field->value = value;
     field->type = type;

@@ -27,8 +27,10 @@ Multipart fields retain their names, ordering and binary contents through
 request ownership. Consumers use those parsed fields without interpreting MIME
 boundaries again. Part order does not control routing. Unsupported transfer
 encodings, ambiguous framing and malformed/truncated multipart bodies reject.
-`Expect: 100-continue` is unsupported; upload examples explicitly clear that
-header.
+
+A client can send `Expect: 100-continue` and wait before uploading a body.
+The server replies `100 Continue` when it accepts the headers and is waiting for
+the first body bytes. It routes the request after the complete body arrives.
 
 ## Discovery and administration
 
@@ -174,7 +176,7 @@ For a local `candidate.json` containing
 `{"model":"scout","base":12,"sources":["config.loom","advance.loombc"]}`:
 
 ```bash
-curl --fail-with-body -H 'Expect:' \
+curl --fail-with-body \
   http://127.0.0.1:8080/v1/models/variants \
   -F 'request=@candidate.json;type=application/json;filename=model/candidate.json' \
   -F 'file=@config.loom;filename=model/config.loom' \
@@ -211,15 +213,14 @@ away from the package. For example, `checkpoint:"."` or `assets:"."` can let a
 model read uploaded tokenizer metadata while its source-declared weight files
 resolve under `base_directory:"/srv/checkpoints/model"`.
 
-The normal `--request_body_bytes` limit covers the complete multipart body;
-there is no implicit upload exception. Both content-length and chunked framing
-are accepted. The empty `Expect` header above suppresses an unsupported
-100-continue handshake. This endpoint loads executable code and has the same
-trusted-network boundary as model registration.
+The complete multipart body must fit `--request_body_bytes` with either
+content-length or chunked framing. This endpoint loads executable code and has
+the same trusted-network boundary as model registration.
 
 ## Chat completions
 
-`POST /v1/chat/completions` accepts a text deployment and a message history:
+`POST /v1/chat/completions` requires a registered text model ID and at least one
+message. `GET /v1/models` lists the deployment IDs accepted by the server.
 
 ```json
 {
@@ -604,7 +605,7 @@ The file accepts the same WAV, MP3, FLAC, and raw PCM inputs as
 decoder. The model determines which recording lengths and geometry it can use.
 
 ```sh
-curl --fail-with-body -H 'Expect:' \
+curl --fail-with-body \
   http://127.0.0.1:8080/v1/audio/voices \
   -F model=speaker -F id=narrator \
   -F 'file=@reference.wav;type=audio/wav'
@@ -644,7 +645,7 @@ and FLAC, converting their sample rate and channel layout to the model's input
 geometry:
 
 ```sh
-curl --fail-with-body -H 'Expect:' \
+curl --fail-with-body \
   http://127.0.0.1:8080/v1/audio/transcriptions \
   -F model=recognizer \
   -F 'file=@recording.wav;type=audio/wav'
@@ -676,7 +677,7 @@ selected model. The server converts the declared rate to the model's rate.
 For a 24 kHz mono recording sent to a 16 kHz mono recognizer:
 
 ```sh
-curl --fail-with-body -H 'Expect:' \
+curl --fail-with-body \
   http://127.0.0.1:8080/v1/audio/transcriptions \
   -F model=recognizer \
   -F 'file=@recording.pcm;headers="Content-Type: audio/pcm;rate=24000;channels=1"'

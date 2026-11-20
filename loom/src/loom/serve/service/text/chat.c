@@ -1279,6 +1279,14 @@ static iree_status_t loom_serve_text_chat_request_render(
       object, IREE_ARRAYSIZE(fields), fields));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[1]));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[0]));
+  iree_string_view_t messages =
+      iree_string_view_remove_prefix(fields[1].value, 1);
+  IREE_RETURN_IF_ERROR(iree_json_consume_insignificant(&messages));
+  if (iree_string_view_starts_with_char(messages, ']')) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "chat field 'messages' must contain at least one message");
+  }
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_video_options_read(
       fields[7].value, history->chat->policy->images.maximum_count,
       &history->video));

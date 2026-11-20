@@ -266,7 +266,7 @@ static iree_status_t loom_serve_http_variant_model(
     *out_index = i;
     return iree_ok_status();
   }
-  return iree_make_status(IREE_STATUS_NOT_FOUND, "model is not registered");
+  return loom_serve_http_model_not_found(name);
 }
 
 static iree_status_t loom_serve_http_variant_write(

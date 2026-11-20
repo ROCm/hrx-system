@@ -66,7 +66,7 @@ package:
 ```sh
 server=http://127.0.0.1:8080
 
-curl --fail-with-body --silent --show-error -H 'Expect:' \
+curl --fail-with-body --silent --show-error \
   "$server/v1/models/register" \
   -F 'request=@baseline/model.json;type=application/json;filename=scout/model.json' \
   -F 'file=@baseline/prepare.loom;filename=scout/prepare.loom' \
@@ -95,10 +95,8 @@ Both `.loom` and `.loombc` are JIT inputs; bytecode is portable IR, not an AOT
 device binary. Uploaded bytes are retained in memory through their owning
 registration or compilation. They are not a persistent package catalog.
 The complete multipart body must fit `--request_body_bytes` (8 MiB by default).
-`-H 'Expect:'` suppresses curl's optional continue handshake; ordinary file
-parts supply the required content length. Parameter checkpoints stay on the
-server. The [upload reference](../http-profiles.md#uploaded-source-packages)
-owns exact framing and path rules.
+Parameter checkpoints stay on the server. For multipart framing and package path
+resolution, see [Uploaded source packages](../http-profiles.md#uploaded-source-packages).
 
 ## Save a repeatable continuation
 
@@ -190,7 +188,7 @@ jq -n --argjson base "$original" \
   '{model:"scout", base:$base, sources:["config.loom","advance.loombc"]}' \
   >candidate.json
 
-curl --fail-with-body --silent --show-error -H 'Expect:' \
+curl --fail-with-body --silent --show-error \
   "$server/v1/models/variants" \
   -F 'request=@candidate.json;type=application/json;filename=scout/candidate.json' \
   -F 'file=@candidate/config.loom;filename=scout/config.loom' \

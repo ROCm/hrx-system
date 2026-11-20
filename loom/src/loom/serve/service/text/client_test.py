@@ -105,6 +105,47 @@ class ClientTest(unittest.TestCase):
             chunk["choices"][0]["delta"].get("content", "") for chunk in chunks
         )
 
+    def check_request_diagnostics(self, address):
+        def post(body, expected):
+            return control(
+                address,
+                "POST",
+                "/v1/chat/completions",
+                expected,
+                body=body,
+                headers={"Content-Type": "application/json"},
+            )
+
+        missing_value = '{"model":"text","messages":'
+        for body, terms in (
+            (missing_value + "}", ("JSON", "value", f"byte {len(missing_value)}")),
+            ('{"messages":[]}', ("requires", "model")),
+            ('{"model":7}', ("model", "string")),
+            ('{"model":"text","model":"text"}', ("duplicate", "model")),
+            ('{"model":"text","messages":""}', ("messages", "array")),
+            ('{"model":"text","messages":[],"messages":[]}', ("duplicate", "messages")),
+            (json.dumps(self.body(stream="yes")), ("stream", "boolean", "null")),
+        ):
+            with self.subTest(body=body):
+                error = post(body, 400)["error"]
+                for term in terms:
+                    self.assertIn(term, error["message"])
+        for streaming in (False, True):
+            error = self.request(
+                address, self.body(stream=streaming, messages=[]), expected=400
+            )["error"]
+            self.assertIn("at least one message", error["message"])
+
+        # Recover via the advertised catalog after a misspelled model ID.
+        name = 'missing-"model"'
+        error = post(json.dumps(self.body(model=name)), 404)["error"]
+        self.assertIn(name, error["message"])
+        self.assertIn("/v1/models", error["message"])
+        models = control(address, "GET", "/v1/models", 200)["data"]
+        body = self.body(model=models[0]["id"])
+        result = post("\n" + json.dumps(body, indent=2) + "\n", 200)
+        self.check_completion(result, "bx", "length", 4, 2)
+
     def test_output_forms_share_execution_history_and_failure_semantics(self):
         # HTTP response semantics are independent of worker count. This suite
         # owns concurrent response forms, while pressure coverage owns the
@@ -153,6 +194,7 @@ class ClientTest(unittest.TestCase):
                 ) as (process, bound):
                     self.assertIsNotNone(bound, log.read_text())
                     address = urlsplit(f"http://{bound}")
+                    self.check_request_diagnostics(address)
                     for options in (
                         {},
                         {"stream": False},

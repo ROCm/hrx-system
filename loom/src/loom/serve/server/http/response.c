@@ -8,6 +8,13 @@
 
 #include "loom/util/json.h"
 
+iree_status_t loom_serve_http_model_not_found(iree_string_view_t name) {
+  return iree_make_status(IREE_STATUS_NOT_FOUND,
+                          "model '%.*s' is not registered. List available "
+                          "model IDs with GET /v1/models",
+                          (int)name.size, name.data);
+}
+
 void loom_serve_http_response_send(loom_serve_http_server_t* server,
                                    loom_serve_http_connection_t* connection,
                                    iree_string_view_t response) {
@@ -87,8 +94,12 @@ iree_status_t loom_serve_http_response_error(
       break;
   }
   loom_serve_http_server_record_error(server, status);
+  iree_string_view_t message = iree_status_message(status);
+  if (!message.size) {
+    message = iree_make_cstring_view(reason);
+  }
   iree_status_t response = loom_serve_http_response_reject(
-      server, connection, code, reason, iree_status_message(status), scratch);
+      server, connection, code, reason, message, scratch);
   iree_status_free(status);
   return response;
 }

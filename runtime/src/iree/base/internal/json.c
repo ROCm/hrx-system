@@ -323,7 +323,8 @@ static iree_status_t iree_json_consume_object_impl(
 
 iree_status_t iree_json_consume_object(iree_string_view_t* str,
                                        iree_string_view_t* out_value) {
-  iree_json_skip_bom(str);
+  *out_value = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(iree_json_consume_insignificant(str));
   return iree_json_consume_object_impl(str, /*depth=*/0, out_value);
 }
 
@@ -371,7 +372,8 @@ static iree_status_t iree_json_consume_array_impl(
 
 iree_status_t iree_json_consume_array(iree_string_view_t* str,
                                       iree_string_view_t* out_value) {
-  iree_json_skip_bom(str);
+  *out_value = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(iree_json_consume_insignificant(str));
   return iree_json_consume_array_impl(str, /*depth=*/0, out_value);
 }
 
@@ -398,7 +400,11 @@ static iree_status_t iree_json_consume_value_impl(
     case 'n':
       return iree_json_consume_keyword(str, IREE_SV("null"), out_value);
     default:
-      return iree_json_consume_number(str, out_value);
+      if (str->data[0] == '-' || iree_json_is_digit(str->data[0])) {
+        return iree_json_consume_number(str, out_value);
+      }
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "expected JSON value");
   }
 }
 

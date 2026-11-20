@@ -503,6 +503,18 @@ TEST(JsonConsumeValueTest, True) {
   EXPECT_SV_EQ(value, IREE_SV("true"));
 }
 
+TEST(JsonConsumeValueTest, TypedContainersLeaveTheCursorAtTheEndOfTheValue) {
+  iree_string_view_t cursor =
+      IREE_SV("\r\n\t {\"key\": 1} /* next */ \n [2, 3]  ");
+  iree_string_view_t value;
+  IREE_ASSERT_OK(iree_json_consume_object(&cursor, &value));
+  EXPECT_SV_EQ(value, IREE_SV("{\"key\": 1}"));
+  EXPECT_SV_EQ(cursor, IREE_SV(" /* next */ \n [2, 3]  "));
+  IREE_ASSERT_OK(iree_json_consume_array(&cursor, &value));
+  EXPECT_SV_EQ(value, IREE_SV("[2, 3]"));
+  EXPECT_SV_EQ(cursor, IREE_SV("  "));
+}
+
 TEST(JsonConsumeValueTest, WithLeadingWhitespace) {
   iree_string_view_t str = IREE_SV("  \n\t123");
   iree_string_view_t value;
