@@ -15,6 +15,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/pass/types.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/switch.h"
 
 namespace {
 
@@ -120,6 +121,44 @@ TEST_F(ConnectivityTest, PayloadAndCompletionReachOnlyTheirIntendedConsumers) {
             LOOM_AIE2P_NATIVE_CONNECTIVITY_NONE);
   EXPECT_EQ(Check(completion, {consumer}, 1, true).failure,
             LOOM_AIE2P_NATIVE_CONNECTIVITY_NONE);
+}
+
+TEST_F(ConnectivityTest, ConcurrentShimBroadcastsBranchOnTheirWorkerRows) {
+  const auto* family = context_.family;
+  const auto* compute =
+      loom_xdna_array_tile_kind_facts(family, LOOM_XDNA_TILE_KIND_COMPUTE);
+  std::vector<loom_aie2p_native_connection_t> groups;
+  std::vector<Endpoint> destinations;
+  for (uint16_t i = 0; i < compute->row_count; ++i) {
+    const uint16_t row = compute->first_row + i;
+    groups.push_back({
+        .source = {{i, 0}, LOOM_XDNA_STREAM_PORT_DMA, 0},
+        .packet = UINT8_MAX,
+        .destination_offset = destinations.size(),
+        .destination_count = family->column_count,
+    });
+    for (uint16_t column = 0; column < family->column_count; ++column) {
+      destinations.push_back(
+          {{column, row}, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0});
+    }
+  }
+  const loom_aie2p_native_connections_t intent = {
+      .groups = groups.data(),
+      .group_count = groups.size(),
+      .destinations = destinations.data(),
+      .destination_count = destinations.size(),
+  };
+  loom_aie2p_native_switch_t* switches = nullptr;
+  IREE_ASSERT_OK(
+      loom_aie2p_native_ingress_circuits(family, &intent, &arena_, &switches));
+  ASSERT_NE(switches, nullptr);
+  size_t shim_count = 0, workers = 0;
+  for (const auto* state = switches; state; state = state->next) {
+    shim_count += state->coordinate.row == 0;
+    workers += state->coordinate.row >= compute->first_row;
+  }
+  EXPECT_EQ(shim_count, groups.size());
+  EXPECT_EQ(workers, destinations.size());
 }
 
 TEST_F(ConnectivityTest,

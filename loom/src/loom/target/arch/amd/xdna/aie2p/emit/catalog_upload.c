@@ -8,8 +8,8 @@
 
 #include <string.h>
 
-#include "loom/target/arch/amd/xdna/aie2p/pipeline/connectivity.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_plan.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/switch.h"
 
 typedef struct loom_aie2p_catalog_column_t {
   // First byte in the tile-local SRAM bank.
@@ -28,9 +28,6 @@ static iree_status_t loom_aie2p_catalog_routes(
     const loom_xdna_array_family_t* family, const bool* columns,
     iree_host_size_t count, iree_arena_allocator_t* arena,
     loom_aie2p_native_switch_t** out_switches) {
-  loom_aie2p_array_route_builder_t routing;
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_route_builder_initialize(
-      family, count * 3, arena, &routing));
   loom_aie2p_native_connection_t* connections = NULL;
   loom_aie2p_native_connection_endpoint_t* destinations = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -47,11 +44,6 @@ static iree_status_t loom_aie2p_catalog_routes(
     }
     const loom_xdna_tile_coordinate_t shim = {column, 0};
     const loom_xdna_tile_coordinate_t memory = {column, memory_row};
-    loom_aie2p_array_route_tree_t tree = {0};
-    const bool routed = loom_aie2p_array_route_ingress(
-        &routing, (uint32_t)index, &tree, shim, 0, memory, 0);
-    IREE_ASSERT(routed);
-    (void)routed;
     connections[index] = (loom_aie2p_native_connection_t){
         .source = {shim, LOOM_XDNA_STREAM_PORT_DMA, 0},
         .packet = UINT8_MAX,
@@ -61,28 +53,14 @@ static iree_status_t loom_aie2p_catalog_routes(
     destinations[index++] = (loom_aie2p_native_connection_endpoint_t){
         memory, LOOM_XDNA_STREAM_PORT_DMA, 0};
   }
-  loom_aie2p_native_route_t* routes = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, routing.route_count, sizeof(*routes), (void**)&routes));
-  for (iree_host_size_t i = 0; i < routing.route_count; ++i) {
-    routes[i] = (loom_aie2p_native_route_t){.edge = &routing.routes[i],
-                                            .packet = UINT8_MAX,
-                                            .control_source = UINT32_MAX};
-  }
-  const loom_aie2p_native_switch_input_t input = {.routing = &routing,
-                                                  .routes = routes};
-  iree_string_view_t requirement;
-  IREE_RETURN_IF_ERROR(loom_aie2p_native_switches_build(
-      &input, arena, out_switches, &requirement));
-  IREE_ASSERT(iree_string_view_is_empty(requirement));
   const loom_aie2p_native_connections_t intended = {
       .groups = connections,
       .group_count = count,
       .destinations = destinations,
       .destination_count = count,
   };
-  return loom_aie2p_native_connections_verify(&routing, *out_switches,
-                                              &intended, arena);
+  return loom_aie2p_native_ingress_circuits(family, &intended, arena,
+                                            out_switches);
 }
 
 static loom_aie2p_program_record_t loom_aie2p_catalog_write(uint32_t address,
@@ -241,6 +219,7 @@ iree_status_t loom_aie2p_catalog_upload_build(
   loom_aie2p_native_switch_t* switches = NULL;
   IREE_RETURN_IF_ERROR(
       loom_aie2p_catalog_routes(family, columns, count, arena, &switches));
+  IREE_ASSERT(switches);  // Each column owns its independent one-hop circuit.
   // Four switch-bank writes, seven descriptor setup records, two starts,
   // and four retirement records per active column.
   enum {

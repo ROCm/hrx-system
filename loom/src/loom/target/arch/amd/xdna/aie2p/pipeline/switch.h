@@ -46,6 +46,15 @@ iree_status_t loom_aie2p_native_switches_build(
     iree_arena_allocator_t* arena, loom_aie2p_native_switch_t** out_switches,
     iree_string_view_t* out_requirement);
 
+// Routes simultaneous shim DMA circuits to local DMA or tile-control
+// receivers and independently verifies the complete destination sets. Each
+// sender owns one multicast tree. Insufficient links leave |out_switches|
+// NULL so startup can use ordinary firmware writes.
+iree_status_t loom_aie2p_native_ingress_circuits(
+    const loom_xdna_array_family_t* family,
+    const loom_aie2p_native_connections_t* connections,
+    iree_arena_allocator_t* arena, loom_aie2p_native_switch_t** out_switches);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

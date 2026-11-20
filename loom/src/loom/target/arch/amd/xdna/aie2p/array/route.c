@@ -626,12 +626,14 @@ bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
                                ->first_row
                          : destination.row;
   }
-  // Completion packets share a shim source even when they return to different
-  // cores. Keep their upward prefix in that column, leaving the receiving
-  // column's vertical lanes available for ingress payloads.
+  // Completion packets and shim-to-control broadcasts share their upward
+  // prefix at the sender. Branching on the receivers' row lets other rows
+  // use independent horizontal lanes.
   if (source.column != destination.column &&
       source_kind == LOOM_XDNA_TILE_KIND_SHIM_NOC &&
-      source_port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL &&
+      (source_port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL ||
+       (source_port == LOOM_XDNA_STREAM_PORT_DMA &&
+        destination_port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL && !packet)) &&
       destination_kind == LOOM_XDNA_TILE_KIND_COMPUTE) {
     horizontal_row = destination.row;
   }
