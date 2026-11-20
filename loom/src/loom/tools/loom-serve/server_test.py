@@ -200,6 +200,8 @@ class ServerTest(unittest.TestCase):
                     self.assertEqual(
                         control(address, "GET", "/v1/models", 200)["data"], []
                     )
+                    for path in ("/health", "/v1/health", "/ready", "/v1/ready"):
+                        control(address, "GET", path, 503)
                     self.assertEqual(
                         control(address, "GET", "/v1/status", 200)["server"][
                             "resources"
@@ -216,6 +218,7 @@ class ServerTest(unittest.TestCase):
                     self.assertEqual(
                         registration["loom"]["status"]["admission"], "drained"
                     )
+                    control(address, "GET", "/ready", 503)
                     self.assertEqual(
                         control(address, "GET", "/v1/models", 200)["data"], []
                     )
@@ -224,6 +227,19 @@ class ServerTest(unittest.TestCase):
                         "vectors",
                     )
                     self.post(address, "/v1/models/undrain", {"model": "vectors"})
+                    # Launchers wait for a model before issuing the first inference.
+                    while not control(address, "GET", "/models", 200)["data"]:
+                        entry = control(address, "GET", "/v1/status", 200)["data"][0]
+                        self.assertNotIn("error", entry["loom"])
+                    for path in ("/health", "/v1/health"):
+                        self.assertEqual(
+                            control(address, "GET", path, 200), {"status": "ok"}
+                        )
+                    for path in ("/ready", "/v1/ready"):
+                        self.assertEqual(
+                            control(address, "GET", path, 200),
+                            {"status": "ready", "model": "vectors"},
+                        )
                     for inputs, expected in (
                         (["a", "bbb"], [[1, 1], [6, 3]]),
                         (["ab"], [[3, 2]]),
@@ -248,7 +264,9 @@ class ServerTest(unittest.TestCase):
                                 "total_tokens": token_count,
                             },
                         )
-                    model = control(address, "GET", "/v1/models", 200)["data"][0]
+                    catalog = control(address, "GET", "/v1/models", 200)
+                    self.assertEqual(control(address, "GET", "/models", 200), catalog)
+                    model = catalog["data"][0]
                     self.assertEqual(model["id"], "vectors")
                     self.assertEqual(model["object"], "model")
                     self.assertGreater(model["created"], 0)
@@ -256,8 +274,16 @@ class ServerTest(unittest.TestCase):
                     self.assertEqual(model["owned_by"], "local")
                     self.assertEqual(model["input_modalities"], ["text"])
                     self.assertEqual(model["output_modalities"], ["embedding"])
+                    self.assertEqual(
+                        model["architecture"]["input_modalities"], ["text"]
+                    )
+                    self.assertEqual(
+                        model["architecture"]["output_modalities"], ["embedding"]
+                    )
                     self.assertNotIn("context_length", model)
                     self.post(address, "/v1/models/drain", {"model": "vectors"})
+                    control(address, "GET", "/ready", 503)
+                    control(address, "GET", "/health", 503)
                     self.assertEqual(
                         control(address, "GET", "/v1/models", 200)["data"][0]["id"],
                         "vectors",
@@ -270,6 +296,7 @@ class ServerTest(unittest.TestCase):
                     )
                     while control(address, "GET", "/v1/status", 200)["data"]:
                         pass
+                    control(address, "GET", "/v1/ready", 503)
                     self.assertEqual(
                         control(address, "GET", "/healthz", 200), {"status": "ready"}
                     )
@@ -531,8 +558,15 @@ class ServerTest(unittest.TestCase):
                     self.assertGreater(after[1 - index], before[1 - index])
                     self.assertEqual(after[index], before[index])
                     self.assertEqual(after[2], before[2])
+                self.assertEqual(
+                    control(address, "GET", "/ready", 200), {"status": "ready"}
+                )
                 self.post(
                     address, "/v1/models/unregister", {"model": "alpha"}, expected=202
+                )
+                self.assertEqual(
+                    control(address, "GET", "/ready", 200),
+                    {"status": "ready", "model": "beta"},
                 )
                 while any(
                     entry["id"] == "alpha"

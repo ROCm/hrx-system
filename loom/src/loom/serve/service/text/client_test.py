@@ -241,6 +241,15 @@ class ClientTest(unittest.TestCase):
                         media_io_kwargs=None,
                         client_extension={"request_label": "example"},
                     )
+                    count = control(
+                        address,
+                        "POST",
+                        "/v1/chat/completions/input_tokens",
+                        200,
+                        body=json.dumps(compatible),
+                        headers={"Content-Type": "application/json"},
+                    )
+                    self.assertEqual(count["object"], "response.input_tokens")
                     for streaming in (False, True):
                         result = self.request(
                             address, {**compatible, "stream": streaming}
@@ -251,17 +260,9 @@ class ClientTest(unittest.TestCase):
                             )
                         else:
                             self.check_completion(result, "bx", "length", 4, 2)
-                    self.assertEqual(
-                        control(
-                            address,
-                            "POST",
-                            "/v1/chat/completions/input_tokens",
-                            200,
-                            body=json.dumps(compatible),
-                            headers={"Content-Type": "application/json"},
-                        ),
-                        {"input_tokens": 4},
-                    )
+                            self.assertEqual(
+                                count["input_tokens"], result["usage"]["prompt_tokens"]
+                            )
                     tools = [
                         {
                             "type": "function",

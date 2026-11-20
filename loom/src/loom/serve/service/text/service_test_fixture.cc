@@ -9,9 +9,26 @@
 #include <cstdlib>
 #include <string>
 
+#include "iree/base/internal/json.h"
 #include "loom/runtime/testing/application.h"
 
 namespace loom_serve::testing::text {
+
+void SourceTextServiceTest::ExpectInputTokens(const std::string& response,
+                                              uint64_t expected) {
+  SCOPED_TRACE(response);
+  ASSERT_EQ(response.find("HTTP/1.1 200 "), 0u);
+  const size_t separator = response.find("\r\n\r\n");
+  ASSERT_NE(separator, std::string::npos);
+  iree_string_view_t body = iree_make_string_view(
+      response.data() + separator + 4, response.size() - separator - 4);
+  iree_string_view_t value;
+  IREE_ASSERT_OK(
+      iree_json_lookup_object_value(body, IREE_SV("input_tokens"), &value));
+  uint64_t count = 0;
+  IREE_ASSERT_OK(iree_json_parse_uint64(value, &count));
+  EXPECT_EQ(count, expected);
+}
 
 void SourceTextServiceTest::EditNativeProvider(const std::string& source_path,
                                                const std::string& target_path,

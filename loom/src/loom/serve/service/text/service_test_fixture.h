@@ -264,6 +264,8 @@ class SourceTextServiceTest : public ::testing::Test {
     return response;
   }
 
+  static void ExpectInputTokens(const std::string& response, uint64_t expected);
+
   static std::string Message(const std::string& role,
                              const std::string& content) {
     return "{\"role\":\"" + role + "\",\"content\":\"" + content + "\"}";

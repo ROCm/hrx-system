@@ -84,19 +84,15 @@ class InputCountTest : public SourceTextServiceTest {
 
 TEST_F(InputCountTest, FreshChatCountsWithoutActivatingOrReserving) {
   ExpectCold();
-  EXPECT_NE(Count(Request(Message("user", "abxa")))
-                .find("\r\n\r\n{\"input_tokens\":4}"),
-            std::string::npos);
-  EXPECT_NE(
+  ExpectInputTokens(Count(Request(Message("user", "abxa"))), 4);
+  ExpectInputTokens(
       Count(Request(Message("system", "ab") + "," + Message("user", "xa") +
                     "," + Message("assistant", "bx") + "," +
-                    Message("user", "ba")))
-          .find("\r\n\r\n{\"input_tokens\":9}"),
-      std::string::npos);
+                    Message("user", "ba"))),
+      9);
   // Counting requires no output reservation: the whole context can be input.
-  EXPECT_NE(Count(Request(Message("user", std::string(96, 'a')), 16))
-                .find("\r\n\r\n{\"input_tokens\":96}"),
-            std::string::npos);
+  ExpectInputTokens(Count(Request(Message("user", std::string(96, 'a')), 16)),
+                    96);
   ExpectCold();
   EXPECT_EQ(interface_.telemetry.counters->completed, 3u);
 }
@@ -105,17 +101,14 @@ TEST_F(InputCountTest, SourceMediaRowsNeedNoProjectionOrComponent) {
   const auto request = Request(
       ImageMessage("a", "image/x-portable-arbitrarymap", kPam, "low", "b"));
   const auto response = Count(request);
-  EXPECT_EQ(response.find("HTTP/1.1 200"), 0u) << response;
   // The fixture's ordered_content emits one logical position per image.
-  EXPECT_NE(response.find("\r\n\r\n{\"input_tokens\":3}"), std::string::npos)
-      << response;
+  ExpectInputTokens(response, 3);
   ExpectCold();
   const auto multiple = Count(Request(
       ImageMessage("a", "image/x-portable-arbitrarymap", kPam, "low", "b") +
       "," +
       ImageMessage("x", "image/x-portable-arbitrarymap", kPam, "high", "")));
-  EXPECT_NE(multiple.find("{\"input_tokens\":5}"), std::string::npos)
-      << multiple;
+  ExpectInputTokens(multiple, 5);
   ExpectCold();
 }
 
@@ -123,10 +116,10 @@ TEST_F(InputCountTest, ToolsAndOptionsUseTheSameSourcePolicy) {
   const auto tools = Count(
       R"({"model":"fixture-text","messages":[{"role":"user","content":"abxa"}],"tools":[{"type":"function","function":{"name":"read","parameters":{"type":"object","properties":{}}}}]})");
   // chat_begin emits one catalog marker per tool before the four input IDs.
-  EXPECT_NE(tools.find("{\"input_tokens\":5}"), std::string::npos) << tools;
+  ExpectInputTokens(tools, 5);
   const auto options = Count(
       R"({"model":"fixture-text","messages":[{"role":"user","content":"abxa"}],"enable_thinking":false,"temperature":0,"top_p":1,"top_k":1,"seed":42})");
-  EXPECT_NE(options.find("{\"input_tokens\":4}"), std::string::npos) << options;
+  ExpectInputTokens(options, 4);
   ExpectCold();
 }
 
@@ -149,8 +142,7 @@ TEST_F(InputCountTest, CountingProgressesWithEveryExecutionRowOccupied) {
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
     return interface_.telemetry.counters->completed == 1;
   }));
-  EXPECT_NE(Read(client).find("\r\n\r\n{\"input_tokens\":3}"),
-            std::string::npos);
+  ExpectInputTokens(Read(client), 3);
   EXPECT_EQ(interface_.snapshot(interface_.runtime.self).active_requests, 1u);
   const auto after = loom_serve_text_model_pool_usage(model_);
   EXPECT_EQ(after.available, before.available);
@@ -228,9 +220,9 @@ TEST_F(InputCountTest, FullQueueRejectsWithoutDisturbingAcceptedQueries) {
   EXPECT_EQ(Read(clients[2]).find("HTTP/1.1 503"), 0u);
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] { return Idle(); }));
   for (size_t i = 0; i < 2; ++i) {
-    EXPECT_NE(Read(clients[i]).find("{\"input_tokens\":4}"), std::string::npos);
+    ExpectInputTokens(Read(clients[i]), 4);
   }
-  EXPECT_NE(Count(body).find("{\"input_tokens\":4}"), std::string::npos);
+  ExpectInputTokens(Count(body), 4);
   ExpectCold();
 }
 
@@ -266,10 +258,10 @@ TEST_F(InputCountTest, DisconnectRetiresTheHeadBeforeReusingItsClaim) {
       },
       connections[0], iree_infinite_timeout()));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] { return Idle(); }));
-  EXPECT_NE(Read(second).find("{\"input_tokens\":3}"), std::string::npos);
+  ExpectInputTokens(Read(second), 3);
   EXPECT_EQ(interface_.telemetry.counters->cancelled, 1u);
   EXPECT_EQ(interface_.telemetry.counters->completed, 1u);
-  EXPECT_NE(Count(body).find("{\"input_tokens\":4}"), std::string::npos);
+  ExpectInputTokens(Count(body), 4);
   ExpectCold();
 }
 
@@ -290,9 +282,7 @@ TEST_F(InputCountTest, InvalidInputDoesNotPoisonTheModel) {
     EXPECT_EQ(Count(Request(Message("user", "a")), header).find("HTTP/1.1 400"),
               0u);
   }
-  EXPECT_NE(
-      Count(Request(Message("user", "abxa"))).find("{\"input_tokens\":4}"),
-      std::string::npos);
+  ExpectInputTokens(Count(Request(Message("user", "abxa"))), 4);
   ExpectCold();
 }
 
