@@ -287,7 +287,7 @@ static iree_status_t loom_serve_http_parse_field_line(
 }
 
 static iree_status_t loom_serve_http_parse_headers(
-    loom_serve_http_request_parser_t* parser) {
+    loom_serve_http_request_parser_t* parser, bool* out_expect_continue) {
   const iree_string_view_t storage =
       loom_serve_http_request_storage_view(parser);
   const iree_host_size_t request_line_end =
@@ -302,6 +302,7 @@ static iree_status_t loom_serve_http_parse_headers(
   bool has_host = false;
   bool has_content_length = false;
   bool is_chunked = false;
+  bool expect_continue = false;
   iree_host_size_t content_length = 0;
   iree_host_size_t cursor = request_line_end + 2;
   while (cursor < parser->header_length) {
@@ -343,8 +344,11 @@ static iree_status_t loom_serve_http_parse_headers(
       }
       is_chunked = true;
     } else if (iree_string_view_equal_case(name, IREE_SV("Expect"))) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "HTTP Expect is unsupported");
+      if (!iree_string_view_equal_case(value, IREE_SV("100-continue"))) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "unsupported HTTP expectation");
+      }
+      expect_continue = true;
     } else if (iree_string_view_equal_case(name, IREE_SV("Content-Encoding")) &&
                !iree_string_view_equal_case(value, IREE_SV("identity"))) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -370,6 +374,7 @@ static iree_status_t loom_serve_http_parse_headers(
                             "HTTP request body capacity exhausted");
   }
   parser->body_remaining = content_length;
+  *out_expect_continue = expect_continue && (is_chunked || content_length != 0);
   parser->phase = is_chunked ? LOOM_SERVE_HTTP_REQUEST_PARSER_PHASE_CHUNK_SIZE
                              : LOOM_SERVE_HTTP_REQUEST_PARSER_PHASE_BODY;
   return iree_ok_status();
@@ -710,7 +715,10 @@ iree_status_t loom_serve_http_request_parser_allocate(
 
 iree_status_t loom_serve_http_request_parser_feed(
     loom_serve_http_request_parser_t* parser, iree_const_byte_span_t chunk,
-    const loom_serve_http_request_t** out_request) {
+    const loom_serve_http_request_t** out_request, bool* out_send_continue) {
+  if (out_send_continue) {
+    *out_send_continue = false;
+  }
   if (!parser || !out_request || (chunk.data_length != 0 && !chunk.data)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -724,6 +732,7 @@ iree_status_t loom_serve_http_request_parser_feed(
   }
 
   iree_host_size_t consumed_length = 0;
+  bool expect_continue = false;
   iree_status_t status = iree_ok_status();
   if (parser->phase == LOOM_SERVE_HTTP_REQUEST_PARSER_PHASE_HEADERS) {
     const iree_host_size_t old_length =
@@ -746,7 +755,7 @@ iree_status_t loom_serve_http_request_parser_feed(
           iree_string_view_find(storage, IREE_SV("\r\n\r\n"), scan_offset);
       if (delimiter != IREE_STRING_VIEW_NPOS) {
         parser->header_length = delimiter + 4;
-        status = loom_serve_http_parse_headers(parser);
+        status = loom_serve_http_parse_headers(parser, &expect_continue);
         // Replay lookahead from the caller's bytes through the selected body
         // decoder; retained storage contains only headers and decoded content.
         consumed_length = parser->header_length - old_length;
@@ -775,6 +784,9 @@ iree_status_t loom_serve_http_request_parser_feed(
     *out_request = &parser->request;
   } else if (!iree_status_is_ok(status)) {
     parser->phase = LOOM_SERVE_HTTP_REQUEST_PARSER_PHASE_FAILED;
+  } else if (out_send_continue) {
+    *out_send_continue =
+        expect_continue && consumed_length == chunk.data_length;
   }
   return status;
 }

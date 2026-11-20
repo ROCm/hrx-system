@@ -113,7 +113,7 @@ bool Parse(iree_const_byte_span_t bytes, bool fragmented,
 
   const loom_serve_http_request_t* request = nullptr;
   status = loom_serve_http_request_parser_feed(
-      parser, iree_const_byte_span_empty(), &request);
+      parser, iree_const_byte_span_empty(), &request, nullptr);
   if (iree_status_is_ok(status)) {
     if (fragmented && bytes.data_length) {
       const uint64_t hash = Hash(bytes);
@@ -135,10 +135,12 @@ bool Parse(iree_const_byte_span_t bytes, bool fragmented,
         if (!chunk.data_length) {
           continue;
         }
-        status = loom_serve_http_request_parser_feed(parser, chunk, &request);
+        status = loom_serve_http_request_parser_feed(parser, chunk, &request,
+                                                     nullptr);
       }
     } else {
-      status = loom_serve_http_request_parser_feed(parser, bytes, &request);
+      status =
+          loom_serve_http_request_parser_feed(parser, bytes, &request, nullptr);
     }
   }
   if (iree_status_is_ok(status)) {

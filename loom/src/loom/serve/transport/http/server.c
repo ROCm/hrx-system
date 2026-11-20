@@ -126,19 +126,31 @@ static iree_status_t loom_serve_http_connection_receive(
     void* user_data, iree_async_span_t data, iree_async_buffer_lease_t* lease) {
   loom_serve_http_connection_t* connection = user_data;
   const loom_serve_http_request_t* request = NULL;
+  bool send_continue = false;
   iree_slim_mutex_lock(&connection->receive_mutex);
   connection->receive_eof |= data.length == 0;
   const bool upgraded = connection->protocol.receive != NULL;
-  iree_status_t status =
-      upgraded ? connection->protocol.receive(connection->protocol.user_data,
-                                              iree_async_span_const_data(data))
-      : data.length
-          ? loom_serve_http_request_parser_feed(
-                connection->parser, iree_async_span_const_data(data), &request)
-          : loom_serve_http_request_parser_finalize(connection->parser,
-                                                    &request);
+  iree_status_t status;
+  if (upgraded) {
+    status = connection->protocol.receive(connection->protocol.user_data,
+                                          iree_async_span_const_data(data));
+  } else if (data.length) {
+    status = loom_serve_http_request_parser_feed(
+        connection->parser, iree_async_span_const_data(data), &request,
+        &send_continue);
+  } else {
+    status =
+        loom_serve_http_request_parser_finalize(connection->parser, &request);
+  }
   iree_slim_mutex_unlock(&connection->receive_mutex);
-  if (iree_status_is_ok(status) && (request || upgraded)) {
+  if (!iree_status_is_ok(status)) {
+    return status;
+  }
+  if (send_continue) {
+    return loom_serve_http_connection_send(
+        connection, IREE_SV("HTTP/1.1 100 Continue\r\n\r\n"));
+  }
+  if (request || upgraded) {
     iree_slim_mutex_lock(&connection->server->mutex);
     if (request) {
       connection->request = request;
@@ -148,7 +160,7 @@ static iree_status_t loom_serve_http_connection_receive(
     iree_slim_mutex_unlock(&connection->server->mutex);
   }
   // EOF is a half-close: a complete request may still receive its response.
-  return status;
+  return iree_ok_status();
 }
 
 static void loom_serve_http_connection_send_completed(

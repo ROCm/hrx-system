@@ -31,7 +31,7 @@ class WebSocketHandshakeTest : public ::testing::Test {
     const loom_serve_http_request_t* request = nullptr;
     iree_status_t status = loom_serve_http_request_parser_feed(
         parser, iree_make_const_byte_span(headers.data(), headers.size()),
-        &request);
+        &request, nullptr);
     if (iree_status_is_ok(status)) {
       status = loom_serve_websocket_handshake(
           request, {.allowed_origins = origins}, subprotocol, &response_);

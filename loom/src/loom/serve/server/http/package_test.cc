@@ -49,8 +49,8 @@ class HttpPackageTest : public ::testing::Test {
         std::to_string(body.size()) + "\r\n\r\n" + body;
     const loom_serve_http_request_t* request = nullptr;
     IREE_RETURN_IF_ERROR(loom_serve_http_request_parser_feed(
-        parser_, iree_make_const_byte_span(wire.data(), wire.size()),
-        &request));
+        parser_, iree_make_const_byte_span(wire.data(), wire.size()), &request,
+        nullptr));
     IREE_RETURN_IF_ERROR(
         loom_serve_http_request_parser_finalize(parser_, &request));
     return loom_serve_http_package_parse(request, host_allocator, json,

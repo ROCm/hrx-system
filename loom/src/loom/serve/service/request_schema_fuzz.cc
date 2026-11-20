@@ -167,7 +167,7 @@ void Exercise(char family, const std::string& wire_request) {
     status = loom_serve_http_request_parser_feed(
         parser,
         iree_make_const_byte_span(wire_request.data(), wire_request.size()),
-        &request);
+        &request, nullptr);
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_http_request_parser_finalize(parser, &request);

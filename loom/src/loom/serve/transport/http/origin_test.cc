@@ -23,7 +23,8 @@ iree_status_t Check(const std::string& host, const std::string& headers,
       {4096, 512, 32, 4096, 32}, iree_allocator_system(), &parser));
   const loom_serve_http_request_t* request = nullptr;
   iree_status_t status = loom_serve_http_request_parser_feed(
-      parser, iree_make_const_byte_span(wire.data(), wire.size()), &request);
+      parser, iree_make_const_byte_span(wire.data(), wire.size()), &request,
+      nullptr);
   if (iree_status_is_ok(status)) {
     status = loom_serve_http_origin_check(request, policy);
   }
