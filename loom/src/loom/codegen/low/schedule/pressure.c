@@ -909,6 +909,13 @@ void loom_low_schedule_pressure_initialize_block(
     const loom_low_schedule_node_t* node = &state->nodes[node_index];
     const loom_value_ordinal_t* operand_ordinals =
         loom_low_schedule_node_const_operand_ordinals(node);
+    if (block_record->has_issue_alternatives && node->schedule_class &&
+        !iree_any_bit_set(node->flags,
+                          LOOM_LOW_SCHEDULE_NODE_FLAG_ISSUE_ALTERNATIVES)) {
+      loom_low_schedule_resource_demand_add(&state->resource_demand,
+                                            state->target.schedule_model,
+                                            node->schedule_class);
+    }
     for (uint16_t operand_index = 0; operand_index < node->operand_count;
          ++operand_index) {
       loom_low_schedule_note_candidate_operand_use(
@@ -1075,6 +1082,9 @@ static void loom_low_schedule_score_candidate_schedule_class(
 }
 
 static bool loom_low_schedule_alternative_score_is_better(
+    const loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_class_t* alternative_class,
+    const loom_low_schedule_class_t* selected_class,
     const loom_low_schedule_candidate_score_t* alternative,
     const loom_low_schedule_candidate_score_t* selected) {
   if (alternative->effective_stall_cycles != selected->effective_stall_cycles) {
@@ -1084,7 +1094,15 @@ static bool loom_low_schedule_alternative_score_is_better(
   if (alternative->hazard_stall_cycles != selected->hazard_stall_cycles) {
     return alternative->hazard_stall_cycles < selected->hazard_stall_cycles;
   }
-  return alternative->resource_stall_cycles < selected->resource_stall_cycles;
+  if (alternative->resource_stall_cycles != selected->resource_stall_cycles) {
+    return alternative->resource_stall_cycles < selected->resource_stall_cycles;
+  }
+  return loom_low_schedule_resource_demand_cost(&state->resource_demand,
+                                                state->target.schedule_model,
+                                                alternative_class) <
+         loom_low_schedule_resource_demand_cost(&state->resource_demand,
+                                                state->target.schedule_model,
+                                                selected_class);
 }
 
 static uint32_t loom_low_schedule_first_alternative_row(
@@ -1124,13 +1142,14 @@ static void loom_low_schedule_select_candidate_schedule_class(
   score->selected_descriptor_ordinal = source_descriptor_ordinal;
   loom_low_schedule_score_candidate_schedule_class(state, node->schedule_class,
                                                    score);
-  if (state->options->strategy != LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL ||
-      source_descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
+  if (!iree_any_bit_set(node->flags,
+                        LOOM_LOW_SCHEDULE_NODE_FLAG_ISSUE_ALTERNATIVES)) {
     return;
   }
 
   const uint32_t row_start = loom_low_schedule_first_alternative_row(
       descriptor_set, source_descriptor_ordinal);
+  const loom_low_schedule_class_t* selected_class = node->schedule_class;
   for (uint32_t row_index = row_start;
        row_index < descriptor_set->schedule_alternative_count; ++row_index) {
     const loom_low_schedule_alternative_t* alternative =
@@ -1147,10 +1166,12 @@ static void loom_low_schedule_select_candidate_schedule_class(
     loom_low_schedule_candidate_score_t alternative_score = *score;
     loom_low_schedule_score_candidate_schedule_class(
         state, alternative_schedule_class, &alternative_score);
-    if (!loom_low_schedule_alternative_score_is_better(&alternative_score,
-                                                       score)) {
+    if (!loom_low_schedule_alternative_score_is_better(
+            state, alternative_schedule_class, selected_class,
+            &alternative_score, score)) {
       continue;
     }
+    selected_class = alternative_schedule_class;
     score->hazard_stall_cycles = alternative_score.hazard_stall_cycles;
     score->resource_stall_cycles = alternative_score.resource_stall_cycles;
     score->effective_stall_cycles = alternative_score.effective_stall_cycles;

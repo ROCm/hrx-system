@@ -95,6 +95,8 @@ enum loom_low_schedule_node_flag_bits_e {
   LOOM_LOW_SCHEDULE_NODE_FLAG_LOCAL_SSA_INPUT = 1u << 11,
   // Descriptor is an at-most-two-cycle register move with an SSA input.
   LOOM_LOW_SCHEDULE_NODE_FLAG_SHORT_REGISTER_MOVE = 1u << 12,
+  // Resource scheduling can choose an encoding-equivalent descriptor.
+  LOOM_LOW_SCHEDULE_NODE_FLAG_ISSUE_ALTERNATIVES = 1u << 13,
 };
 typedef uint16_t loom_low_schedule_node_flags_t;
 
@@ -732,6 +734,8 @@ typedef struct loom_low_schedule_block_t {
   // within its scheduling limit, including live-out values and late reads.
   // False when that sweep or those limits were unavailable.
   bool source_registers_fit;
+  // A node in this block needs equivalent issue forms priced at scheduling.
+  bool has_issue_alternatives;
 } loom_low_schedule_block_t;
 
 // Accepted resource-stall block schedules preserved by a scoped IR transform.

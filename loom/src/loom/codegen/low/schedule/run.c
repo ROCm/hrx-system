@@ -1436,6 +1436,11 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
       continue;
     }
     if (loom_low_schedule_strategy_uses_pressure(state->options->strategy)) {
+      if (block_record->has_issue_alternatives) {
+        IREE_RETURN_IF_ERROR(loom_low_schedule_resource_demand_begin(
+            state->target.schedule_model, state->scratch_arena,
+            &state->resource_demand));
+      }
       loom_low_schedule_pressure_initialize_block(state, block_record,
                                                   &pressure_state);
       if (state->options->strategy ==

@@ -1230,21 +1230,37 @@ TEST_F(Aie2pProgramCompileTest,
   EXPECT_EQ(entry_move->slot, expected_entry_move.slot);
   EXPECT_EQ(entry_move->value, expected_entry_move.value);
 
-  const loom_aie2p_instruction_id_t first_fifo_pop =
-      loom_aie2p_encoding_find_instruction(IREE_SV("VLDA_POP_512_normal_pop"));
-  const loom_aie2p_instruction_id_t second_fifo_pop =
-      loom_aie2p_encoding_find_instruction(IREE_SV("VLDB_POP_512_normal_pop"));
-  ASSERT_NE(first_fifo_pop, LOOM_AIE2P_INSTRUCTION_ID_INVALID);
-  ASSERT_NE(second_fifo_pop, LOOM_AIE2P_INSTRUCTION_ID_INVALID);
-  EXPECT_TRUE(std::any_of(helper_bundles.begin(), helper_bundles.end(),
-                          [first_fifo_pop](const auto& bundle) {
-                            return BundleHasInstruction(bundle, first_fifo_pop);
-                          }));
-  EXPECT_TRUE(std::any_of(helper_bundles.begin(), helper_bundles.end(),
-                          [second_fifo_pop](const auto& bundle) {
-                            return BundleHasInstruction(bundle,
-                                                        second_fifo_pop);
-                          }));
+  // Either load port accepts either FIFO tuple. The ptr field selects the
+  // complete (p0, lf0, r24) or (p1, lf1, r25) tuple.
+  const loom_aie2p_encoding_field_id_t pointer_field =
+      loom_aie2p_encoding_find_field(IREE_SV("ptr"));
+  ASSERT_NE(pointer_field, LOOM_AIE2P_ENCODING_FIELD_ID_INVALID);
+  size_t tuple_pop_counts[2] = {};
+  for (iree_string_view_t name : {IREE_SV("VLDA_POP_512_normal_pop"),
+                                  IREE_SV("VLDB_POP_512_normal_pop")}) {
+    const auto instruction = loom_aie2p_encoding_find_instruction(name);
+    ASSERT_NE(instruction, LOOM_AIE2P_INSTRUCTION_ID_INVALID);
+    for (const auto& bundle : helper_bundles) {
+      const auto* slot = FindInstructionSlot(bundle, instruction);
+      if (!slot) {
+        continue;
+      }
+      loom_aie2p_encoding_field_value_t fields[2];
+      iree_host_size_t field_count = 0;
+      IREE_ASSERT_OK(loom_aie2p_encoding_unpack_instruction(
+          instruction, slot->value, IREE_ARRAYSIZE(fields), fields,
+          &field_count));
+      ASSERT_EQ(field_count, IREE_ARRAYSIZE(fields));
+      for (const auto& field : fields) {
+        if (field.field_id == pointer_field) {
+          ASSERT_LT(field.value, IREE_ARRAYSIZE(tuple_pop_counts));
+          ++tuple_pop_counts[field.value];
+        }
+      }
+    }
+  }
+  EXPECT_EQ(tuple_pop_counts[0], 1u);
+  EXPECT_EQ(tuple_pop_counts[1], 1u);
 }
 
 TEST_F(Aie2pProgramCompileTest,

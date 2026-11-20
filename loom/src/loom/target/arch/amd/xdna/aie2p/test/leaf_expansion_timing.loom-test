@@ -38,9 +38,9 @@ code: 32 5b 1c 6a 08 b2 82 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00
 
 // ====
 
-// Register increments have the same alternative, without moving or copying
-// the modifier or weakening the pointer's consuming tie.
-// RUN: emit aie2p-leaf @address_lane_modifier report=code
+// Register increments can also issue beside both loads. The selected
+// descriptors identify which load and address lanes share the issue cycle.
+// RUN: emit low-schedule-query @address_lane_modifier strategy=resource-stall issue=0,1,2 descriptor=0,1,2
 
 aie2p.target<core> @target
 
@@ -52,7 +52,12 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @address_lane_modifier(%accumu
 }
 
 // ----
-code: 3c 20 17 b0 82 20 18 34 04 3a 18 00 28 10 00 00 00 00 00 00 00 00 00 00
+node 0 issue-cycle: 0
+node 1 issue-cycle: 0
+node 2 issue-cycle: 0
+node 0 descriptor: amd.xdna.aie2p.load.accumulator.indexed.immediate
+node 1 descriptor: amd.xdna.aie2p.load.b.i32x16.indexed.immediate
+node 2 descriptor: amd.xdna.aie2p.address.add.s.register
 
 // ====
 

@@ -407,7 +407,7 @@ coissued components: 4
 // Completing the first encoding requires the prior carry-writing ADD, even
 // though its returned cursor is not an SSA input of the encoding. The four C
 // fragments leave only one DM of scratch, so the second encoding must wait.
-// RUN: emit aie2p-leaf @pinned_encode_state_prerequisite report=code
+// RUN: emit low-schedule-query @pinned_encode_state_prerequisite strategy=resource-stall order=4,5,7,8,11,12,13,16 kind=state consumer=5
 
 aie2p.target<core> @target
 
@@ -438,7 +438,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @pinned_encode_state_prerequis
 }
 
 // ----
-code: d4 15 03 d8 86 00 44 80 28 01 00 00 b8 00 d1 18 b8 18 b0 1f 00 00 00 00 00 00 98 30 42 10 98 20 00 10 18 0b 20 08 98 1b 00 01 00 00 00 00 18 00 0c 03 48 69 08 00 00 00 00 00 f8 8a 81 1c f8 8a 03 1c 02 70 c5 42 02 c0 46 01 b8 18 b0 1f 18 36 8a 08 00 00 48 69 20 01 00 00 48 29 48 02 48 29 60 03 18 00 28 10 00 00 00 00 00 00 00 00 00 00
+block 0 order: 4, 5, 7, 8, 11, 12, 13, 16
+node 5 <- 4
 
 // ====
 
@@ -603,7 +604,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @fused_forwarded_loop(%first_r
 
 // ----
 issue cycles: 70
-code bytes: 290
+code bytes: 288
 coissued bundles: 15
 coissued components: 35
 

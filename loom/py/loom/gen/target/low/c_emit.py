@@ -268,6 +268,11 @@ def _descriptor_row_lines(
     rows = []
     for descriptor, descriptor_row in zip(descriptors, descriptor_rows, strict=True):
         layout = []
+        flags = []
+        if descriptor_row["value_state_operand_count"]:
+            flags.append("LOOM_LOW_DESCRIPTOR_LAYOUT_FLAG_VALUE_STATE")
+        if descriptor.schedule_alternatives:
+            flags.append("LOOM_LOW_DESCRIPTOR_LAYOUT_FLAG_SCHEDULE_ALTERNATIVES")
         for span in ("feature_mask_word", "encoding_field_value", "immediate", "effect", "constraint", "storage_lease", "operand_form"):
             count = descriptor_row[f"{span}_count"]
             start = descriptor_row[f"{span}_start"] if count else 0
@@ -277,7 +282,7 @@ def _descriptor_row_lines(
                 f".encoding_format_id = {descriptor.encoding_format_id},",
                 f".minimum_packet_operand_count = {descriptor_row['minimum_packet_operand_count']},",
                 f".op_kind = {descriptor.op_kind.c_name},",
-                f".flags = {'LOOM_LOW_DESCRIPTOR_LAYOUT_FLAG_VALUE_STATE' if descriptor_row['value_state_operand_count'] else '0'},",
+                f".flags = {' | '.join(flags) or '0'},",
             )
         )
         layout_index, _ = append_interned_sequence((tuple(layout),), layout_rows, layout_starts)
@@ -532,6 +537,7 @@ def _resource_row_lines(
             f"    .slot_start = {calendar.slot_start},",
             f"    .slot_mask = {calendar.slot_mask},",
             f"    .minimum_issue_units = {calendar.minimum_issue_units},",
+            f"    .group_ordinal = {calendar.group_ordinal},",
             "},",
         ]
         for resource, calendar in zip(

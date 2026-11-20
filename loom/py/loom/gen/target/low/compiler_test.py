@@ -551,6 +551,8 @@ def test_disjoint_issue_uses_respect_aliases_and_stage_intervals(second_resource
             descriptors=(replace(TEST_LOW_ADD_I32_DESCRIPTOR, schedule_class=schedule_class.name, instruction_classes=(InstructionClass.SCALAR_ALU,)),),
         )
     )
+    groups = {resource.name: calendar.group_ordinal for resource, calendar in zip(compiled.resources, compiled.resource_calendars, strict=True)}
+    assert (groups["test.issue"] == groups[second_resource]) == (second_resource != "test.other")
     disjoint = ScheduleClassFlag.DISJOINT_ISSUE_USES in compiled.schedule_classes[0].flags
     assert disjoint == (second_resource == "test.other" or second_stage >= 2)
 

@@ -95,6 +95,8 @@ class CompiledResourceCalendar:
     slot_mask: int
     # Required stage-zero units common to every schedule class in this group.
     minimum_issue_units: int
+    # Dense capacity owner shared by every resource alias.
+    group_ordinal: int
 
 
 @dataclass(frozen=True, slots=True)

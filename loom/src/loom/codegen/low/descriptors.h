@@ -1162,6 +1162,8 @@ typedef struct loom_low_resource_t {
     // Required stage-zero units common to every schedule class, including
     // uses of aliases in this contention group. Zero means no common demand.
     uint16_t minimum_issue_units;
+    // Dense capacity owner for this resource and all its contention aliases.
+    uint16_t group_ordinal;
   } calendar;
 } loom_low_resource_t;
 
@@ -1317,6 +1319,9 @@ typedef uint8_t loom_low_descriptor_layout_flags_t;
 // Schedule-only state, discarded writes, and reads explicit in SSA are
 // excluded.
 #define LOOM_LOW_DESCRIPTOR_LAYOUT_FLAG_VALUE_STATE ((uint8_t)1u << 0)
+
+// The selected descriptor view includes equivalent issue forms for this row.
+#define LOOM_LOW_DESCRIPTOR_LAYOUT_FLAG_SCHEDULE_ALTERNATIVES ((uint8_t)1u << 1)
 
 // Immutable structural spans shared by instruction identities and target views.
 // Operand binding and encoding-ID queries stay in the descriptor row;

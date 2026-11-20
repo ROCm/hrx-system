@@ -98,6 +98,18 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "resource_demand",
+    srcs = ["resource_demand.c"],
+    hdrs = ["resource_demand.h"],
+    visibility = ["//visibility:private"],
+    deps = [
+        "//loom/src/loom/codegen/low:descriptors",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "schedule",
     srcs = [
         "block.c",
@@ -161,6 +173,7 @@ loom_cc_library(
         ":dependency_index",
         ":ready_frontier",
         ":resource_calendar",
+        ":resource_demand",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/analysis:ownership",
         "//loom/src/loom/codegen/low:descriptor_traits",
@@ -250,6 +263,7 @@ loom_cc_test(
         ":dependency_index",
         ":ready_frontier",
         ":resource_calendar",
+        ":resource_demand",
         ":schedule",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:function",
@@ -293,6 +307,7 @@ loom_cc_test(
         ":dependency_index",
         ":ready_frontier",
         ":resource_calendar",
+        ":resource_demand",
         ":schedule",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:descriptors",
@@ -333,6 +348,7 @@ loom_cc_test(
         ":dependency_index",
         ":ready_frontier",
         ":resource_calendar",
+        ":resource_demand",
         ":schedule",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:function",
@@ -364,6 +380,7 @@ loom_cc_test(
     deps = [
         ":dependency_index",
         ":resource_calendar",
+        ":resource_demand",
         ":schedule",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:function",
@@ -400,6 +417,7 @@ loom_cc_test(
         ":dependency_index",
         ":ready_frontier",
         ":resource_calendar",
+        ":resource_demand",
         ":schedule",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:function",
@@ -529,6 +547,17 @@ loom_cc_test(
     srcs = ["resource_calendar_test.cc"],
     deps = [
         ":resource_calendar",
+        "//loom/src/loom/target/test:descriptors",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "resource_demand_test",
+    srcs = ["resource_demand_test.cc"],
+    deps = [
+        ":resource_demand",
         "//loom/src/loom/target/test:descriptors",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

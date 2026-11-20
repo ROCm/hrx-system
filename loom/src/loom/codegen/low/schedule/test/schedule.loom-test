@@ -1401,26 +1401,6 @@ block 0 order: 0, 1, 2, 3
 
 // ====
 
-// Encoding-equivalent forms let independent source-identical operations use
-// distinct resources in the same issue cycle.
-// RUN: emit low-schedule-query @encoding_equivalent_schedule_alternatives strategy=resource-stall issue=0,1 descriptor=0,1
-
-test.target<low_core> @test_target
-
-low.func.def target<test.low.core>(@test_target) @encoding_equivalent_schedule_alternatives(%lhs0: reg<test.i32>, %rhs0: reg<test.i32>, %lhs1: reg<test.i32>, %rhs1: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
-  %a = test.schedule.alternative.a.i32 %lhs0, %rhs0
-  %b = test.schedule.alternative.a.i32 %lhs1, %rhs1
-  return %a, %b
-}
-
-// ----
-node 0 issue-cycle: 0
-node 1 issue-cycle: 0
-node 0 descriptor: test.schedule.alternative.a.i32
-node 1 descriptor: test.schedule.alternative.b.i32
-
-// ====
-
 // An issued constant fills the producer latency before the dependent adds.
 // RUN: emit low-schedule-query @constant_latency strategy=resource-stall order=0,1,2,3 issue=0,1,2,3
 

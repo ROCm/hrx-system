@@ -54,6 +54,11 @@ def test_descriptor_layout_pool_preserves_all_compiled_spans() -> None:
     )
     assert len(layouts) < len(rows)
     for descriptor, source, row in zip(compiled.descriptors, compiled.descriptor_rows, rows, strict=True):
+        flags = []
+        if source["value_state_operand_count"]:
+            flags.append("LOOM_LOW_DESCRIPTOR_LAYOUT_FLAG_VALUE_STATE")
+        if descriptor.schedule_alternatives:
+            flags.append("LOOM_LOW_DESCRIPTOR_LAYOUT_FLAG_SCHEDULE_ALTERNATIVES")
         index = int(next(field for field in row if field.startswith(".layout_index = ")).removeprefix(".layout_index = ").removesuffix(","))
         expected = []
         for span in ("feature_mask_word", "encoding_field_value", "immediate", "effect", "constraint", "storage_lease", "operand_form"):
@@ -64,7 +69,7 @@ def test_descriptor_layout_pool_preserves_all_compiled_spans() -> None:
                 f".encoding_format_id = {descriptor.encoding_format_id},",
                 f".minimum_packet_operand_count = {source['minimum_packet_operand_count']},",
                 f".op_kind = {descriptor.op_kind.c_name},",
-                f".flags = {'LOOM_LOW_DESCRIPTOR_LAYOUT_FLAG_VALUE_STATE' if source['value_state_operand_count'] else '0'},",
+                f".flags = {' | '.join(flags) or '0'},",
             )
         )
         assert layouts[index] == tuple(expected)
