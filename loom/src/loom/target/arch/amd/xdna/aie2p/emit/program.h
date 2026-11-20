@@ -132,6 +132,10 @@ typedef struct loom_aie2p_program_upload_patch_t {
   uint32_t byte_length;
 } loom_aie2p_program_upload_patch_t;
 
+// Start each source range on a separate 64-byte line. This alignment applies
+// to both the immutable allocation and the offsets packed inside it.
+#define LOOM_AIE2P_PROGRAM_UPLOAD_ALIGNMENT 64u
+
 // Equivalent initialization using DMA in place of inline firmware writes.
 typedef struct loom_aie2p_program_upload_t {
   // Initialization including the loader's temporary circuits and queue drains.

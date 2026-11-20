@@ -1021,7 +1021,7 @@ static iree_status_t loom_aie2p_xdna_build_image(
           .domain = IREE_XDNA_ELF_ALLOCATION_DOMAIN_DMA,
           .flags = IREE_XDNA_ELF_ALLOCATION_FLAG_IMMUTABLE,
           .byte_length = size,
-          .alignment = profile->limits.minimum_device_memory_alignment,
+          .alignment = LOOM_AIE2P_PROGRAM_UPLOAD_ALIGNMENT,
           .first_load = emitted_segment_count,
           .load_count = 1,
       };

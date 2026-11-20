@@ -165,7 +165,8 @@ static iree_host_size_t loom_aie2p_catalog_select_columns(
     if (!columns[column]) {
       continue;
     }
-    range->source_offset = (uint32_t)iree_host_align(data_size, 64);
+    range->source_offset = (uint32_t)iree_host_align(
+        data_size, LOOM_AIE2P_PROGRAM_UPLOAD_ALIGNMENT);
     data_size = range->source_offset + range->contents_length;
     ++count;
   }

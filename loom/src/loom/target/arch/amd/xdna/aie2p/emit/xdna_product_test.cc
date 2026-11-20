@@ -480,6 +480,7 @@ TEST_F(XdnaProductTest, StaticLoaderAddressesPrecedeBothBindingRelocations) {
       const auto& allocation = tables->allocations[source];
       EXPECT_EQ(allocation.domain, IREE_XDNA_ELF_ALLOCATION_DOMAIN_DMA);
       EXPECT_EQ(allocation.flags, IREE_XDNA_ELF_ALLOCATION_FLAG_IMMUTABLE);
+      EXPECT_EQ(allocation.alignment, 64u);
       ASSERT_EQ(allocation.byte_length, data.size());
       std::array<uint8_t, 8> loaded = {};
       IREE_ASSERT_OK(iree_hal_amd_xdna_image_load_allocation(image_, source,
