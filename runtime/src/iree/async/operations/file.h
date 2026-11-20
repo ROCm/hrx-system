@@ -231,6 +231,7 @@ typedef struct iree_async_file_write_operation_t {
 
 // Closes a file asynchronously.
 //
+// All owners share one native handle and coordinate a single close.
 // An accepted close consumes one caller reference at terminal completion.
 // A rejected submission leaves that reference with the caller. If a linked
 // close is cancelled before it executes, other owners still hold an open

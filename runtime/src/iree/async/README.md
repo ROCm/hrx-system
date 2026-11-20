@@ -579,40 +579,44 @@ Multishot (ACCEPT, RECV with MULTISHOT flag):
   6. Final callback without MORE flag    -> caller owns again
 
 Cancellation:
-  1. Caller calls cancel(operation)
-  2. Proactor eventually invokes callback with IREE_STATUS_CANCELLED, no MORE flag
-  3. Caller owns operation again
+  1. Caller requests cancellation
+  2. Poll delivers the terminal callback without MORE. Its status reports
+     the outcome.
+  3. With request_cancel(), target storage is reusable after both the terminal
+     callback and the receipt.
 ```
 
 ### Multishot Termination
 
-Multishot operations persist until one of these conditions:
+A multishot accept holds its own reference to the listener. At shutdown,
+request cancellation of the accept and keep polling through its final callback
+(the one without `IREE_ASYNC_COMPLETION_FLAG_MORE`). Natural completion can
+win the race with cancellation. With `iree_async_proactor_request_cancel`,
+call `iree_async_proactor_cancel_request_target_retired` in the terminal
+callback if the receipt is pending. Keep the request and target storage alive
+until both callbacks have run.
 
-1. **Resource close**: Closing the underlying socket/file generates a final
-   callback (error status, no MORE flag).
-2. **Error**: Network disconnect, peer close, etc. generates a final callback.
-3. **Explicit cancellation**: `cancel()` generates a final callback with
-   `IREE_STATUS_CANCELLED`.
+The owner can then release its listener reference directly, or submit
+`SOCKET_CLOSE` to receive the native close result. For example, this function
+takes one owned listener reference. Its caller supplies operation storage that
+remains live through `on_close`.
 
-**Critical**: `release()` does NOT terminate multishot operations. The operation
-holds a reference to the resource, keeping it alive.
-
-**Correct cleanup pattern**:
 ```c
-// 1. Close the socket (async operation).
-iree_async_socket_close_operation_t close_op = {0};
-close_op.base.type = IREE_ASYNC_OPERATION_TYPE_SOCKET_CLOSE;
-close_op.socket = listener;
-close_op.base.completion_fn = on_close;
-iree_async_proactor_submit_one(proactor, &close_op.base);
-
-// 2. Wait for:
-//    - The close completion (close_op callback fires)
-//    - The multishot final callback (no MORE flag)
-// Both will fire; order depends on kernel behavior.
-
-// 3. Release the socket AFTER both callbacks complete.
-iree_async_socket_release(listener);
+static iree_status_t close_listener(
+    iree_async_proactor_t* proactor, iree_async_socket_t* listener,
+    iree_async_socket_close_operation_t* close_op, void* user_data) {
+  iree_async_operation_initialize(&close_op->base,
+                                  IREE_ASYNC_OPERATION_TYPE_SOCKET_CLOSE,
+                                  IREE_ASYNC_OPERATION_FLAG_NONE, on_close,
+                                  user_data);
+  close_op->socket = listener;
+  iree_status_t status =
+      iree_async_proactor_submit_one(proactor, &close_op->base);
+  if (!iree_status_is_ok(status)) {
+    iree_async_socket_release(listener);  // Submission left ownership here.
+  }
+  return status;
+}
 ```
 
 ### Span Region Lifetime

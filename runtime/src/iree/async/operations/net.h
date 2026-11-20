@@ -667,6 +667,7 @@ static inline void iree_async_socket_recvfrom_operation_initialize(
 
 // Closes a socket asynchronously.
 //
+// All owners share one native handle and coordinate a single close.
 // An accepted close consumes one caller reference at terminal completion.
 // A rejected submission leaves that reference with the caller. If a linked
 // close is cancelled before it executes, other owners still hold an open
@@ -677,17 +678,8 @@ static inline void iree_async_socket_recvfrom_operation_initialize(
 //   yes     | yes      | yes  | yes
 //
 // Linger behavior:
-//   If SO_LINGER is set on the socket, close may block until pending data
-//   is transmitted or the linger timeout expires. Errors during this period
-//   (e.g., connection reset) are reported via the callback status.
-//
-//   For non-blocking close without waiting for pending data, disable linger
-//   before importing the socket or use socket options at creation time.
-//
-// Returns (via callback status):
-//   IREE_STATUS_OK: Socket closed successfully.
-//   IREE_STATUS_DEADLINE_EXCEEDED: SO_LINGER timeout expired.
-//   Other: Network error during graceful close.
+//   A positive SO_LINGER interval can make native close wait for queued data.
+//   The platform socket API determines how expiration is reported.
 typedef struct iree_async_socket_close_operation_t {
   iree_async_operation_t base;
 
