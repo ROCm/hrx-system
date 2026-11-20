@@ -294,6 +294,13 @@ static int iree_async_posix_worker_main(void* user_data) {
         cancelled
             ? iree_status_from_code(IREE_STATUS_CANCELLED)
             : iree_async_posix_execute_file_operation(proactor, operation);
+    if (cancelled &&
+        (operation->type == IREE_ASYNC_OPERATION_TYPE_FILE_CLOSE ||
+         operation->type == IREE_ASYNC_OPERATION_TYPE_SOCKET_CLOSE)) {
+      // No syscall was issued. Another owner keeps a live descriptor. If this
+      // was its last reference, finish native destruction on this worker.
+      iree_async_operation_release_resources(operation, NULL);
+    }
     IREE_TRACE_ZONE_END(z1);
     iree_async_posix_worker_publish(
         worker, operation, status,

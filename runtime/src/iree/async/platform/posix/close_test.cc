@@ -26,9 +26,12 @@ namespace {
 std::atomic<int> watched_fd{-1};
 std::atomic<int> attempts{0};
 int close_error = 0;
+thread_local bool is_poll_owner = false;
+std::atomic<bool> closed_on_poll_owner{false};
 
 int CloseWithDelayedError(int fd) {
   if (attempts.fetch_add(1) == 0) {
+    closed_on_poll_owner.store(is_poll_owner);
     // Linux detaches the descriptor before returning a filesystem flush error.
     if (__real_close(fd) < 0) {
       return -1;
@@ -121,6 +124,62 @@ TEST_P(CloseTest, SocketReportsErrorAndRetiresOnce) {
                                           &operation.socket));
   ExpectCloseError(&operation.base, IREE_ASYNC_OPERATION_TYPE_SOCKET_CLOSE,
                    operation.socket->primitive.value.fd);
+}
+
+// Failed open skips both successors. Retirement of the only file reference
+// must complete before either skipped callback can reuse its operation.
+TEST(PosixCloseTest, SkippedLastCloseRetiresOnWorkerBeforeSuccessor) {
+  iree_async_proactor_t* proactor = nullptr;
+  IREE_ASSERT_OK(
+      iree_async_proactor_create_posix(iree_async_proactor_options_default(),
+                                       iree_allocator_system(), &proactor));
+  iree_async_file_open_operation_t opening = {};
+  CompletionTracker opened, closed;
+  iree_async_operation_initialize(
+      &opening.base, IREE_ASYNC_OPERATION_TYPE_FILE_OPEN,
+      IREE_ASYNC_OPERATION_FLAG_LINKED, CompletionTracker::Callback, &opened);
+  opening.path = "/dev/null/not-a-directory";
+  opening.open_flags = IREE_ASYNC_FILE_OPEN_FLAG_READ;
+  int fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
+  ASSERT_GE(fd, 0);
+  iree_async_file_close_operation_t closing = {};
+  IREE_ASSERT_OK(
+      iree_async_file_import(proactor, iree_async_primitive_from_fd(fd),
+                             IREE_ASYNC_FILE_FLAG_NONE, &closing.file));
+  iree_async_operation_initialize(
+      &closing.base, IREE_ASYNC_OPERATION_TYPE_FILE_CLOSE,
+      IREE_ASYNC_OPERATION_FLAG_LINKED, CompletionTracker::Callback, &closed);
+  iree_async_operation_t tail = {};
+  iree_async_operation_initialize(
+      &tail, IREE_ASYNC_OPERATION_TYPE_NOP, 0,
+      +[](void* user_data, iree_async_operation_t*, iree_status_t status,
+          iree_async_completion_flags_t) {
+        auto* closed = static_cast<CompletionTracker*>(user_data);
+        EXPECT_EQ(closed->call_count, 1);
+        EXPECT_EQ(attempts.load(), 1);
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, status);
+      },
+      &closed);
+  iree_async_operation_t* operations[] = {&opening.base, &closing.base, &tail};
+  close_error = EIO;
+  attempts.store(0);
+  watched_fd.store(fd);
+  is_poll_owner = true;
+  IREE_ASSERT_OK(iree_async_proactor_submit(proactor, {operations, 3}));
+  iree_host_size_t callbacks = 0;
+  while (callbacks < 3) {
+    iree_host_size_t count = 0;
+    IREE_ASSERT_OK(
+        iree_async_proactor_poll(proactor, iree_infinite_timeout(), &count));
+    callbacks += count;
+  }
+  is_poll_owner = false;
+  watched_fd.store(-1);
+  EXPECT_FALSE(closed_on_poll_owner.load());
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        opened.ConsumeStatus());
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, closed.ConsumeStatus());
+  iree_async_proactor_release(proactor);
 }
 
 // posix_close(fd, 0) can report EINPROGRESS for an interrupted close.

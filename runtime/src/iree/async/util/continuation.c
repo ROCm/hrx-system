@@ -34,11 +34,15 @@ iree_status_t iree_async_continuation_prepare_batch(
   return iree_ok_status();
 }
 
-iree_host_size_t iree_async_continuation_cancel(
-    iree_async_operation_t* chain_head) {
+static iree_host_size_t iree_async_continuation_cancel_with(
+    iree_async_operation_t* chain_head,
+    iree_async_continuation_defer_cancel_fn_t defer_cancel, void* user_data) {
   iree_host_size_t callback_count = 0;
   iree_async_operation_t* operation = chain_head;
   while (operation) {
+    if (defer_cancel && defer_cancel(user_data, operation)) {
+      break;
+    }
     iree_async_operation_t* next = operation->linked_next;
     operation->linked_next = NULL;
     callback_count += iree_async_operation_complete(
@@ -47,6 +51,11 @@ iree_host_size_t iree_async_continuation_cancel(
     operation = next;
   }
   return callback_count;
+}
+
+iree_host_size_t iree_async_continuation_cancel(
+    iree_async_operation_t* chain_head) {
+  return iree_async_continuation_cancel_with(chain_head, NULL, NULL);
 }
 
 iree_async_continuation_t iree_async_continuation_begin(
@@ -94,8 +103,9 @@ iree_async_continuation_t iree_async_continuation_begin(
   return continuation;
 }
 
-iree_host_size_t iree_async_continuation_finish(
-    iree_async_continuation_t* continuation) {
+iree_host_size_t iree_async_continuation_finish_with(
+    iree_async_continuation_t* continuation,
+    iree_async_continuation_defer_cancel_fn_t defer_cancel, void* user_data) {
   iree_async_operation_t* chain_head = continuation->chain_head;
   iree_status_t submit_status = continuation->submit_status;
   bool cancel_chain = continuation->cancel_chain;
@@ -107,13 +117,15 @@ iree_host_size_t iree_async_continuation_finish(
     return 0;
   }
   if (cancel_chain) {
-    return iree_async_continuation_cancel(chain_head);
+    return iree_async_continuation_cancel_with(chain_head, defer_cancel,
+                                               user_data);
   }
 
   iree_async_operation_t* remaining_chain = chain_head->linked_next;
   chain_head->linked_next = NULL;
   iree_host_size_t callback_count = iree_async_operation_complete(
       chain_head, submit_status, IREE_ASYNC_COMPLETION_FLAG_NONE);
-  callback_count += iree_async_continuation_cancel(remaining_chain);
+  callback_count += iree_async_continuation_cancel_with(
+      remaining_chain, defer_cancel, user_data);
   return callback_count;
 }

@@ -58,6 +58,23 @@ static const iree_async_proactor_vtable_t iree_async_proactor_posix_vtable;
 static void iree_async_proactor_posix_signal_deinitialize(
     iree_async_proactor_posix_t* proactor);
 
+// A skipped close still consumes one reference. Its last release can enter a
+// blocking native close. The file worker owns the suffix until that completes.
+static bool iree_async_proactor_posix_defer_cancelled_close(
+    void* user_data, iree_async_operation_t* operation) {
+  if (operation->type != IREE_ASYNC_OPERATION_TYPE_FILE_CLOSE &&
+      operation->type != IREE_ASYNC_OPERATION_TYPE_SOCKET_CLOSE) {
+    return false;
+  }
+  iree_async_operation_set_internal_flags(
+      operation, IREE_ASYNC_POSIX_INTERNAL_FLAG_CANCELLED);
+  operation->next = NULL;
+  iree_async_posix_file_batch_t batch = {
+      .head = operation, .tail = operation, .count = 1};
+  iree_async_posix_file_queue_push(user_data, &batch);
+  return true;
+}
+
 // Completes an operation directly from the poll thread when no completion pool
 // entry is available. Returns the exact number of user callbacks invoked,
 // including failed continuations.
@@ -74,7 +91,8 @@ iree_host_size_t iree_async_proactor_posix_complete_direct(
   }
   iree_host_size_t completed_count =
       iree_async_operation_complete(operation, status, flags);
-  completed_count += iree_async_continuation_finish(&continuation);
+  completed_count += iree_async_continuation_finish_with(
+      &continuation, iree_async_proactor_posix_defer_cancelled_close, proactor);
   return completed_count;
 }
 
@@ -2164,7 +2182,9 @@ static iree_host_size_t iree_async_proactor_posix_drain_pending_semaphore_waits(
         completion.continuation_head, iree_status_code(status));
     drained_count += iree_async_operation_complete(
         &wait_op->base, status, IREE_ASYNC_COMPLETION_FLAG_NONE);
-    drained_count += iree_async_continuation_finish(&continuation);
+    drained_count += iree_async_continuation_finish_with(
+        &continuation, iree_async_proactor_posix_defer_cancelled_close,
+        proactor);
 
     entry = next;
   }
