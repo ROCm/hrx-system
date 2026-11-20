@@ -56,7 +56,8 @@ typedef struct loom_serve_text_source_t {
   int32_t eos_token;
   // Effective prefill capacity selected by source preparation.
   iree_host_size_t prefill_capacity;
-  // Leading stages sharing one immutable parameter placement.
+  // Leading direct-row stages sharing one immutable parameter placement.
+  // An epoch handling every row may declare zero.
   iree_host_size_t shared_stage_count;
   // Source-resolved cache addressability in token positions.
   iree_host_size_t pool_capacity;

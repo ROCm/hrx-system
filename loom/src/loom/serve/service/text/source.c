@@ -93,9 +93,13 @@ static iree_status_t loom_serve_text_prepare(
   if (iree_status_is_ok(status)) {
     status = iree_vm_i32_from_variant(results[1], &shared_stage_count);
   }
+  // Pooled and draft-backed rows submit through the source epoch even for
+  // one request. Their command stages may each own a distinct weight layout.
+  const int32_t minimum_shared_stages =
+      (options->pool_capacity || options->draft_depth) ? 0 : 1;
   if (iree_status_is_ok(status) &&
       (prefill_capacity < 1 || prefill_capacity > INT32_MAX ||
-       shared_stage_count < 1 ||
+       shared_stage_count < minimum_shared_stages ||
        (iree_host_size_t)shared_stage_count >
            loom_runtime_preparation_stage_count(source->preparation))) {
     status =

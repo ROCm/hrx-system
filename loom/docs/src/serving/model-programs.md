@@ -468,6 +468,12 @@ For example, three sessions with one ready token each supply three tokens and
 three spans. A single prompt offering three tokens supplies three tokens and
 one span. Both can use the same prepared command program.
 
+The second result of `prepare` counts leading stages that share one weight
+layout and implement the direct-row bindings. A model that serves all rows
+through its epoch can return zero. Each recorded stage then declares its own
+weight bindings, and the first binding of the first stage identifies the
+primary checkpoint.
+
 Resident capacity grows independently of the work in each packet. Source control
 exports `resize_state(control_state, resident_capacity)`, returning replacement
 control state followed by the same five storage records used at preparation.
