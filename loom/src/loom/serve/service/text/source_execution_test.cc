@@ -327,11 +327,9 @@ TEST_F(SourceTextServiceTest,
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(models) && iree_status_is_ok(status); ++i) {
-    const loom_serve_packing_shape_t shape = {4 * (i + 1), i + 1};
     auto options = ModelOptions();
-    options.prefill_capacity = shape.token_capacity;
-    options.epoch_count = 1;
-    options.epoch_shapes = &shape;
+    options.prefill_capacity = 4 * (i + 1);
+    options.span_capacity = i + 1;
     status = loom_serve_text_model_allocate(device_, storage_owner_, &options,
                                             host_allocator_, &models[i]);
     bool progress = false;
@@ -408,8 +406,8 @@ TEST_F(SourceTextServiceTest, IndependentParameterPreparationJoinsAllDomains) {
                        "  func.call @parameter(%media_stage, %c0_i32, "
                        "%c0_source, %checkpoint, %media_policy)");
     EditNativeProvider(package + "/prepare.loom", package + "/prepare.loom",
-                       "func.return %effective, %c2_i32, %state",
-                       "func.return %effective, %c1_i32, %state");
+                       "func.return %prefill, %c2_i32, %state",
+                       "func.return %prefill, %c1_i32, %state");
     ASSERT_TRUE(std::filesystem::copy_file(directory_ + "/weights.loom",
                                            package + "/media-weights.loom"));
     if (fail_policy) {
@@ -649,12 +647,10 @@ class WideCohortTextServiceTest : public SourceTextServiceTest {
     options.context_capacity = 256;
     options.pool_capacity = 4096;
     options.row_count = 257;
-    options.epoch_count = IREE_ARRAYSIZE(wide_shapes_);
-    options.epoch_shapes = wide_shapes_;
+    options.prefill_capacity = 256;
+    options.span_capacity = 129;
     return options;
   }
-
-  const loom_serve_packing_shape_t wide_shapes_[2] = {{1, 1}, {256, 129}};
 };
 
 class GrowingTextServiceTest : public SourceTextServiceTest {
@@ -689,16 +685,13 @@ class GrowingTextServiceTest : public SourceTextServiceTest {
     auto options = SourceTextServiceTest::ModelOptions();
     options.context_capacity = 256;
     options.pool_capacity = 4096;
-    options.epoch_count = IREE_ARRAYSIZE(growth_shapes_);
-    options.epoch_shapes = growth_shapes_;
+    options.prefill_capacity = 4096;
+    options.span_capacity = 129;
     return options;
   }
 
   // Explicit storage owner independent of the execution device's default pool.
   loom_runtime_pool_t* pool_ = nullptr;
-  // Large input staging makes 129 residents cross physical slab boundaries,
-  // while the actual numerical workload remains a few tokens per resident.
-  const loom_serve_packing_shape_t growth_shapes_[1] = {{4096, 129}};
 };
 
 TEST_F(GrowingTextServiceTest, GrowthKeepsLiveHistoriesHandlesAndCheckpoints) {
@@ -751,8 +744,7 @@ TEST_F(GrowingTextServiceTest, GrowthKeepsLiveHistoriesHandlesAndCheckpoints) {
       references[i].Consume(tokens[i]);
       spans[i] = {i, 1, &tokens[i], LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT};
     }
-    IREE_ASSERT_OK(
-        loom_serve_text_model_epoch(model_, 0, capacity, spans.data()));
+    IREE_ASSERT_OK(loom_serve_text_model_epoch(model_, capacity, spans.data()));
     for (size_t i = 0; i < capacity; ++i) {
       EXPECT_EQ(loom_serve_text_row_token(loom_serve_text_model_row(model_, i)),
                 references[i].Predict())
@@ -801,9 +793,8 @@ TEST_F(WideCohortTextServiceTest, WideEpochsPreserveSparseResidentsAndForks) {
     }
     const loom_serve_text_span_t duplicate[] = {spans[0], spans[0]};
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                          loom_serve_text_model_epoch(model_, 1, 2, duplicate));
-    IREE_ASSERT_OK(
-        loom_serve_text_model_epoch(model_, 1, kCount, spans.data()));
+                          loom_serve_text_model_epoch(model_, 2, duplicate));
+    IREE_ASSERT_OK(loom_serve_text_model_epoch(model_, kCount, spans.data()));
     for (size_t i = 0; i < kCount; ++i) {
       EXPECT_EQ(loom_serve_text_row_token(
                     loom_serve_text_model_row(model_, spans[i].row_index)),
@@ -825,7 +816,7 @@ TEST_F(WideCohortTextServiceTest, WideEpochsPreserveSparseResidentsAndForks) {
   const loom_serve_text_span_t branches[] = {
       {255, 1, &a, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT},
       {256, 1, &b, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT}};
-  IREE_ASSERT_OK(loom_serve_text_model_epoch(model_, 1, 2, branches));
+  IREE_ASSERT_OK(loom_serve_text_model_epoch(model_, 2, branches));
   Oracle fork_reference = references[0];
   fork_reference.Consume(a);
   references[0].Consume(b);
@@ -878,7 +869,7 @@ TEST_P(PooledTextServiceTest, ChunkingRowsAndForksMatchDenseOracle) {
       {2, 1, &b, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT},
   };
   IREE_ASSERT_OK(
-      loom_serve_text_model_epoch(model_, 1, IREE_ARRAYSIZE(spans), spans));
+      loom_serve_text_model_epoch(model_, IREE_ARRAYSIZE(spans), spans));
   Oracle branch = reference;
   reference.Consume(a);
   branch.Consume(b);
@@ -908,7 +899,7 @@ TEST_P(PooledTextServiceTest, KnownInputCheckpointsPreserveNoPrediction) {
   }
   auto* row = loom_serve_text_model_row(model_, 0);
   const loom_serve_text_span_t prefix = {0, tokens.size(), tokens.data(), 0};
-  IREE_ASSERT_OK(loom_serve_text_model_epoch(model_, 1, 1, &prefix));
+  IREE_ASSERT_OK(loom_serve_text_model_epoch(model_, 1, &prefix));
   EXPECT_EQ(loom_serve_text_row_position(row), 11u);
   loom_runtime_execution_frontier_t frontier;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
@@ -922,7 +913,7 @@ TEST_P(PooledTextServiceTest, KnownInputCheckpointsPreserveNoPrediction) {
   // advances retained state without making the row eligible for decoding.
   const int32_t b = Oracle::Id('b');
   const loom_serve_text_span_t append = {0, 1, &b, 0};
-  IREE_ASSERT_OK(loom_serve_text_model_epoch(model_, 0, 1, &append));
+  IREE_ASSERT_OK(loom_serve_text_model_epoch(model_, 1, &append));
   EXPECT_EQ(loom_serve_text_row_position(row), 12u);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         loom_serve_text_row_submit_decode(row, &frontier));
@@ -941,8 +932,8 @@ TEST_P(PooledTextServiceTest, KnownInputCheckpointsPreserveNoPrediction) {
       {0, 1, &x, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT},
       {1, 1, &b, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT},
   };
-  IREE_ASSERT_OK(loom_serve_text_model_epoch(
-      model_, 1, IREE_ARRAYSIZE(branches), branches));
+  IREE_ASSERT_OK(
+      loom_serve_text_model_epoch(model_, IREE_ARRAYSIZE(branches), branches));
   Oracle reference;
   reference.Consume(prompt + "bx");
   Oracle branch;
@@ -1027,13 +1018,10 @@ TEST_F(SourceTextServiceTest, WideSourceEpochsRetainExactHttpHistory) {
     SCOPED_TRACE(capacity);
     IREE_ASSERT_OK(loom_serve_text_model_free(model_));
     model_ = nullptr;
-    const loom_serve_packing_shape_t shapes[] = {{32, 4}, {capacity, 4}};
     auto options = ModelOptions();
     options.prefill_capacity = capacity;
     options.context_capacity = capacity + 64;
     options.pool_capacity = 4 * ((options.context_capacity + 3) / 4 * 4);
-    options.epoch_count = IREE_ARRAYSIZE(shapes);
-    options.epoch_shapes = shapes;
     IREE_ASSERT_OK(loom_serve_text_model_allocate(
         device_, storage_owner_, &options, host_allocator_, &model_));
     EXPECT_EQ(loom_serve_text_model_prefill_capacity(model_), capacity);
@@ -1063,7 +1051,7 @@ TEST_F(SourceTextServiceTest, WideSourceEpochsRetainExactHttpHistory) {
         {2, tokens.size(), tokens.data(), LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT},
     };
     IREE_ASSERT_OK(
-        loom_serve_text_model_epoch(model_, 1, IREE_ARRAYSIZE(spans), spans));
+        loom_serve_text_model_epoch(model_, IREE_ARRAYSIZE(spans), spans));
     reference.Consume(pending);
     EXPECT_EQ(loom_serve_text_row_token(full), reference.Predict());
     Oracle fresh;
@@ -1080,7 +1068,8 @@ TEST_F(SourceTextServiceTest, WideSourceEpochsRetainExactHttpHistory) {
               options.pool_capacity);
   }
 
-  // Same server binary and source package, now with a 4097-token host shape.
+  // Same server binary and source package, now with a 4097-token submission
+  // budget.
   Start(4097);
   std::string prompt;
   for (size_t i = 0; i < 4088; ++i) {

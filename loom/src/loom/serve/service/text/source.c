@@ -38,31 +38,12 @@ static iree_status_t loom_serve_text_prepare(
     const loom_serve_text_options_t* options,
     loom_serve_text_storage_t* storage) {
   const iree_allocator_t host_allocator = source->host_allocator;
-  iree_vm_buffer_t* shapes = NULL;
-  iree_status_t status =
-      iree_vm_buffer_create(options->epoch_count * 2 * sizeof(int64_t),
-                            iree_alignof(int64_t), host_allocator, &shapes);
-  iree_byte_span_t shape_bytes = iree_byte_span_empty();
-  if (iree_status_is_ok(status)) {
-    status = iree_vm_buffer_map_write(shapes, 0, iree_vm_buffer_length(shapes),
-                                      &shape_bytes);
-  }
-  if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < options->epoch_count; ++i) {
-      iree_unaligned_store_le_u64(shape_bytes.data + i * 16,
-                                  options->epoch_shapes[i].token_capacity);
-      iree_unaligned_store_le_u64(shape_bytes.data + i * 16 + 8,
-                                  options->epoch_shapes[i].span_capacity);
-    }
-  }
   iree_vm_buffer_t* weights = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_vm_buffer_clone(
-        IREE_VM_BUFFER_ACCESS_FLAG_READ,
-        iree_make_const_byte_span(options->weights_path.data,
-                                  options->weights_path.size),
-        1, host_allocator, &weights);
-  }
+  iree_status_t status = iree_vm_buffer_clone(
+      IREE_VM_BUFFER_ACCESS_FLAG_READ,
+      iree_make_const_byte_span(options->weights_path.data,
+                                options->weights_path.size),
+      1, host_allocator, &weights);
   if (iree_status_is_ok(status)) {
     const iree_string_view_t json = iree_string_view_is_empty(options->options)
                                         ? IREE_SV("{}")
@@ -79,8 +60,7 @@ static iree_status_t loom_serve_text_prepare(
       iree_vm_variant_from_i64((int64_t)options->row_count),
       iree_vm_variant_from_i64((int64_t)options->checkpoint_capacity),
       iree_vm_variant_from_i32((int32_t)options->draft_depth),
-      iree_vm_buffer_variant_from_ptr_move(&source->vm_types, &shapes),
-      iree_vm_variant_from_i64((int64_t)options->epoch_count),
+      iree_vm_variant_from_i64((int64_t)options->span_capacity),
       iree_vm_buffer_variant_from_ptr_move(&source->vm_types, &weights),
       iree_vm_buffer_variant_from_ptr_borrowed(&source->vm_types,
                                                source->options),

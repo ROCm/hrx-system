@@ -19,7 +19,7 @@
       "libraries": ["program/advance.loom"]
     }
   },
-  "services": {"chat": {"kind": "text", "version": 1}},
+  "services": {"chat": {"kind": "text", "version": 2}},
   "variants": {
     "original": {
       "services": {

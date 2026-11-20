@@ -70,7 +70,7 @@ class ConfigurationTest : public ::testing::Test {
   loom_serve_model_configuration_t model_ = {};
 };
 
-std::string Card(const std::string& kind, int version = 1,
+std::string Card(const std::string& kind, int version,
                  const std::string& identity = "publisher/model") {
   return R"({"schema_version":1,"model":{"id":")" + identity +
          R"(","name":"A readable model name"},
@@ -84,12 +84,21 @@ std::string Card(const std::string& kind, int version = 1,
       "execution":{"pending_requests":7}}}})";
 }
 
+struct ServiceVersions {
+  // Service selector published in a model card.
+  const char* kind;
+  // Oldest published ABI the native service accepts.
+  int first;
+  // Most recent published ABI.
+  int current;
+};
+
 class CardConfigurationTest
     : public ConfigurationTest,
-      public ::testing::WithParamInterface<const char*> {};
+      public ::testing::WithParamInterface<ServiceVersions> {};
 
 TEST_P(CardConfigurationTest, DirectCardOwnsPresetWithoutReadingPrograms) {
-  auto json = Card(GetParam());
+  auto json = Card(GetParam().kind, GetParam().current);
   IREE_ASSERT_OK(Load(json));
   json.assign(json.size(), 'x');
   EXPECT_EQ(String(model_.name), "publisher/model");
@@ -99,7 +108,7 @@ TEST_P(CardConfigurationTest, DirectCardOwnsPresetWithoutReadingPrograms) {
   ASSERT_NE(model_.resolved_sources, nullptr);
   ASSERT_NE(model_.sources.card, nullptr);
   const auto* selection = loom_model_card_selection(model_.sources.card);
-  EXPECT_EQ(String(selection->kind), GetParam());
+  EXPECT_EQ(String(selection->kind), GetParam().kind);
   EXPECT_EQ(String(selection->selector.preset), "interactive");
   EXPECT_EQ(selection->inputs.count, 2u);
   EXPECT_EQ(String(selection->inputs.values[0].file.path), "absent.loom");
@@ -109,38 +118,47 @@ TEST_P(CardConfigurationTest, DirectCardOwnsPresetWithoutReadingPrograms) {
 }
 
 TEST_P(CardConfigurationTest, DirectCardAcceptsEverySupportedAbi) {
-  const int latest = std::string(GetParam()) == "speech" ? 2 : 1;
-  for (int version = 1; version <= latest; ++version) {
+  const auto& service = GetParam();
+  for (int version = service.first; version <= service.current; ++version) {
     SCOPED_TRACE(version);
-    IREE_ASSERT_OK(Load(Card(GetParam(), version)));
+    IREE_ASSERT_OK(Load(Card(service.kind, version)));
     ASSERT_NE(model_.sources.card, nullptr);
     EXPECT_EQ(loom_model_card_selection(model_.sources.card)->version, version);
   }
 }
 
 TEST_P(CardConfigurationTest, DirectCardRejectsUnsupportedAbiBeforeProgramIo) {
-  const int unsupported = std::string(GetParam()) == "speech" ? 3 : 2;
+  const auto& service = GetParam();
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
-                        Load(Card(GetParam(), unsupported)));
+                        Load(Card(service.kind, service.current + 1)));
+  if (service.first > 1) {
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
+                          Load(Card(service.kind, service.first - 1)));
+  }
   EXPECT_EQ(model_.sources.card, nullptr);
   EXPECT_EQ(model_.name.data, nullptr);
 }
 
 INSTANTIATE_TEST_SUITE_P(NativeServices, CardConfigurationTest,
-                         ::testing::Values("text", "sequence", "image",
-                                           "embedding", "decision", "speech",
-                                           "recognition", "activity"));
+                         ::testing::Values(ServiceVersions{"text", 2, 2},
+                                           ServiceVersions{"sequence", 2, 2},
+                                           ServiceVersions{"image", 1, 1},
+                                           ServiceVersions{"embedding", 1, 1},
+                                           ServiceVersions{"decision", 1, 1},
+                                           ServiceVersions{"speech", 1, 2},
+                                           ServiceVersions{"recognition", 1, 1},
+                                           ServiceVersions{"activity", 1, 1}));
 
 TEST_F(ConfigurationTest,
        DirectCardSelectsNamedPresetAndPreservesDecodedIdentity) {
   IREE_ASSERT_OK(
-      Load(Card("text", 1, R"(publisher/a\\b)"), IREE_SV("interactive")));
+      Load(Card("text", 2, R"(publisher/a\\b)"), IREE_SV("interactive")));
   EXPECT_EQ(String(model_.name), R"(publisher/a\b)");
   IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
-                        Load(Card("text"), IREE_SV("absent")));
+                        Load(Card("text", 2), IREE_SV("absent")));
   EXPECT_EQ(model_.name.data, nullptr);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        Load(Card("text", 1, "invalid alias")));
+                        Load(Card("text", 2, "invalid alias")));
   EXPECT_EQ(model_.sources.card, nullptr);
 }
 
@@ -153,19 +171,19 @@ TEST_F(ConfigurationTest, DeploymentOwnsItsPresetSelection) {
 }
 
 TEST_F(ConfigurationTest, LoadsUtf8FilesWithAByteOrderMark) {
-  IREE_ASSERT_OK(Load("\xEF\xBB\xBF\r\n" + Card("text")));
+  IREE_ASSERT_OK(Load("\xEF\xBB\xBF\r\n" + Card("text", 2)));
   EXPECT_EQ(String(model_.name), "publisher/model");
 
   const std::string with_comment = "\xEF\xBB\xBF// local settings\r\n";
   IREE_ASSERT_OK(Load(with_comment + Text()));
   EXPECT_EQ(String(model_.name), "scout");
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        Load(with_comment + Card("text")));
+                        Load(with_comment + Card("text", 2)));
 }
 
 TEST_F(ConfigurationTest, DirectCardRetainsLazyImageContractAndDefaults) {
-  auto json = Card("text");
-  json.insert(json.find("\"version\":1"),
+  auto json = Card("text", 2);
+  json.insert(json.find("\"version\":"),
               R"("components":{"image":{"version":1,"options":["patches"]}},)");
   json.insert(
       json.find("\"execution\""),
@@ -182,14 +200,14 @@ TEST_F(ConfigurationTest, DirectCardRetainsLazyImageContractAndDefaults) {
 TEST_F(ConfigurationTest, UnsupportedComponentsFailBeforeProgramIo) {
   for (const char* declaration :
        {R"({"audio":{"version":1}})", R"({"image":{"version":2}})"}) {
-    auto json = Card("text");
-    json.insert(json.find("\"version\":1"),
+    auto json = Card("text", 2);
+    json.insert(json.find("\"version\":"),
                 std::string("\"components\":") + declaration + ",");
     IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED, Load(json));
     EXPECT_EQ(model_.sources.card, nullptr);
   }
-  auto json = Card("speech");
-  json.insert(json.find("\"version\":1"), R"("components":{"image":{}},)");
+  auto json = Card("speech", 1);
+  json.insert(json.find("\"version\":"), R"("components":{"image":{}},)");
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED, Load(json));
 }
 
@@ -772,7 +790,7 @@ TEST_F(ConfigurationTest, TokenCapacitiesUseSignedCoordinates) {
 
 TEST_F(ConfigurationTest, CardTokenCapacitiesUseTheDeploymentContract) {
   for (uint32_t capacity : {1048576u, uint32_t{INT32_MAX}}) {
-    auto json = Card("text");
+    auto json = Card("text", 2);
     const std::string count = std::to_string(capacity);
     json.insert(json.find("\"pending_requests\""),
                 "\"context_capacity\":" + count + ",\"prefill_capacity\":" +
@@ -784,7 +802,7 @@ TEST_F(ConfigurationTest, CardTokenCapacitiesUseTheDeploymentContract) {
   }
 }
 
-TEST_F(ConfigurationTest, SessionMaximumBoundsInitialCapacityNotEpochShape) {
+TEST_F(ConfigurationTest, SessionMaximumBoundsInitialCapacity) {
   for (const char* kind : {"text", "sequence"}) {
     const std::string inputs =
         std::string(R"(,"weights":"model.irpa")") +
@@ -812,7 +830,7 @@ TEST_F(ConfigurationTest, SessionMaximumBoundsInitialCapacityNotEpochShape) {
 }
 
 TEST_F(ConfigurationTest, CardPresetMayBoundSessionsWithoutInitialRows) {
-  auto json = Card("text");
+  auto json = Card("text", 2);
   json.insert(json.find("\"pending_requests\""), R"("max_sessions":1,)");
   IREE_ASSERT_OK(Load(json));
   EXPECT_EQ(model_.text.max_sessions, 1u);

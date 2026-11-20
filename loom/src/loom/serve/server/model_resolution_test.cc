@@ -23,7 +23,7 @@ constexpr char kCard[] = R"json({
   "model": {"id": "fixture/text", "name": "Text fixture"},
   "programs": {"source": {"inputs": ["prepare.loom", "control.loom"],
                           "libraries": []}},
-  "services": {"chat": {"kind": "text", "version": 1}},
+  "services": {"chat": {"kind": "text", "version": 2}},
   "variants": {"tiny": {"services": {"chat": {
     "programs": ["source"],
     "parameters": {"weights": {"files": ["model.safetensors"]}},
@@ -243,8 +243,10 @@ class ServiceCardResolutionTest
 };
 
 TEST_P(ServiceCardResolutionTest, SupportedVersionResolvesWithoutProgramIo) {
-  const int latest = std::string(GetParam()) == "speech" ? 2 : 1;
-  for (int version = 1; version <= latest; ++version) {
+  const std::string kind = GetParam();
+  const int first = kind == "text" || kind == "sequence" ? 2 : 1;
+  const int latest = kind == "speech" ? 2 : first;
+  for (int version = first; version <= latest; ++version) {
     SCOPED_TRACE(version);
     InitializeService(version);
     loom_serve_model_resolution_t* resolution = nullptr;
@@ -263,7 +265,13 @@ TEST_P(ServiceCardResolutionTest, SupportedVersionResolvesWithoutProgramIo) {
 }
 
 TEST_P(ServiceCardResolutionTest, UnsupportedVersionFailsBeforeProgramIo) {
-  InitializeService(std::string(GetParam()) == "speech" ? 3 : 2);
+  const std::string kind = GetParam();
+  // Version one text programs require the host to register a size catalog.
+  // Other services exercise a version newer than their published contract.
+  const int version = kind == "text" || kind == "sequence" ? 1
+                      : kind == "speech"                   ? 3
+                                                           : 2;
+  InitializeService(version);
   loom_serve_model_resolution_t* resolution = nullptr;
   IREE_ASSERT_OK(loom_serve_model_resolution_start(
       Sink(), &configuration_, Observer(), allocator_, &resolution));

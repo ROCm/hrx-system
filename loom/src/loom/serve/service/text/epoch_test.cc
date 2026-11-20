@@ -27,13 +27,12 @@ class Epoch : public loom_serve_text_epoch_t {
 };
 
 TEST(TextEpochTest, KnownInputsAndDecodePreserveRowIdentityAndPhase) {
-  const loom_serve_packing_shape_t shape = {16, 4};
   const loom_serve_text_epoch_options_t options = {
       .context_capacity = 96,
       .chunk_size = 8,
       .continuation_epochs = 1,
-      .shapes = &shape,
-      .shape_count = 1,
+      .token_capacity = 16,
+      .span_capacity = 4,
   };
   const int32_t tokens[] = {10, 11, 12, 13, 14, 15, 16, 17, 18, 19};
   const loom_serve_text_media_input_t media = {};
@@ -91,14 +90,13 @@ TEST(TextEpochTest, KnownInputsAndDecodePreserveRowIdentityAndPhase) {
 }
 
 TEST(TextEpochTest, ContinuationMixesPromptTailsAndBoundedVerifiers) {
-  const loom_serve_packing_shape_t shape = {16, 4};
   loom_serve_text_epoch_options_t options = {
       .context_capacity = 64,
       .chunk_size = 8,
       .continuation_epochs = 2,
       .draft_depth = 3,
-      .shapes = &shape,
-      .shape_count = 1,
+      .token_capacity = 16,
+      .span_capacity = 4,
   };
   const int32_t tokens[] = {10, 11, 12, 13};
   const loom_serve_text_media_input_t media = {};
@@ -174,14 +172,13 @@ TEST(TextEpochTest, ContinuationMixesPromptTailsAndBoundedVerifiers) {
 }
 
 TEST(TextEpochTest, NoContinuationReducesCreditToOneVerifier) {
-  const loom_serve_packing_shape_t shape = {16, 4};
   const loom_serve_text_epoch_options_t options = {
       .context_capacity = 64,
       .chunk_size = 8,
       .continuation_epochs = 2,
       .draft_depth = 3,
-      .shapes = &shape,
-      .shape_count = 1,
+      .token_capacity = 16,
+      .span_capacity = 4,
   };
   loom_serve_text_epoch_row_t rows[] = {
       {.output_count = 9, .position = 60, .token = 21},
@@ -205,39 +202,34 @@ TEST(TextEpochTest, NoContinuationReducesCreditToOneVerifier) {
 }
 
 TEST(TextEpochTest, ContinuationCountsThePromptRemainderOrVerifierWidth) {
-  const loom_serve_packing_shape_t shapes[] = {{4, 1}, {16, 1}};
   const loom_serve_text_epoch_options_t options = {
       .context_capacity = 64,
       .chunk_size = 16,
       .continuation_epochs = 2,
       .draft_depth = 3,
-      .shapes = shapes,
-      .shape_count = IREE_ARRAYSIZE(shapes),
+      .token_capacity = 16,
+      .span_capacity = 1,
   };
   const int32_t tokens[16] = {};
   const loom_serve_text_epoch_row_t rows[] = {
       {.input_tokens = tokens, .input_count = 16, .output_count = 9}};
-  for (iree_host_size_t first : {0u, 1u}) {
+  for (iree_host_size_t first : {4u, 16u}) {
     SCOPED_TRACE(first);
-    const loom_serve_packed_span_t scheduled[] = {
-        {0, shapes[first].token_capacity}};
+    const loom_serve_packed_span_t scheduled[] = {{0, first}};
     const loom_serve_packing_plan_t plan = {
         .span_count = 1,
-        .token_count = shapes[first].token_capacity,
-        .shape_index = first,
+        .token_count = first,
     };
     Epoch epoch(IREE_ARRAYSIZE(scheduled));
     loom_serve_text_continuation_t next;
     loom_serve_text_epoch_prepare(&options, rows, 1, &plan, scheduled, &epoch,
                                   &next);
     EXPECT_EQ(epoch.device_epochs, 2);
-    EXPECT_EQ(next.shape_index, 1 - first);
-    EXPECT_EQ(epoch.continuation_token_count, first == 0 ? 12u : 4u);
+    EXPECT_EQ(epoch.continuation_token_count, first == 4 ? 12u : 4u);
   }
 }
 
 TEST(TextEpochTest, IsolatedStagesScheduleOnlyTheFirstInput) {
-  const loom_serve_packing_shape_t shape = {16, 4};
   for (auto mode : {LOOM_SERVICE_TEXT_SCHEDULE_ISOLATED,
                     LOOM_SERVICE_TEXT_SCHEDULE_MATCHED}) {
     const loom_serve_text_epoch_options_t options = {
@@ -245,8 +237,8 @@ TEST(TextEpochTest, IsolatedStagesScheduleOnlyTheFirstInput) {
         .chunk_size = 8,
         .continuation_epochs = 1,
         .schedule_mode = mode,
-        .shapes = &shape,
-        .shape_count = 1,
+        .token_capacity = 16,
+        .span_capacity = 4,
     };
     const loom_serve_text_epoch_row_t rows[] = {
         {.output_count = 9, .position = 3, .token = 21}};
@@ -267,7 +259,6 @@ TEST(TextEpochTest, CohortCapacityIsIndependentOfResidentIdentity) {
   for (iree_host_size_t depth = 1; depth <= 7; ++depth) {
     for (iree_host_size_t count :
          {1u, 2u, 3u, 15u, 16u, 17u, 31u, 32u, 33u, 64u, 100u, 129u}) {
-      const loom_serve_packing_shape_t shape = {count * 8, count};
       Epoch epoch(count);
       for (iree_host_size_t epochs : {1u, 2u}) {
         SCOPED_TRACE(count);
@@ -277,8 +268,8 @@ TEST(TextEpochTest, CohortCapacityIsIndependentOfResidentIdentity) {
             .chunk_size = 8,
             .continuation_epochs = epochs,
             .draft_depth = depth,
-            .shapes = &shape,
-            .shape_count = 1,
+            .token_capacity = count * 8,
+            .span_capacity = count,
         };
         std::vector<loom_serve_text_epoch_row_t> rows(count);
         std::vector<loom_serve_packed_span_t> scheduled(count);
@@ -324,7 +315,7 @@ TEST(TextEpochTest, CohortCapacityIsIndependentOfResidentIdentity) {
           EXPECT_LE(next.output_limits[i], rows[first].output_count);
           continued_tokens += span.token_count;
         }
-        EXPECT_LE(continued_tokens, shape.token_capacity);
+        EXPECT_LE(continued_tokens, options.token_capacity);
         EXPECT_EQ(epoch.device_epochs, next.span_count ? 2 : 1);
         EXPECT_EQ(epoch.continuation_token_count, continued_tokens);
       }
@@ -333,7 +324,6 @@ TEST(TextEpochTest, CohortCapacityIsIndependentOfResidentIdentity) {
 }
 
 TEST(TextEpochTest, DraftWidthControlsContinuationCreditAndContextFrontier) {
-  const loom_serve_packing_shape_t shape = {128, 16};
   for (iree_host_size_t depth = 1; depth <= 7; ++depth) {
     const iree_host_size_t width = depth + 1;
     const loom_serve_text_epoch_options_t options = {
@@ -341,8 +331,8 @@ TEST(TextEpochTest, DraftWidthControlsContinuationCreditAndContextFrontier) {
         .chunk_size = 8,
         .continuation_epochs = 2,
         .draft_depth = depth,
-        .shapes = &shape,
-        .shape_count = 1,
+        .token_capacity = 128,
+        .span_capacity = 16,
     };
     loom_serve_text_epoch_row_t rows[] = {
         {.output_count = 16, .position = 64 - width - 1, .token = 21}};
@@ -369,7 +359,6 @@ TEST(TextEpochTest, DraftWidthControlsContinuationCreditAndContextFrontier) {
 }
 
 TEST(TextEpochTest, ContinuationLeavesFinalOutputToOrdinaryDecode) {
-  const loom_serve_packing_shape_t shape = {16, 1};
   const int32_t input[] = {20, 21, 22};
   for (iree_host_size_t depth = 1; depth <= 7; ++depth) {
     SCOPED_TRACE(depth);
@@ -379,8 +368,8 @@ TEST(TextEpochTest, ContinuationLeavesFinalOutputToOrdinaryDecode) {
         .chunk_size = 8,
         .continuation_epochs = 2,
         .draft_depth = depth,
-        .shapes = &shape,
-        .shape_count = 1,
+        .token_capacity = 16,
+        .span_capacity = 1,
     };
     for (bool known : {false, true}) {
       SCOPED_TRACE(known);
@@ -417,19 +406,17 @@ TEST(TextEpochTest, ContinuationLeavesFinalOutputToOrdinaryDecode) {
 }
 
 TEST(TextEpochTest, ContinuationPreservesActualExpansionPriority) {
-  const loom_serve_packing_shape_t shape = {16, 4};
   const loom_serve_text_epoch_options_t options = {
       .context_capacity = 64,
       .chunk_size = 8,
       .continuation_epochs = 2,
       .draft_depth = 3,
-      .shapes = &shape,
-      .shape_count = 1,
+      .token_capacity = 16,
+      .span_capacity = 4,
   };
   const loom_serve_ready_span_t ready[] = {{4, 4}, {4, 4}, {20, 1}, {20, 1}};
-  loom_serve_packed_span_t scheduled[4], scratch[4];
-  const auto plan =
-      loom_serve_pack_shapes(4, ready, 1, &shape, 8, 0, scheduled, scratch);
+  loom_serve_packed_span_t scheduled[4];
+  const auto plan = loom_serve_pack_spans(4, ready, 16, 4, 8, 0, scheduled);
   ASSERT_EQ(plan.span_count, 4);
   EXPECT_EQ(plan.next_row, 3);
   EXPECT_EQ(plan.next_span, 3);
@@ -505,11 +492,11 @@ TEST(TextEpochTest, CompactContinuationMatchesResidentDomainRotation) {
             for (auto value : ready) {
               minima += value.minimum_count;
             }
-            const loom_serve_packing_shape_t shape = {
-                pressured ? width + 1 : minima + 4, pressured ? 2u : 5u};
-            loom_serve_packed_span_t scheduled[5], scratch[5];
-            const auto plan = loom_serve_pack_shapes(5, ready, 1, &shape, 64,
-                                                     start, scheduled, scratch);
+            const size_t token_capacity = pressured ? width + 1 : minima + 4;
+            const size_t span_capacity = pressured ? 2u : 5u;
+            loom_serve_packed_span_t scheduled[5];
+            const auto plan = loom_serve_pack_spans(
+                5, ready, token_capacity, span_capacity, 64, start, scheduled);
             if (!plan.span_count) {
               continue;
             }
@@ -549,17 +536,17 @@ TEST(TextEpochTest, CompactContinuationMatchesResidentDomainRotation) {
               separate(following, continuation_start);
             }
             loom_serve_packed_span_t expected[5];
-            const auto reference =
-                loom_serve_pack_shapes(5, following, 1, &shape, 64,
-                                       continuation_start, expected, scratch);
+            const auto reference = loom_serve_pack_spans(
+                5, following, token_capacity, span_capacity, 64,
+                continuation_start, expected);
             const loom_serve_text_epoch_options_t options = {
                 .context_capacity = 128,
                 .chunk_size = 64,
                 .continuation_epochs = 2,
                 .draft_depth = width - 1,
                 .packing_mode = mode,
-                .shapes = &shape,
-                .shape_count = 1,
+                .token_capacity = token_capacity,
+                .span_capacity = span_capacity,
             };
             loom_serve_text_continuation_t next;
             const auto cursor = loom_serve_text_epoch_prepare(

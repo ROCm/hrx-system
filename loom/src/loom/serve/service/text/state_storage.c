@@ -14,8 +14,9 @@ void loom_serve_text_state_initialize(const loom_serve_text_options_t* options,
                                       loom_serve_text_state_t* out_state) {
   *out_state = (loom_serve_text_state_t){
       .host_allocator = host_allocator,
-      .flags = (options->epoch_count ? LOOM_SERVE_TEXT_STATE_FLAG_PACKED : 0) |
-               (options->draft_depth ? LOOM_SERVE_TEXT_STATE_FLAG_DRAFT : 0),
+      .flags =
+          (options->span_capacity ? LOOM_SERVE_TEXT_STATE_FLAG_PACKED : 0) |
+          (options->draft_depth ? LOOM_SERVE_TEXT_STATE_FLAG_DRAFT : 0),
       .row_count = options->row_count,
       .cache.capacity = options->pool_capacity,
       .checkpoints.capacity = (uint32_t)options->checkpoint_capacity,

@@ -199,16 +199,20 @@ static void loom_serve_text_media_epoch_store(
 iree_status_t loom_serve_text_media_epoch_initialize(
     iree_host_size_t first_span_count,
     const loom_serve_text_span_t* first_spans,
-    iree_host_size_t first_packet_capacity, iree_host_size_t next_span_count,
-    const loom_serve_text_span_t* next_spans,
-    iree_host_size_t next_packet_capacity, iree_allocator_t host_allocator,
-    loom_serve_text_media_epoch_t* out_epoch) {
+    iree_host_size_t first_token_count, iree_host_size_t next_span_count,
+    const loom_serve_text_span_t* next_spans, iree_host_size_t next_token_count,
+    iree_allocator_t host_allocator, loom_serve_text_media_epoch_t* out_epoch) {
   memset(out_epoch, 0, sizeof(*out_epoch));
-  const iree_host_size_t packet_length =
-      (first_packet_capacity + next_packet_capacity) *
-      LOOM_SERVE_TEXT_MEDIA_PACKET_RECORD_BYTES;
+  const uint64_t record_count = (uint64_t)first_token_count + next_token_count;
+  if (record_count > UINT32_MAX / LOOM_SERVE_TEXT_MEDIA_PACKET_RECORD_BYTES) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "mixed input records exceed the 32-bit packet extent");
+  }
+  const uint32_t packet_length =
+      (uint32_t)record_count * LOOM_SERVE_TEXT_MEDIA_PACKET_RECORD_BYTES;
   loom_serve_text_media_epoch_layout_t layout = {.device_length =
-                                                     (uint32_t)packet_length};
+                                                     packet_length};
   if (!loom_serve_text_media_epoch_layout(first_span_count, first_spans,
                                           &layout)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -242,7 +246,7 @@ iree_status_t loom_serve_text_media_epoch_initialize(
       .host_allocator = host_allocator,
       .first_feature_count = first_feature_count,
       .next_feature_count = (uint32_t)feature_count - first_feature_count,
-      .device_length = (uint32_t)packet_length,
+      .device_length = packet_length,
   };
   iree_status_t status = iree_vm_buffer_create(
       plan_length, iree_alignof(uint32_t), host_allocator, &epoch.plan);

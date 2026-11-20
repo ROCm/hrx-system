@@ -84,7 +84,7 @@ The referenced `model.json` can contain:
       "config": {"model.width": 64}
     }
   },
-  "services": {"chat": {"kind": "text", "version": 1}},
+  "services": {"chat": {"kind": "text", "version": 2}},
   "variants": {
     "small": {
       "services": {
@@ -117,16 +117,15 @@ The referenced `model.json` can contain:
 }
 ```
 
-These programs implement the text service ABI, including `text_prepare_v1` and
-the corresponding `text_<role>_v1` control exports. Service `version` is
+These programs implement the text service ABI, including `text_prepare_v2` and
+the corresponding `text_<role>_v2` control exports. Service `version` is
 independent of `schema_version` and the bytecode encoding version. Omitting it
 selects the unversioned development names, `text_<role>`. A missing versioned
 export is an error; bare exports are not substituted. Several services and ABI
 revisions can coexist in one provider set. The host checks the selected service.
-Native card execution supports service ABI 1 for text, sequence, image,
-embedding, decision, speech, recognition, and activity, plus their unversioned
-development contracts. Each uses its own `<kind>_<role>_v1` exports for both
-preparation and control. Selecting a different service does not rename exports
+Text and sequence implement ABI 2. Image, embedding, decision, recognition,
+and activity implement ABI 1. Speech implements ABIs 1 and 2. Each uses its
+own `<kind>_<role>_v<version>` exports for preparation and control. Selecting a different service does not rename exports
 or substitute another service's ABI.
 
 Text services can declare an independently versioned image projector:
@@ -136,7 +135,7 @@ Text services can declare an independently versioned image projector:
   "services": {
     "chat": {
       "kind": "text",
-      "version": 1,
+      "version": 2,
       "components": {"image": {"version": 1}}
     }
   }
@@ -358,7 +357,7 @@ Native capacity fields are:
 | `max_sessions` | omitted | Positive ceiling on resident session owners. Preparation and outstanding output retain their owners; extra requests wait in `pending_requests`. Omission leaves concurrency memory-limited. |
 | `rows` | `4` | Initial resident capacity hint, capped by `max_sessions` when set. The directory grows as requests arrive, independently of epoch token/span capacity and up to the configured maximum. |
 | `context_capacity` | `16384` | Per-row logical context limit in token positions, fitting a positive signed 32-bit count. The source validates the model's supported context window. |
-| `prefill_capacity` | `512` | Largest automatically specialized packed token shape; not a prompt-length limit. |
+| `prefill_capacity` | `512` | Maximum tokens admitted to one submission across all active rows. Longer prompts span multiple submissions. |
 | `checkpoint_capacity` | `0` | Explicit pinned endpoint slots, independent of execution rows. |
 | `session_cache_capacity` | automatic | Evictable idle histories beyond resident rows. An explicit count is exact; zero disables this cache. Nonzero counts also reserve one admission-exchange endpoint. |
 | `prefix_cache_capacity` | automatic | Evictable exact intermediate-prefix endpoints. An explicit count is exact; zero disables capture. |
@@ -429,7 +428,7 @@ remain separate measurements; the cold estimate does not change with resident
 growth.
 
 The shared pool can grow independently of the per-session context limit and
-prefill shape. Its token count must fit both host indexing and a signed 64-bit
+per-submission token budget. Its token count must fit both host indexing and a signed 64-bit
 integer. Source preparation declares the page size and storage layout; the
 resulting pool must contain at most 4,294,967,295 physical pages, and each region
 must fit its declared allocation. These representation limits do not guarantee
@@ -445,8 +444,7 @@ can visit the deployment over its lifetime. Finished or cancelled requests
 release their owners for reuse. Slow output readers still count while they
 retain a request, and a full pending queue rejects additional requests with
 HTTP 503. Growth stops exactly at the maximum, including non-power-of-two
-limits such as six. Dispatch shapes remain independent: a single session can
-still use a large prefill shape.
+limits such as six. A single session can consume the full per-submission token budget.
 
 Idle session caches, shared prefix endpoints, and explicit checkpoints have
 their own capacities; the session maximum is not a byte budget for those

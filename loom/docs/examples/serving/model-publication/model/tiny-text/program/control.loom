@@ -47,7 +47,7 @@ func.def @join(%a: buffer, %b: buffer) -> (buffer) {
   func.return %output : buffer
 }
 
-func.def public @text_model_name_v1() -> (buffer) {
+func.def public @text_model_name_v2() -> (buffer) {
   %name = buffer.constant utf8("tiny-text") : buffer
   func.return %name : buffer
 }
@@ -56,7 +56,7 @@ func.decl import("json") @parse_i64(%source: buffer, %offset: i64, %length: i64)
 
 func.decl import("json") @parse_f64(%source: buffer, %offset: i64, %length: i64) -> (f64)
 
-func.def public @text_request_defaults_v1(%options: buffer) -> (buffer) {
+func.def public @text_request_defaults_v2(%options: buffer) -> (buffer) {
   %fields, %type, %count = func.call @members(%options) : (buffer) -> (buffer, i32, i64)
   %object = scalar.constant 2 : i32
   %empty_count = scalar.constant 0 : i64
@@ -68,7 +68,7 @@ func.def public @text_request_defaults_v1(%options: buffer) -> (buffer) {
   func.return %empty : buffer
 }
 
-func.def public @text_request_options_v1(%defaults: buffer, %request: buffer, %nonce: i64) -> (buffer) {
+func.def public @text_request_options_v2(%defaults: buffer, %request: buffer, %nonce: i64) -> (buffer) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -126,21 +126,21 @@ func.def public @text_request_options_v1(%defaults: buffer, %request: buffer, %n
   func.return %defaults : buffer
 }
 
-func.def public @text_bind_request_v1(%state: buffer, %row: i32, %options: buffer) {
+func.def public @text_bind_request_v2(%state: buffer, %row: i32, %options: buffer) {
   func.return
 }
 
-func.def public @text_chat_reasoning_v1() -> (i32, i32, i32) {
+func.def public @text_chat_reasoning_v2() -> (i32, i32, i32) {
   %c0 = scalar.constant 0 : i32
   func.return %c0, %c0, %c0 : i32, i32, i32
 }
 
-func.def public @text_chat_image_limits_v1() -> (i64, i64, i64, i64, i64) {
+func.def public @text_chat_image_limits_v2() -> (i64, i64, i64, i64, i64) {
   %c0_i64 = scalar.constant 0 : i64
   func.return %c0_i64, %c0_i64, %c0_i64, %c0_i64, %c0_i64 : i64, i64, i64, i64, i64
 }
 
-func.def public @text_chat_begin_v1(%request: buffer, %tools: buffer) -> (buffer, i64) {
+func.def public @text_chat_begin_v2(%request: buffer, %tools: buffer) -> (buffer, i64) {
   %c0 = index.constant 0 : offset
   %c0_index = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -202,7 +202,7 @@ func.def public @text_chat_begin_v1(%request: buffer, %tools: buffer) -> (buffer
   func.return %empty, %c0_i64 : buffer, i64
 }
 
-func.def public @text_chat_message_v1(%raw: buffer, %role: buffer, %content: buffer, %parts: buffer, %frames: buffer, %reasoning: buffer, %calls: buffer, %state: i64, %ordinal: i64, %fields: i64, %part_count: i64) -> (buffer, i64, buffer, i64) {
+func.def public @text_chat_message_v2(%raw: buffer, %role: buffer, %content: buffer, %parts: buffer, %frames: buffer, %reasoning: buffer, %calls: buffer, %state: i64, %ordinal: i64, %fields: i64, %part_count: i64) -> (buffer, i64, buffer, i64) {
   %c0_i64 = scalar.constant 0 : i64
   %plain = scalar.cmpi eq, %fields, %c0_i64 : i64
   func.call @check(%plain) : (i1)
@@ -222,12 +222,12 @@ func.def public @text_chat_message_v1(%raw: buffer, %role: buffer, %content: buf
   func.return %fragment, %state, %empty, %c0_i64 : buffer, i64, buffer, i64
 }
 
-func.def public @text_chat_end_v1(%state: i64) -> (buffer, i64) {
+func.def public @text_chat_end_v2(%state: i64) -> (buffer, i64) {
   %empty = buffer.constant utf8("") : buffer
   func.return %empty, %state : buffer, i64
 }
 
-func.def public @text_render_tool_v1(%name: buffer, %arguments: buffer, %ordinal: i64) -> (buffer, i64) {
+func.def public @text_render_tool_v2(%name: buffer, %arguments: buffer, %ordinal: i64) -> (buffer, i64) {
   %c0 = scalar.constant 0 : i32
   %c0_i64 = scalar.constant 0 : i64
   %error = buffer.constant utf8("text tiny accepts a/b/x messages without tools, reasoning or model options") : buffer
@@ -236,7 +236,7 @@ func.def public @text_render_tool_v1(%name: buffer, %arguments: buffer, %ordinal
   func.return %empty, %c0_i64 : buffer, i64
 }
 
-func.def public @text_parse_tools_v1(%schemas: buffer, %response: buffer, %truncated: i64) -> (buffer) {
+func.def public @text_parse_tools_v2(%schemas: buffer, %response: buffer, %truncated: i64) -> (buffer) {
   %empty = buffer.constant utf8("[]") : buffer
   func.return %empty : buffer
 }
@@ -244,7 +244,7 @@ func.def public @text_parse_tools_v1(%schemas: buffer, %response: buffer, %trunc
 // The host supplies the previous raw prediction separately. On EOS it replaces
 // the first assistant delimiter in this suffix; an open response consumes its
 // last ordinary token before that delimiter. Full replay encodes both normally.
-func.def public @text_prepare_input_v1(%text: buffer, %markers: buffer, %marker_count: i64, %format: i32, %boundary: i32, %capacity: i64) -> (buffer, i64, buffer) {
+func.def public @text_prepare_input_v2(%text: buffer, %markers: buffer, %marker_count: i64, %format: i32, %boundary: i32, %capacity: i64) -> (buffer, i64, buffer) {
   %c0 = index.constant 0 : offset
   %c0_index = index.constant 0 : index
   %c1 = index.constant 1 : offset
@@ -296,14 +296,14 @@ func.def public @text_prepare_input_v1(%text: buffer, %markers: buffer, %marker_
   func.return %output, %count, %empty : buffer, i64, buffer
 }
 
-func.def public @text_output_next_v1(%response: buffer, %previous: i64, %state: i64, %phase: i32) -> (i64, i64, i64, i64) {
+func.def public @text_output_next_v2(%response: buffer, %previous: i64, %state: i64, %phase: i32) -> (i64, i64, i64, i64) {
   %length = buffer.length %response
   %count = index.cast %length : offset to i64
   %content = scalar.constant 1 : i64
   func.return %content, %previous, %count, %state : i64, i64, i64, i64
 }
 
-func.def public @text_complete_text_v1(%prompt: buffer, %response: buffer, %content: buffer, %reasoning: buffer, %tools: buffer, %initial_state: i64, %final_state: i64) -> (buffer, i32) {
+func.def public @text_complete_text_v2(%prompt: buffer, %response: buffer, %content: buffer, %reasoning: buffer, %tools: buffer, %initial_state: i64, %final_state: i64) -> (buffer, i32) {
   %c0 = index.constant 0 : offset
   %length = buffer.length %response
   %empty = index.cmp eq, %length, %c0 : offset
@@ -317,7 +317,7 @@ func.def public @text_complete_text_v1(%prompt: buffer, %response: buffer, %cont
   func.return %result, %reusable : buffer, i32
 }
 
-func.def public @text_encode_state_v1(%bindings: buffer, %count: i32, %origins: buffer) {
+func.def public @text_encode_state_v2(%bindings: buffer, %count: i32, %origins: buffer) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -358,7 +358,7 @@ func.def @plan_capacity(%plan: buffer) -> (index) {
 
 // Device packets retain the first cohort's nine-field plan records. Feedback
 // slots are span-indexed, including unselected input-only spans.
-func.def public @text_encode_epoch_v1(%control_state: buffer, %plan: buffer, %inputs: buffer, %media_plan: buffer, %first_count: i32, %next_count: i32, %input_count: i32, %first_media_count: i32, %next_media_count: i32, %first_packet_capacity: i32, %next_packet_capacity: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32, buffer, i64, i64) {
+func.def public @text_encode_epoch_v2(%control_state: buffer, %plan: buffer, %inputs: buffer, %media_plan: buffer, %first_count: i32, %next_count: i32, %input_count: i32, %first_media_count: i32, %next_media_count: i32, %first_token_count: i32, %next_token_count: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32, buffer, i64, i64) {
   %origin = index.constant 0 : offset
   %header_bytes = index.constant 16 : offset
   %count64 = scalar.extui %first_count : i32 to i64
@@ -398,7 +398,7 @@ func.def public @text_encode_epoch_v1(%control_state: buffer, %plan: buffer, %in
   func.return %first_count, %control_state, %transfer_begin, %transfer_length : i32, buffer, i64, i64
 }
 
-func.def public @text_publish_epoch_v1(%control_state: buffer, %plan: buffer, %media_plan: buffer, %count: i32, %first_media_count: i32, %next_media_count: i32, %verified: i32, %continues: i32, %next_speculative: buffer, %ordinary: buffer, %first_results: buffer, %next_results: buffer, %progress: buffer, %proposal_counts: buffer) {
+func.def public @text_publish_epoch_v2(%control_state: buffer, %plan: buffer, %media_plan: buffer, %count: i32, %first_media_count: i32, %next_media_count: i32, %verified: i32, %continues: i32, %next_speculative: buffer, %ordinary: buffer, %first_results: buffer, %next_results: buffer, %progress: buffer, %proposal_counts: buffer) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -437,7 +437,7 @@ func.def public @text_publish_epoch_v1(%control_state: buffer, %plan: buffer, %m
   func.return
 }
 
-func.def public @text_step_v1(%state: buffer, %initialize: i32, %source_position: i32, %input_count: i32, %residual: ptr<@HalBuffer>, %control: ptr<@HalBuffer>, %recurrent: ptr<@HalBuffer>, %attention: ptr<@HalBuffer>, %tokens: ptr<@HalBuffer>, %progress: ptr<@HalBuffer>) -> (i64, i32) {
+func.def public @text_step_v2(%state: buffer, %initialize: i32, %source_position: i32, %input_count: i32, %residual: ptr<@HalBuffer>, %control: ptr<@HalBuffer>, %recurrent: ptr<@HalBuffer>, %attention: ptr<@HalBuffer>, %tokens: ptr<@HalBuffer>, %progress: ptr<@HalBuffer>) -> (i64, i32) {
   %c0 = scalar.constant 0 : i32
   %c2 = scalar.constant 2 : i32
   %c0_i64 = scalar.constant 0 : i64
@@ -448,7 +448,7 @@ func.def public @text_step_v1(%state: buffer, %initialize: i32, %source_position
   func.return %c0_i64, %next_source_position : i64, i32
 }
 
-func.def public @text_epoch_v1(%control_state: buffer, %shape: i32, %proposes: i32, %verifies: i32, %span_count: i32, %output_count: i32, %epoch_count: i32, %continuation_shape: i32, %continuation_proposes: i32, %first_media_count: i32, %next_media_count: i32, %residual: ptr<@HalBuffer>, %metadata: ptr<@HalBuffer>, %origins: ptr<@HalBuffer>, %state: ptr<@HalBuffer>, %tokens: ptr<@HalBuffer>, %outputs: ptr<@HalBuffer>, %carry: ptr<@HalBuffer>, %committed: ptr<@HalBuffer>, %results: ptr<@HalBuffer>, %draft_cache: ptr<@HalBuffer>, %draft_origins: ptr<@HalBuffer>, %next_results: ptr<@HalBuffer>) -> (i64) {
+func.def public @text_epoch_v2(%control_state: buffer, %token_count: i32, %proposes: i32, %verifies: i32, %span_count: i32, %output_count: i32, %next_span_count: i32, %next_token_count: i32, %continuation_proposes: i32, %first_media_count: i32, %next_media_count: i32, %residual: ptr<@HalBuffer>, %metadata: ptr<@HalBuffer>, %origins: ptr<@HalBuffer>, %state: ptr<@HalBuffer>, %tokens: ptr<@HalBuffer>, %outputs: ptr<@HalBuffer>, %carry: ptr<@HalBuffer>, %committed: ptr<@HalBuffer>, %results: ptr<@HalBuffer>, %draft_cache: ptr<@HalBuffer>, %draft_origins: ptr<@HalBuffer>, %next_results: ptr<@HalBuffer>) -> (i64) {
   %origin = index.constant 0 : offset
   %view = buffer.view %control_state[%origin] : buffer -> view<1xi32>
   %stage = view.load %view[0] : view<1xi32> -> i32
@@ -464,7 +464,7 @@ func.def public @text_epoch_v1(%control_state: buffer, %shape: i32, %proposes: i
 
 func.decl @tiny_storage(%maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64) -> (buffer, buffer, buffer, buffer, buffer)
 
-func.def public @text_resize_state_v1(%state: buffer, %rows: i64) -> (buffer, buffer, buffer, buffer, buffer, buffer) {
+func.def public @text_resize_state_v2(%state: buffer, %rows: i64) -> (buffer, buffer, buffer, buffer, buffer, buffer) {
   %layout_origin = index.constant 88 : offset
   %layout = buffer.view %state[%layout_origin] : buffer -> view<5xi64>
   %maximum = view.load %layout[0] : view<5xi64> -> i64

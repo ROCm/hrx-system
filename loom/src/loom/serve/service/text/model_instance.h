@@ -69,10 +69,10 @@ struct loom_serve_text_model_t {
   loom_runtime_stage_t* stage_bindings;
   // Original command private peak, retained for explicit variant restoration.
   uint64_t stage_workspace_bytes;
-  // Number of target packed shapes, independent of auxiliary draft stages.
-  iree_host_size_t shape_count;
-  // Immutable prepared shape capacities, owned in epoch option order.
-  loom_serve_packing_shape_t* shapes;
+  // Maximum input positions admitted in one device epoch.
+  iree_host_size_t token_capacity;
+  // Maximum distinct rows admitted in one device epoch.
+  iree_host_size_t span_capacity;
   // Context specialization shared by every compiled stage.
   iree_host_size_t context_capacity;
   // Proposed tokens after each known anchor; zero disables drafting.

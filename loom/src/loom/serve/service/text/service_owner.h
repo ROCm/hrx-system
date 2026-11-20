@@ -61,11 +61,10 @@ struct loom_serve_text_service_t {
   loom_service_execution_reconfiguration_t* reconfiguration;
   // Borrowed deployment name, independent of the source policy identity.
   iree_string_view_t name;
-  // Owned fallback shape for isolated execution.
-  loom_serve_packing_shape_t isolated_shape;
   // Number of allocated device/session rows.
   iree_host_size_t row_count;
-  // Resident owner ceiling, independent of epoch shapes; zero is unbounded.
+  // Resident owner ceiling, independent of active epoch size; zero is
+  // unbounded.
   iree_host_size_t max_sessions;
   // Cold replacement directory, private to its CPU task until readiness joins.
   loom_serve_text_service_capacity_t growth;

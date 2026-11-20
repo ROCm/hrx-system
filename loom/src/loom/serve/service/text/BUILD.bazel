@@ -124,8 +124,6 @@ loom_cc_library(
         "//loom/src/loom/serve/service/text:chat",
         "//loom/src/loom/serve/service/text:input",
         "//loom/src/loom/serve/service/text:model",
-        "//loom/src/loom/serve/service/text:packing",
-        "//loom/src/loom/serve/service/text:schedule",
         "//loom/src/loom/serve/service/text:service",
         "//loom/src/loom/serve/service/text:telemetry",
         "//loom/src/loom/serve/testing:http_harness",
@@ -762,7 +760,6 @@ loom_cc_library(
         ":capture",
         ":chat",
         ":epoch_upload",
-        ":packing",
         ":storage",
         ":storage_bounds",
         ":tool_xml",
@@ -861,11 +858,7 @@ loom_cc_library(
     name = "schedule",
     srcs = ["schedule.c"],
     hdrs = ["schedule.h"],
-    deps = [
-        ":packing",
-        "//loom/src/loom/service/text:schedule",
-        "//runtime/src/iree/base",
-    ],
+    deps = ["//runtime/src/iree/base"],
 )
 
 loom_cc_library(
@@ -1012,8 +1005,8 @@ loom_cc_library(
     deps = [
         ":model",
         ":packing",
-        ":schedule",
         "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/service/text:schedule",
         "//runtime/src/iree/base",
     ],
 )
@@ -1028,7 +1021,6 @@ loom_cc_test(
         ":epoch",
         ":model",
         ":packing",
-        ":schedule",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -1327,7 +1319,6 @@ loom_cc_library(
         ":pending_request",
         ":prefix_cache",
         ":reconfiguration",
-        ":schedule",
         ":sequence",
         ":session",
         ":session_cache",
@@ -1353,6 +1344,7 @@ loom_cc_library(
         "//loom/src/loom/service/finite:component",
         "//loom/src/loom/service/telemetry:record",
         "//loom/src/loom/service/telemetry:tracing",
+        "//loom/src/loom/service/text:schedule",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",

@@ -450,7 +450,6 @@ loom_cc_library(
         "//loom/src/loom/serve/service/speech:voice_load",
         "//loom/src/loom/serve/service/text:cache_policy",
         "//loom/src/loom/serve/service/text:model",
-        "//loom/src/loom/serve/service/text:schedule",
         "//loom/src/loom/serve/service/text:service",
         "//loom/src/loom/service/finite:component",
         "//loom/src/loom/service/finite:model",

@@ -55,14 +55,10 @@ class TextRetentionTest : public SourceTextServiceTest {
     // Keep the live token sequence tiny, but place each row's input across a
     // mapping boundary. Recurrent/KV bounds alone cannot cover that exact
     // private request range as they do in the compact fixture.
-    const loom_serve_packing_shape_t shapes[] = {
-        {4, 1}, {mapping_size / sizeof(int32_t) + 1, 4}};
     auto options = ModelOptions();
-    options.prefill_capacity = shapes[1].token_capacity;
+    options.prefill_capacity = mapping_size / sizeof(int32_t) + 1;
     options.context_capacity = 2 * options.prefill_capacity;
     options.pool_capacity = 4 * options.prefill_capacity;
-    options.epoch_count = IREE_ARRAYSIZE(shapes);
-    options.epoch_shapes = shapes;
     IREE_ASSERT_OK(loom_serve_text_model_free(model_));
     model_ = nullptr;
     IREE_ASSERT_OK(loom_serve_text_model_allocate(

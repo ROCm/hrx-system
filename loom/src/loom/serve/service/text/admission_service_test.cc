@@ -21,7 +21,7 @@ class AdmissionServiceTest : public SourceTextServiceTest {
   loom_serve_text_options_t ModelOptions() const override {
     auto options = SourceTextServiceTest::ModelOptions();
     options.row_count = 2;
-    options.epoch_shapes = admission_shapes_;
+    options.span_capacity = 2;
     options.pool_capacity = 64;
     return options;
   }
@@ -356,9 +356,6 @@ class AdmissionServiceTest : public SourceTextServiceTest {
   }
 
  private:
-  // Two execution rows share one source command across token buckets.
-  const loom_serve_packing_shape_t admission_shapes_[3] = {
-      {4, 1}, {16, 2}, {32, 2}};
 };
 
 TEST_F(AdmissionServiceTest, FifoHoldsFittingTailUntilOldestCanProgress) {

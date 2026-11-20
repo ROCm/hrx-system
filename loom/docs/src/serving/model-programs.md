@@ -460,7 +460,15 @@ and speculative verifier work. Token capacity and independently advancing span
 capacity are separate. The source reports completed progress; native ownership
 commits it after readiness.
 
-Resident capacity grows independently of those epoch shapes. Source control
+During preparation, `prepare(prefill_capacity, context_capacity, pool_capacity,
+rows, pins, draft_depth, span_capacity, weights, options)` receives token and
+span budgets for staging. Each call to `epoch` identifies the actual number of
+tokens and spans submitted for the first packet and its optional continuation.
+For example, three sessions with one ready token each supply three tokens and
+three spans. A single prompt offering three tokens supplies three tokens and
+one span. Both can use the same prepared command program.
+
+Resident capacity grows independently of the work in each packet. Source control
 exports `resize_state(control_state, resident_capacity)`, returning replacement
 control state followed by the same five storage records used at preparation.
 Existing private views, recurrent slots, and KV planes retain their byte offsets;
@@ -530,7 +538,7 @@ defines entry signatures, alignment and cancellation.
 
 ### Declare reasoning support
 
-The text control program exports `text_chat_reasoning_v1()`, returning three
+The text control program exports `text_chat_reasoning_v2()`, returning three
 I32 values: whether reasoning is supported, a bitmap of selectable efforts, and
 the effort ordinal used when a request omits controls. Preparation calls this
 once and validates the declaration before publishing the model. The server
@@ -646,12 +654,11 @@ draft depth is a ceiling and cannot substitute for these counts. Serving
 telemetry consumes this semantic output without decoding device-private packets
 or issuing another readback.
 
-`encode_epoch` receives the selected first-epoch and continuation token
-capacities as `first_packet_capacity` and `next_packet_capacity`. These are
-the prepared shapes, independent of live token counts and whether the inputs
-contain media. The continuation capacity is zero when no continuation is
-submitted. Source can use these values to lay out packets and associate
-captured state with the prepared programs that consume it.
+`encode_epoch` receives the numbers of tokens reserved in the submitted plans
+as `first_token_count` and `next_token_count`. A missing continuation has zero
+tokens and zero spans. Mixed input stores projected feature data after the
+records for both submitted packets. The device may subsequently accept fewer
+tokens during verification. The reservation keeps those feature offsets valid.
 
 `encode_epoch` writes metadata and input packets, then returns
 `(output_count, transfer_plan, byte_offset, byte_length)`. The plan view contains
@@ -679,7 +686,7 @@ The same contract applies to generative text and media epochs. See
 [epoch uploads](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/service/text/epoch_upload.h)
 for local HAL binding and payload ownership.
 
-`capture_epoch(control_state, shape_index, span_count, plan)` returns a buffer
+`capture_epoch(control_state, span_count, plan)` returns a buffer
 of little-endian i64 triples: `[span_ordinal, residual_byte_offset, byte_length]`.
 Ranges are grouped in submitted span order, with at least one nonempty range
 per span. Multiple ranges concatenate in source order. The plan is checked and

@@ -501,7 +501,7 @@ func.def public @encode_state(%bindings: buffer, %count: i32, %origins: buffer) 
 
 // Opaque output deliberately gathers the two halves of each retained hidden
 // word in reverse order. Native serving preserves bytes, not tensor types.
-func.def public @capture_epoch(%state: buffer, %shape: i32, %count: i32, %plan: buffer) -> (buffer) {
+func.def public @capture_epoch(%state: buffer, %count: i32, %plan: buffer) -> (buffer) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -611,7 +611,7 @@ func.def @encode_mixed_media(%plan: buffer, %media_plan: buffer, %media_count: i
 
 // Device packets retain the first cohort's nine-field plan records. Feedback
 // slots are span-indexed, including unselected input-only spans.
-func.def public @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: buffer, %media_plan: buffer, %first_count: i32, %next_count: i32, %input_count: i32, %first_media_count: i32, %next_media_count: i32, %first_packet_capacity: i32, %next_packet_capacity: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32, buffer, i64, i64) {
+func.def public @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: buffer, %media_plan: buffer, %first_count: i32, %next_count: i32, %input_count: i32, %first_media_count: i32, %next_media_count: i32, %first_token_count: i32, %next_token_count: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32, buffer, i64, i64) {
   %origin = index.constant 0 : offset
   %header_bytes = index.constant 16 : offset
   %count64 = scalar.extui %first_count : i32 to i64
@@ -623,8 +623,8 @@ func.def public @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: bu
   view.store %first_count, %header[0] : i32, view<4xi32>
   view.store %eos, %header[1] : i32, view<4xi32>
   // Retain prepared geometry independently of the live plan's token counts.
-  view.store %first_packet_capacity, %header[2] : i32, view<4xi32>
-  view.store %next_packet_capacity, %header[3] : i32, view<4xi32>
+  view.store %first_token_count, %header[2] : i32, view<4xi32>
+  view.store %next_token_count, %header[3] : i32, view<4xi32>
   buffer.copy %plan[%origin], %metadata[%header_bytes], %plan_bytes
   %media_count = scalar.addi %first_media_count, %next_media_count : i32
   %has_media = scalar.cmpi ne, %media_count, %c0 : i32
@@ -637,7 +637,7 @@ func.def public @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: bu
   scf.if %has_media {
     // Ordinary records need zero feature fields; inactive capacity is not read.
     buffer.fill %c0, %tokens[%origin], %input_bytes : i32
-    %packet_capacity = scalar.addi %first_packet_capacity, %next_packet_capacity : i32
+    %packet_capacity = scalar.addi %first_token_count, %next_token_count : i32
     %c0_index = index.constant 0 : index
     func.call @encode_mixed_plan(%plan, %inputs, %c0_index, %first_count, %input_count, %packet_capacity, %tokens) : (buffer, buffer, index, i32, i32, i32, buffer)
     %has_next = scalar.cmpi ne, %next_count, %c0 : i32
@@ -721,7 +721,7 @@ func.def public @step(%state: buffer, %initialize: i32, %source_position: i32, %
   func.return %c0_i64, %next_source_position : i64, i32
 }
 
-func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %verifies: i32, %span_count: i32, %output_count: i32, %epoch_count: i32, %continuation_shape: i32, %continuation_proposes: i32, %first_media_count: i32, %next_media_count: i32, %residual: ptr<@HalBuffer>, %metadata: ptr<@HalBuffer>, %origins: ptr<@HalBuffer>, %state: ptr<@HalBuffer>, %tokens: ptr<@HalBuffer>, %outputs: ptr<@HalBuffer>, %carry: ptr<@HalBuffer>, %committed: ptr<@HalBuffer>, %results: ptr<@HalBuffer>, %draft_cache: ptr<@HalBuffer>, %draft_origins: ptr<@HalBuffer>, %next_results: ptr<@HalBuffer>) -> (i64) {
+func.def public @epoch(%control_state: buffer, %token_count: i32, %proposes: i32, %verifies: i32, %span_count: i32, %output_count: i32, %next_span_count: i32, %next_token_count: i32, %continuation_proposes: i32, %first_media_count: i32, %next_media_count: i32, %residual: ptr<@HalBuffer>, %metadata: ptr<@HalBuffer>, %origins: ptr<@HalBuffer>, %state: ptr<@HalBuffer>, %tokens: ptr<@HalBuffer>, %outputs: ptr<@HalBuffer>, %carry: ptr<@HalBuffer>, %committed: ptr<@HalBuffer>, %results: ptr<@HalBuffer>, %draft_cache: ptr<@HalBuffer>, %draft_origins: ptr<@HalBuffer>, %next_results: ptr<@HalBuffer>) -> (i64) {
   %origin = index.constant 0 : offset
   %view = buffer.view %control_state[%origin] : buffer -> view<2xi32>
   %text_stage = view.load %view[0] : view<2xi32> -> i32

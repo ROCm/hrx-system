@@ -11,7 +11,6 @@
 
 #include "iree/testing/gtest.h"
 #include "loom/serve/service/text/packing.h"
-#include "loom/serve/service/text/schedule.h"
 
 namespace {
 
@@ -56,8 +55,6 @@ struct Traversal {
   Tick start = 0;
   // Retirement time, after which new readiness can affect selection.
   Tick finish = 0;
-  // Prepared shape selected by the production catalog/packer.
-  loom_serve_packing_shape_t shape = {};
   // Actual selected work in packing order, without padded slots.
   std::vector<loom_serve_packed_span_t> spans;
   // Known prompt inputs, excluding restored prefixes.
@@ -69,17 +66,14 @@ struct Traversal {
 // Models the packer's single-epoch caller contract, not native memory admission
 // or the service's publication implementation. Each request has an available
 // resident row. Explicit credit/arrival events feed trusted readiness; only
-// retirement consumes work. Actual packing and shape selection are not mocked.
+// retirement consumes work. The production packer assigns the available inputs.
 class Workload {
  public:
   Workload(size_t capacity, size_t chunk_size, std::vector<Request> requests)
       : requests_(std::move(requests)),
         progress_(requests_.size()),
-        shapes_(loom_serve_text_default_shapes(capacity, requests_.size(),
-                                               nullptr)),
-        chunk_size_(chunk_size) {
-    loom_serve_text_default_shapes(capacity, requests_.size(), shapes_.data());
-  }
+        token_capacity_(capacity),
+        chunk_size_(chunk_size) {}
 
   template <typename Cost>
   void Run(Cost cost) {
@@ -96,7 +90,7 @@ class Workload {
       work_bound += requests_[i].input_count + requests_[i].output_count;
     }
     std::vector<loom_serve_ready_span_t> ready(count);
-    std::vector<loom_serve_packed_span_t> spans(count), scratch(count);
+    std::vector<loom_serve_packed_span_t> spans(count);
     Tick now = 0;
     size_t cursor = 0;
     while (true) {
@@ -137,9 +131,9 @@ class Workload {
       if (!remaining) {
         return;
       }
-      const auto plan = loom_serve_pack_shapes(
-          count, ready.data(), shapes_.size(), shapes_.data(), chunk_size_,
-          cursor, spans.data(), scratch.data());
+      const auto plan =
+          loom_serve_pack_spans(count, ready.data(), token_capacity_, count,
+                                chunk_size_, cursor, spans.data());
       const size_t selected = plan.span_count;
       cursor = plan.next_row;
       if (!selected) {
@@ -153,7 +147,6 @@ class Workload {
       ASSERT_LT(traversals_.size(), work_bound);
       Traversal traversal;
       traversal.start = now;
-      traversal.shape = shapes_[plan.shape_index];
       traversal.spans.assign(spans.begin(), spans.begin() + selected);
       std::vector<bool> seen(count);
       for (const auto& span : traversal.spans) {
@@ -170,10 +163,10 @@ class Workload {
         }
       }
       ASSERT_LE(traversal.prefill_inputs + traversal.decode_inputs,
-                traversal.shape.token_capacity);
+                token_capacity_);
       ASSERT_EQ(traversal.prefill_inputs + traversal.decode_inputs,
                 plan.token_count);
-      ASSERT_LE(selected, traversal.shape.span_capacity);
+      ASSERT_LE(selected, count);
       const Tick duration = cost(traversal);
       ASSERT_GT(duration, 0);
       now += duration;
@@ -206,8 +199,8 @@ class Workload {
   const std::vector<Request> requests_;
   // Caller-owned state, advanced only after simulated device retirement.
   std::vector<Progress> progress_;
-  // Production catalog; every traversal uses the same prepared variants.
-  std::vector<loom_serve_packing_shape_t> shapes_;
+  // Total ready input positions admitted per device traversal.
+  size_t token_capacity_;
   // Existing per-row expansion limit, not an aggregate token budget.
   size_t chunk_size_;
   // Complete selected-work history, including work cancelled in flight.
@@ -235,8 +228,6 @@ TEST(PackingWorkloadTest, LateShortPromptMatchesTheMixedServingPartition) {
     }
     EXPECT_EQ(selected[8], long_spans[i]);
     EXPECT_EQ(selected[9], short_spans[i]);
-    EXPECT_EQ(traversal.shape.token_capacity, i == 4 ? 128 : 8192);
-    EXPECT_EQ(traversal.shape.span_capacity, 16);
     EXPECT_EQ(traversal.decode_inputs, i < 2 ? 8 : 9);
   }
   EXPECT_EQ(workload.progress()[8].finish, 50);
@@ -303,8 +294,6 @@ TEST(PackingWorkloadTest, PerRowChunksDoNotBoundTheSharedTraversal) {
       const auto& traversal = workload.traversals()[i];
       EXPECT_EQ(traversal.prefill_inputs, 8192 * prompts);
       EXPECT_EQ(traversal.decode_inputs, 8);
-      EXPECT_EQ(traversal.shape.token_capacity, prompts == 1 ? 16384 : 32768);
-      EXPECT_EQ(traversal.shape.span_capacity, 16);
     }
     for (size_t i = 0; i < prompts; ++i) {
       EXPECT_EQ(workload.progress()[8 + i].finish, 40);
@@ -406,7 +395,8 @@ TEST(PackingWorkloadTest, RaggedArrivalsConserveEveryInputAndOutput) {
         }
         Workload workload(capacity, chunk, requests);
         ASSERT_NO_FATAL_FAILURE(workload.Run([](const Traversal& traversal) {
-          return static_cast<Tick>(1 + traversal.shape.token_capacity);
+          return static_cast<Tick>(1 + traversal.prefill_inputs +
+                                   traversal.decode_inputs);
         }));
         size_t consumed_inputs = 0, consumed_decode = 0;
         for (const auto& traversal : workload.traversals()) {

@@ -17,7 +17,6 @@
 #include "loom/serve/service/speech/service.h"
 #include "loom/serve/service/speech/voice_load.h"
 #include "loom/serve/service/text/cache_policy.h"
-#include "loom/serve/service/text/schedule.h"
 #include "loom/serve/service/text/service.h"
 #include "loom/service/finite/component.h"
 #include "loom/service/finite/decision/protocol.h"
@@ -697,7 +696,7 @@ static iree_status_t loom_serve_recognition_registration_create(
 }
 
 typedef struct loom_serve_text_registration_t {
-  // Allocator owning this operation and its stable shape table.
+  // Allocator owning this registration and its load operation.
   iree_allocator_t host_allocator;
   // Borrowed server capabilities and reporting policy.
   const loom_serve_model_registration_options_t* options;
@@ -710,8 +709,6 @@ typedef struct loom_serve_text_registration_t {
   loom_runtime_wake_callback_t observer;
   // Registration-wide history retained beyond service retirement.
   loom_runtime_telemetry_stream_t* stream;
-  // Shape inputs borrowed by asynchronous preparation until publication.
-  loom_serve_packing_shape_t* shapes;
   // Owned preparation operation, transferred on every terminal outcome.
   loom_serve_text_load_t* load;
   // Partial or prepared model retained through actual consumer retirement.
@@ -916,16 +913,9 @@ static iree_status_t loom_serve_text_registration_create(
   loom_runtime_memory_pool_t* memory_pool = loom_runtime_pool_memory(pool);
   const uint64_t cache_limit_bytes =
       memory_pool ? loom_runtime_memory_pool_limit(memory_pool) : 0;
-  const iree_host_size_t shape_count = loom_serve_text_default_shapes(
-      text->prefill_capacity, text->max_sessions, NULL);
-  iree_host_size_t total = 0, shapes_offset = 0;
-  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
-      sizeof(loom_serve_text_registration_t), &total,
-      IREE_STRUCT_FIELD(shape_count, loom_serve_packing_shape_t,
-                        &shapes_offset)));
   loom_serve_text_registration_t* registration = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(host_allocator, total, (void**)&registration));
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+      host_allocator, sizeof(*registration), (void**)&registration));
   registration->host_allocator = host_allocator;
   registration->options = options;
   registration->device = loom_runtime_device_group_at(
@@ -933,10 +923,6 @@ static iree_status_t loom_serve_text_registration_create(
   registration->configuration = configuration;
   registration->observer = observer;
   registration->stream = stream;
-  registration->shapes =
-      (loom_serve_packing_shape_t*)((uint8_t*)registration + shapes_offset);
-  loom_serve_text_default_shapes(text->prefill_capacity, text->max_sessions,
-                                 registration->shapes);
   const loom_serve_text_options_t model_options = {
       .mode = configuration->kind == LOOM_SERVICE_KIND_SEQUENCE
                   ? LOOM_SERVE_TEXT_MODE_ENCODE
@@ -946,8 +932,9 @@ static iree_status_t loom_serve_text_registration_create(
       .context_capacity = text->context_capacity,
       .pool_capacity = memory_pool ? 0 : text->context_capacity,
       .cache_limit_bytes = cache_limit_bytes,
-      .epoch_count = shape_count,
-      .epoch_shapes = registration->shapes,
+      .span_capacity = text->max_sessions ? iree_min(text->max_sessions,
+                                                     text->prefill_capacity)
+                                          : text->prefill_capacity,
       .draft_depth = text->draft_depth,
       .kernel_sanitizer = {.type = LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
                            .structure_size = sizeof(loomc_sanitizer_options_t)},

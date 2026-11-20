@@ -25,13 +25,9 @@ class SourceEpochUploadTest : public SourceTextServiceTest {
     options.prefill_capacity = 4097;
     options.context_capacity = 8192;
     options.pool_capacity = 8192;
-    options.epoch_shapes = wide_shapes_;
-    options.epoch_count = IREE_ARRAYSIZE(wide_shapes_);
     return options;
   }
 
-  // Retained packet capacity is independent of this epoch's live token count.
-  const loom_serve_packing_shape_t wide_shapes_[2] = {{4, 1}, {4097, 4}};
   // Distinct sentinels reveal uploads of unwritten host capacity.
   const uint8_t host_canary_ = 0x31;
   // Borrowed fill pattern remains alive through failed submission retirement.
@@ -51,14 +47,10 @@ TEST_F(SourceEpochUploadTest, LivePacketsPreserveUnusedHostAndDeviceCapacity) {
   const std::array<iree_hal_buffer_t*, 2> device = {
       model_->state.epoch.buffers[1], model_->state.epoch.buffers[4]};
   std::array<Oracle, 4> reference;
-  for (auto [shape_index, span_count, tokens_per_span] :
-       {std::array{1u, 4u, 1024u},
-        {0u, 1u, 1u},
-        {1u, 3u, 341u},
-        {1u, 1u, 1u}}) {
+  for (auto [span_count, tokens_per_span] :
+       {std::array{4u, 1024u}, {1u, 1u}, {3u, 341u}, {1u, 7u}}) {
     SCOPED_TRACE(::testing::Message()
-                 << "shape=" << shape_index << " spans=" << span_count
-                 << " tokens=" << tokens_per_span);
+                 << "spans=" << span_count << " tokens=" << tokens_per_span);
     uint64_t completion = 0;
     for (size_t slot = 0; slot < host.size(); ++slot) {
       std::memset(host[slot].data, host_canary_, host[slot].data_length);
@@ -91,10 +83,10 @@ TEST_F(SourceEpochUploadTest, LivePacketsPreserveUnusedHostAndDeviceCapacity) {
       spans[row] = {row, tokens_per_span, inputs[row].data(),
                     LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT};
     }
-    IREE_ASSERT_OK(loom_serve_text_model_epoch(model_, shape_index, span_count,
-                                               spans.data()));
+    IREE_ASSERT_OK(
+        loom_serve_text_model_epoch(model_, span_count, spans.data()));
     EXPECT_EQ(iree_unaligned_load_le_u32(host[0].data + 8),
-              wide_shapes_[shape_index].token_capacity);
+              span_count * tokens_per_span);
     EXPECT_EQ(iree_unaligned_load_le_u32(host[0].data + 12), 0u);
     const std::array<size_t, 2> live_lengths = {
         16 + span_count * 36, span_count * tokens_per_span * sizeof(int32_t)};

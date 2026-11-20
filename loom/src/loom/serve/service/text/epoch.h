@@ -8,7 +8,8 @@
 #define LOOM_SERVE_SERVICE_TEXT_EPOCH_H_
 
 #include "loom/serve/service/text/model.h"
-#include "loom/serve/service/text/schedule.h"
+#include "loom/serve/service/text/packing.h"
+#include "loom/service/text/schedule.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,10 +32,10 @@ typedef struct loom_serve_text_epoch_options_t {
   loom_service_text_schedule_mode_t schedule_mode;
   // Whether known inputs and verifiers may share a cohort.
   loom_service_text_packing_mode_t packing_mode;
-  // Borrowed cached shape catalog, stable through the model lifetime.
-  const loom_serve_packing_shape_t* shapes;
-  // Number of candidate token/span shapes.
-  iree_host_size_t shape_count;
+  // Maximum input positions the service can admit in one device epoch.
+  iree_host_size_t token_capacity;
+  // Maximum distinct rows the service can admit in one device epoch.
+  iree_host_size_t span_capacity;
 } loom_serve_text_epoch_options_t;
 
 // Snapshot of a credited participant at a completed model boundary. Snapshots
@@ -69,8 +70,6 @@ typedef struct loom_serve_text_epoch_t {
   void* storage;
   // Number of admitted spans; zero when no cohort is retained.
   iree_host_size_t count;
-  // Cached command-program bucket for the first epoch.
-  iree_host_size_t shape_index;
   // Current span in isolated/matched execution.
   iree_host_size_t cursor;
   // First issued epoch identity and host-observed submission time.
@@ -108,10 +107,8 @@ typedef struct loom_serve_text_epoch_t {
     loom_serve_text_epoch_row_t* rows;
     // Remaining work indexed by the first cohort's ordinal.
     loom_serve_ready_span_t* ready;
-    // Winning continuation partition, still in first-cohort ordinals.
+    // Scheduled continuation spans in first-cohort order.
     loom_serve_packed_span_t* scheduled;
-    // Candidate partition reused for each continuation shape.
-    loom_serve_packed_span_t* candidate;
     // Following spans retaining the original resident identities.
     loom_serve_text_span_t* spans;
     // Following per-span output limits across both epochs.

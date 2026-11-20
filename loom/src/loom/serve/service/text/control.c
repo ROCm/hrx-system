@@ -19,20 +19,17 @@
 iree_status_t loom_serve_text_control_initialize(
     const loom_serve_text_source_t* source, loom_runtime_execution_t* execution,
     iree_hal_queue_t* transfer, const loom_serve_text_state_t* state,
-    iree_host_size_t shape_count, const loom_serve_packing_shape_t* shapes,
+    iree_host_size_t token_capacity, iree_host_size_t span_capacity,
     iree_host_size_t stage_count, const loom_runtime_stage_t* stages,
     iree_allocator_t host_allocator, loom_serve_text_control_t* out_control) {
   loom_serve_text_control_t* control = out_control;
   memset(control, 0, sizeof(*control));
   // Both dense padding and semantic packed inputs belong to the single model
   // invocation. Only the final prediction persists independently in each row.
-  iree_host_size_t input_length = 0;
-  iree_host_size_t span_capacity = 1;
-  for (iree_host_size_t i = 0; i < shape_count; ++i) {
-    input_length =
-        iree_max(input_length, 2 * shapes[i].token_capacity * sizeof(int32_t));
-    span_capacity = iree_max(span_capacity, shapes[i].span_capacity);
-  }
+  uint64_t input_length =
+      span_capacity ? 2ull * token_capacity * sizeof(int32_t) : 0;
+  const bool has_epochs = span_capacity != 0;
+  span_capacity = iree_max(span_capacity, 1u);
   const bool packed =
       state->cache.capacity ||
       iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT);
@@ -40,48 +37,55 @@ iree_status_t loom_serve_text_control_initialize(
       source->prefill_capacity > input_length / (2 * sizeof(int32_t))) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "source prefill capacity exceeds the epoch catalog");
+        "source prefill capacity exceeds the submission budget");
   }
   for (iree_host_size_t i = 0; i < state->row_count; ++i) {
     const iree_device_size_t length =
         iree_hal_buffer_byte_length(state->rows[i]->buffers[TEXT_TOKENS]);
-    const iree_host_size_t minimum =
-        (packed ? 1 : source->prefill_capacity) * sizeof(int32_t);
-    if (length < minimum || length > IREE_HOST_SIZE_MAX) {
+    const uint64_t minimum =
+        (packed ? 1ull : source->prefill_capacity) * sizeof(int32_t);
+    if (length < minimum) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "source row %zu has an invalid token extent", i);
     }
     if (!packed) {
-      input_length = iree_max(input_length, (iree_host_size_t)length);
+      input_length = iree_max(input_length, length);
     }
   }
-  const iree_host_size_t lengths[TEXT_HOST_BUFFER_COUNT] = {
-      2 * span_capacity * TEXT_PLAN_FIELD_COUNT * sizeof(int32_t),
+  const uint64_t lengths[TEXT_HOST_BUFFER_COUNT] = {
+      2ull * span_capacity * TEXT_PLAN_FIELD_COUNT * sizeof(int32_t),
       input_length,
-      shape_count ? iree_hal_buffer_byte_length(state->epoch.buffers[1]) : 0,
-      shape_count ? iree_hal_buffer_byte_length(state->epoch.buffers[4]) : 0,
-      shape_count ? iree_hal_buffer_byte_length(state->epoch.buffers[5]) : 0,
+      has_epochs ? iree_hal_buffer_byte_length(state->epoch.buffers[1]) : 0,
+      has_epochs ? iree_hal_buffer_byte_length(state->epoch.buffers[4]) : 0,
+      has_epochs ? iree_hal_buffer_byte_length(state->epoch.buffers[5]) : 0,
       iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT)
           ? state->storage.feedback_split
           : 0,
       iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT)
           ? iree_hal_buffer_byte_length(state->draft.next_results)
           : 0,
-      span_capacity * TEXT_PROGRESS_FIELD_COUNT * sizeof(int32_t),
-      state->row_count * 4 * sizeof(int64_t),
-      shape_count ? state->storage.bytes[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS]
-                        .data_length
-                  : 0,
-      span_capacity * sizeof(int32_t),
-      span_capacity * sizeof(uint32_t),
+      (uint64_t)span_capacity * TEXT_PROGRESS_FIELD_COUNT * sizeof(int32_t),
+      4ull * state->row_count * sizeof(int64_t),
+      has_epochs ? state->storage.bytes[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS]
+                       .data_length
+                 : 0,
+      (uint64_t)span_capacity * sizeof(int32_t),
+      (uint64_t)span_capacity * sizeof(uint32_t),
   };
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < TEXT_HOST_BUFFER_COUNT && iree_status_is_ok(status); ++i) {
-    status = iree_vm_buffer_create(lengths[i], iree_alignof(int64_t),
+    if (lengths[i] > IREE_HOST_SIZE_MAX) {
+      status = iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "text staging buffer %zu exceeds host address space", i);
+      break;
+    }
+    const iree_host_size_t length = (iree_host_size_t)lengths[i];
+    status = iree_vm_buffer_create(length, iree_alignof(int64_t),
                                    host_allocator, &control->host.buffers[i]);
     if (iree_status_is_ok(status)) {
-      status = iree_vm_buffer_map_write(control->host.buffers[i], 0, lengths[i],
+      status = iree_vm_buffer_map_write(control->host.buffers[i], 0, length,
                                         &control->host.bytes[i]);
     }
   }
@@ -89,7 +93,7 @@ iree_status_t loom_serve_text_control_initialize(
   if (lengths[TEXT_HOST_STATE_ORIGINS]) {
     memcpy(control->host.bytes[TEXT_HOST_STATE_ORIGINS].data,
            state->storage.bytes[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS].data,
-           lengths[TEXT_HOST_STATE_ORIGINS]);
+           control->host.bytes[TEXT_HOST_STATE_ORIGINS].data_length);
   }
   const iree_byte_span_t feedback[] = {
       control->host.bytes[TEXT_HOST_OUTPUTS],
@@ -225,8 +229,7 @@ iree_status_t loom_serve_text_control_initialize(
     return loom_runtime_program_bind_service(control->program, 1, &step);
   }
   iree_vm_function_t defaults = {0};
-  const iree_vm_signature_type_t capture_arguments[] = {buffer, i32, i32,
-                                                        buffer};
+  const iree_vm_signature_type_t capture_arguments[] = {buffer, i32, buffer};
   const iree_vm_signature_type_t options_arguments[] = {buffer, buffer, i64,
                                                         buffer};
   const loom_runtime_program_binding_t encoding_bindings[] = {
@@ -316,14 +319,12 @@ iree_status_t loom_serve_text_control_prepare_request(
 
 iree_status_t loom_serve_text_control_capture(
     loom_serve_text_control_t* control, const loom_serve_text_source_t* source,
-    iree_host_size_t shape_index, iree_host_size_t span_count,
-    iree_device_size_t residual_length, iree_allocator_t host_allocator,
-    loom_serve_text_capture_t** out_capture) {
+    iree_host_size_t span_count, iree_device_size_t residual_length,
+    iree_allocator_t host_allocator, loom_serve_text_capture_t** out_capture) {
   *out_capture = NULL;
   iree_vm_variant_t arguments[] = {
       iree_vm_buffer_variant_from_ptr_borrowed(&source->vm_types,
                                                source->control_state),
-      iree_vm_variant_from_i32((int32_t)shape_index),
       iree_vm_variant_from_i32((int32_t)span_count),
       iree_vm_buffer_variant_from_ptr_borrowed(
           &source->vm_types, control->host.buffers[TEXT_HOST_PLAN]),

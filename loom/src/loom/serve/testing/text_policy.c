@@ -56,10 +56,10 @@ iree_status_t loom_serve_test_text_policy_allocate(
     const loom_model_selection_t* selection =
         loom_model_card_selection(policy->sources->card);
     if (!iree_string_view_equal(selection->kind, IREE_SV("text")) ||
-        (selection->version && selection->version != 1)) {
+        (selection->version && selection->version != 2)) {
       status = iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "request checks require text service version 1 or development");
+          "request checks require text service version 2 or development");
     }
   }
   if (iree_status_is_ok(status)) {

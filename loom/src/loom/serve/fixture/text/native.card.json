@@ -59,14 +59,14 @@
   "services": {
     "chat": {
       "kind": "text",
-      "version": 1
+      "version": 2
     },
     "development": {
       "kind": "text"
     },
     "encode": {
       "kind": "sequence",
-      "version": 1
+      "version": 2
     }
   },
   "variants": {
