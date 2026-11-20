@@ -293,6 +293,17 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "control_packet_test",
+    srcs = ["control_packet_test.cc"],
+    deps = [
+        ":execution_plan",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "execution_plan_test",
     srcs = ["execution_plan_test.cc"],
     deps = [

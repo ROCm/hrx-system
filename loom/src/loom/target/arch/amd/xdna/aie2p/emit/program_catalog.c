@@ -93,6 +93,8 @@ iree_status_t loom_aie2p_program_catalog_build(
         .ordinal = i};
   }
   loom_aie2p_program_catalog_sort(streams, stream_count);
+  const uint32_t aperture =
+      compute->memory.program_load_base - compute->memory.program_base;
   uint64_t catalog_length = 0;
   for (iree_host_size_t i = 0; i < stream_count; ++i) {
     if (i != 0 &&
@@ -100,10 +102,11 @@ iree_status_t loom_aie2p_program_catalog_build(
       streams[i].offset = streams[i - 1].offset;
       streams[i].length = streams[i - 1].length;
     } else {
-      const uint64_t length =
-          iree_host_align(streams[i].section->contents.data_length, 4);
+      const loom_native_section_t* section = streams[i].section;
+      const iree_host_size_t words = loom_aie2p_control_packet_write_word_count(
+          aperture + (uint32_t)section->address, section->contents.data_length);
       streams[i].offset = (uint32_t)catalog_length;
-      streams[i].length = (uint32_t)(length + 8 * ((length + 15) / 16) + 8);
+      streams[i].length = (uint32_t)((words + 2) * sizeof(uint32_t));
       catalog_length += streams[i].length;
     }
   }
@@ -141,30 +144,14 @@ iree_status_t loom_aie2p_program_catalog_build(
     const loom_aie2p_program_catalog_stream_t* stream = &streams[i];
     const loom_native_section_t* section = stream->section;
     if (i == 0 || streams[i - 1].offset != stream->offset) {
-      iree_host_size_t position = stream->offset / 4;
-      const iree_host_size_t length =
-          iree_host_align(section->contents.data_length, 4);
-      for (iree_host_size_t byte = 0; byte < length; byte += 16) {
-        const iree_host_size_t count = iree_min(length - byte, 16) / 4;
-        words[position++] =
-            loom_aie2p_control_packet_parity(binding->code_packet);
-        words[position++] = loom_aie2p_control_packet_write(
-            compute->memory.program_load_base + (uint32_t)section->address -
-                compute->memory.program_base + (uint32_t)byte,
-            count);
-        for (iree_host_size_t j = 0; j < count; ++j) {
-          const iree_host_size_t begin = byte + j * 4;
-          uint8_t padded[4] = {0};
-          memcpy(
-              padded, section->contents.data + begin,
-              iree_min(section->contents.data_length - begin, sizeof(padded)));
-          words[position++] = iree_unaligned_load_le_u32(padded);
-        }
-      }
-      words[position++] =
+      const uint32_t header =
           loom_aie2p_control_packet_parity(binding->code_packet);
-      words[position++] = loom_aie2p_control_packet_read(status_address, 1,
-                                                         binding->reply_packet);
+      uint32_t* end = loom_aie2p_control_packet_store_writes(
+          header, aperture + (uint32_t)section->address, section->contents,
+          words + stream->offset / 4);
+      end[0] = header;
+      end[1] = loom_aie2p_control_packet_read(status_address, 1,
+                                              binding->reply_packet);
     }
     uint32_t* descriptor = &descriptors[stream->ordinal * 8];
     descriptor[0] = loom_xdna_register_field_encode(

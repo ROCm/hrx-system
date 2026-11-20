@@ -8,7 +8,64 @@
 
 #include "iree/base/internal/math.h"
 #include "loom/analysis/pipeline/lifetimes.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/connectivity.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
+
+iree_status_t loom_aie2p_native_ingress_circuits(
+    const loom_xdna_array_family_t* family,
+    const loom_aie2p_native_connections_t* connections,
+    iree_arena_allocator_t* arena, loom_aie2p_native_switch_t** out_switches) {
+  *out_switches = NULL;
+  iree_host_size_t capacity = 0;
+  for (iree_host_size_t i = 0; i < connections->group_count; ++i) {
+    const loom_aie2p_native_connection_t* group = &connections->groups[i];
+    const uint16_t column = group->source.coordinate.column;
+    for (iree_host_size_t j = 0; j < group->destination_count; ++j) {
+      const loom_xdna_tile_coordinate_t destination =
+          connections->destinations[group->destination_offset + j].coordinate;
+      // Shim mux, one edge per link, and the receiver's local switch output.
+      capacity += 2u + destination.row +
+                  (iree_max(column, destination.column) -
+                   iree_min(column, destination.column));
+    }
+  }
+  loom_aie2p_array_route_builder_t routing;
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_route_builder_initialize(
+      family, capacity, arena, &routing));
+  for (iree_host_size_t i = 0; i < connections->group_count; ++i) {
+    const loom_aie2p_native_connection_t* group = &connections->groups[i];
+    loom_aie2p_array_route_tree_t tree = {0};
+    for (iree_host_size_t j = 0; j < group->destination_count; ++j) {
+      const loom_aie2p_native_connection_endpoint_t destination =
+          connections->destinations[group->destination_offset + j];
+      if (!loom_aie2p_array_route_stream(
+              &routing, (uint32_t)i, &tree, group->source.coordinate,
+              LOOM_XDNA_STREAM_PORT_DMA, group->source.channel,
+              destination.coordinate, destination.port, destination.channel,
+              /*packet=*/false)) {
+        return iree_ok_status();
+      }
+    }
+  }
+  loom_aie2p_native_route_t* routes = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, routing.route_count, sizeof(*routes), (void**)&routes));
+  for (iree_host_size_t i = 0; i < routing.route_count; ++i) {
+    routes[i] = (loom_aie2p_native_route_t){.edge = &routing.routes[i],
+                                            .packet = UINT8_MAX,
+                                            .control_source = UINT32_MAX};
+  }
+  const loom_aie2p_native_switch_input_t input = {.routing = &routing,
+                                                  .routes = routes};
+  iree_string_view_t requirement;
+  IREE_RETURN_IF_ERROR(loom_aie2p_native_switches_build(
+      &input, arena, out_switches, &requirement));
+  if (!iree_string_view_is_empty(requirement)) {
+    return iree_ok_status();
+  }
+  return loom_aie2p_native_connections_verify(&routing, *out_switches,
+                                              connections, arena);
+}
 
 typedef struct loom_aie2p_native_packet_group_t {
   // Complete multicast output set for one input packet filter.

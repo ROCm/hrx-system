@@ -24,6 +24,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_catalog.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_compile.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_replacement.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/worker_upload.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/code_banks.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/control_packet.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
@@ -96,9 +97,10 @@ struct loom_aie2p_configuration_plan_t {
   // Initialization boundary after the final worker load, before pipeline
   // routes.
   iree_host_size_t after_program_loads;
-  // Original physical data reservations shared by all oversized pipeline
-  // workers.
-  const loom_aie2p_execution_plan_t* replacement_scope;
+  // Physical routing, resources, and startup ownership of a generated pipeline.
+  const loom_aie2p_execution_plan_t* pipeline_scope;
+  // At least one worker requires on-demand instruction placement.
+  bool needs_replacement;
   // Fixed resident storage reservations indexed by physical tile.
   loom_aie2p_configuration_memory_t* memories;
   // Workers already counted in this plan's optional pipeline report.
@@ -1006,7 +1008,7 @@ static iree_status_t loom_aie2p_configuration_require(
 
 // Compile the uninstrumented leaves before choosing a common cut. Each
 // construction's maximum is the largest aligned demand on any one core.
-// A core that fits outright needs neither a census nor a loader.
+// A core that fits outright needs no replacement census.
 static iree_status_t loom_aie2p_configuration_prepare_workers(
     loom_aie2p_configuration_plan_t* plan,
     loom_aie2p_program_compiler_t* compiler,
@@ -1028,16 +1030,19 @@ static iree_status_t loom_aie2p_configuration_prepare_workers(
       return iree_ok_status();
     }
     const loom_pipeline_entry_binding_t* entry = load->source->pipeline_entry;
-    if (program->contribution.realization.code.byte_length <= capacity ||
-        !entry) {
+    if (!entry) {
       continue;
     }
     // Only pipeline construction can attach a physical plan. It owns one
     // transport scope per configuration and leaves the cores reset during load.
     IREE_ASSERT(entry->scope->type == &loom_aie2p_execution_plan_type);
-    IREE_ASSERT(!plan->replacement_scope ||
-                &plan->replacement_scope->base == entry->scope);
-    plan->replacement_scope = (const loom_aie2p_execution_plan_t*)entry->scope;
+    IREE_ASSERT(!plan->pipeline_scope ||
+                &plan->pipeline_scope->base == entry->scope);
+    plan->pipeline_scope = (const loom_aie2p_execution_plan_t*)entry->scope;
+    if (program->contribution.realization.code.byte_length <= capacity) {
+      continue;
+    }
+    plan->needs_replacement = true;
     if (!maximum_lengths && entry->scope->lifetimes.loop_depths) {
       scope = entry->scope;
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -1157,7 +1162,7 @@ static iree_status_t loom_aie2p_configuration_place_workers(
       *program_layout = layouts[i];
       if (!catalogs) {
         IREE_RETURN_IF_ERROR(loom_aie2p_code_transport_initialize(
-            plan->replacement_scope, plan->entry->tile_count,
+            plan->pipeline_scope, plan->entry->tile_count,
             request->scratch_arena, &transport));
         IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
             request->scratch_arena, plan->entry->tile_count, sizeof(*catalogs),
@@ -1271,6 +1276,11 @@ static iree_status_t loom_aie2p_configuration_place_workers(
         &transport, catalogs, plan->entry->tile_count,
         plan->after_program_loads, request->scratch_arena, plan->program));
   }
+  if (plan->pipeline_scope && plan->entry->tile_count > 1) {
+    IREE_RETURN_IF_ERROR(loom_aie2p_worker_upload_install(
+        plan->pipeline_scope, tiles, plan->entry->tile_count,
+        plan->after_program_loads, request->scratch_arena, plan->program));
+  }
   plan->entry->tiles = tiles;
   if (plan->report) {
     IREE_RETURN_IF_ERROR(loom_aie2p_configuration_report_finish(
@@ -1353,7 +1363,7 @@ static iree_status_t loom_aie2p_configuration_place_banks(
     }
     iree_host_size_t* order = NULL;
     IREE_RETURN_IF_ERROR(loom_aie2p_code_banks_order(
-        plan->replacement_scope, demands, count, arena, &order));
+        plan->pipeline_scope, demands, count, arena, &order));
     if (order) {
       IREE_RETURN_IF_ERROR(loom_aie2p_configuration_try_placement(
           plan, compiler, worker_set, layouts, order, provisional, rejected,
@@ -1370,7 +1380,7 @@ static iree_status_t loom_aie2p_configuration_reduce_catalogs(
     loom_aie2p_configuration_plan_t* plan, loom_aie2p_program_layout_t* layouts,
     iree_arena_allocator_t* scratch, bool* out_changed) {
   *out_changed = false;
-  const loom_pipeline_entry_scope_t* scope = &plan->replacement_scope->base;
+  const loom_pipeline_entry_scope_t* scope = &plan->pipeline_scope->base;
   const uint32_t capacity =
       loom_xdna_array_tile_kind_facts(plan->family, LOOM_XDNA_TILE_KIND_COMPUTE)
           ->memory.program_capacity;
@@ -1422,7 +1432,7 @@ static iree_status_t loom_aie2p_configuration_place_cut(
       plan, compiler, worker_set, layouts, code_owners != NULL, &rejected,
       out_materialized));
   if (rejected.op && reduce_catalogs &&
-      plan->replacement_scope->base.lifetimes.loop_depths) {
+      plan->pipeline_scope->base.lifetimes.loop_depths) {
     iree_arena_allocator_t scratch;
     iree_arena_initialize(arena->block_pool, &scratch);
     bool changed = false;
@@ -1468,7 +1478,7 @@ iree_status_t loom_aie2p_configuration_plan_materialize(
   if (plan->error_count) {
     return iree_ok_status();
   }
-  if (!plan->replacement_scope) {
+  if (!plan->needs_replacement) {
     loom_aie2p_catalog_rejection_t rejected;
     return loom_aie2p_configuration_place_workers(plan, compiler, worker_set,
                                                   NULL, NULL, false, NULL,
