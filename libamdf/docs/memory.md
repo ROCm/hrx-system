@@ -359,7 +359,7 @@ prefix includes native payload before logical byte zero, such as private
 bootstrap storage. Ordinary allocation profiles have a zero prefix. For example,
 a 4 KiB native granularity rounds 4097 logical bytes to 8192 payload bytes even
 when the caller requests a stronger supported base alignment. The Windows XDNA
-private profile exposes 64 MiB minus a 32 KiB prefix and acquires the full 64 MiB.
+private profile exposes 64 MiB minus a 64 KiB prefix and acquires the full 64 MiB.
 
 A pool can capture these immutable facts for its complete scope and consumer
 contract, compute the charge when growing, reserve that charge against its own

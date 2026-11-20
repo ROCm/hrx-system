@@ -250,8 +250,9 @@ amdf_status_t amdf_xdna_umd_device_query_memory_profile(
 void amdf_xdna_umd_context_query_memory_profile(
     amdf_xdna_umd_context_t* context,
     amdf_memory_native_profile_t* out_profile) {
-  const uint64_t byte_length = AMDF_WINDOWS_XDNA_PRIVATE_APERTURE_SIZE -
-                               AMDF_WINDOWS_XDNA_PRIVATE_BOOTSTRAP_SIZE;
+  const uint64_t prefix = amdf_windows_xdna_instruction_prefix_size(
+      context->device->profile->info->instruction.address_alignment);
+  const uint64_t byte_length = AMDF_WINDOWS_XDNA_PRIVATE_APERTURE_SIZE - prefix;
   *out_profile = (amdf_memory_native_profile_t){
       .ordinal = 0,
       .memory_class = AMDF_MEMORY_CLASS_PRIVATE,
@@ -285,8 +286,7 @@ void amdf_xdna_umd_context_query_memory_profile(
               .minimum_alignment = AMDF_WINDOWS_KMT_PAGE_SIZE,
               .maximum_alignment = AMDF_WINDOWS_KMT_PAGE_SIZE,
               .native_byte_length_granularity = AMDF_WINDOWS_KMT_PAGE_SIZE,
-              .native_byte_length_prefix =
-                  AMDF_WINDOWS_XDNA_PRIVATE_BOOTSTRAP_SIZE,
+              .native_byte_length_prefix = prefix,
           },
       .host_mapping =
           {
@@ -336,7 +336,7 @@ amdf_status_t amdf_xdna_umd_memory_prepare_private(
                                                   &memory->private_allocation);
   status = amdf_windows_xdna_kernel_execution_prepare_memory(
       context->kernel_execution, &memory->private_allocation);
-  const uint64_t prefix = AMDF_WINDOWS_XDNA_PRIVATE_BOOTSTRAP_SIZE;
+  const uint64_t prefix = profile->allocation.native_byte_length_prefix;
   if (amdf_status_is_ok(status)) {
     memory->host_pointer =
         (uint8_t*)memory->private_allocation.host_pointer + prefix;

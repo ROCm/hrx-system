@@ -149,10 +149,14 @@ The following native execution contracts apply to the admitted AIE2P profiles:
 | Boundary | Linux modern DRM | Windows MCDM |
 | --- | --- | --- |
 | Context admission | Native hardware context; queue creation qualifies direct instruction execution and completion. | Native private adapter query selects direct or metadata partition admission. |
-| Instruction storage | Context-qualified DEV backing, with sizes and alignment from its scope. | One 64 MiB native aperture per context; a reserved 32 KiB bootstrap prefix is excluded from the caller's usable range. |
+| Instruction storage | Context-qualified DEV backing, with sizes and alignment from its scope. | One 64 MiB native aperture per context. Its scope excludes a 64 KiB prefix for the CU setup PDI, command lists, and ELF admission instructions. |
 | Instruction submission | Mandatory DRM execution record and command BO referencing the caller's instruction range. | An ERT ELF or bootstrap-interpreter packet referencing the same range, selected at queue creation. |
 | Ordinary data addresses | Firmware and shim-DMA address interpretations. | Firmware and shim-DMA address interpretations for standard system backing. |
 | Private addresses | The scope reports available firmware and DMA interpretations. | Firmware address returned by native allocation; a private shim-DMA interpretation is not advertised. |
+
+Windows retains the PDI at the aperture base because firmware encodes its address
+in device-memory alignment units. The ELF admission instructions and the caller's
+first usable byte each begin at a separate instruction-aligned address. [Firmware CU configuration](https://github.com/amd/xdna-driver/blob/45d06428a8895f305822c1201e71582c01358052/drivers/accel/amdxdna/aie2_message.c#L576-L615).
 
 Profiles distinguish backing granularity from address alignment. In particular,
 Windows standard backing is rounded to 64 KiB, while KMT mappings guarantee
@@ -224,17 +228,20 @@ amdf_status_t status = xdna->kernel_queue_create(context, &create_info, &queue);
 
 Success guarantees the operation on that queue. The device's
 `instruction.features` reports operations guaranteed on every queue. Linux DRM
-uses the ELF transport for every admitted queue. Windows also supports an
-ordinary queue that uses the bootstrap interpreter. To request an ELF queue on
-Windows, allocate the context's instruction backing first. Queue creation
-submits one native ELF transaction that loads the provider's inert PDI and
-checks both the progress fence and the firmware response. Its storage comes
-from the existing queue ring and the reserved context prefix.
+uses the ELF transport for every admitted queue. On Windows, libamdf exposes
+the bootstrap interpreter on both the direct and metadata MCDM interfaces.
+The direct interface additionally supports ELF queue admission. Allocate the
+context's instruction backing first. Queue creation submits one native ELF
+transaction that loads the provider's inert PDI and checks both the progress
+fence and the firmware response. Its storage comes from the existing queue
+ring and the reserved context prefix.
 
-If the native interface rejects the command as unsupported, the application
-can create an ordinary queue with `create_info.next = NULL`. Access, allocation,
-and execution failures propagate to the caller. The selected format applies
-to single commands and command arrays for the queue's lifetime.
+The metadata interfaces return `AMDF_STATUS_CODE_UNSUPPORTED` for this request
+before submitting a command. They have no defined rejection completion for an
+unknown ERT packet. After an unsupported result, the application can create an
+ordinary queue on the same context with `create_info.next = NULL`. Access,
+allocation, and execution failures propagate to the caller. The selected format
+applies to single commands and command arrays for the queue's lifetime.
 
 Windows initialization constructs a minimal PDI/CDO container directly in
 reserved private backing. Its single NOP admits the transaction interpreter
