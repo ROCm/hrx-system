@@ -1694,6 +1694,7 @@ iree_status_t loom_low_lower_rule_plan_finalize(
   match_context.policy_rule_set_ordinal =
       (uint16_t)(selected_plan->selection.rule.rule_set_index + 1u);
   uint32_t sequence_lane_count = 0;
+  uint8_t last_recurrence_materializer = 0;
   for (uint16_t i = 0; i < rule->emit_count; ++i) {
     const loom_low_lower_emit_ref_t emit_ref =
         loom_low_lower_rule_set_emit_ref_at(
@@ -1714,6 +1715,16 @@ iree_status_t loom_low_lower_rule_plan_finalize(
     }
     if (elided) {
       continue;
+    }
+    if (emit->source_memory_ordinal != 0) {
+      const loom_low_lower_source_memory_t* memory =
+          &rule_set->source_memories[emit->source_memory_ordinal - 1];
+      const uint8_t materializer = memory->byte_offset_materializer_ordinal;
+      if (materializer != 0 && materializer != last_recurrence_materializer) {
+        IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_plan_recurrences(
+            context, source_memory_builder, selected_plan, memory));
+        last_recurrence_materializer = materializer;
+      }
     }
     const loom_low_lower_rule_operand_masks_t operand_masks =
         loom_low_lower_rule_operand_masks(rule_set, emit);

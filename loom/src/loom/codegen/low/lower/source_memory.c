@@ -350,107 +350,76 @@ static uint16_t loom_low_lower_memory_invariant_terms(
 
 static bool loom_low_lower_memory_recurrence_stride(
     loom_low_lower_context_t* context, const loom_cfg_loop_nest_t* loops,
-    uint16_t loop_index, const loom_low_source_memory_dynamic_term_t* term,
-    loom_value_id_t producer_value_id, loom_value_id_t factor_identity,
-    int64_t* out_constant_stride, loom_value_id_t* out_stride_value) {
+    uint16_t loop_index, loom_value_id_t producer_value_id,
+    loom_value_id_t factor_identity, int64_t* out_constant_stride,
+    loom_value_id_t* out_stride_value) {
   *out_constant_stride = 0;
   *out_stride_value = LOOM_VALUE_ID_INVALID;
-  if (term->source != LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE ||
-      term->stride_value_count != 0) {
-    return false;
-  }
   const loom_value_fact_table_t* fact_table = context->fact_table;
-  if (loom_value_fact_table_query_identity(fact_table, term->index) ==
-      factor_identity) {
-    *out_constant_stride = term->byte_stride;
-    const loom_symbolic_product_t* product =
-        producer_value_id != term->index
-            ? loom_symbolic_expr_lookup_product(
-                  loom_low_lower_context_symbolic_expr_context(context),
-                  producer_value_id)
-            : NULL;
-    if (product != NULL) {
-      const bool first_matches =
-          loom_value_fact_table_query_identity(
-              fact_table, product->operand_values[0]) == factor_identity;
-      const bool second_matches =
-          loom_value_fact_table_query_identity(
-              fact_table, product->operand_values[1]) == factor_identity;
-      if (first_matches != second_matches) {
-        const loom_value_id_t stride_value =
-            product->operand_values[first_matches ? 1 : 0];
-        int64_t exact_stride = 0;
-        if (loom_value_facts_as_exact_i64(
-                loom_value_fact_table_lookup(fact_table, stride_value),
-                &exact_stride) &&
-            exact_stride == term->byte_stride &&
-            loom_low_lower_memory_value_is_loop_invariant(
-                context->module, loops, loop_index, stride_value)) {
-          *out_stride_value =
-              loom_value_fact_table_query_identity(fact_table, stride_value);
-        }
+  const loom_symbolic_expr_context_t* expressions =
+      loom_low_lower_context_symbolic_expr_context(context);
+  // The recurrence replaces the authored producer, so its increment uses the
+  // producer's units independently of the surrounding address's byte scale.
+  const loom_symbolic_product_t* product =
+      loom_symbolic_expr_lookup_product(expressions, producer_value_id);
+  if (product != NULL) {
+    const bool first_matches =
+        loom_value_fact_table_query_identity(
+            fact_table, product->operand_values[0]) == factor_identity;
+    const bool second_matches =
+        loom_value_fact_table_query_identity(
+            fact_table, product->operand_values[1]) == factor_identity;
+    if (first_matches != second_matches) {
+      const loom_value_id_t stride_value =
+          product->operand_values[first_matches ? 1 : 0];
+      if (loom_low_lower_memory_value_is_loop_invariant(
+              context->module, loops, loop_index, stride_value)) {
+        *out_stride_value =
+            loom_value_fact_table_query_identity(fact_table, stride_value);
+        return !loom_value_facts_as_exact_i64(
+                   loom_value_fact_table_lookup(fact_table, stride_value),
+                   out_constant_stride) ||
+               *out_constant_stride != 0;
       }
     }
-    return term->byte_stride != 0;
   }
-  if (term->byte_stride != 1) {
-    return false;
-  }
-  const loom_symbolic_product_t* product = loom_symbolic_expr_lookup_product(
-      loom_low_lower_context_symbolic_expr_context(context), term->index);
-  if (product == NULL) {
-    return false;
-  }
-  const bool first_matches =
+  // Constant scales and shifts can be normalized without a product record.
+  // Read their own retained coefficient rather than the memory access's scale.
+  loom_symbolic_expr_summary_t summary;
+  if (!loom_symbolic_expr_context_try_lookup_summary(
+          expressions, producer_value_id, &summary) ||
+      !loom_symbolic_expr_is_linear(&summary.expression) ||
+      summary.expression.constant != 0 || summary.expression.term_count != 1 ||
       loom_value_fact_table_query_identity(
-          fact_table, product->operand_values[0]) == factor_identity;
-  const bool second_matches =
-      loom_value_fact_table_query_identity(
-          fact_table, product->operand_values[1]) == factor_identity;
-  if (first_matches == second_matches) {
+          fact_table, summary.expression.terms[0].value_id) !=
+          factor_identity) {
     return false;
   }
-  const loom_value_id_t stride_value =
-      product->operand_values[first_matches ? 1 : 0];
-  *out_stride_value =
-      loom_value_fact_table_query_identity(fact_table, stride_value);
-  if (loom_value_facts_as_exact_i64(
-          loom_value_fact_table_lookup(fact_table, stride_value),
-          out_constant_stride)) {
-    return *out_constant_stride != 0;
-  } else if (!loom_low_lower_memory_value_is_loop_invariant(
-                 context->module, loops, loop_index, stride_value)) {
-    return false;
-  }
-  return true;
+  *out_constant_stride = summary.expression.terms[0].coefficient;
+  return *out_constant_stride != 0;
 }
 
-static iree_status_t loom_low_lower_memory_append_recurrence(
+static void loom_low_lower_memory_append_recurrence(
     loom_low_lower_context_t* context, const loom_cfg_loop_nest_t* loops,
     uint16_t loop_index, const loom_low_source_memory_dynamic_term_t* term,
     loom_value_id_t producer_value_id, loom_value_id_t induction_identity,
     loom_low_lower_source_memory_recurrence_t* candidates,
     uint8_t* inout_candidate_count) {
   if (term->source != LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE ||
-      (producer_value_id == term->index &&
-       (term->stride_value_count != 0 || term->byte_stride != 1)) ||
       loom_value_is_block_arg(
           loom_module_value(context->module, producer_value_id))) {
-    return iree_ok_status();
+    return;
   }
   int64_t constant_stride = 0;
   loom_value_id_t stride_value_id = LOOM_VALUE_ID_INVALID;
   if (!loom_low_lower_memory_recurrence_stride(
-          context, loops, loop_index, term, producer_value_id,
-          induction_identity, &constant_stride, &stride_value_id)) {
-    return iree_ok_status();
-  }
-  if (stride_value_id == LOOM_VALUE_ID_INVALID && constant_stride == 0) {
-    return iree_ok_status();
+          context, loops, loop_index, producer_value_id, induction_identity,
+          &constant_stride, &stride_value_id)) {
+    return;
   }
   for (uint8_t i = 0; i < *inout_candidate_count; ++i) {
     if (candidates[i].producer_value_id == producer_value_id) {
-      return iree_ok_status();
+      return;
     }
   }
   candidates[*inout_candidate_count] =
@@ -460,7 +429,6 @@ static iree_status_t loom_low_lower_memory_append_recurrence(
           .constant_stride = constant_stride,
       };
   ++*inout_candidate_count;
-  return iree_ok_status();
 }
 
 static iree_status_t loom_low_lower_memory_append_term_recurrence(
@@ -529,10 +497,10 @@ static iree_status_t loom_low_lower_memory_retain_recurrences(
       continue;
     }
     if (builder->supports_producer_recurrences) {
-      IREE_RETURN_IF_ERROR(loom_low_lower_memory_append_recurrence(
+      loom_low_lower_memory_append_recurrence(
           context, &cfg->loops, loop_index, &record->access.dynamic_terms[i],
           record->access.dynamic_terms[i].index, induction_identity, candidates,
-          &candidate_count));
+          &candidate_count);
     }
     if (builder->supports_term_recurrences) {
       IREE_RETURN_IF_ERROR(loom_low_lower_memory_append_term_recurrence(
@@ -544,10 +512,10 @@ static iree_status_t loom_low_lower_memory_retain_recurrences(
       record->access.dynamic_term_count == 1 &&
       loom_low_source_memory_access_dynamic_offset_has_materialized_view_base(
           &record->access)) {
-    IREE_RETURN_IF_ERROR(loom_low_lower_memory_append_recurrence(
+    loom_low_lower_memory_append_recurrence(
         context, &cfg->loops, loop_index, &record->access.dynamic_terms[0],
         record->access.dynamic_view_base_value_id, induction_identity,
-        candidates, &candidate_count));
+        candidates, &candidate_count);
   }
   for (uint8_t i = 0; builder->supports_producer_recurrences &&
                       i < record->access.dynamic_realization_count;
@@ -558,10 +526,10 @@ static iree_status_t loom_low_lower_memory_retain_recurrences(
         0) {
       continue;
     }
-    IREE_RETURN_IF_ERROR(loom_low_lower_memory_append_recurrence(
+    loom_low_lower_memory_append_recurrence(
         context, &cfg->loops, loop_index, &realization->term,
         realization->term.index, induction_identity, candidates,
-        &candidate_count));
+        &candidate_count);
   }
   // Replacing one term is unambiguous only when this access has one canonical
   // term varying with the loop induction. Diagonal or otherwise repeated

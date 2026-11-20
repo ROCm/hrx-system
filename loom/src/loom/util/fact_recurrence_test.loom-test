@@ -1,0 +1,324 @@
+// RUN: pass canonicalize
+
+// A runtime stride carries its full interval through a counted address walk.
+// The body excludes the terminal increment; an upper-bounded count's exit
+// also includes the zero-trip seed.
+func.def @counted_address(%raw_start: index, %raw_stride: index, %raw_count: index) {
+  %start = index.assume %raw_start [range(%raw_start, 0, 16)] : index
+  %stride = index.assume %raw_stride [range(%raw_stride, 1, 4)] : index
+  %count = index.assume %raw_count [range(%raw_count, 0, 512)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %end = scf.for %i = [%c0 to %count step %c1](%position = %start : index) -> (index) {
+    %lo = test.fact_range_lo %position : index -> i64
+    %hi = test.fact_range_hi %position : index -> i64
+    test.use %lo, %hi : i64, i64
+    %next = index.add %position, %stride : index
+    scf.yield %next : index
+  }
+  %end_lo = test.fact_range_lo %end : index -> i64
+  %end_hi = test.fact_range_hi %end : index -> i64
+  test.use %end_lo, %end_hi : i64, i64
+  func.return
+}
+
+// ----
+func.def @counted_address(%raw_start: index, %raw_stride: index, %raw_count: index) {
+  %start = index.assume %raw_start [range(%raw_start, 0, 16)] : index
+  %stride = index.assume %raw_stride [range(%raw_stride, 1, 4)] : index
+  %count = index.assume %raw_count [range(%raw_count, 0, 512)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %end = scf.for %i = [%c0 to %count step %c1](%position = %start : index) -> (index) {
+    %lo = scalar.constant 0 : i64
+    %hi = scalar.constant 2060 : i64
+    test.use %lo, %hi : i64, i64
+    %next = index.add %position, %stride : index
+    scf.yield %next : index
+  }
+  %end_lo = scalar.constant 0 : i64
+  %end_hi = scalar.constant 2064 : i64
+  test.use %end_lo, %end_hi : i64, i64
+  func.return
+}
+
+// ====
+
+// Positive and negative translations, subtraction, and nontrivial multiples
+// share one proof. The exact count strengthens the final range independently
+// of the observed body envelope.
+func.def @signed_translation(%raw_start: i32, %raw_stride: i32) {
+  %start = scalar.assume %raw_start [range(%raw_start, 80, 96), multiple_of(%raw_start, 8)] : i32
+  %stride = scalar.assume %raw_stride [range(%raw_stride, -8, 12), multiple_of(%raw_stride, 4)] : i32
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %count = index.constant 32 : index
+  %bias = scalar.constant 4 : i32
+  %end = scf.for %i = [%c0 to %count step %c1](%position = %start : i32) -> (i32) {
+    %lo = test.fact_range_lo %position : i32 -> i64
+    %hi = test.fact_range_hi %position : i32 -> i64
+    %divisor = test.fact_divisor %position : i32 -> i64
+    test.use %lo, %hi, %divisor : i64, i64, i64
+    %translated = scalar.addi %position, %stride : i32
+    %next = scalar.subi %translated, %bias : i32
+    scf.yield %next : i32
+  }
+  %end_lo = test.fact_range_lo %end : i32 -> i64
+  %end_hi = test.fact_range_hi %end : i32 -> i64
+  %end_divisor = test.fact_divisor %end : i32 -> i64
+  test.use %end_lo, %end_hi, %end_divisor : i64, i64, i64
+  func.return
+}
+
+// ----
+func.def @signed_translation(%raw_start: i32, %raw_stride: i32) {
+  %start = scalar.assume %raw_start [range(%raw_start, 80, 96), multiple_of(%raw_start, 8)] : i32
+  %stride = scalar.assume %raw_stride [range(%raw_stride, -8, 12), multiple_of(%raw_stride, 4)] : i32
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %count = index.constant 32 : index
+  %end = scf.for %i = [%c0 to %count step %c1](%position = %start : i32) -> (i32) {
+    %lo = scalar.constant -292 : i64
+    %hi = scalar.constant 344 : i64
+    %divisor = scalar.constant 4 : i64
+    test.use %lo, %hi, %divisor : i64, i64, i64
+    %translated = scalar.addi %position, %stride : i32
+    %25 = scalar.constant -4 : i32
+    %next = scalar.addi %translated, %25 : i32
+    scf.yield %next : i32
+  }
+  %end_lo = scalar.constant -304 : i64
+  %end_hi = scalar.constant 352 : i64
+  %end_divisor = scalar.constant 8 : i64
+  test.use %end_lo, %end_hi, %end_divisor : i64, i64, i64
+  func.return
+}
+
+// ====
+
+// The same equation is retained across a condition loop's header/body handoff.
+func.def @while_address(%raw_count: index, %raw_stride: offset) {
+  %count = index.assume %raw_count [range(%raw_count, 0, 17)] : index
+  %stride = index.assume %raw_stride [range(%raw_stride, 2, 8), multiple_of(%raw_stride, 2)] : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %start = index.constant 4096 : offset
+  %last_iteration, %end = scf.while(%i = %c0 : index, %position = %start : offset) -> (index, offset) {
+    %header_lo = test.fact_range_lo %position : offset -> i64
+    %header_hi = test.fact_range_hi %position : offset -> i64
+    test.use %header_lo, %header_hi : i64, i64
+    %more = index.cmp slt, %i, %count : index
+    scf.condition %more, %i, %position : i1, index, offset
+  } do(%iteration: index, %cursor: offset) {
+    %lo = test.fact_range_lo %cursor : offset -> i64
+    %hi = test.fact_range_hi %cursor : offset -> i64
+    %divisor = test.fact_divisor %cursor : offset -> i64
+    test.use %lo, %hi, %divisor : i64, i64, i64
+    %next_iteration = index.add %iteration, %c1 : index
+    %next_cursor = index.sub %cursor, %stride : offset
+    scf.yield %next_iteration, %next_cursor : index, offset
+  }
+  %end_lo = test.fact_range_lo %end : offset -> i64
+  %end_hi = test.fact_range_hi %end : offset -> i64
+  test.use %end_lo, %end_hi : i64, i64
+  func.return
+}
+
+// ----
+func.def @while_address(%raw_count: index, %raw_stride: offset) {
+  %count = index.assume %raw_count [range(%raw_count, 0, 17)] : index
+  %stride = index.assume %raw_stride [range(%raw_stride, 2, 8), multiple_of(%raw_stride, 2)] : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %start = index.constant 4096 : offset
+  %last_iteration, %end = scf.while(%i = %c0 : index, %position = %start : offset) -> (index, offset) {
+    %header_lo = scalar.constant 3960 : i64
+    %header_hi = scalar.constant 4096 : i64
+    test.use %header_lo, %header_hi : i64, i64
+    %more = index.cmp slt, %i, %count : index
+    scf.condition %more, %i, %position : i1, index, offset
+  } do(%iteration: index, %cursor: offset) {
+    %lo = scalar.constant 3968 : i64
+    %hi = scalar.constant 4096 : i64
+    %divisor = scalar.constant 2 : i64
+    test.use %lo, %hi, %divisor : i64, i64, i64
+    %next_iteration = index.add %iteration, %c1 : index
+    %next_cursor = index.sub %cursor, %stride : offset
+    scf.yield %next_iteration, %next_cursor : index, offset
+  }
+  %end_lo = scalar.constant 3960 : i64
+  %end_hi = scalar.constant 4096 : i64
+  test.use %end_lo, %end_hi : i64, i64
+  func.return
+}
+
+// ====
+
+// CFG loop state uses the same numeric evaluator as structured loops.
+func.def @cfg_address(%raw_count: index, %raw_stride: offset) {
+  %count = index.assume %raw_count [range(%raw_count, 0, 17)] : index
+  %stride = index.assume %raw_stride [range(%raw_stride, 2, 8), multiple_of(%raw_stride, 2)] : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %start = index.constant 4096 : offset
+  cfg.br ^header(%c0: index, %start: offset)
+^header(%i: index, %position: offset):
+  %lo = test.fact_range_lo %position : offset -> i64
+  %hi = test.fact_range_hi %position : offset -> i64
+  %divisor = test.fact_divisor %position : offset -> i64
+  test.use %lo, %hi, %divisor : i64, i64, i64
+  %more = index.cmp slt, %i, %count : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next_iteration = index.add %i, %c1 : index
+  %next_cursor = index.sub %position, %stride : offset
+  cfg.br ^header(%next_iteration: index, %next_cursor: offset)
+^exit:
+  func.return
+}
+
+// ----
+func.def @cfg_address(%raw_count: index, %raw_stride: offset) {
+  %count = index.assume %raw_count [range(%raw_count, 0, 17)] : index
+  %stride = index.assume %raw_stride [range(%raw_stride, 2, 8), multiple_of(%raw_stride, 2)] : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %start = index.constant 4096 : offset
+  cfg.br ^header(%c0: index, %start: offset)
+^header(%i: index, %position: offset):
+  %lo = scalar.constant 3960 : i64
+  %hi = scalar.constant 4096 : i64
+  %divisor = scalar.constant 2 : i64
+  test.use %lo, %hi, %divisor : i64, i64, i64
+  %more = index.cmp slt, %i, %count : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next_iteration = index.add %i, %c1 : index
+  %next_cursor = index.sub %position, %stride : offset
+  cfg.br ^header(%next_iteration: index, %next_cursor: offset)
+^exit:
+  func.return
+}
+
+// ====
+
+// A bounded stride does not authorize a mathematical recurrence when a
+// represented execution wraps its fixed-width source type.
+func.def @wrapping_byte(%raw_stride: i8, %raw_count: index) {
+  %stride = scalar.assume %raw_stride [range(%raw_stride, 1, 2)] : i8
+  %count = index.assume %raw_count [range(%raw_count, 0, 64)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %start = scalar.constant 0 : i8
+  %end = scf.for %i = [%c0 to %count step %c1](%position = %start : i8) -> (i8) {
+    %next = scalar.addi %position, %stride : i8
+    scf.yield %next : i8
+  }
+  %end_lo = test.fact_range_lo %end : i8 -> i64
+  %end_hi = test.fact_range_hi %end : i8 -> i64
+  test.use %end_lo, %end_hi : i64, i64
+  func.return
+}
+
+// ----
+func.def @wrapping_byte(%raw_stride: i8, %raw_count: index) {
+  %end_lo = scalar.constant -128 : i64
+  %end_hi = scalar.constant 127 : i64
+  test.use %end_lo, %end_hi : i64, i64
+  func.return
+}
+
+// ====
+
+// A net translation that fits is insufficient when an intermediate prefix
+// exceeds the selected target carrier.
+test.target<low_core> @narrow {index_bitwidth = 32, offset_bitwidth = 32}
+
+func.def target(@narrow) @overflowing_prefix(%raw_stride: offset, %raw_count: index) {
+  %stride = index.assume %raw_stride [range(%raw_stride, 32, 36)] : offset
+  %count = index.assume %raw_count [range(%raw_count, 0, 2)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %start = index.constant 4294967280 : offset
+  %bias = index.constant 32 : offset
+  %end = scf.for %i = [%c0 to %count step %c1](%position = %start : offset) -> (offset) {
+    %temporary = index.add %position, %stride : offset
+    %next = index.sub %temporary, %bias : offset
+    scf.yield %next : offset
+  }
+  %end_hi = test.fact_range_hi %end : offset -> i64
+  test.use %end_hi : i64
+  func.return
+}
+
+// ----
+test.target<low_core> @narrow {index_bitwidth = 32, offset_bitwidth = 32}
+
+func.def target(@narrow) @overflowing_prefix(%raw_stride: offset, %raw_count: index) {
+  %end_hi = scalar.constant 4294967295 : i64
+  test.use %end_hi : i64
+  func.return
+}
+
+// ====
+
+// An outer carried pitch is invariant in the inner loop, but its facts change
+// as the outer solve progresses. The retained equation must read those current
+// facts instead of preserving its first iteration's literal-looking stride.
+func.def @nested_runtime_pitch() {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %outer_count = index.constant 8 : index
+  %inner_count = index.constant 64 : index
+  %last_pitch = scf.for %outer = [%c0 to %outer_count step %c1](%pitch = %c1 : index) -> (index) {
+    %end = scf.for %inner = [%c0 to %inner_count step %c1](%position = %c0 : index) -> (index) {
+      %next = index.add %position, %pitch : index
+      scf.yield %next : index
+    }
+    %end_lo = test.fact_range_lo %end : index -> i64
+    %end_hi = test.fact_range_hi %end : index -> i64
+    test.use %end_lo, %end_hi : i64, i64
+    %next_pitch = index.add %pitch, %c1 : index
+    scf.yield %next_pitch : index
+  }
+  func.return
+}
+
+// ----
+func.def @nested_runtime_pitch() {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %outer_count = index.constant 8 : index
+  %last_pitch = scf.for %outer = [%c0 to %outer_count step %c1](%pitch = %c1 : index) -> (index) {
+    %end_lo = scalar.constant 64 : i64
+    %end_hi = scalar.constant 512 : i64
+    test.use %end_lo, %end_hi : i64, i64
+    %next_pitch = index.add %pitch, %c1 : index
+    scf.yield %next_pitch : index
+  }
+  func.return
+}
+
+// ====
+
+// A bounded increment that changes on each iteration is not an invariant
+// stride. In particular, the sum of 0..63 is not a multiple of the trip count.
+func.def @varying_increment() {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %count = index.constant 64 : index
+  %end = scf.for %i = [%c0 to %count step %c1](%sum = %c0 : index) -> (index) {
+    %next = index.add %sum, %i : index
+    scf.yield %next : index
+  }
+  %divisor = test.fact_divisor %end : index -> i64
+  test.use %divisor : i64
+  func.return
+}
+
+// ----
+func.def @varying_increment() {
+  %divisor = scalar.constant 1 : i64
+  test.use %divisor : i64
+  func.return
+}

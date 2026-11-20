@@ -80,6 +80,9 @@ bool loom_low_lower_rule_source_memory_plan_requires_producer(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_source_memory_plan_builder_t* builder,
     const loom_low_lower_selected_plan_t* selected_plan) {
+  // Retained recurrences prove the producer's value. Replacing that value with
+  // initialized state does not speculate the original operation; its effects
+  // must still be preserved independently of whether its result is needed.
   if (builder->producers_by_value_ordinal == NULL ||
       selected_plan->source_op->result_count != 1 ||
       selected_plan->kind != LOOM_LOW_LOWER_SELECTED_PLAN_RULE ||
@@ -87,8 +90,7 @@ bool loom_low_lower_rule_source_memory_plan_requires_producer(
                        LOOM_LOW_LOWER_SELECTED_PLAN_CLAIMED) ||
       selected_plan->selection.rule.source_node_count != 1 ||
       loom_low_lower_source_value_storage_op_requires_emission(
-          selected_plan->source_op, selected_plan->source_op->traits) ||
-      !loom_traits_are_safe_to_speculate(selected_plan->source_op->traits)) {
+          selected_plan->source_op, selected_plan->source_op->traits)) {
     return false;
   }
   const loom_low_lower_rule_t* rule =
@@ -139,7 +141,7 @@ typedef struct loom_low_lower_rule_source_memory_recurrence_key_t {
 } loom_low_lower_rule_source_memory_recurrence_key_t;
 
 typedef struct loom_low_lower_rule_source_memory_recurrence_state_t {
-  // Invariant byte stride consumed directly by the backedge update.
+  // Invariant increment consumed directly by the backedge update.
   loom_low_lower_realization_input_t stride_input;
   // Physical carrier shared by initialization and update.
   loom_type_t carrier_type;
@@ -1030,7 +1032,7 @@ loom_low_lower_rule_source_memory_consider_recurrence(
     return iree_ok_status();
   }
   // This recipe initializes the carrier with zero and advances it by the
-  // authored byte stride. Other induction domains require additional setup or
+  // authored increment. Other induction domains require additional setup or
   // stride-scaling arithmetic that this materializer contract does not name.
   if (loop->initial_value != 0 || loop->step != 1) {
     return iree_ok_status();
@@ -1104,6 +1106,30 @@ loom_low_lower_rule_source_memory_consider_recurrence(
   }
   builder->last_recurrence = recurrence;
   builder->producers_by_value_ordinal[producer_ordinal] = NULL;
+  return iree_ok_status();
+}
+
+iree_status_t loom_low_lower_rule_source_memory_plan_recurrences(
+    loom_low_lower_context_t* context,
+    loom_low_lower_rule_source_memory_plan_builder_t* builder,
+    const loom_low_lower_selected_plan_t* selected_plan,
+    const loom_low_lower_source_memory_t* source_memory) {
+  const loom_low_lower_selected_source_memory_t* selected_source_memory =
+      loom_low_lower_selected_plan_source_memory(selected_plan);
+  const loom_low_lower_source_memory_recurrence_set_t* recurrences =
+      selected_source_memory->record->recurrences;
+  if (recurrences == NULL || recurrences->producer_count == 0) {
+    return iree_ok_status();
+  }
+  const loom_low_lower_rule_set_t* rule_set =
+      loom_low_lower_selected_plan_rule_set(selected_plan);
+  const loom_low_lower_source_memory_byte_offset_materializer_t* materializer =
+      loom_low_lower_rule_set_source_memory_byte_offset_materializer(
+          rule_set, source_memory);
+  for (uint8_t i = 0; i < recurrences->producer_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_consider_recurrence(
+        context, builder, rule_set, materializer, &recurrences->producers[i]));
+  }
   return iree_ok_status();
 }
 
@@ -1195,14 +1221,6 @@ iree_status_t loom_low_lower_rule_source_memory_plan_byte_offset(
       loom_low_lower_selected_plan_emission_op(selected_plan);
   const loom_low_lower_source_memory_recurrence_set_t* recurrences =
       memory_record->recurrences;
-  if (recurrences != NULL) {
-    for (uint8_t i = 0; i < recurrences->producer_count; ++i) {
-      IREE_RETURN_IF_ERROR(
-          loom_low_lower_rule_source_memory_consider_recurrence(
-              context, builder, rule_set, materializer,
-              &recurrences->producers[i]));
-    }
-  }
   const loom_block_t* block = emission_op->parent_block;
   uint32_t hash = loom_structural_hash_initialize();
   hash = loom_structural_hash_mix_u64(hash, identity);

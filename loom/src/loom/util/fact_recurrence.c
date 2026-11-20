@@ -446,24 +446,38 @@ bool loom_value_fact_recurrence_evaluate(
   if (!loom_value_fact_recurrence_fits(table, scalar_type, initial)) {
     return false;
   }
-  int64_t delta = 0, minimum_prefix = 0, maximum_prefix = 0;
+  int64_t delta_lower = 0, delta_upper = 0;
+  int64_t minimum_prefix = 0, maximum_prefix = 0;
+  uint64_t delta_divisor = 0;
   for (uint32_t i = 0; trip_count != 0 && i < recurrence->step_count; ++i) {
     const loom_value_fact_recurrence_step_t* step = &recurrence->steps[i];
     const loom_value_facts_t facts =
         loom_value_fact_recurrence_operand_facts(table, step->increment);
-    int64_t increment = 0;
-    if (!loom_value_facts_as_exact_i64(facts, &increment) ||
-        !loom_value_fact_recurrence_fits(table, scalar_type, facts) ||
-        !(step->subtract ? iree_checked_sub_i64(delta, increment, &delta)
-                         : iree_checked_add_i64(delta, increment, &delta))) {
+    if (!loom_value_fact_recurrence_fits(table, scalar_type, facts) ||
+        !(step->subtract ? iree_checked_sub_i64(delta_lower, facts.range_hi,
+                                                &delta_lower) &&
+                               iree_checked_sub_i64(delta_upper, facts.range_lo,
+                                                    &delta_upper)
+                         : iree_checked_add_i64(delta_lower, facts.range_lo,
+                                                &delta_lower) &&
+                               iree_checked_add_i64(delta_upper, facts.range_hi,
+                                                    &delta_upper))) {
       return false;
     }
-    minimum_prefix = iree_min(minimum_prefix, delta);
-    maximum_prefix = iree_max(maximum_prefix, delta);
+    const uint64_t increment_divisor =
+        loom_value_facts_is_exact(facts)
+            ? iree_math_magnitude_i64(facts.range_lo)
+            : (uint64_t)facts.known_divisor;
+    delta_divisor = iree_math_gcd_u64(delta_divisor, increment_divisor);
+    minimum_prefix = iree_min(minimum_prefix, delta_lower);
+    maximum_prefix = iree_max(maximum_prefix, delta_upper);
   }
+  const loom_value_facts_t delta = loom_value_facts_make(
+      delta_lower, delta_upper,
+      delta_divisor > (uint64_t)INT64_MAX ? 1 : (int64_t)delta_divisor);
   loom_loop_recurrence_facts_t candidate;
-  if (!loom_loop_domain_additive_recurrence_facts(initial, delta, trip_count,
-                                                  &candidate) ||
+  if (!loom_loop_domain_additive_range_facts(initial, delta, trip_count,
+                                             &candidate) ||
       !loom_value_fact_recurrence_fits(table, scalar_type, candidate.values)) {
     return false;
   }

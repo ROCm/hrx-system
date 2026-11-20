@@ -309,6 +309,7 @@ def _memory_rule(
             if addressing
             in {
                 _MemoryAddressing.DIRECT,
+                _MemoryAddressing.PRESERVE_SOURCE_INDEX,
                 _MemoryAddressing.MATERIALIZE_BYTE_OFFSET,
             }
             else None

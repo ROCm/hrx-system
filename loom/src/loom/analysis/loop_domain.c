@@ -225,6 +225,55 @@ bool loom_loop_domain_additive_recurrence_facts(
   return true;
 }
 
+bool loom_loop_domain_additive_range_facts(
+    loom_value_facts_t initial_values, loom_value_facts_t step,
+    uint64_t trip_count, loom_loop_recurrence_facts_t* out_facts) {
+  if (!loom_loop_domain_additive_recurrence_facts(initial_values, step.range_lo,
+                                                  trip_count, out_facts)) {
+    return false;
+  }
+  if (trip_count == 0 || loom_value_facts_is_exact(step)) {
+    return true;
+  }
+  loom_loop_recurrence_facts_t upper;
+  if (!loom_loop_domain_additive_recurrence_facts(initial_values, step.range_hi,
+                                                  trip_count, &upper)) {
+    *out_facts = upper;
+    return false;
+  }
+
+  // Joining endpoint divisors would exclude valid interior strides: [2, 4]
+  // also admits 3. Only the supplied stride divisor applies to the whole range.
+  const int64_t divisor = loom_loop_domain_recurrence_divisor(
+      initial_values, (uint64_t)step.known_divisor);
+  out_facts->values = loom_value_facts_make(out_facts->values.range_lo,
+                                            upper.values.range_hi, divisor);
+  out_facts->body_values = loom_value_facts_make(
+      out_facts->body_values.range_lo, upper.body_values.range_hi,
+      trip_count == 1 ? initial_values.known_divisor : divisor);
+
+  // gcd(initial, count * stride) without overflowing the trip-count product.
+  // Splitting out gcd(initial, count) bounds the remaining product by initial,
+  // except for a zero seed whose stride multiple may exceed the fact domain.
+  const uint64_t initial_divisor =
+      loom_value_facts_is_exact(initial_values)
+          ? iree_math_magnitude_i64(initial_values.range_lo)
+          : (uint64_t)initial_values.known_divisor;
+  const uint64_t count_divisor = iree_math_gcd_u64(initial_divisor, trip_count);
+  uint64_t exit_divisor = 0;
+  if (!iree_checked_mul_u64(count_divisor,
+                            iree_math_gcd_u64(initial_divisor / count_divisor,
+                                              (uint64_t)step.known_divisor),
+                            &exit_divisor) ||
+      exit_divisor > (uint64_t)INT64_MAX) {
+    exit_divisor = 1;
+  }
+  out_facts->exit_value =
+      loom_value_facts_make(out_facts->exit_value.range_lo,
+                            upper.exit_value.range_hi, (int64_t)exit_divisor);
+  return true;
+}
+
 static loom_loop_recurrence_facts_t loom_loop_domain_exact_recurrence_facts(
     loom_loop_bound_flags_t bound_flags, uint8_t bitwidth,
     int64_t initial_value, int64_t bound, int64_t step) {
