@@ -128,7 +128,7 @@ the compatible variant, partition, service, and program combinations without
 reading files. An all-variant publication lock covers all these combinations;
 ordinary acquisition still reads only one selected closure.
 
-A service's kind and version define exported roles, such as `text_prepare_v1`.
+A service's kind and version define exported roles, such as `text_prepare_v2`.
 An omitted version selects development names such as `text_prepare`; it does
 not select the latest ABI. Several services and revisions may share a provider
 set. Schema, service, and bytecode revisions have independent compatibility
@@ -143,7 +143,7 @@ A service may declare components whose roles and lifecycle it owns. Text's
   "services": {
     "chat": {
       "kind": "text",
-      "version": 1,
+      "version": 2,
       "components": {"image": {"version": 1}}
     }
   }
