@@ -139,6 +139,14 @@ static iree_status_t loom_low_schedule_resolve_descriptor(
 
   node->descriptor = packet.descriptor;
   node->source_descriptor_ordinal = packet.descriptor_ordinal;
+  if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL &&
+      iree_any_bit_set(loom_low_descriptor_layout(state->target.descriptor_set,
+                                                  packet.descriptor)
+                           ->flags,
+                       LOOM_LOW_DESCRIPTOR_LAYOUT_FLAG_SCHEDULE_ALTERNATIVES)) {
+    node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_ISSUE_ALTERNATIVES;
+    state->blocks[node->block_index].has_issue_alternatives = true;
+  }
   loom_low_schedule_index_active_descriptor_state(state, &packet);
   const loom_named_attr_slice_t attrs =
       loom_low_descriptor_packet_attrs(op, packet.kind);

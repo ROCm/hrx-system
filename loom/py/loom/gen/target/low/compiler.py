@@ -390,9 +390,9 @@ def compile_resource_calendars(
             minimum_issue_units[group] = min(minimum_issue_units.get(group, units), units)
     calendars: dict[int, CompiledResourceCalendar] = {}
     slot_count = 0
-    for group, horizon in horizons.items():
+    for ordinal, (group, horizon) in enumerate(horizons.items()):
         length = 1 << (horizon + lookback_cycles - 1).bit_length() if horizon else 0
-        calendars[group] = CompiledResourceCalendar(slot_start=slot_count, slot_mask=max(length - 1, 0), minimum_issue_units=minimum_issue_units.get(group, 0))
+        calendars[group] = CompiledResourceCalendar(slot_start=slot_count, slot_mask=max(length - 1, 0), minimum_issue_units=minimum_issue_units.get(group, 0), group_ordinal=ordinal)
         slot_count += length
     validation.validate_u32(slot_count, "resource calendar slot count")
     return [calendars[groups[resource.name]] for resource in resources], slot_count

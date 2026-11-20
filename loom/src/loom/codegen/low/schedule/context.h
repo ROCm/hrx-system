@@ -19,6 +19,7 @@
 #include "loom/codegen/low/schedule/dependency_incoming.h"
 #include "loom/codegen/low/schedule/dependency_index.h"
 #include "loom/codegen/low/schedule/resource_calendar.h"
+#include "loom/codegen/low/schedule/resource_demand.h"
 #include "loom/codegen/low/schedule/setup_order.h"
 #include "loom/codegen/low/schedule/storage_lifetime.h"
 #include "loom/codegen/low/schedule/storage_relation_index.h"
@@ -348,6 +349,8 @@ typedef struct loom_low_schedule_build_state_t {
   loom_low_schedule_model_summary_t* model_summaries;
   // Capacity-aware resource occupancy for the current scheduled block.
   loom_low_schedule_resource_calendar_t resource_calendar;
+  // Unavoidable issue demand and equivalent-form prices for the current block.
+  loom_low_schedule_resource_demand_t resource_demand;
   // Earliest issue cycle allowed by each node's latency-bearing dependencies.
   uint32_t* node_ready_issue_cycles;
   // Incremental completion-wait costs for resource-stall candidate scoring.
