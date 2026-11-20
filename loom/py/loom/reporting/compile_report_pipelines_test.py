@@ -256,6 +256,61 @@ def test_phase_copies_rank_per_call_and_keep_runtime_counts_unknown() -> None:
     assert "range_check" not in independent["pipeline_phase_copies"][0]
 
 
+def test_phase_copy_totals_span_different_external_runs() -> None:
+    site = dict(
+        root="pipeline",
+        phase="projection",
+        occurrence=0,
+        binding=4,
+        direction="read",
+        bytes_per_copy=131072,
+        copies_per_phase_call=1,
+    )
+    report = _report()
+    report["pipeline_external_copies"] = [
+        dict(site, contiguous_run_bytes=2048),
+        dict(site, contiguous_run_bytes=2048),
+        dict(site, direction="write", contiguous_run_bytes=64),
+        dict(site, direction="write", contiguous_run_bytes=2048),
+        dict(site, binding=3),
+        dict(site, binding=3, contiguous_run_bytes=64),
+    ]
+    view = build_compile_report_show(parse_compile_report(report))
+    read, write, mixed = view["pipeline_phase_copies"][0]["groups"]
+    assert [g["bytes_per_phase_call"] for g in (read, write, mixed)] == [262144] * 3
+    assert read["contiguous_run_bytes"] == 2048
+    assert "contiguous_run_bytes" not in write
+    assert "contiguous_run_bytes" not in mixed
+    text = format_compile_report_show_text(view)
+    assert "262,144 B (2,048 consecutive B per run)" in text
+    assert text.count("consecutive B per run") == 1
+
+
+@pytest.mark.parametrize(
+    ("width", "run"), [(1024, 0), (1024, 48), (1024, 1024), (None, 4)]
+)
+def test_invalid_strided_external_run_names_its_source(
+    width: int | None, run: int
+) -> None:
+    report = _report()
+    report["pipeline_external_copies"] = [
+        dict(
+            root="stream",
+            phase="copy",
+            occurrence=0,
+            binding=0,
+            direction="read",
+            bytes_per_copy=width,
+            copies_per_phase_call=1,
+            contiguous_run_bytes=run,
+        )
+    ]
+    with pytest.raises(
+        CompileReportError, match=r"pipeline_external_copies\[0\].contiguous_run_bytes"
+    ):
+        build_compile_report_show(parse_compile_report(report))
+
+
 def test_show_keeps_exports_separate_and_preserves_placement_rank() -> None:
     report = _report()
     plans = report["pipeline_plans"]

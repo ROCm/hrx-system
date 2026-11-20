@@ -13,6 +13,10 @@ func.def noinline @store_records(%local: view<8192xi8>, %row: index) where [rang
   %record_bytes = vector.load %local[0] : view<8192xi8> -> vector<72xi8>
   %record = vector.fragment<lhs> %record_bytes shape [%extent, %extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
   vector.store<volatile> %record, %destination[%row, 640] : vector<72xi8>, view<8x776xi8>
+  %other_bytes = vector.slice %group[216] : vector<576xi8> -> vector<72xi8>
+  %other = vector.fragment<rhs> %other_bytes shape [%extent, %extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %pair = vector.concat<0> %other, %record : vector<72xi8>, vector<72xi8> -> vector<144xi8>
+  vector.store %pair, %destination[%row, 64] : vector<144xi8>, view<8x776xi8>
   func.return
 }
 
@@ -59,6 +63,9 @@ func.def @reference(%input: buffer, %output: buffer) {
   %group_bytes = index.constant 576 : index
   %record_bytes = index.constant 72 : index
   %record_offset = index.constant 640 : index
+  %other_offset = index.constant 216 : index
+  %pair_first = index.constant 64 : index
+  %pair_second = index.constant 136 : index
   %source = buffer.view %input[%origin] : buffer -> view<8192xi8>
   %backing = buffer.view %output[%origin] : buffer -> view<8192xi8>
   %destination = buffer.view %output[%destination_offset] : buffer -> view<8x776xi8>
@@ -75,6 +82,12 @@ func.def @reference(%input: buffer, %output: buffer) {
       %value = view.load %source[%byte] : view<8192xi8> -> i8
       %position = index.add %record_offset, %byte : index
       view.store %value, %destination[%row, %position] : i8, view<8x776xi8>
+      %other_position = index.add %other_offset, %byte : index
+      %other_value = view.load %source[%other_position] : view<8192xi8> -> i8
+      %first_position = index.add %pair_first, %byte : index
+      %second_position = index.add %pair_second, %byte : index
+      view.store %other_value, %destination[%row, %first_position] : i8, view<8x776xi8>
+      view.store %value, %destination[%row, %second_position] : i8, view<8x776xi8>
     }
   }
   func.return

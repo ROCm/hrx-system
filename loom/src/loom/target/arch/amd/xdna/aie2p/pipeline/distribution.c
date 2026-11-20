@@ -16,6 +16,48 @@
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/switch.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
 
+// A dense batch fits one length field. A strided record's logical payload and
+// physical byte envelope differ. The ordinary binding DMA encoder owns its
+// length, step, and wrap fields for the complete logical traversal.
+static bool loom_aie2p_native_encode_channel_record(
+    const loom_xdna_array_family_t* family,
+    const loom_aie2p_native_channel_t* channel,
+    const loom_xdna_tile_facts_t* tile, uint32_t record_count,
+    uint32_t words[8], iree_string_view_t* out_reason) {
+  if (channel->slots_may_alias) {
+    *out_reason = IREE_SV("channel-copy slots with provably disjoint elements");
+    return false;
+  }
+  const loom_xdna_dma_facts_t* dma = &tile->dma;
+  if (!channel->record_dense) {
+    const loom_pipeline_channel_geometry_t* geometry =
+        channel->source->geometry;
+    loom_storage_geometry_t record = {
+        .layout_kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
+        .element_bit_count = geometry->element_bit_count,
+        .rank = geometry->strided_record_rank};
+    memcpy(record.axes, loom_pipeline_channel_strided_record_axes(geometry),
+           record.rank * sizeof(record.axes[0]));
+    return loom_aie2p_native_encode_descriptor(family, &record, dma,
+                                               channel->record_byte_length, 1,
+                                               tile->kind, words, out_reason);
+  }
+  const uint64_t transfer_bytes =
+      (uint64_t)channel->record_byte_length * record_count;
+  const uint64_t length_units =
+      transfer_bytes / dma->transfer_length_granularity;
+  if (transfer_bytes % dma->transfer_length_granularity ||
+      length_units < iree_max(1u, dma->transfer_length_offset) ||
+      length_units > (uint64_t)dma->maximum_encoded_transfer_length +
+                         dma->transfer_length_offset) {
+    *out_reason =
+        IREE_SV("a channel record length representable by its memory DMA");
+    return false;
+  }
+  words[0] = length_units - dma->transfer_length_offset;
+  return true;
+}
+
 iree_status_t loom_aie2p_native_select_channel_endpoint(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_invocations_t* invocations,
@@ -37,26 +79,10 @@ iree_status_t loom_aie2p_native_select_channel_endpoint(
   // transfer per replay. A single retained lifetime brackets the whole finite
   // sequence; autonomous repeated lifetimes use one credit per replay. A
   // retained input receiver publishes only after the complete batch arrives.
-  const uint64_t transfer_bytes = (uint64_t)channel->record_byte_length *
-                                  (batch_records ? batch_records : 1);
-  if (!channel->record_dense ||
-      (channel->source->capacity > 1 &&
-       channel->byte_stride < channel->record_byte_length)) {
-    *out_reason = IREE_SV("contiguous non-overlapping channel-copy records");
-    return iree_ok_status();
-  }
-  const uint64_t length_units =
-      transfer_bytes / dma->transfer_length_granularity;
-  const uint64_t minimum_length_units =
-      iree_max(1u, dma->transfer_length_offset);
-  const uint64_t maximum_length_units =
-      (uint64_t)dma->maximum_encoded_transfer_length +
-      dma->transfer_length_offset;
-  if (transfer_bytes % dma->transfer_length_granularity ||
-      length_units < minimum_length_units ||
-      length_units > maximum_length_units) {
-    *out_reason =
-        IREE_SV("a channel record length representable by its memory DMA");
+  uint32_t words[8] = {0};
+  if (!loom_aie2p_native_encode_channel_record(
+          context->family, channel, tile->facts,
+          batch_records ? batch_records : 1, words, out_reason)) {
     return iree_ok_status();
   }
   // A retained batch is one contiguous transfer. Single-slot transfers also
@@ -73,8 +99,6 @@ iree_status_t loom_aie2p_native_select_channel_endpoint(
         "rotating slot stride");
     return iree_ok_status();
   }
-  uint32_t words[8] = {0};
-  words[0] = length_units - dma->transfer_length_offset;
   // A retained receiver publishes the complete batch only after every record
   // arrives. Repeated admissions need one credit for each downstream replay;
   // acquiring that same quantum prevents replacement during a later replay.
@@ -439,14 +463,29 @@ static iree_status_t loom_aie2p_native_form_packet_program(
       ((uint64_t)dma->maximum_encoded_transfer_length +
        dma->transfer_length_offset) *
       dma->transfer_length_granularity;
-  if (channel->record_byte_length % dma->transfer_length_granularity ||
-      channel->record_byte_length > maximum_bytes ||
-      channel->byte_offset % dma->address_alignment) {
+  uint32_t record_words[8] = {0};
+  iree_string_view_t reason;
+  if (!loom_aie2p_native_encode_channel_record(
+          context->family, channel, tile->facts, 1, record_words, &reason)) {
+    return loom_aie2p_native_reject(context, first->admission->op, reason);
+  }
+  if (channel->byte_offset % dma->address_alignment) {
     return loom_aie2p_native_reject(
         context, first->admission->op,
-        IREE_SV("DMA-aligned records with representable packet lengths"));
+        IREE_SV("DMA-aligned source records for packet distribution"));
   }
-  const uint32_t maximum_records = maximum_bytes / channel->record_byte_length;
+  uint32_t* strided_record_words = NULL;
+  if (!channel->record_dense) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate(context->pass->arena,
+                                             sizeof(record_words),
+                                             (void**)&strided_record_words));
+    memcpy(strided_record_words, record_words, sizeof(record_words));
+  }
+  const uint32_t maximum_records =
+      channel->record_dense &&
+              channel->byte_stride == channel->record_byte_length
+          ? maximum_bytes / channel->record_byte_length
+          : 1;
   const uint32_t rotation =
       stream ? channel->source->capacity /
                    iree_math_gcd_u64(channel->source->capacity, stream->records)
@@ -594,6 +633,7 @@ static iree_status_t loom_aie2p_native_form_packet_program(
   }
   *out_program = (loom_aie2p_native_packet_program_t){
       .ranges = ranges,
+      .strided_record_words = strided_record_words,
       .range_count = range_count,
       .period_range_count = period_range_count,
       .period_repetitions = (uint32_t)full_cycles,
@@ -761,11 +801,15 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
   }
   for (uint16_t i = 0; i < range_count; ++i) {
     uint32_t* words = sequence->words[i];
-    memset(words, 0, sizeof(*sequence->words));
     const loom_aie2p_native_distribution_range_t* range = &ranges[i];
-    words[0] = range->count * channel->record_byte_length /
-                   dma->transfer_length_granularity -
-               dma->transfer_length_offset;
+    if (program->strided_record_words) {
+      memcpy(words, program->strided_record_words, sizeof(*sequence->words));
+    } else {
+      memset(words, 0, sizeof(*sequence->words));
+      words[0] = range->count * channel->record_byte_length /
+                     dma->transfer_length_granularity -
+                 dma->transfer_length_offset;
+    }
     words[layout->address_word] |= loom_xdna_register_field_encode(
         layout->address, (layout->local_address_base + channel->byte_offset +
                           range->first * channel->byte_stride) >>

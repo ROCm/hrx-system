@@ -1,0 +1,53 @@
+// RUN: pass canonicalize
+
+// Each input carries four encoded bytes. Stacking rows keeps each record
+// contiguous. Appending two bytes to each row interleaves the two records.
+// A row of four bytes can be appended along the inner axis intact.
+func.def @record_boundaries(%left: vector<4xf32>, %right: vector<4xf32>) -> (i64, i64, i64) {
+  %schema = encoding.define #encoding.f8e4m3<payload_elements=4, payload_packing=target_fragment, payload_registers=1> : encoding<schema>
+  %a = vector.encode %left using %schema : vector<4xf32>, encoding<schema> -> vector<2x2xi8>
+  %b = vector.encode %right using %schema : vector<4xf32>, encoding<schema> -> vector<2x2xi8>
+  %complete = vector.concat<0> %a, %b : vector<2x2xi8>, vector<2x2xi8> -> vector<4x2xi8>
+  %interleaved = vector.concat<1> %a, %b : vector<2x2xi8>, vector<2x2xi8> -> vector<2x4xi8>
+  %row = vector.encode %left using %schema : vector<4xf32>, encoding<schema> -> vector<1x4xi8>
+  %inner = vector.concat<1> %row, %row : vector<1x4xi8>, vector<1x4xi8> -> vector<1x8xi8>
+  %complete_count = test.fact_encoding_operand_field %complete ["payload_elements"] : vector<4x2xi8> -> i64
+  %interleaved_count = test.fact_encoding_operand_field %interleaved ["payload_elements"] : vector<2x4xi8> -> i64
+  %inner_count = test.fact_encoding_operand_field %inner ["payload_elements"] : vector<1x8xi8> -> i64
+  func.return %complete_count, %interleaved_count, %inner_count : i64, i64, i64
+}
+
+// ----
+func.def @record_boundaries(%left: vector<4xf32>, %right: vector<4xf32>) -> (i64, i64, i64) {
+  %complete_count = scalar.constant 4 : i64
+  %interleaved_count = scalar.constant 0 : i64
+  %inner_count = scalar.constant 4 : i64
+  func.return %complete_count, %interleaved_count, %inner_count : i64, i64, i64
+}
+
+// ====
+// RUN: pass canonicalize
+
+// Record size alone is insufficient. A plain byte vector and another encoding
+// can both have the right length. Only matching records share a schema.
+func.def @matching_payloads(%input: vector<4xf32>, %plain: vector<4xi8>) -> (i64, i64, i64) {
+  %one = encoding.define #encoding.f8e4m3<payload_elements=4, payload_packing=target_fragment, payload_registers=1> : encoding<schema>
+  %two = encoding.define #encoding.f8e5m2<payload_elements=4, payload_packing=target_fragment, payload_registers=1> : encoding<schema>
+  %a = vector.encode %input using %one : vector<4xf32>, encoding<schema> -> vector<4xi8>
+  %b = vector.encode %input using %two : vector<4xf32>, encoding<schema> -> vector<4xi8>
+  %records = vector.concat<0> %a, %a, %a : vector<4xi8>, vector<4xi8>, vector<4xi8> -> vector<12xi8>
+  %mixed = vector.concat<0> %a, %b : vector<4xi8>, vector<4xi8> -> vector<8xi8>
+  %partly_raw = vector.concat<0> %a, %plain : vector<4xi8>, vector<4xi8> -> vector<8xi8>
+  %record_count = test.fact_encoding_operand_field %records ["payload_elements"] : vector<12xi8> -> i64
+  %mixed_count = test.fact_encoding_operand_field %mixed ["payload_elements"] : vector<8xi8> -> i64
+  %raw_count = test.fact_encoding_operand_field %partly_raw ["payload_elements"] : vector<8xi8> -> i64
+  func.return %record_count, %mixed_count, %raw_count : i64, i64, i64
+}
+
+// ----
+func.def @matching_payloads(%input: vector<4xf32>, %plain: vector<4xi8>) -> (i64, i64, i64) {
+  %record_count = scalar.constant 4 : i64
+  %mixed_count = scalar.constant 0 : i64
+  %raw_count = scalar.constant 0 : i64
+  func.return %record_count, %mixed_count, %raw_count : i64, i64, i64
+}

@@ -217,17 +217,17 @@ pipeline.def<kernel> public retain target(@device) @selected_retirement_order() 
 
 aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
 
-// These slots have disjoint elements but overlapping byte envelopes. A linear
-// record DMA would cross into another slot's ownership.
-pipeline.def<kernel> public retain target(@device) @interleaved_distribution() run() {
+// Slot one begins at the second element of slot zero. Independent DMA
+// ownership would let one producer overwrite a record still being read.
+pipeline.def<kernel> public retain target(@device) @aliasing_distribution() run() {
   %source_memory = pipeline.memory<workgroup>[0, 2] : pool
   %destination_memory = pipeline.memory<workgroup>[0, 3] : pool
-  %bytes = index.constant 128 : offset
+  %bytes = index.constant 192 : offset
   %origin = index.constant 0 : offset
   %capacity = index.constant 2 : index
   %source_storage = buffer.alloca<workgroup> pool(%source_memory) align(64) %bytes : buffer
-  %source_slots = buffer.view %source_storage[%origin] : buffer -> view<2x16xi32, #encoding.layout.strided<strides=[1, 2]>>
-  %source = channel.bind<fifo> %source_slots, %capacity : view<2x16xi32, #encoding.layout.strided<strides=[1, 2]>>, index -> channel<tile<16xi32>>
+  %source_slots = buffer.view %source_storage[%origin] : buffer -> view<2x16xi32, #encoding.layout.strided<strides=[2, 2]>>
+  %source = channel.bind<fifo> %source_slots, %capacity : view<2x16xi32, #encoding.layout.strided<strides=[2, 2]>>, index -> channel<tile<16xi32>>
   %destination_storage = buffer.alloca<workgroup> pool(%destination_memory) align(64) %bytes : buffer
   %destination_slots = buffer.view %destination_storage[%origin] : buffer -> view<2x16xi32>
   %destination = channel.bind<fifo> %destination_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
@@ -238,7 +238,7 @@ pipeline.def<kernel> public retain target(@device) @interleaved_distribution() r
     channel.publish %write : write<tile<16xi32>>
   }
   pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
-    // ERROR@+1: XDNA/051 {requirement="contiguous non-overlapping channel-copy records"}
+    // ERROR@+1: XDNA/051 {requirement="channel-copy slots with provably disjoint elements"}
     %read, %payload = channel.acquire %source : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32, #encoding.layout.strided<strides=[2]>>)
     %write, %destination_payload = channel.reserve %destination : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
     channel.copy %read -> %write : read<tile<16xi32>>, write<tile<16xi32>>

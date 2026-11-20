@@ -738,9 +738,11 @@ TEST_F(PipelineConstructionTest, SlotGeometryRetainsSpecializationAndPadding) {
     uint64_t record_bit_span;
     // Logical traversal visits consecutive physical elements.
     bool dense;
+    // Every active slot owns a separate set of physical elements.
+    bool slots_disjoint;
   };
   const Case cases[] = {
-      {"dense", LOOM_SCALAR_TYPE_I8, {4, 1}, false, false, 32, 32, true},
+      {"dense", LOOM_SCALAR_TYPE_I8, {4, 1}, false, false, 32, 32, true, true},
       {"slot_padding",
        LOOM_SCALAR_TYPE_BF16,
        {16, 1},
@@ -748,6 +750,7 @@ TEST_F(PipelineConstructionTest, SlotGeometryRetainsSpecializationAndPadding) {
        false,
        256,
        64,
+       true,
        true},
       {"record_padding",
        LOOM_SCALAR_TYPE_I32,
@@ -756,7 +759,8 @@ TEST_F(PipelineConstructionTest, SlotGeometryRetainsSpecializationAndPadding) {
        false,
        1024,
        320,
-       false},
+       false,
+       true},
       {"interleaved",
        LOOM_SCALAR_TYPE_I8,
        {2, 4},
@@ -764,8 +768,27 @@ TEST_F(PipelineConstructionTest, SlotGeometryRetainsSpecializationAndPadding) {
        false,
        16,
        104,
+       false,
+       true},
+      {"shared_elements",
+       LOOM_SCALAR_TYPE_I8,
+       {2, 2},
+       false,
+       false,
+       16,
+       56,
+       false,
        false},
-      {"subbyte", LOOM_SCALAR_TYPE_I1, {4, 1}, false, false, 4, 4, true},
+      {"shared_origin",
+       LOOM_SCALAR_TYPE_I8,
+       {0, 1},
+       false,
+       false,
+       0,
+       32,
+       true,
+       false},
+      {"subbyte", LOOM_SCALAR_TYPE_I1, {4, 1}, false, false, 4, 4, true, true},
       {"runtime_extent",
        LOOM_SCALAR_TYPE_F32,
        {16, 1},
@@ -773,6 +796,7 @@ TEST_F(PipelineConstructionTest, SlotGeometryRetainsSpecializationAndPadding) {
        false,
        0,
        0,
+       false,
        false},
       {"runtime_layout",
        LOOM_SCALAR_TYPE_F64,
@@ -781,6 +805,7 @@ TEST_F(PipelineConstructionTest, SlotGeometryRetainsSpecializationAndPadding) {
        true,
        0,
        0,
+       false,
        false},
   };
   for (const auto& item : cases) {
@@ -863,6 +888,13 @@ TEST_F(PipelineConstructionTest, SlotGeometryRetainsSpecializationAndPadding) {
     EXPECT_EQ(geometry->element_bit_count,
               loom_scalar_type_bitwidth(item.element_type));
     EXPECT_EQ(geometry->record_dense, item.dense);
+    EXPECT_EQ(geometry->slots_disjoint, item.slots_disjoint);
+    EXPECT_EQ(geometry->strided_record_rank, item.dense ? 0u : 1u);
+    if (!item.dense) {
+      const auto* axes = loom_pipeline_channel_strided_record_axes(geometry);
+      EXPECT_EQ(axes[0].extent, 4u);
+      EXPECT_EQ(axes[0].element_stride, item.strides[1]);
+    }
   }
 }
 

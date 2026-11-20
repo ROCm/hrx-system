@@ -314,6 +314,60 @@ TEST_F(PayloadTest, MulticastClassesIgnoreDestinationEnumerationOrder) {
   EXPECT_EQ(paths[0].payloads[0]->destinations[0].tile, &tiles_[3]);
 }
 
+TEST_F(PayloadTest, SRAMDistributionLeavesPassthroughForShimCommands) {
+  // A single SRAM queue sends one packet class up to a worker and another
+  // down to the shim. Queue and packet identities span both directions.
+  Ordinary(0, 1, false);
+  loom_aie2p_native_distribution_path_t path = {};
+  loom_aie2p_native_distribution_endpoint_t receiver = {.tile = &tiles_[2]};
+  loom_aie2p_native_distribution_t distribution = {};
+  distribution.sender.tile = &tiles_[1];
+  distribution.receivers = &receiver;
+  distribution.receiver_count = 1;
+  distribution.path = &path;
+  path.first = &distribution;
+  loom_aie2p_native_distribution_plan_t plan = {.geometries = &distribution};
+  workers_[1].distribution_plan = &plan;
+  Form();
+  const auto* egress = paths_[0].payload;
+  ASSERT_EQ(egress->source, path.payloads[0]->source);
+  EXPECT_NE(egress->packet, path.payloads[0]->packet);
+
+  IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
+      context_.family, 64, &arena_, &context_.routing));
+  routes_.resize(64);
+  context_.routes = routes_.data();
+  uint32_t next_source = 0;
+  bool valid = false;
+  IREE_ASSERT_OK(loom_aie2p_native_route_payload(
+      &context_, path.payloads[0], nullptr, &next_source, &valid));
+  ASSERT_TRUE(valid);
+
+  // All four compute rows return data to SRAM. The first row grants its
+  // return lane to a command that continues through SRAM to the shim.
+  loom_aie2p_array_route_tree_t returns[4] = {};
+  const size_t first = context_.routing.route_count;
+  for (uint8_t i = 0; i < 4; ++i) {
+    ASSERT_TRUE(loom_aie2p_array_route_workers(
+        &context_.routing, next_source++, &returns[i],
+        {0, static_cast<uint16_t>(2 + i)}, 0, {0, 1}, i, i == 0));
+  }
+  loom_aie2p_array_route_sharing_t sharing = {};
+  IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
+      &context_.routing, first, 2, {0, 1},
+      LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD, &sharing));
+  loom_aie2p_array_route_tree_t command = {};
+  ASSERT_TRUE(loom_aie2p_array_route_control(
+      &context_.routing, next_source++, &command, {0, 2},
+      LOOM_XDNA_STREAM_PORT_CORE, 0, {0, 0}, &sharing));
+  ASSERT_TRUE(sharing.used);
+  IREE_ASSERT_OK(loom_aie2p_native_route_payload(
+      &context_, paths_[0].payload, nullptr, &next_source, &valid));
+  ASSERT_TRUE(valid);
+  EXPECT_TRUE(egress->routed);
+  EXPECT_TRUE(path.payloads[0]->routed);
+}
+
 class MulticastPayloadTest
     : public PayloadTest,
       public ::testing::WithParamInterface<std::tuple<unsigned, bool>> {

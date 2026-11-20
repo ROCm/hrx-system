@@ -11,6 +11,7 @@
 #include "loom/analysis/channel_plan.h"
 #include "loom/analysis/kernel_synchronization_legality.h"
 #include "loom/analysis/movement.h"
+#include "loom/analysis/storage_geometry.h"
 #include "loom/ir/local_value_domain.h"
 #include "loom/ir/symbol_map.h"
 #include "loom/ops/channel/ops.h"
@@ -57,6 +58,27 @@ static iree_host_size_t loom_pipeline_realization_fresh_ingress_channel(
   return loom_pipeline_invocations_channel_index(
       invocations,
       loom_channel_plan_channel(&worker->channels, record.value_id));
+}
+
+// External copies with an exact byte payload can still visit short groups of
+// consecutive addresses. The worker's specialized type owns the source order.
+static uint64_t loom_pipeline_realization_strided_run_bytes(
+    const loom_module_t* module, const loom_fact_context_t* facts,
+    loom_type_t type, int64_t bytes_per_copy) {
+  if (bytes_per_copy <= 0 || !loom_type_has_encoding(type)) {
+    return 0;
+  }
+  loom_storage_geometry_t geometry;
+  loom_storage_geometry_span_t span;
+  if (!loom_storage_geometry_query(facts, module, type, &geometry) ||
+      geometry.layout_kind != LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED ||
+      !loom_storage_geometry_measure(&geometry, 0, &span) ||
+      loom_storage_geometry_span_is_dense(&span)) {
+    return 0;
+  }
+  // Static copy payloads have a whole-byte scalar width. The complete
+  // payload already bounds this product.
+  return span.contiguous_element_count * (geometry.element_bit_count / 8);
 }
 
 // Capture root-buffer demand where the authored phase, bound external operand,
@@ -122,6 +144,9 @@ static iree_status_t loom_pipeline_realization_record_copies(
             (copy->flags & LOOM_MOVEMENT_REQUEST_STATIC_TRANSFER)
                 ? copy->transferred_byte_count
                 : -1;
+        row.contiguous_run_bytes = loom_pipeline_realization_strided_run_bytes(
+            module, &worker->facts.context,
+            read ? copy->source.type : copy->dest.type, row.bytes_per_copy);
         const uint16_t block = copy->op->parent_block->region_index;
         row.worker_visits_known =
             loom_cfg_execution_count_is_exact(&worker->execution_counts, block);

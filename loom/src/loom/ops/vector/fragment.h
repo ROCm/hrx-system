@@ -179,6 +179,12 @@ bool loom_vector_fragment_fact_query_payload_storage_schema(
     loom_vector_fragment_fact_t fact,
     loom_value_fact_storage_schema_t* out_schema);
 
+// Returns the physical payload schema retained by an encoded vector or a
+// matrix fragment, independently of the fragment's role and logical shape.
+bool loom_vector_facts_query_payload_storage_schema(
+    const loom_fact_context_t* context, loom_value_facts_t facts,
+    loom_value_fact_storage_schema_t* out_schema);
+
 // Queries the storage schema from which the current payload was prepared. An
 // exact source schema is resolved through |module|; otherwise this aliases the
 // current payload schema.

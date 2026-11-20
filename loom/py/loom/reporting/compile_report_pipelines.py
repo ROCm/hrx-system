@@ -63,6 +63,7 @@ class _PhaseCopyGroup:
     binding: int
     direction: str
     width: int | None
+    contiguous_run_bytes: int | None
     visits: int | None = 0
 
     @property
@@ -74,7 +75,7 @@ class _PhaseCopyGroup:
         return self.width * self.visits
 
     def row(self) -> dict[str, object]:
-        return {
+        row = {
             "phase": self.phase,
             "occurrence": self.occurrence,
             "binding": self.binding,
@@ -83,6 +84,9 @@ class _PhaseCopyGroup:
             "copies_per_phase_call": self.visits,
             "bytes_per_phase_call": self.byte_count,
         }
+        if self.contiguous_run_bytes is not None:
+            row["contiguous_run_bytes"] = self.contiguous_run_bytes
+        return row
 
 
 def _copy_sites(document: CompileReportDocument) -> Iterator[tuple[str, dict]]:
@@ -92,6 +96,40 @@ def _copy_sites(document: CompileReportDocument) -> Iterator[tuple[str, dict]]:
     for i, site in enumerate(sites):
         path = f"pipeline_external_copies[{i}]"
         yield path, _object(site, path)
+
+
+def _strided_run_bytes(row: dict, width: int | None, path: str) -> int | None:
+    if "contiguous_run_bytes" not in row:
+        return None
+    key = f"{path}.contiguous_run_bytes"
+    run = _count(row["contiguous_run_bytes"], key)
+    if width is None or not 0 < run < width or width % run:
+        raise CompileReportError(f"{key}: expected a proper divisor of bytes_per_copy")
+    return run
+
+
+def strided_external_copies(
+    document: CompileReportDocument,
+) -> Iterator[tuple[str, str, int, str, int, int]]:
+    """Yields source copies with an exact split into consecutive address groups."""
+    for path, row in _copy_sites(document):
+        if "contiguous_run_bytes" not in row:
+            continue
+        width = _nullable_count(row, "bytes_per_copy", path)
+        run = _strided_run_bytes(row, width, path)
+        direction = row.get("direction")
+        if direction not in ("read", "write"):
+            raise CompileReportError(f"{path}.direction: expected read or write")
+        visits = _nullable_count(row, "copies_per_phase_call", path)
+        if width is not None and run is not None and visits != 0:
+            yield (
+                path,
+                _string(row.get("phase"), f"{path}.phase"),
+                _count(row.get("binding"), f"{path}.binding"),
+                direction,
+                width,
+                run,
+            )
 
 
 def single_slot_refills(
@@ -135,12 +173,15 @@ def build_pipeline_phase_copies(
         if direction not in ("read", "write"):
             raise CompileReportError(f"{path}.direction: expected read or write")
         width = _nullable_count(row, "bytes_per_copy", path)
+        run = _strided_run_bytes(row, width, path)
         visits = _nullable_count(row, "copies_per_phase_call", path)
         groups = roots.setdefault(root, {})
         key = phase, occurrence, binding, direction, width
         if key not in groups:
-            groups[key] = _PhaseCopyGroup(*key)
+            groups[key] = _PhaseCopyGroup(*key, contiguous_run_bytes=run)
         group = groups[key]
+        if group.contiguous_run_bytes != run:
+            group.contiguous_run_bytes = None
         if visits is None:
             group.visits = None
         elif group.visits is not None:
@@ -198,13 +239,16 @@ def append_pipeline_phase_copies_text(lines: list[str], roots: list) -> None:
         lines.extend(("", f"Source-phase external copies in {root['root']}"))
         if root["largest_counted"]:
             lines.append("  Largest fully counted copies per phase call")
-        lines.extend(
-            f"    {group['direction']} binding[{group['binding']}] "
-            f"{group['phase']} (call site {group['occurrence']}): "
-            f"{group['copies_per_phase_call']:,} x {group['bytes_per_copy']:,} B "
-            f"= {group['bytes_per_phase_call']:,} B"
-            for group in root["largest_counted"]
-        )
+        for group in root["largest_counted"]:
+            line = (
+                f"    {group['direction']} binding[{group['binding']}] "
+                f"{group['phase']} (call site {group['occurrence']}): "
+                f"{group['copies_per_phase_call']:,} x {group['bytes_per_copy']:,} B "
+                f"= {group['bytes_per_phase_call']:,} B"
+            )
+            if "contiguous_run_bytes" in group:
+                line += f" ({group['contiguous_run_bytes']:,} consecutive B per run)"
+            lines.append(line)
         lines.append(
             f"  {root['unknown_group_count']} of {root['group_count']} groups lack "
             "a proven byte total. Multiply each phase's bytes by its calls "

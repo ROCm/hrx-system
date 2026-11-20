@@ -499,6 +499,11 @@ iree_status_t loom_target_compile_report_format_pipeline_copies_json(
         IREE_RETURN_IF_ERROR(loom_json_object_write_null_field(
             &object, IREE_SV("bytes_per_copy")));
       }
+      if (row->contiguous_run_bytes) {
+        IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+            &object, IREE_SV("contiguous_run_bytes"),
+            row->contiguous_run_bytes));
+      }
       if (row->visits_known) {
         IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
             &object, IREE_SV("copies_per_phase_call"), row->visits));
@@ -683,6 +688,11 @@ iree_status_t loom_target_compile_report_format_pipeline_copies_text(
             row->fresh_fifo, row->fresh_fifo_capacity));
         IREE_RETURN_IF_ERROR(loom_target_compile_report_append_optional_count(
             builder, row->worker_visits_known, row->visits_per_worker));
+      }
+      if (row->contiguous_run_bytes) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, " contiguous_run_bytes=%" PRIu64,
+            row->contiguous_run_bytes));
       }
       IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
     }

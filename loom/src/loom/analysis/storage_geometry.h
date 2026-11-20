@@ -46,9 +46,15 @@ typedef struct loom_storage_geometry_span_t {
   // Address envelope from the origin through the last addressed element.
   // Padding contributes to this span; repeated addresses do not enlarge it.
   uint64_t element_span;
-  // Logical row-major traversal visits consecutive physical elements.
-  bool dense;
+  // Number of consecutive elements in the dense innermost logical axes.
+  // Subsequent groups of this size may be padded, permuted, or repeated.
+  uint64_t contiguous_element_count;
 } loom_storage_geometry_span_t;
+
+static inline bool loom_storage_geometry_span_is_dense(
+    const loom_storage_geometry_span_t* span) {
+  return span->contiguous_element_count == span->element_count;
+}
 
 // Resolves a shaped type using static dimensions/encodings and already-retained
 // SSA facts. No producer or call-graph traversal occurs. Returns false when the
@@ -62,7 +68,7 @@ bool loom_storage_geometry_query(const loom_fact_context_t* context,
 
 // Prepends one outer axis to an already measured inner span. An empty axis or
 // span produces an empty span. Overflow returns false without changing the
-// span. Starting with count=span=1 and dense=true describes one scalar element.
+// span. A scalar has one logical, addressed, and contiguous element.
 // Consumers that already visit axes can accumulate a footprint without building
 // a temporary geometry or visiting the coordinates again.
 bool loom_storage_geometry_span_prepend(loom_storage_geometry_axis_t axis,

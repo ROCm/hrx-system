@@ -99,6 +99,7 @@ loom_test(
         "dynamic_packet_addresses.loom",
         "finite_ingress.loom",
         "input_origins.loom",
+        "interleaved_slots.loom",
         "ordered_prefix.loom",
         "ordered_replay.loom",
         "packet_iterator_geometry.loom",

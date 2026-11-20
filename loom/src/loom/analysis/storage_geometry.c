@@ -71,13 +71,10 @@ bool loom_storage_geometry_query(const loom_fact_context_t* context,
 bool loom_storage_geometry_span_prepend(loom_storage_geometry_axis_t axis,
                                         loom_storage_geometry_span_t* span) {
   if (axis.extent == 0 || span->element_count == 0) {
-    *span = (loom_storage_geometry_span_t){.dense = true};
+    *span = (loom_storage_geometry_span_t){0};
     return true;
   }
-  loom_storage_geometry_span_t result = {
-      .dense = span->dense &&
-               (axis.extent == 1 || axis.element_stride == span->element_count),
-  };
+  loom_storage_geometry_span_t result = {0};
   uint64_t contribution = 0;
   if (!iree_checked_mul_u64(span->element_count, axis.extent,
                             &result.element_count) ||
@@ -87,6 +84,13 @@ bool loom_storage_geometry_span_prepend(loom_storage_geometry_axis_t axis,
                             &result.element_span)) {
     return false;
   }
+  // A preceding dimension extends the dense suffix only when one step over
+  // it follows every element of the inner dimensions in address order.
+  result.contiguous_element_count =
+      loom_storage_geometry_span_is_dense(span) &&
+              (axis.extent == 1 || axis.element_stride == span->element_count)
+          ? result.element_count
+          : span->contiguous_element_count;
   *span = result;
   return true;
 }
@@ -96,12 +100,12 @@ bool loom_storage_geometry_measure(const loom_storage_geometry_t* geometry,
                                    loom_storage_geometry_span_t* out_span) {
   for (uint8_t i = first_axis; i < geometry->rank; ++i) {
     if (geometry->axes[i].extent == 0) {
-      *out_span = (loom_storage_geometry_span_t){.dense = true};
+      *out_span = (loom_storage_geometry_span_t){0};
       return true;
     }
   }
   loom_storage_geometry_span_t span = {
-      .element_count = 1, .element_span = 1, .dense = true};
+      .element_count = 1, .element_span = 1, .contiguous_element_count = 1};
   for (uint8_t i = geometry->rank; i-- > first_axis;) {
     if (!loom_storage_geometry_span_prepend(geometry->axes[i], &span)) {
       return false;

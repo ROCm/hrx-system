@@ -22,6 +22,7 @@ from loom.reporting.compile_report_suggestions import (
     CompileReportSuggestionOptions,
     CompileReportSuggestionProvider,
     CompileReportSuggestionResult,
+    suggest_short_external_runs,
     suggest_single_slot_ingress,
 )
 from loom.target.arch.amd.xdna.aie2p.compile_report_suggestions import (
@@ -56,6 +57,7 @@ def suggest_compile_report(
     )
     if options.include_experimental and document.status_code == 0:
         source_suggestions += suggest_single_slot_ingress(document)
+        source_suggestions += suggest_short_external_runs(document)
     target_result = _suggest_target(document, options)
     expansions = suggest_expansions(document)
     if not source_suggestions and not expansions:

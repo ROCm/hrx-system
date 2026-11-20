@@ -2933,6 +2933,52 @@ static iree_status_t loom_vector_concat_define_partition_fact(
       });
 }
 
+// Each contiguous run copied from an operand must end on a record boundary.
+// This also covers an inner-axis concat when every row has complete records.
+static bool loom_vector_concat_query_record_schema(
+    const loom_fact_context_t* context, const loom_module_t* module,
+    loom_value_slice_t inputs, const loom_value_facts_t* input_facts,
+    uint8_t concat_axis, loom_value_fact_storage_schema_t* out_schema) {
+  if (inputs.count == 0 || !loom_vector_facts_query_payload_storage_schema(
+                               context, input_facts[0], out_schema)) {
+    return false;
+  }
+  const loom_value_fact_encoded_operand_schema_t schema =
+      out_schema->encoded_operand;
+  if (schema.payload_packing !=
+          LOOM_VALUE_FACT_PAYLOAD_PACKING_TARGET_FRAGMENT ||
+      schema.payload_register_count == 0 || schema.payload_element_count == 0) {
+    return false;
+  }
+  const uint32_t record_bit_count =
+      (uint32_t)schema.payload_register_count * 32;
+  for (iree_host_size_t i = 0; i < inputs.count; ++i) {
+    if (i > 0 && input_facts[i].extension_id != input_facts[0].extension_id) {
+      loom_value_fact_storage_schema_t input_schema;
+      if (!loom_vector_facts_query_payload_storage_schema(
+              context, input_facts[i], &input_schema) ||
+          !loom_value_fact_storage_schema_equal(input_schema, *out_schema)) {
+        return false;
+      }
+    }
+    const loom_type_t type = loom_module_value_type(module, inputs.values[i]);
+    uint64_t run_bit_count =
+        loom_scalar_type_bitwidth(loom_type_element_type(type));
+    for (uint8_t axis = concat_axis; axis < loom_type_rank(type); ++axis) {
+      if (loom_type_dim_is_dynamic_at(type, axis) ||
+          !iree_checked_mul_u64(run_bit_count,
+                                loom_type_dim_static_size_at(type, axis),
+                                &run_bit_count)) {
+        return false;
+      }
+    }
+    if (run_bit_count == 0 || run_bit_count % record_bit_count != 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
 iree_status_t loom_vector_concat_facts(loom_fact_context_t* context,
                                        const loom_module_t* module,
                                        const loom_op_t* op,
@@ -2943,6 +2989,20 @@ iree_status_t loom_vector_concat_facts(loom_fact_context_t* context,
   loom_type_t result_type =
       loom_module_value_type(module, loom_vector_concat_result(op));
   int64_t axis = loom_vector_concat_axis(op);
+  loom_value_fact_storage_schema_t schema;
+  if (axis >= 0 && axis < loom_type_rank(result_type) &&
+      loom_vector_concat_query_record_schema(
+          context, module, loom_vector_concat_inputs(op), operand_facts,
+          (uint8_t)axis, &schema)) {
+    // The bytes retain their record schema. Matrix roles, logical dimensions,
+    // and per-value auxiliary operands belong to the individual fragments.
+    const loom_value_fact_encoding_summary_t summary = {
+        .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+        .storage_schema = schema,
+    };
+    return loom_value_facts_make_encoding_summary(context, summary,
+                                                  &result_facts[0]);
+  }
   iree_host_size_t result_lane_count = 0;
   if (axis < 0 || axis >= loom_type_rank(result_type) ||
       !loom_vector_type_static_lane_count(result_type, &result_lane_count) ||

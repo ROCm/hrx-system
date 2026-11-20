@@ -147,7 +147,7 @@ typedef struct loom_target_compile_report_pipeline_transfer_t {
   uint32_t partition_lane_count;
   // Byte offset added to the external binding base.
   uint64_t binding_byte_offset;
-  // Contiguous bytes touched by one transfer task.
+  // Address envelope of one transfer task, including gaps between coordinates.
   uint64_t binding_span_byte_count;
   // Bytes transferred by one task execution.
   uint32_t task_byte_count;
@@ -236,6 +236,9 @@ typedef struct loom_target_compile_report_pipeline_copy_t {
   bool worker_visits_known;
   // Payload bytes per copy, or a negative value when runtime-dependent.
   int64_t bytes_per_copy;
+  // Bytes in the contiguous inner axes of a known strided external copy.
+  // Zero when the complete copy is contiguous or its order is unknown.
+  uint64_t contiguous_run_bytes;
   // Copies from this site per invocation of its phase when visits_known.
   uint64_t visits;
   // Construction channel ordinal when the destination is freshly reserved.

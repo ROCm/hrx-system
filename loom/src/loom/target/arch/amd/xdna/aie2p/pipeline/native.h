@@ -64,6 +64,8 @@ typedef struct loom_aie2p_native_channel_t {
   uint32_t record_byte_length;
   // Logical payload elements occupy one contiguous byte range in order.
   bool record_dense;
+  // The binding lacks a proof of independent storage for rotating FIFO slots.
+  bool slots_may_alias;
   // Both endpoints visit one record per unit of this invocation's capture.
   // NULL for static rates, independent captures, or multiple admission sites.
   const loom_pipeline_channel_repeat_t* repeat;
@@ -559,6 +561,8 @@ typedef struct loom_aie2p_native_distribution_range_t {
 typedef struct loom_aie2p_native_packet_program_t {
   // Consecutive DMA packet ranges in the source's retained copy order.
   loom_aie2p_native_distribution_range_t* ranges;
+  // DMA traversal of a single strided record. Dense ranges encode just length.
+  const uint32_t* strided_record_words;
   // Number of source descriptors required by those ranges.
   uint16_t range_count;
   // Prefix covering one complete address period; zero for a partial-only run.

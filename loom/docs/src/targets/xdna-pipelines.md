@@ -394,6 +394,12 @@ count still needs per-tile measurements on the completed request.
    slot names the producer phase, input binding, copy width, and refill count
    per worker. Measure the wait for that slot's credit and check available
    local storage before comparing a two-slot schedule.
+   For a strided external copy, the report also gives the number of
+   consecutive bytes in its inner dimensions. A 128 KiB copy with a 64-byte
+   run visits 2,048 address groups. The same payload with a 2 KiB run visits
+   64. Check the selected DMA order at both ends and time the complete phase
+   to see whether moving the reorder into SRAM pays. The device can combine
+   or split those source-level groups into bus transactions.
 4. **Count what every participating core executes.** Disassemble the native
    loops in the measured images, including their callers. Count loop trips,
    full and partial tiles, issue packets, empty packets, MACs with operand
@@ -470,7 +476,10 @@ iree-profile counter --format=jsonl --counter_samples request.ireeprof \
 
 Check the summary for dropped records and match each sample to the submitted
 entry and request interval. The XDNA HAL exposes
-`partition_shim.invocation_cycles`, which times the invocation on the device.
+`partition_shim.invocation_cycles`, which counts cycles inside the
+compiler-declared measurement interval. Generated pipelines bracket worker
+activation through completion waits. Setup before activation needs a separate
+interval to account for its cost.
 Attribution to core issue or stalls additionally needs per-tile event windows
 from a collector that exposes those events on the target. A shim timer alone
 leaves both quantities unknown.

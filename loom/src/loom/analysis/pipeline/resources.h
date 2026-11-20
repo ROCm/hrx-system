@@ -10,6 +10,7 @@
 #include "loom/analysis/channel_plan.h"
 #include "loom/analysis/pipeline/schedule.h"
 #include "loom/analysis/source_storage_packing.h"
+#include "loom/analysis/storage_geometry.h"
 #include "loom/error/emitter.h"
 #include "loom/util/fact_table.h"
 
@@ -84,7 +85,19 @@ typedef struct loom_pipeline_channel_geometry_t {
   uint16_t element_bit_count;
   // Logical row-major traversal visits consecutive physical elements.
   bool record_dense;
+  // The slot stride separates complete records or their interleaved strips.
+  bool slots_disjoint;
+  // Number of trailing geometry axes for a non-dense record. Dense records
+  // need only their length and have no trailing allocation.
+  uint8_t strided_record_rank;
 } loom_pipeline_channel_geometry_t;
+
+// Physical strides retained from the binding, excluding its outer slot axis.
+static inline const loom_storage_geometry_axis_t*
+loom_pipeline_channel_strided_record_axes(
+    const loom_pipeline_channel_geometry_t* geometry) {
+  return (const loom_storage_geometry_axis_t*)(geometry + 1);
+}
 
 typedef struct loom_pipeline_resource_channel_t {
   // Fresh protocol binding, independent of its backing allocation identity.

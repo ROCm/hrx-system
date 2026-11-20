@@ -113,7 +113,7 @@ static bool loom_movement_vector_footprint_byte_length(
   }
 
   loom_storage_geometry_span_t span = {
-      .element_count = 1, .element_span = 1, .dense = true};
+      .element_count = 1, .element_span = 1, .contiguous_element_count = 1};
   for (uint8_t axis = access->vector_rank; axis-- > 0;) {
     if (loom_type_dim_is_dynamic_at(access->vector_type, axis)) {
       return false;

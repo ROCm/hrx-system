@@ -289,6 +289,27 @@ def _bfp_fragment_rule() -> DescriptorRule:
 AIE2P_BFP_FRAGMENT_RULES = (
     _bfp_fragment_rule(),
     DescriptorRule(
+        source_op=vector.vector_concat,
+        guards=(
+            Guard.i64_range("axis", 0, 0),
+            Guard.operand_segment_count("inputs", 2),
+            Guard.value_type(
+                "result", Vector("i8", minimum_lanes=144, maximum_lanes=72 * 65535)
+            ),
+            Guard.low_value_register_class("result", "aie2p.mexa"),
+        ),
+        emit=(
+            EmitRegisterConcat(
+                sources=(
+                    ValueRef.operand("inputs", element=0),
+                    ValueRef.operand("inputs", element=1),
+                ),
+                result=ValueRef.result("result"),
+            ),
+        ),
+        report_key="fragment.bfp16ebs8.concat",
+    ),
+    DescriptorRule(
         source_op=vector.vector_slice,
         source_nodes=(
             SourceNode.exclusive_user(

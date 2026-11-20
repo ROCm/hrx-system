@@ -14,19 +14,24 @@ static bool loom_aie2p_array_reject_binding_transfer(
   return false;
 }
 
-static bool loom_aie2p_array_binding_address_dimension(
-    uint64_t element_stride, uint64_t dimension, uint16_t element_bit_width,
-    uint8_t address_granularity_bits, uint8_t dimension_index,
-    uint8_t dimension_count, const loom_xdna_dma_facts_t* dma_facts,
-    loom_aie2p_array_binding_dma_dimension_t* out_dimension,
+static bool loom_aie2p_array_binding_append_dimension(
+    loom_storage_geometry_axis_t axis, uint16_t element_bit_width,
+    uint8_t address_granularity_bits, bool has_outer_dimension,
+    const loom_xdna_dma_facts_t* dma_facts, uint8_t* dimension_count,
+    loom_aie2p_array_binding_dma_dimension_t* dimensions,
     iree_string_view_t* out_reason) {
+  if (*dimension_count == dma_facts->address_dimension_count) {
+    return loom_aie2p_array_reject_binding_transfer(
+        IREE_SV("the strided transfer requires more address dimensions "
+                "than DMA provides"),
+        out_reason);
+  }
   uint64_t step_bits = 0;
   uint64_t wrap = 0;
-  const bool has_outer_dimension = dimension_index + 1u < dimension_count;
-  if (dimension_index == 0 && element_bit_width < address_granularity_bits) {
+  if (*dimension_count == 0 && element_bit_width < address_granularity_bits) {
     uint64_t packed_dimension_bits = 0;
-    if (element_stride != 1 ||
-        !iree_checked_mul_u64(dimension, (uint64_t)element_bit_width,
+    if (axis.element_stride != 1 ||
+        !iree_checked_mul_u64(axis.extent, (uint64_t)element_bit_width,
                               &packed_dimension_bits) ||
         packed_dimension_bits % address_granularity_bits != 0) {
       return loom_aie2p_array_reject_binding_transfer(
@@ -39,7 +44,7 @@ static bool loom_aie2p_array_binding_address_dimension(
       wrap = packed_dimension_bits / address_granularity_bits;
     }
   } else {
-    if (!iree_checked_mul_u64(element_stride, (uint64_t)element_bit_width,
+    if (!iree_checked_mul_u64(axis.element_stride, (uint64_t)element_bit_width,
                               &step_bits) ||
         step_bits % address_granularity_bits != 0) {
       return loom_aie2p_array_reject_binding_transfer(
@@ -48,7 +53,7 @@ static bool loom_aie2p_array_binding_address_dimension(
           out_reason);
     }
     if (has_outer_dimension) {
-      wrap = dimension;
+      wrap = axis.extent;
     }
   }
 
@@ -66,7 +71,7 @@ static bool loom_aie2p_array_binding_address_dimension(
         IREE_SV("an address dimension exceeds the nonzero DMA wrap field"),
         out_reason);
   }
-  *out_dimension = (loom_aie2p_array_binding_dma_dimension_t){
+  dimensions[(*dimension_count)++] = (loom_aie2p_array_binding_dma_dimension_t){
       .step_size = (uint32_t)step_size,
       .wrap = (uint32_t)wrap,
   };
@@ -185,28 +190,46 @@ bool loom_aie2p_array_resolve_binding_transfer(
     transfer_byte_length = transfer_bit_length / 8u;
     binding_span_byte_length = binding_span_bit_length / 8u;
 
-    if (!span.dense) {
-      if (transfer_rank > dma_facts->address_dimension_count) {
-        return loom_aie2p_array_reject_binding_transfer(
-            IREE_SV("the strided transfer requires more address dimensions "
-                    "than DMA provides"),
-            out_reason);
-      }
-      dma_dimension_count = transfer_rank;
-      uint8_t dimension_index = 0;
+    if (!loom_storage_geometry_span_is_dense(&span)) {
+      const uint8_t unit_bits = family->address_generation_granularity_bits;
+      const bool wide = element_bit_width > unit_bits;
+      const uint16_t axis_bits = wide ? unit_bits : element_bit_width;
+      const uint64_t maximum_wrap = (UINT64_C(1) << dma_facts->wrap_bits) - 1;
+      // A wide scalar contributes an innermost run of consecutive native
+      // words. Keep it separate across gaps, or when a combined wrap would
+      // exceed its field. The measured transfer and envelope bound the
+      // products in native words below.
+      const uint16_t words = wide ? element_bit_width / unit_bits : 0;
+      loom_storage_geometry_axis_t inner = {.extent = words,
+                                            .element_stride = 1};
       for (uint8_t axis = source_rank; axis-- > first_transfer_axis;) {
-        const loom_storage_geometry_axis_t source_axis = geometry->axes[axis];
+        loom_storage_geometry_axis_t source_axis = geometry->axes[axis];
         if (source_axis.extent == 1) {
           continue;
         }
-        if (!loom_aie2p_array_binding_address_dimension(
-                source_axis.element_stride, source_axis.extent,
-                element_bit_width, family->address_generation_granularity_bits,
-                dimension_index, transfer_rank, dma_facts,
-                &dma_dimensions[dimension_index], out_reason)) {
+        --transfer_rank;
+        if (wide) {
+          source_axis.element_stride *= words;
+          if (source_axis.element_stride ==
+                  inner.extent * inner.element_stride &&
+              (!transfer_rank ||
+               inner.extent * source_axis.extent <= maximum_wrap)) {
+            inner.extent *= source_axis.extent;
+            continue;
+          }
+        }
+        if (inner.extent &&
+            !loom_aie2p_array_binding_append_dimension(
+                inner, axis_bits, unit_bits, true, dma_facts,
+                &dma_dimension_count, dma_dimensions, out_reason)) {
           return false;
         }
-        ++dimension_index;
+        inner = source_axis;
+      }
+      if (!loom_aie2p_array_binding_append_dimension(
+              inner, axis_bits, unit_bits, false, dma_facts,
+              &dma_dimension_count, dma_dimensions, out_reason)) {
+        return false;
       }
     }
   }

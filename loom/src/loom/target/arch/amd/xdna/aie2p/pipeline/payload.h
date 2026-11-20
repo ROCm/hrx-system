@@ -47,6 +47,9 @@ typedef struct loom_aie2p_native_payload_class_t {
   bool routed;
   // Every use is a distribution with a receiver-owned admission protocol.
   bool distribution_only;
+  // An SRAM sender reaches a shim on its south port. Its on-array destinations
+  // use its north port or terminate locally, so their link trees are disjoint.
+  bool sram_egress;
 } loom_aie2p_native_payload_class_t;
 
 // All occurrence-owned uses of one physical memory-to-stream queue.
@@ -78,10 +81,8 @@ iree_status_t loom_aie2p_native_form_payloads(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization, bool* out_valid);
 
-// Realizes the sender's complete destination inventory once, longest paths
-// first. All classes share its physical prefix, including classes requested
-// later by another transport family. Each class retains its own route interval
-// and packet identity; subsequent requests consume those retained routes.
+// Realizes classes on the same physical sender branch together, longest paths
+// first. Each class retains its route interval and sender-wide packet identity.
 iree_status_t loom_aie2p_native_route_payload(
     loom_aie2p_native_context_t* context,
     loom_aie2p_native_payload_class_t* payload, const loom_op_t* op,

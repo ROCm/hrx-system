@@ -184,16 +184,10 @@ static bool loom_aie2p_value_has_bfp_storage(
   };
   const loom_value_facts_t facts =
       loom_value_fact_table_lookup(fact_table, value);
-  loom_value_fact_encoding_summary_t summary = {0};
-  if (loom_value_facts_query_encoding_summary(&fact_table->context, facts,
-                                              &summary)) {
-    return loom_value_fact_encoded_operand_schema_equal(
-        summary.storage_schema.encoded_operand, native);
-  }
-  loom_vector_fragment_fact_t fragment;
-  return loom_vector_fragment_fact_query_value_facts(&fact_table->context,
-                                                     facts, &fragment) &&
-         loom_value_fact_encoded_operand_schema_equal(fragment.encoded_operand,
+  loom_value_fact_storage_schema_t schema;
+  return loom_vector_facts_query_payload_storage_schema(&fact_table->context,
+                                                        facts, &schema) &&
+         loom_value_fact_encoded_operand_schema_equal(schema.encoded_operand,
                                                       native);
 }
 

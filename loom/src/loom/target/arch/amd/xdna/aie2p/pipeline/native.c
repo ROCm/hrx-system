@@ -129,6 +129,7 @@ static iree_status_t loom_aie2p_native_select_channels(
         .byte_stride = (uint32_t)(geometry->slot_bit_stride / 8),
         .record_byte_length = (uint32_t)(geometry->record_bit_span / 8),
         .record_dense = geometry->record_dense,
+        .slots_may_alias = !geometry->slots_disjoint,
         .balance = {.worker = UINT32_MAX, .exact = true, .balanced = true},
         .cursor = {.reader = {.worker = UINT32_MAX},
                    .writer = {.worker = UINT32_MAX}}};

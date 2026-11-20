@@ -27,6 +27,7 @@ loom_check_test_suite(
         "divrem.loom-test",
         "element_summary_facts.loom-test",
         "elementary_folding.loom-test",
+        "encoded_concat_facts.loom-test",
         "facts.loom-test",
         "fast_math_facts.loom-test",
         "float_conversion_facts.loom-test",
