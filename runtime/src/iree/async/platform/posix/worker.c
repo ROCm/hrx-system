@@ -13,9 +13,11 @@
 
 #include "iree/async/file.h"
 #include "iree/async/operations/file.h"
+#include "iree/async/operations/net.h"
 #include "iree/async/platform/posix/close.h"
 #include "iree/async/platform/posix/proactor.h"
 #include "iree/async/util/completion_pool.h"
+#include "iree/async/util/operation_completion.h"
 #include "iree/base/internal/atomic_slist.h"
 #include "iree/base/internal/file_io_posix.h"
 #include "iree/base/threading/notification.h"
@@ -187,10 +189,6 @@ static iree_async_operation_t* iree_async_posix_file_queue_pop(
 
 static iree_status_t iree_async_posix_execute_file_operation(
     iree_async_proactor_posix_t* proactor, iree_async_operation_t* operation) {
-  if (iree_any_bit_set(iree_async_operation_load_internal_flags(operation),
-                       IREE_ASYNC_POSIX_INTERNAL_FLAG_CANCELLED)) {
-    return iree_status_from_code(IREE_STATUS_CANCELLED);
-  }
   switch (operation->type) {
     case IREE_ASYNC_OPERATION_TYPE_FILE_OPEN:
       return iree_async_posix_execute_file_open(
@@ -201,6 +199,14 @@ static iree_status_t iree_async_posix_execute_file_operation(
     case IREE_ASYNC_OPERATION_TYPE_FILE_WRITE:
       return iree_async_posix_execute_file_write(
           (iree_async_file_write_operation_t*)operation);
+    case IREE_ASYNC_OPERATION_TYPE_SOCKET_CLOSE: {
+      iree_async_socket_t* socket =
+          ((iree_async_socket_close_operation_t*)operation)->socket;
+      iree_status_t status =
+          iree_async_posix_close_fd(&socket->primitive.value.fd);
+      socket->state = IREE_ASYNC_SOCKET_STATE_CLOSED;
+      return status;
+    }
     case IREE_ASYNC_OPERATION_TYPE_FILE_CLOSE:
       return iree_async_posix_execute_file_close(
           (iree_async_file_close_operation_t*)operation);
@@ -226,9 +232,9 @@ void iree_async_posix_worker_release_completion(
   iree_notification_post(&worker->completion_consumed, 1);
 }
 
-static void iree_async_posix_worker_publish(iree_async_posix_worker_t* worker,
-                                            iree_async_operation_t* operation,
-                                            iree_status_t status) {
+static void iree_async_posix_worker_publish(
+    iree_async_posix_worker_t* worker, iree_async_operation_t* operation,
+    iree_status_t status, iree_async_completion_flags_t flags) {
   iree_async_proactor_posix_t* proactor = worker->proactor;
   iree_async_posix_completion_t* completion =
       iree_async_posix_completion_pool_acquire(&proactor->completion_pool);
@@ -240,7 +246,7 @@ static void iree_async_posix_worker_publish(iree_async_posix_worker_t* worker,
   }
   completion->operation = operation;
   completion->status = status;
-  completion->flags = IREE_ASYNC_COMPLETION_FLAG_NONE;
+  completion->flags = flags;
   iree_atomic_slist_push(&proactor->completion_queue, &completion->slist_entry);
   iree_async_proactor_posix_wake_poll_thread(proactor);
 
@@ -281,10 +287,18 @@ static int iree_async_posix_worker_main(void* user_data) {
     }
     iree_notification_cancel_wait(&queue->notification);
     IREE_TRACE_ZONE_BEGIN_NAMED(z1, "worker_execute_operation");
+    const bool cancelled =
+        iree_any_bit_set(iree_async_operation_load_internal_flags(operation),
+                         IREE_ASYNC_POSIX_INTERNAL_FLAG_CANCELLED);
     iree_status_t status =
-        iree_async_posix_execute_file_operation(proactor, operation);
+        cancelled
+            ? iree_status_from_code(IREE_STATUS_CANCELLED)
+            : iree_async_posix_execute_file_operation(proactor, operation);
     IREE_TRACE_ZONE_END(z1);
-    iree_async_posix_worker_publish(worker, operation, status);
+    iree_async_posix_worker_publish(
+        worker, operation, status,
+        cancelled ? IREE_ASYNC_COMPLETION_FLAG_NONE
+                  : IREE_ASYNC_COMPLETION_FLAG_NATIVE_RESULT);
   }
   IREE_TRACE_ZONE_END(z0);
   return 0;

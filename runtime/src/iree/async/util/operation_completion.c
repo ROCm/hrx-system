@@ -18,7 +18,11 @@ iree_host_size_t iree_async_operation_complete(
   const bool is_final =
       !iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE);
   iree_async_operation_pool_t* pool = is_final ? operation->pool : NULL;
-  status = iree_async_operation_resolve_completion(operation, status, &flags);
+  if (iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_NATIVE_RESULT)) {
+    flags &= ~IREE_ASYNC_COMPLETION_FLAG_NATIVE_RESULT;
+  } else {
+    status = iree_async_operation_resolve_completion(operation, status, &flags);
+  }
 
   iree_async_region_t*
       retained_regions[IREE_ASYNC_SOCKET_SCATTER_GATHER_MAX_BUFFERS];

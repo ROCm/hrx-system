@@ -14,6 +14,10 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Backend-only input to completion. Once a checked syscall has run, even
+// ECANCELED is its native result. The callback receives the original status.
+#define IREE_ASYNC_COMPLETION_FLAG_NATIVE_RESULT (1u << 31)
+
 // Transfers |status| to an operation's completion callback and returns the
 // operation to its optional pool after a final completion. Final completion
 // clears backend-private flags before the callback so the callback receives a

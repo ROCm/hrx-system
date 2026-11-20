@@ -765,16 +765,16 @@ TEST_F(PosixProactorSubmitTest, CompletionExhaustionDoesNotConsumeSocketClose) {
   close_operation.socket = socket.get();
 
   std::array<iree_async_notification_signal_operation_t,
-             kCompletionPoolCapacity>
+             kCompletionPoolCapacity + 1>
       signals;
-  std::array<iree_async_operation_t*, kCompletionPoolCapacity + 1> operations;
+  std::array<iree_async_operation_t*, kCompletionPoolCapacity + 2> operations;
   operations[0] = &close_operation.base;
   for (iree_host_size_t i = 0; i < signals.size(); ++i) {
     InitializeNotificationSignal(&signals[i], notification, &tracker);
     operations[i + 1] = &signals[i].base;
   }
 
-  IREE_EXPECT_STATUS_IS(
+  IREE_ASSERT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
       iree_async_proactor_submit(
           proactor_, iree_async_operation_list_make(operations.data(),
@@ -787,9 +787,9 @@ TEST_F(PosixProactorSubmitTest, CompletionExhaustionDoesNotConsumeSocketClose) {
   IREE_ASSERT_OK(
       iree_async_proactor_submit_one(proactor_, &close_operation.base));
   socket.release();
-  EXPECT_EQ(fcntl(socket_fd, F_GETFD), -1);
-  EXPECT_EQ(errno, EBADF);
   PollUntilCallbacks(proactor_, &tracker, 1);
+  char byte = 0;
+  EXPECT_EQ(recv(peer_fd.get(), &byte, 1, MSG_DONTWAIT), 0);
   ExpectSuccessfulCompletions(tracker, 1);
 }
 

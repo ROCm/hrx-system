@@ -499,19 +499,14 @@ static void iree_async_proactor_io_uring_fill_socket_recvfrom(
   sqe->user_data = (uint64_t)(uintptr_t)base_operation;
 }
 
-// Fills an SQE for a SOCKET_CLOSE operation.
-// Uses IORING_OP_CLOSE to close the socket asynchronously.
-// The socket reference is consumed (not retained) - it will be destroyed
-// after completion.
+// Socket release can wait for a positive SO_LINGER interval, including on
+// a nonblocking socket. Run it on io-wq so poll can service other descriptors.
 static void iree_async_proactor_io_uring_fill_socket_close(
     iree_io_uring_sqe_t* sqe, iree_async_operation_t* base_operation) {
   iree_async_socket_close_operation_t* close_op =
       (iree_async_socket_close_operation_t*)base_operation;
-
-  // Note: We do NOT retain the socket here. The close operation consumes
-  // the caller's reference. The socket will be destroyed on completion.
-
   sqe->opcode = IREE_IORING_OP_CLOSE;
+  sqe->flags = IREE_IOSQE_ASYNC;
   sqe->fd = close_op->socket->primitive.value.fd;
   sqe->user_data = (uint64_t)(uintptr_t)base_operation;
 }

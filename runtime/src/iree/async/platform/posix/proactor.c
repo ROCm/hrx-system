@@ -29,7 +29,6 @@
 #include "iree/async/operations/net.h"
 #include "iree/async/operations/scheduling.h"
 #include "iree/async/operations/semaphore.h"
-#include "iree/async/platform/posix/close.h"
 #include "iree/async/platform/posix/compat.h"
 #include "iree/async/platform/posix/fence.h"
 #include "iree/async/platform/posix/relay.h"
@@ -879,19 +878,6 @@ static void iree_async_proactor_posix_commit_socket_connect(
       IREE_ASYNC_COMPLETION_FLAG_NONE);
 }
 
-// Closes a socket fd on the submitting thread and publishes the reserved
-// completion for poll-owned callback dispatch. CLOSE consumes the caller's
-// socket reference at admission and gains no matching retain.
-static void iree_async_proactor_posix_commit_socket_close(
-    iree_async_proactor_posix_t* proactor,
-    iree_async_socket_close_operation_t* close_op) {
-  iree_status_t close_status =
-      iree_async_posix_close_fd(&close_op->socket->primitive.value.fd);
-  close_op->socket->state = IREE_ASYNC_SOCKET_STATE_CLOSED;
-  iree_async_proactor_posix_publish_completion(
-      proactor, &close_op->base, close_status, IREE_ASYNC_COMPLETION_FLAG_NONE);
-}
-
 // Validates and submits a SOCKET_RECV_POOL operation.
 // Validates that the pool's region has WRITE access (required for receiving)
 // and that the region was registered with this proactor. The actual recv is
@@ -1669,7 +1655,6 @@ static bool iree_async_proactor_posix_requires_submit_completion(
     case IREE_ASYNC_OPERATION_TYPE_SOCKET_CONNECT:
     case IREE_ASYNC_OPERATION_TYPE_SOCKET_SEND:
     case IREE_ASYNC_OPERATION_TYPE_SOCKET_SENDTO:
-    case IREE_ASYNC_OPERATION_TYPE_SOCKET_CLOSE:
     case IREE_ASYNC_OPERATION_TYPE_NOTIFICATION_SIGNAL:
     case IREE_ASYNC_OPERATION_TYPE_SEMAPHORE_WAIT:
     case IREE_ASYNC_OPERATION_TYPE_SEMAPHORE_SIGNAL:
@@ -1808,11 +1793,6 @@ static void iree_async_proactor_posix_commit_operation(
       return;
     }
 
-    case IREE_ASYNC_OPERATION_TYPE_SOCKET_CLOSE:
-      iree_async_proactor_posix_commit_socket_close(
-          proactor, (iree_async_socket_close_operation_t*)operation);
-      return;
-
     case IREE_ASYNC_OPERATION_TYPE_TIMER:
       iree_async_proactor_posix_commit_timer(
           proactor, (iree_async_timer_operation_t*)operation);
@@ -1857,6 +1837,7 @@ static void iree_async_proactor_posix_commit_operation(
     case IREE_ASYNC_OPERATION_TYPE_FILE_OPEN:
     case IREE_ASYNC_OPERATION_TYPE_FILE_READ:
     case IREE_ASYNC_OPERATION_TYPE_FILE_WRITE:
+    case IREE_ASYNC_OPERATION_TYPE_SOCKET_CLOSE:
     case IREE_ASYNC_OPERATION_TYPE_FILE_CLOSE:
       if (files->tail) {
         files->tail->next = operation;
@@ -3395,6 +3376,7 @@ static iree_status_t iree_async_proactor_posix_cancel(
     case IREE_ASYNC_OPERATION_TYPE_FILE_OPEN:
     case IREE_ASYNC_OPERATION_TYPE_FILE_READ:
     case IREE_ASYNC_OPERATION_TYPE_FILE_WRITE:
+    case IREE_ASYNC_OPERATION_TYPE_SOCKET_CLOSE:
     case IREE_ASYNC_OPERATION_TYPE_FILE_CLOSE:
       // Workers observe cancellation before entering a blocking syscall. Once
       // execution has started its actual result wins, including any OS error.
