@@ -260,7 +260,7 @@ loom_amdgpu_fragment_publication_region_count(
   const uint64_t active_lane_mask =
       loom_amdgpu_fragment_publication_active_lane_mask(query, publication);
   for (uint8_t view_axis = 0; view_axis < query->view_rank; ++view_axis) {
-    if (query->runtime_axes[view_axis].lane_coordinate_scale == 0) {
+    if (query->runtime_axes[view_axis].lane_projection.count == 0) {
       continue;
     }
     return (uint32_t)iree_math_count_ones_u64(active_lane_mask);

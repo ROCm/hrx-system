@@ -12,6 +12,7 @@
 
 #include "iree/testing/gtest.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
+#include "loom/target/arch/amdgpu/lower/fragment_memory/address.h"
 #include "loom/target/arch/amdgpu/lower/fragment_memory/packet.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/target/arch/amdgpu/target_info.h"
@@ -187,6 +188,39 @@ TEST(AmdgpuFragmentMemoryTransposeTest, Gfx1200FamilyMatchesSemanticLayouts) {
   EXPECT_GT(wave32_role_count, 4u);
   EXPECT_GT(wave64_role_count, 2u);
   EXPECT_GT(repeated_packet_role_count, 0u);
+}
+
+TEST(AmdgpuFragmentMemoryTransposeTest, Wave64IssuersReadBothColumnHalves) {
+  loom_target_low_descriptor_registry_t registry = {};
+  loom_amdgpu_low_descriptor_registry_initialize(&registry);
+  const auto* descriptor_set = DescriptorSet(&registry, "gfx1201");
+  ASSERT_NE(descriptor_set, nullptr);
+
+  for (
+      const auto kind : {
+          LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F32_16X16X16_F16_W64,
+          LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F32_16X16X16_PACKED8_W64,
+      }) {
+    SCOPED_TRACE(kind);
+    const auto* layout = loom_amdgpu_matrix_fragment_layout_for_kind(kind);
+    ASSERT_NE(layout, nullptr);
+    const auto plan = TransposedPlan(layout, LOOM_CONTRACT_OPERAND_ROLE_RHS);
+    loom_amdgpu_fragment_memory_transpose_choice_t choice = {};
+    ASSERT_TRUE(loom_amdgpu_fragment_memory_select_transpose_load(
+        descriptor_set, layout, &plan, &choice));
+    ASSERT_EQ(choice.packet_count, 1u);
+    // Each issuer reads eight consecutive columns of B[k,n]. Issuers 4..7
+    // within each group of eight supply the upper half of the wave.
+    for (uint8_t k = 0; k < 16; ++k) {
+      for (uint8_t column : {0, 8}) {
+        const uint8_t issuer =
+            k % 4u + (k / 8u) * 4u + column + ((k / 4u) % 2u) * 16u;
+        EXPECT_EQ(loom_amdgpu_fragment_memory_relative_lane_byte_offset(
+                      &choice.address_layout, issuer),
+                  (16u * k + column) * plan.element_byte_count);
+      }
+    }
+  }
 }
 
 TEST(AmdgpuFragmentMemoryTransposeTest, Gfx1250ExtendsEveryEightBitRole) {

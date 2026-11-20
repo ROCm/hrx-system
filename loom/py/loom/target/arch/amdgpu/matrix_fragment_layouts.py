@@ -20,12 +20,19 @@ from loom.target.arch.amdgpu.matrix_fragment_layout import (
 )
 
 _STRUCTURED_2_TO_4_REDUCTION_GROUP = MatrixFragmentReductionGroup(2, 4)
+# RDNA4 ISA 7.12.2: the first half-wave owns the even C/D row groups.
+_RDNA4_WAVE64_RESULT_ROW_GROUPS = (0, 2, 1, 3)
 
 
 def _axis(
-    *, outer: int = 1, thread: int = 1, stride: int = 1, element: int = 1
+    *,
+    outer: int = 1,
+    thread: int = 1,
+    stride: int = 1,
+    element: int = 1,
+    thread_order: tuple[int, ...] = (),
 ) -> MatrixFragmentAxisLayout:
-    return MatrixFragmentAxisLayout(outer, thread, stride, element)
+    return MatrixFragmentAxisLayout(outer, thread, stride, element, thread_order)
 
 
 def _axes(
@@ -115,6 +122,7 @@ def _single_tile_layout(
     rhs_element_bit_count: int,
     result_payload_element_count: int,
     result_element_bit_count: int = 32,
+    result_row_group_order: tuple[int, ...] = (),
     mfma_result_group_height: int | None = None,
     lhs_reduction_group: MatrixFragmentReductionGroup | None = None,
     lhs_lane_replication: int = 1,
@@ -173,6 +181,7 @@ def _single_tile_layout(
                 thread=result_column_thread_count,
                 stride=column_count,
                 element=result_payload_element_count,
+                thread_order=result_row_group_order,
             ),
             column=_axis(thread=column_count),
         )
@@ -649,6 +658,7 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
             result_element_bit_count=result_element_bit_count,
             lhs_lane_replication=lane_replication,
             rhs_lane_replication=lane_replication,
+            result_row_group_order=_RDNA4_WAVE64_RESULT_ROW_GROUPS,
         )
         for (
             key,
@@ -1015,6 +1025,7 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
             lhs_reduction_group=_STRUCTURED_2_TO_4_REDUCTION_GROUP,
             lhs_lane_replication=lhs_lane_replication,
             family="swmmac",
+            result_row_group_order=_RDNA4_WAVE64_RESULT_ROW_GROUPS,
         )
         for (
             key,

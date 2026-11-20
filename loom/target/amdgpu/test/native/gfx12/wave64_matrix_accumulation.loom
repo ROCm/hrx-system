@@ -1,0 +1,73 @@
+// A row-major RHS exercises the native transpose load. Distinct products
+// and nonzero accumulators check C and D ownership at both row pitches.
+amdgpu.target<gfx12-generic> @rdna4_wave64 {subgroup_size = 64}
+
+kernel.def target(@rdna4_wave64) @matrix_accumulation() {
+  %unit = index.constant 1 : index
+  %wave = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%wave, %unit, %unit) : index
+} launch(%pitch_arg: index, %lhs: buffer, %rhs: buffer, %init: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %size = index.constant 16 : index
+  %pitch = index.assume %pitch_arg [range(%pitch_arg, 16, 32)] : index
+  %strides = encoding.layout.strided [%pitch, 1] : encoding<layout>
+  %left = buffer.view %lhs[%base] : buffer -> view<16x16xf16>
+  %right = buffer.view %rhs[%base] : buffer -> view<16x16xf16>
+  %initial = buffer.view %init[%base] : buffer -> view<16x16xf32, %strides>
+  %destination = buffer.view %output[%base] : buffer -> view<16x16xf32, %strides>
+  %a = vector.fragment.load<lhs> %left[0, 0] shape [%size, %size] : view<16x16xf16> -> vector<4xf16>
+  %b = vector.fragment.load<rhs> %right[0, 0] shape [%size, %size] : view<16x16xf16> -> vector<4xf16>
+  %c = vector.fragment.load<init> %initial[0, 0] shape [%size, %size] : view<16x16xf32, %strides> -> vector<4xf32>
+  %d = vector.mma %a, %b, %c : vector<4xf16>, vector<4xf16>, vector<4xf32>
+  vector.fragment.store<result> %d, %destination[0, 0] shape [%size, %size] : vector<4xf32>, view<16x16xf32, %strides>
+  kernel.return
+}
+
+func.def @scalar_matrix_accumulation(%pitch_arg: index, %lhs: buffer, %rhs: buffer, %init: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %size = index.constant 16 : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %pitch = index.assume %pitch_arg [range(%pitch_arg, 16, 32)] : index
+  %left = buffer.view %lhs[%base] : buffer -> view<16x16xf16>
+  %right = buffer.view %rhs[%base] : buffer -> view<16x16xf16>
+  %initial = buffer.view %init[%base] : buffer -> view<512xf32>
+  %destination = buffer.view %output[%base] : buffer -> view<512xf32>
+  scf.for %row = [%begin to %size step %step] {
+    scf.for %column = [%begin to %size step %step] {
+      %offset = index.madd %row, %pitch, %column : index
+      %c = view.load %initial[%offset] : view<512xf32> -> f32
+      %d = scf.for %k = [%begin to %size step %step](%acc = %c : f32) -> (f32) {
+        %a = view.load %left[%row, %k] : view<16x16xf16> -> f16
+        %b = view.load %right[%k, %column] : view<16x16xf16> -> f16
+        %a32 = scalar.extf %a : f16 to f32
+        %b32 = scalar.extf %b : f16 to f32
+        %next = scalar.fmaf %a32, %b32, %acc : f32
+        scf.yield %next : f32
+      }
+      view.store %d, %destination[%offset] : f32, view<512xf32>
+    }
+  }
+  func.return
+}
+
+func.def @row_pitch(%trial: index) -> (index) {
+  %size = index.constant 16 : index
+  %pitch = index.madd %trial, %size, %size : index
+  func.return %pitch : index
+}
+
+check.scenario public @wave64_matrix_accumulation {
+  check.requires<hal.amdgpu.target> {target = "gfx12-generic"}
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %pitch = check.generate<@row_pitch>(%trial) : (index) -> (index)
+    %lhs = check.generate.iota offset(1.0) step(1.0) : tensor<16x16xf16>
+    %rhs = check.generate.iota offset(-64.0) step(1.0) : tensor<16x16xf16>
+    %init = check.generate.iota offset(3.0) step(1.0) : tensor<512xf32>
+    %output = check.generate.fill value(-777.0) : tensor<512xf32>
+    check.compare<@matrix_accumulation, @scalar_matrix_accumulation>(%pitch, %lhs, %rhs, %init, %output) : (index, tensor<16x16xf16>, tensor<16x16xf16>, tensor<512xf32>, tensor<512xf32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<512xf32>
+    }
+  }
+  check.return
+}

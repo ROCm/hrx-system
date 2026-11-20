@@ -159,17 +159,14 @@ static void loom_amdgpu_fragment_memory_transpose_destination(
     *out_packet_element = (issuing_lane % 16u) / 4u;
     return;
   }
-  if (wave_size == 32) {
-    *out_participant = (uint8_t)((issuing_lane / 8u) * 8u + loaded_element);
-    *out_packet_element = issuing_lane % 8u;
-    return;
+  // Both wave sizes use the same 32 issuing lanes. Wave64 distributes the
+  // upper four elements of each wave32 destination lane to lane + 32.
+  *out_participant = (uint8_t)((issuing_lane / 8u) * 8u + loaded_element);
+  *out_packet_element = issuing_lane % 8u;
+  if (wave_size == 64) {
+    *out_participant += (*out_packet_element / 4u) * 32u;
+    *out_packet_element %= 4u;
   }
-  const uint8_t participant_group =
-      (uint8_t)((issuing_lane / 16u) * 2u + (issuing_lane / 4u) % 2u);
-  const uint8_t participant_base =
-      (uint8_t)(participant_group * 16u + (issuing_lane / 8u) % 2u * 8u);
-  *out_participant = participant_base + loaded_element;
-  *out_packet_element = issuing_lane % 4u;
 }
 
 static bool loom_amdgpu_fragment_memory_transpose_element_byte_offset(

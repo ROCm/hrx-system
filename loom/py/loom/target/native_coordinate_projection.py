@@ -179,6 +179,8 @@ def _compile_separable_projection(
         if tuple(expected) != destination_coordinate:
             return None
 
+    # Keep each source-to-destination pair contiguous. Fragment lowering can
+    # retain a slice for a runtime-strided axis and multiply its digit sum once.
     terms = []
     for destination_index, destination_dimension in enumerate(destination_dimensions):
         for source_index, source_dimension in enumerate(source_dimensions):

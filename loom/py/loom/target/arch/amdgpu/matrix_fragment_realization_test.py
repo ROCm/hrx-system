@@ -69,7 +69,7 @@ def test_catalog_covers_every_contract_family_and_layout_class() -> None:
     catalog = AMDGPU_MATRIX_FRAGMENT_REALIZATION_CATALOG
 
     assert len(catalog.contract_choices) == 235
-    assert len(catalog.result_representations) == 51
+    assert len(catalog.result_representations) == 54
     assert Counter(
         AMDGPU_MATRIX_CONTRACTS[choices.operand_exchanged_contract_ordinal].family
         for choices in catalog.contract_choices
@@ -107,8 +107,8 @@ def test_catalog_covers_every_contract_family_and_layout_class() -> None:
         )
         alternative_ids.add(choices.operand_exchanged_result_representation_id)
 
-    assert len(canonical_ids) == 26
-    assert len(alternative_ids) == 25
+    assert len(canonical_ids) == 28
+    assert len(alternative_ids) == 26
     assert canonical_ids.isdisjoint(alternative_ids)
 
 
@@ -175,13 +175,13 @@ def test_compact_runtime_catalog_fits_two_kibibytes() -> None:
     total_bytes = (
         contract_choice_bytes + result_representation_bytes + coordinate_binding_bytes
     )
-    assert total_bytes == 1309
+    assert total_bytes == 1335
     assert total_bytes < 2048
 
 
 def test_numeric_independent_coordinates_preserve_source_embedding() -> None:
     catalog = AMDGPU_MATRIX_FRAGMENT_REALIZATION_CATALOG
-    assert len(catalog.result_coordinates) == 22
+    assert len(catalog.result_coordinates) == 24
     embedding_distinctions = 0
     for left_id, left in enumerate(catalog.result_representations, 1):
         left_role = left.fragment_layout.result

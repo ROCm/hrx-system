@@ -1230,6 +1230,8 @@ typedef enum loom_amdgpu_fragment_memory_packetization_e {
 enum {
   // Maximum physical rank of a blocked matrix-fragment view.
   LOOM_AMDGPU_FRAGMENT_MEMORY_VIEW_RANK_CAPACITY = 3,
+  // Maximum distinct lane digits admitted by the fragment table generator.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_LANE_TERM_CAPACITY = 4,
 };
 
 enum loom_amdgpu_fragment_memory_epilogue_strategy_e {
@@ -1275,19 +1277,22 @@ typedef struct loom_amdgpu_fragment_memory_address_layout_t {
   uint8_t lane_address_cost;
   // Lane coordinate terms compiled from semantic layout axes.
   loom_amdgpu_fragment_memory_lane_term_t
-      lane_terms[LOOM_MATRIX_FRAGMENT_AXIS_COUNT];
+      lane_terms[LOOM_AMDGPU_FRAGMENT_MEMORY_LANE_TERM_CAPACITY];
   // Static byte offset of each physical fragment register.
   uint32_t
       register_byte_offsets[LOOM_AMDGPU_MAX_MATRIX_FRAGMENT_32BIT_REGISTERS];
 } loom_amdgpu_fragment_memory_address_layout_t;
 
+typedef struct loom_amdgpu_fragment_lane_projection_t {
+  // Contiguous participant digits for one coordinate in the generated plan.
+  const loom_matrix_fragment_coordinate_projection_term_t* terms;
+  // Number of digits summed to form that coordinate.
+  uint8_t count;
+} loom_amdgpu_fragment_lane_projection_t;
+
 typedef struct loom_amdgpu_fragment_memory_runtime_axis_t {
-  // Power-of-two divisor applied to the subgroup lane ID.
-  uint16_t lane_divisor;
-  // Optional power-of-two modulus applied after division; zero omits it.
-  uint16_t lane_modulus;
-  // Logical coordinate scale applied to the resulting lane digit.
-  uint16_t lane_coordinate_scale;
+  // Lane-dependent part of this view axis's logical coordinate.
+  loom_amdgpu_fragment_lane_projection_t lane_projection;
   // Logical coordinate increment between separately addressed packed elements.
   uint16_t packed_element_coordinate_stride;
   // Materializable byte-stride product for this physical view axis.
@@ -1445,6 +1450,13 @@ typedef struct loom_amdgpu_fragment_repack_lane_recipe_t {
   uint16_t right_shift;
 } loom_amdgpu_fragment_repack_lane_recipe_t;
 
+typedef struct loom_amdgpu_fragment_repack_group_term_t {
+  // Bits of the destination row lane selecting this part of the source group.
+  loom_amdgpu_fragment_repack_lane_recipe_t lane_bits;
+  // Bit position of this group digit in the gather byte address.
+  uint8_t byte_shift;
+} loom_amdgpu_fragment_repack_group_term_t;
+
 typedef enum loom_amdgpu_fragment_repack_packed_pair_kind_e {
   // No adjacent-lane pair construction is selected.
   LOOM_AMDGPU_FRAGMENT_REPACK_PACKED_PAIR_NONE = 0,
@@ -1520,16 +1532,16 @@ typedef struct loom_amdgpu_fragment_repack_plan_t {
   uint16_t transposed_source_register_candidate_count;
   // Tile row divisor used to derive target-row and target-reduction lane ids.
   uint16_t lane_divisor;
-  // Log2 byte spacing between source result-fragment lane groups.
-  uint16_t source_lane_group_byte_shift;
+  // Number of row-lane digits contributing to the gather byte address.
+  uint16_t source_lane_group_term_count;
   // Log2 byte spacing contributed by the target LHS lane-div reduction group.
   uint16_t result_lane_div_byte_shift;
   // Selected register-only transport across the target's DS partitions.
   uint16_t gather_kind;
   // Recipe selecting a source payload register from lane_mod.
   loom_amdgpu_fragment_repack_lane_recipe_t source_register_selector;
-  // Recipe selecting the source lane group from lane_mod.
-  loom_amdgpu_fragment_repack_lane_recipe_t source_lane_group;
+  // Generated transfers placing row-lane digits in the source byte address.
+  const loom_amdgpu_fragment_repack_group_term_t* source_lane_group_terms;
   // Recipe constructing one packed pair from adjacent source columns.
   loom_amdgpu_fragment_repack_packed_pair_recipe_t packed_pair;
   // Strategy-specific repack recipes selected during planning.

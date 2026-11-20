@@ -90,6 +90,8 @@ def _role_storage_coordinate_evaluator(
                 inner_linear_index // axis_inner_stride
             ) % axis.element_count
             thread_coordinate = (lane // axis.thread_stride) % axis.thread_count
+            if axis.thread_order:
+                thread_coordinate = axis.thread_order[thread_coordinate]
             outer_coordinate = (
                 outer_linear_index // axis_outer_stride
             ) % axis.outer_count

@@ -37,6 +37,8 @@ class MatrixFragmentAxisLayout:
     thread_count: int
     thread_stride: int
     element_count: int
+    # Logical group for each physical lane group; empty denotes natural order.
+    thread_order: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,6 +226,13 @@ def _validate_role(
             raise ValueError(
                 f"matrix fragment layout '{layout.key}' role '{role.role}' "
                 f"has a non-power-of-two {axis_name} lane factor"
+            )
+        if axis.thread_order and sorted(axis.thread_order) != list(
+            range(axis.thread_count)
+        ):
+            raise ValueError(
+                f"matrix fragment layout '{layout.key}' role '{role.role}' "
+                f"{axis_name} thread order must permute every lane group"
             )
         expected_extent = layout.tile_shape[axis_index]
         if axis_name == "reduction" and reduction_group is not None:
