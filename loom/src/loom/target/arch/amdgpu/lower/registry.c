@@ -1810,6 +1810,12 @@ static iree_status_t loom_amdgpu_finalize_plan(
     const loom_op_t* source_op, loom_low_lower_plan_t plan) {
   (void)user_data;
   switch (plan.id) {
+    case LOOM_OP_KERNEL_WORKGROUP_COUNT:
+    case LOOM_OP_KERNEL_CLUSTER_COUNT:
+    case LOOM_OP_SANITIZER_RACE_ACCESS:
+    case LOOM_OP_SANITIZER_RACE_FRAGMENT_ACCESS:
+    case LOOM_OP_SANITIZER_RACE_SYNC:
+      return loom_amdgpu_finalize_launch_count_plan(context, source_op, plan);
     case LOOM_OP_BUFFER_LOAD_I8_U:
     case LOOM_OP_BUFFER_STORE_I8:
     case LOOM_OP_VIEW_ATOMIC_LOAD:

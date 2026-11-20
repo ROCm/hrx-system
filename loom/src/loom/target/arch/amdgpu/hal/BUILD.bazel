@@ -44,6 +44,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )

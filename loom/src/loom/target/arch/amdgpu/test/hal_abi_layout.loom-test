@@ -9,6 +9,15 @@ low.kernel.def target<amdgpu.cdna2.core>(@target) abi_layout({}) workgroup_size(
 
 // ====
 
+amdgpu.target<gfx90a> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="geometry_args", constraint="an HSA launch geometry field mask"}
+low.kernel.def target<amdgpu.cdna2.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], geometry_args = 64, parameter_count = 0, resource_count = 0, resource_offsets = [], resource_parameter_indices = [], uses_kernarg_segment_ptr = true}) @unknown_geometry() asm {
+  return
+}
+
+// ====
+
 amdgpu.target<gfx942> @target
 
 // ERROR@+1: AMDGPU/059 {field_name="uses_kernarg_segment_ptr"}

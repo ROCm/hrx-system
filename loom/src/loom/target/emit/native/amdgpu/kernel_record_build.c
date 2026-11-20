@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/codegen/low/function.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/ops/low/kernel.h"
@@ -160,10 +161,14 @@ loom_amdgpu_kernel_record_collect_descriptor_flags(
 static iree_status_t loom_amdgpu_kernel_record_build_metadata_arguments(
     const loom_amdgpu_hal_kernel_abi_layout_t* abi_layout,
     iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter,
-    bool* out_accepted, const loom_amdgpu_metadata_argument_t** out_arguments) {
+    bool* out_accepted, const loom_amdgpu_metadata_argument_t** out_arguments,
+    iree_host_size_t* out_argument_count) {
   *out_accepted = false;
   *out_arguments = NULL;
-  const iree_host_size_t argument_count = abi_layout->parameter_count;
+  const iree_host_size_t argument_count =
+      (iree_host_size_t)abi_layout->parameter_count +
+      iree_math_count_ones_u32(abi_layout->geometry_args);
+  *out_argument_count = argument_count;
   if (argument_count == 0) {
     *out_accepted = true;
     return iree_ok_status();
@@ -200,6 +205,19 @@ static iree_status_t loom_amdgpu_kernel_record_build_metadata_arguments(
         .size = direct_arg->payload_size,
         .alignment = direct_arg->kernarg_alignment,
         .kind = LOOM_AMDGPU_METADATA_ARGUMENT_BY_VALUE,
+    };
+  }
+  iree_host_size_t ordinal = abi_layout->parameter_count;
+  for (uint32_t fields = abi_layout->geometry_args; fields;
+       fields &= fields - 1) {
+    const uint32_t field = iree_math_count_trailing_zeros_u32(fields);
+    const uint32_t kind =
+        LOOM_AMDGPU_METADATA_ARGUMENT_HIDDEN_BLOCK_COUNT_X + field;
+    arguments[ordinal++] = (loom_amdgpu_metadata_argument_t){
+        .offset = abi_layout->explicit_kernarg_size +
+                  loom_amdgpu_hal_geometry_arg_offset(field),
+        .size = loom_amdgpu_hal_geometry_arg_size(field),
+        .kind = (loom_amdgpu_metadata_argument_kind_t)kind,
     };
   }
   *out_arguments = arguments;
@@ -344,9 +362,11 @@ iree_status_t loom_amdgpu_kernel_record_build(
       &descriptor_symbol));
 
   const loom_amdgpu_metadata_argument_t* arguments = NULL;
+  iree_host_size_t argument_count = 0;
   bool arguments_accepted = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_build_metadata_arguments(
-      abi_layout, scratch_arena, emitter, &arguments_accepted, &arguments));
+      abi_layout, scratch_arena, emitter, &arguments_accepted, &arguments,
+      &argument_count));
   if (!arguments_accepted) {
     return iree_ok_status();
   }
@@ -372,7 +392,9 @@ iree_status_t loom_amdgpu_kernel_record_build(
           {
               .name = symbol,
               .descriptor_symbol = descriptor_symbol,
-              .kernarg_segment_size = abi_layout->kernarg_segment_size,
+              .kernarg_segment_size = abi_layout->explicit_kernarg_size +
+                                      loom_amdgpu_hal_geometry_byte_length(
+                                          abi_layout->geometry_args),
               .kernarg_segment_alignment =
                   abi_layout->kernarg_segment_alignment,
               .wavefront_size = wavefront_size,
@@ -394,7 +416,7 @@ iree_status_t loom_amdgpu_kernel_record_build(
               .target_extensions =
                   target_facts->properties.kernel_metadata_extensions,
               .arguments = arguments,
-              .argument_count = abi_layout->parameter_count,
+              .argument_count = argument_count,
           },
       .descriptor_flags = descriptor_flags,
       .system_vgpr_workitem_id = system_vgpr_workitem_id,
