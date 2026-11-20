@@ -750,6 +750,13 @@ amdf_status_t amdf_windows_xdna_kernel_execution_acquire_queue(
   if (capacity > UINT32_MAX / sizeof(uint64_t) + 1) {
     return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
   }
+  // Metadata queues execute transactions through the bootstrap interpreter.
+  // Their interface provides no rejecting completion for an unknown ERT
+  // opcode, so an ELF packet cannot safely serve as a capability query.
+  if ((required_features & AMDF_XDNA_INSTRUCTION_FEATURE_LOAD_PDI) != 0 &&
+      execution->protocol != AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
   amdf_status_t status = amdf_windows_xdna_kernel_execution_prepare_through(
       execution, AMDF_WINDOWS_XDNA_KERNEL_EXECUTION_PHASE_READY);
   if (!amdf_status_is_ok(status)) {

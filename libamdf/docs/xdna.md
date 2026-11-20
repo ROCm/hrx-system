@@ -228,17 +228,20 @@ amdf_status_t status = xdna->kernel_queue_create(context, &create_info, &queue);
 
 Success guarantees the operation on that queue. The device's
 `instruction.features` reports operations guaranteed on every queue. Linux DRM
-uses the ELF transport for every admitted queue. Windows also supports an
-ordinary queue that uses the bootstrap interpreter. To request an ELF queue on
-Windows, allocate the context's instruction backing first. Queue creation
-submits one native ELF transaction that loads the provider's inert PDI and
-checks both the progress fence and the firmware response. Its storage comes
-from the existing queue ring and the reserved context prefix.
+uses the ELF transport for every admitted queue. On Windows, libamdf exposes
+the bootstrap interpreter on both the direct and metadata MCDM interfaces.
+The direct interface additionally supports ELF queue admission. Allocate the
+context's instruction backing first. Queue creation submits one native ELF
+transaction that loads the provider's inert PDI and checks both the progress
+fence and the firmware response. Its storage comes from the existing queue
+ring and the reserved context prefix.
 
-If the native interface rejects the command as unsupported, the application
-can create an ordinary queue with `create_info.next = NULL`. Access, allocation,
-and execution failures propagate to the caller. The selected format applies
-to single commands and command arrays for the queue's lifetime.
+The metadata interfaces return `AMDF_STATUS_CODE_UNSUPPORTED` for this request
+before submitting a command. They have no defined rejection completion for an
+unknown ERT packet. After an unsupported result, the application can create an
+ordinary queue on the same context with `create_info.next = NULL`. Access,
+allocation, and execution failures propagate to the caller. The selected format
+applies to single commands and command arrays for the queue's lifetime.
 
 Windows initialization constructs a minimal PDI/CDO container directly in
 reserved private backing. Its single NOP admits the transaction interpreter

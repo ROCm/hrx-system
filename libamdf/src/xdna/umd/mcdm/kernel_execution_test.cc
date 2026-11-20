@@ -623,7 +623,42 @@ TEST_P(WindowsXdnaKernelExecutionTest,
   native_.submission_result = 0;
 }
 
-TEST_P(WindowsXdnaKernelExecutionTest, AdmitsElfOnlyAfterNativeCompletion) {
+using WindowsXdnaMetadataQueueTest = WindowsXdnaKernelExecutionTest;
+
+TEST_P(WindowsXdnaMetadataQueueTest, DeclinesElfAndExecutesInterpreterWork) {
+  amdf_xdna_umd_memory_result_t result = {};
+  ASSERT_EQ(amdf_xdna_umd_memory_prepare_private(&context_, &profile_, &create_,
+                                                 &memory_, &result),
+            AMDF_STATUS_OK);
+  const size_t allocation_count = native_.allocations.size();
+  const size_t submission_count = native_.opcodes.size();
+  amdf_xdna_umd_kernel_queue_t* queue = nullptr;
+  ASSERT_EQ(amdf_xdna_umd_kernel_queue_create(
+                &context_, 2, AMDF_XDNA_INSTRUCTION_FEATURE_LOAD_PDI, &queue),
+            amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
+  EXPECT_EQ(queue, nullptr);
+  EXPECT_EQ(native_.allocations.size(), allocation_count);
+  EXPECT_EQ(native_.opcodes.size(), submission_count);
+
+  ASSERT_EQ(amdf_xdna_umd_kernel_queue_create(&context_, 2, 0, &queue),
+            AMDF_STATUS_OK);
+  const amdf_xdna_umd_kernel_command_t command = {result.device_address, 64};
+  uint64_t point = 0;
+  ASSERT_EQ(amdf_xdna_umd_kernel_queue_submit(queue, 0, 1, &command, &point),
+            AMDF_STATUS_OK);
+  ASSERT_EQ(native_.commands.size(), 1u);
+  EXPECT_EQ((ReadU32(native_.commands[0].packet, 0) >> 23) & 0x1f, 0u);
+  EXPECT_EQ(native_.instruction_address, result.device_address);
+  EXPECT_EQ(amdf_xdna_umd_kernel_queue_query_progress(queue), point);
+  amdf_xdna_umd_kernel_queue_retire_command(queue, 0);
+  EXPECT_EQ(amdf_xdna_umd_kernel_queue_query_terminal_status(queue),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_xdna_umd_kernel_queue_destroy(queue), AMDF_STATUS_OK);
+}
+
+using WindowsXdnaElfAdmissionTest = WindowsXdnaKernelExecutionTest;
+
+TEST_P(WindowsXdnaElfAdmissionTest, AdmitsElfOnlyAfterNativeCompletion) {
   auto* execution = context_.kernel_execution;
   constexpr auto required = AMDF_XDNA_INSTRUCTION_FEATURE_LOAD_PDI;
   EXPECT_EQ(
@@ -673,8 +708,7 @@ TEST_P(WindowsXdnaKernelExecutionTest, AdmitsElfOnlyAfterNativeCompletion) {
             AMDF_STATUS_OK);
 }
 
-TEST_P(WindowsXdnaKernelExecutionTest,
-       RetainsElfAdmissionStorageUntilRetirement) {
+TEST_P(WindowsXdnaElfAdmissionTest, RetainsElfAdmissionStorageUntilRetirement) {
   amdf_xdna_umd_memory_result_t result = {};
   ASSERT_EQ(amdf_xdna_umd_memory_prepare_private(&context_, &profile_, &create_,
                                                  &memory_, &result),
@@ -1574,16 +1608,20 @@ TEST_P(WindowsXdnaKernelExecutionTest,
             failure);
 }
 
+constexpr amdf_windows_xdna_adapter_info_t kDirect = {
+    AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT, false};
+constexpr amdf_windows_xdna_adapter_info_t kSharedDirect = {
+    AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT, true};
+constexpr amdf_windows_xdna_adapter_info_t kMetadata = {
+    AMDF_WINDOWS_XDNA_PROTOCOL_METADATA, true};
+constexpr amdf_windows_xdna_adapter_info_t kCompactMetadata = {
+    AMDF_WINDOWS_XDNA_PROTOCOL_METADATA_COMPACT, true};
 INSTANTIATE_TEST_SUITE_P(NativeInterfaces, WindowsXdnaKernelExecutionTest,
-                         ::testing::Values(
-                             amdf_windows_xdna_adapter_info_t{
-                                 AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT, false},
-                             amdf_windows_xdna_adapter_info_t{
-                                 AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT, true},
-                             amdf_windows_xdna_adapter_info_t{
-                                 AMDF_WINDOWS_XDNA_PROTOCOL_METADATA, true},
-                             amdf_windows_xdna_adapter_info_t{
-                                 AMDF_WINDOWS_XDNA_PROTOCOL_METADATA_COMPACT,
-                                 true}));
+                         ::testing::Values(kDirect, kSharedDirect, kMetadata,
+                                           kCompactMetadata));
+INSTANTIATE_TEST_SUITE_P(NativeInterfaces, WindowsXdnaMetadataQueueTest,
+                         ::testing::Values(kMetadata, kCompactMetadata));
+INSTANTIATE_TEST_SUITE_P(NativeInterfaces, WindowsXdnaElfAdmissionTest,
+                         ::testing::Values(kDirect, kSharedDirect));
 
 }  // namespace
