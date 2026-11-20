@@ -13,11 +13,10 @@
 // known_divisor == 0 (valid facts always have known_divisor >= 1), so newly
 // allocated slots need only zero initialization.
 //
-// Define stores facts for a value ID, growing the covered segment range as
-// needed. Stable segments keep growth linear and let the arena block pool
-// recycle all payload storage without copying facts. Lazy tables start at their
-// first definition instead of allocating an empty prefix for unrelated module
-// values. Explicit capacity reservations cover the zero-based domain. Compute
+// A directory indexes 64-value pages by module-wide SSA ID. Defining a value
+// backs its page. Gaps use only directory slots. Explicit reservations back
+// every page of the requested interval. Existing numeric pointers stay valid
+// across directory growth, scope clearing, and further reservations. Compute
 // runs a forward pass over a region tree, calling each op's fact inference
 // function to seed initial facts from constants and op semantics.
 //
@@ -84,12 +83,13 @@ enum {
   LOOM_VALUE_FACT_SEGMENT_SHIFT = 6,
   LOOM_VALUE_FACT_SEGMENT_CAPACITY = 1 << LOOM_VALUE_FACT_SEGMENT_SHIFT,
   LOOM_VALUE_FACT_SEGMENT_MASK = LOOM_VALUE_FACT_SEGMENT_CAPACITY - 1,
+  LOOM_VALUE_FACT_MAX_PAGES = (UINT32_MAX >> LOOM_VALUE_FACT_SEGMENT_SHIFT) + 1,
 };
 
-// Stable pooled payload for one directly addressed span of value facts.
+// Scope membership and replay state for a reserved or published value-ID page.
 typedef struct loom_value_fact_segment_t {
-  // Numeric facts indexed by the low bits of a value ID.
-  loom_value_facts_t entries[LOOM_VALUE_FACT_SEGMENT_CAPACITY];
+  // One-based absolute number of the next allocated page. Zero ends the list.
+  uint32_t next_allocated_page;
   // Scope membership for entries in this segment.
   uint64_t touched_bits;
   // First value ID of the next touched segment, or INVALID at the tail.
@@ -100,6 +100,27 @@ typedef struct loom_value_fact_segment_t {
   // Transient publication generations while iterative replay is active.
   uint32_t* replay_generations;
 } loom_value_fact_segment_t;
+
+// Auxiliary publications can own replay state before numeric facts exist.
+// Numeric storage, once present, stays at a stable address until table reset.
+typedef struct loom_value_fact_numeric_segment_t {
+  // Common prefix for page membership and replay.
+  loom_value_fact_segment_t state;
+  // Numeric facts addressed by the low bits of the SSA value ID.
+  loom_value_facts_t entries[LOOM_VALUE_FACT_SEGMENT_CAPACITY];
+} loom_value_fact_numeric_segment_t;
+
+// Each aligned arena allocation leaves the low address bit free. Recording
+// the numeric kind in the directory lets lookup select an inline entry
+// without first reading the segment header.
+typedef uintptr_t loom_value_fact_page_t;
+enum { LOOM_VALUE_FACT_PAGE_NUMERIC = 1 };
+
+static inline loom_value_fact_segment_t* loom_value_fact_page_state(
+    loom_value_fact_page_t page) {
+  return (loom_value_fact_segment_t*)(page &
+                                      ~(uintptr_t)LOOM_VALUE_FACT_PAGE_NUMERIC);
+}
 
 // Per-analysis context passed to op fact inference callbacks.
 struct loom_fact_context_t {
@@ -204,26 +225,30 @@ enum loom_value_fact_region_storage_flag_bits_e {
 typedef uint32_t loom_value_fact_region_storage_flags_t;
 
 struct loom_value_fact_table_t {
-  // Arena for reusable fact segments, their pointer directory, and oversized
+  // Arena for reusable fact segments, their page directory, and oversized
   // extension storage.
   iree_arena_allocator_t* arena;
   // Arena for pooled extension entries, payloads, hash buckets, and scratch.
   iree_arena_allocator_t* transient_arena;
 
-  // Active slice of stable segment pointers, directly indexed after the range
-  // check. Segment payloads never move while the table remains initialized.
-  loom_value_fact_segment_t** segments;
-  // Base of the geometrically grown pointer directory containing |segments|.
-  loom_value_fact_segment_t** segment_directory;
-  // Allocated pointer slots in segment_directory, including growth headroom.
+  // Addressable pages, including empty slots between distant publications.
+  loom_value_fact_page_t* segments;
+  // Geometrically grown directory containing |segments| and expansion headroom.
+  loom_value_fact_page_t* segment_directory;
+  // Number of allocated directory slots, including growth headroom.
   iree_host_size_t segment_directory_capacity;
-  // First value ID covered by segments, aligned to a segment boundary.
-  // Lazy scopes omit the empty prefix preceding their first definition.
-  loom_value_id_t first_value_id;
+  // Absolute 64-value page number addressed by segments[0].
+  uint32_t first_page;
+  // Addressable pages, including holes between disjoint publications.
+  uint32_t page_count;
   // Highest defined value ID plus one.
   iree_host_size_t count;
-  // Allocated entry count across the active segments.
-  iree_host_size_t capacity;
+  // One-based absolute number of the first allocated page, or zero when empty.
+  uint32_t first_allocated_page;
+  // First page in the cached contiguous numeric reservation.
+  uint32_t reserved_page_begin;
+  // Exclusive end of the cached reservation. Zero for an empty table.
+  uint32_t reserved_page_end;
   // First value ID of the touched-segment list, or INVALID when empty.
   loom_value_id_t first_touched_segment_id;
   // Number of values with numeric facts or direct-origin storage in the scope,
@@ -562,8 +587,8 @@ iree_status_t loom_value_fact_table_reserve_range(
     loom_value_fact_table_t* table, loom_value_fact_range_t range);
 
 // Reserves entries for [0, |minimum_capacity|), preserving defined facts and
-// touched membership. An existing capacity doubles until it covers the
-// minimum. Only missing stable segments are allocated; existing payloads are
+// touched membership. A contiguous zero-based reservation doubles until it
+// covers the minimum. Only missing segments are allocated; numeric entries are
 // never copied. An empty table starts at the requested minimum rounded to a
 // segment boundary. Does not populate entries.
 iree_status_t loom_value_fact_table_reserve(loom_value_fact_table_t* table,
@@ -614,31 +639,39 @@ static inline void loom_value_fact_table_record_read(
   }
 }
 
-// Returns the stable entry covering |value_id|, or NULL outside the allocated
-// range. This does not record a dependency read.
-static inline const loom_value_facts_t* loom_value_fact_table_find_entry(
+// Returns the directory entry for a value, or zero for an unallocated page.
+static inline loom_value_fact_page_t loom_value_fact_table_find_page(
     const loom_value_fact_table_t* table, loom_value_id_t value_id) {
-  const iree_host_size_t index =
-      (iree_host_size_t)value_id - table->first_value_id;
-  if (index >= table->capacity) {
-    return NULL;
-  }
-  return &table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT]
-              ->entries[index & LOOM_VALUE_FACT_SEGMENT_MASK];
+  const uint32_t index =
+      (value_id >> LOOM_VALUE_FACT_SEGMENT_SHIFT) - table->first_page;
+  return index < table->page_count ? table->segments[index] : 0;
 }
 
-// Returns a replay generation for |value_id|, or zero outside the allocated
-// range. Callers only use this while replay tracking is active.
+// Returns a stable numeric slot, or NULL when the page has no numeric storage.
+// This does not record a dependency read.
+static inline const loom_value_facts_t* loom_value_fact_table_find_entry(
+    const loom_value_fact_table_t* table, loom_value_id_t value_id) {
+  const loom_value_fact_page_t page =
+      loom_value_fact_table_find_page(table, value_id);
+  if (!(page & LOOM_VALUE_FACT_PAGE_NUMERIC)) {
+    return NULL;
+  }
+  const loom_value_fact_numeric_segment_t* segment =
+      (const loom_value_fact_numeric_segment_t*)(page -
+                                                 LOOM_VALUE_FACT_PAGE_NUMERIC);
+  return &segment->entries[value_id & LOOM_VALUE_FACT_SEGMENT_MASK];
+}
+
+// Returns zero for values without publications or evaluations in this scope.
+// Callers only use this while replay tracking is active.
 static inline uint32_t loom_value_fact_table_replay_generation(
     const loom_value_fact_table_t* table, loom_value_id_t value_id) {
-  const iree_host_size_t index =
-      (iree_host_size_t)value_id - table->first_value_id;
-  if (index >= table->capacity) {
+  const loom_value_fact_segment_t* state = loom_value_fact_page_state(
+      loom_value_fact_table_find_page(table, value_id));
+  if (!state) {
     return 0;
   }
-  const loom_value_fact_segment_t* segment =
-      table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT];
-  return segment->replay_generations[index & LOOM_VALUE_FACT_SEGMENT_MASK];
+  return state->replay_generations[value_id & LOOM_VALUE_FACT_SEGMENT_MASK];
 }
 
 // Sets a replay generation for an entry in the allocated range. Replay
@@ -646,10 +679,11 @@ static inline uint32_t loom_value_fact_table_replay_generation(
 static inline void loom_value_fact_table_set_replay_generation(
     loom_value_fact_table_t* table, loom_value_id_t value_id,
     uint32_t generation) {
-  const iree_host_size_t index =
-      (iree_host_size_t)value_id - table->first_value_id;
-  table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT]
-      ->replay_generations[index & LOOM_VALUE_FACT_SEGMENT_MASK] = generation;
+  const uint32_t index =
+      (value_id >> LOOM_VALUE_FACT_SEGMENT_SHIFT) - table->first_page;
+  loom_value_fact_page_state(table->segments[index])
+      ->replay_generations[value_id & LOOM_VALUE_FACT_SEGMENT_MASK] =
+      generation;
 }
 
 // Returns true when |value_id| has explicitly defined facts in |table|.
@@ -995,7 +1029,8 @@ iree_status_t loom_value_fact_table_compute_op(loom_value_fact_table_t* table,
 iree_status_t loom_value_fact_table_enable_replay_generations(
     loom_value_fact_table_t* table);
 
-// Publishes a changed numeric or auxiliary fact for an already touched value.
+// Publishes a changed fact for an already touched value or a retained
+// per-execution definition proof.
 // A complete inference establishes the result's evaluation watermark later.
 // Inactive replay tracking costs no storage and needs no serial update.
 void loom_value_fact_table_publish_change(loom_value_fact_table_t* table,

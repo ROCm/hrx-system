@@ -178,10 +178,13 @@ test.split_func @target() {
   bool changed = false;
   IREE_ASSERT_OK(Simplify(&changed));
   EXPECT_FALSE(changed);
-  EXPECT_EQ(owner_.table.first_value_id, first_target_value & ~UINT32_C(63));
-  EXPECT_GT(owner_.table.first_value_id, first_unrelated_value);
-  EXPECT_EQ(owner_.table.capacity, loom_value_table_capacity(&module_->values) -
-                                       owner_.table.first_value_id);
+  EXPECT_EQ(owner_.table.first_page,
+            first_target_value >> LOOM_VALUE_FACT_SEGMENT_SHIFT);
+  EXPECT_LT(first_unrelated_value >> LOOM_VALUE_FACT_SEGMENT_SHIFT,
+            owner_.table.first_page);
+  EXPECT_EQ(owner_.table.first_page + owner_.table.page_count,
+            loom_value_table_capacity(&module_->values) >>
+                LOOM_VALUE_FACT_SEGMENT_SHIFT);
   EXPECT_EQ(loom_value_fact_table_lookup(&owner_.table, body_value).range_lo,
             42);
   EXPECT_EQ(loom_value_fact_table_lookup(&owner_.table, config_value).range_lo,

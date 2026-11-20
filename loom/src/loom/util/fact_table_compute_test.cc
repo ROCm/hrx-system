@@ -216,6 +216,35 @@ class FactTableScratchTest : public FactTableComputeTest {
   loom_value_id_t condition_ = LOOM_VALUE_ID_INVALID;
 };
 
+TEST_F(FactTableScratchTest, PartialReplayReservationCanBeRetried) {
+  IREE_ASSERT_OK(loom_value_fact_table_enable_replay_generations(&table_));
+  const auto* retained = loom_value_fact_table_find_entry(&table_, inputs_[0]);
+  constexpr loom_value_fact_range_t range = {
+      32768, 3 * LOOM_VALUE_FACT_SEGMENT_CAPACITY};
+  failure_index_ = allocation_count_ + 1;
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_value_fact_table_reserve_range(&table_, range));
+  // The first page is usable. The page whose generation storage failed has
+  // exposed neither a numeric slot nor any scope membership.
+  const auto* first =
+      loom_value_fact_table_find_entry(&table_, range.first_value_id);
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(
+      loom_value_fact_table_find_entry(
+          &table_, range.first_value_id + LOOM_VALUE_FACT_SEGMENT_CAPACITY),
+      nullptr);
+  EXPECT_EQ(loom_value_fact_table_find_entry(&table_, inputs_[0]), retained);
+  EXPECT_EQ(loom_value_fact_table_lookup(&table_, inputs_[0]).range_lo, 2);
+  failure_index_ = SIZE_MAX;
+  IREE_ASSERT_OK(loom_value_fact_table_reserve_range(&table_, range));
+  EXPECT_EQ(loom_value_fact_table_find_entry(&table_, range.first_value_id),
+            first);
+  const auto last = range.first_value_id + range.capacity - 1;
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table_, last,
+                                              loom_value_facts_exact_i64(17)));
+  EXPECT_NE(loom_value_fact_table_replay_generation(&table_, last), 0u);
+}
+
 TEST_F(FactTableScratchTest, FlatRegionNeedsNoContinuationStorage) {
   loom_op_t* identity = nullptr;
   IREE_ASSERT_OK(BuildIdentity(inputs_[0], &identity));

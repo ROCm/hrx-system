@@ -233,6 +233,31 @@ TEST_F(FactTableReplayTest, ChangedExtensionInvalidatesEqualNumericEnvelope) {
   }
 }
 
+TEST_F(FactTableReplayTest, AnOperandCanAcquireFactsInAnEmptyPage) {
+  // The producer, operand, and consumer may be separated by definitions
+  // belonging to other scopes in the module.
+  loom_value_id_t input = LOOM_VALUE_ID_INVALID;
+  for (size_t i = 0; i < LOOM_VALUE_FACT_SEGMENT_CAPACITY; ++i) {
+    IREE_ASSERT_OK(loom_builder_define_value(&builder_, integer_type_, &input));
+  }
+  loom_value_id_t unused = LOOM_VALUE_ID_INVALID;
+  for (size_t i = 0; i < LOOM_VALUE_FACT_SEGMENT_CAPACITY; ++i) {
+    IREE_ASSERT_OK(
+        loom_builder_define_value(&builder_, integer_type_, &unused));
+  }
+  loom_op_t* add = nullptr;
+  IREE_ASSERT_OK(loom_scalar_addi_build(
+      &builder_, 0, lhs_, input, integer_type_, LOOM_LOCATION_UNKNOWN, &add));
+  IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, add));
+  EXPECT_FALSE(loom_value_facts_is_exact(
+      loom_value_fact_table_lookup(&table_, loom_scalar_addi_result(add))));
+  EXPECT_EQ(loom_value_fact_table_find_entry(&table_, input), nullptr);
+  SetInput(input, 11);
+  Expect(add, 14);
+  SetInput(input, 19);
+  Expect(add, 22);
+}
+
 TEST_F(FactTableReplayTest, IdentityChangesDoNotRequireNumericChanges) {
   for (auto input : {lhs_, rhs_}) {
     IREE_ASSERT_OK(loom_value_fact_table_define(&table_, input,
