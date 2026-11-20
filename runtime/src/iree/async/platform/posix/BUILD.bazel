@@ -59,7 +59,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/async/util:continuation",
         "//runtime/src/iree/async/util:message_pool",
         "//runtime/src/iree/async/util:operation_completion",
-        "//runtime/src/iree/async/util:ready_pool",
         "//runtime/src/iree/async/util:semaphore_wait",
         "//runtime/src/iree/async/util:sequence_emulation",
         "//runtime/src/iree/async/util:signal",
@@ -160,6 +159,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/async",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
     ],
 )
 

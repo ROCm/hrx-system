@@ -82,14 +82,6 @@ iree_host_size_t iree_async_proactor_posix_complete_direct(
 // Internal flags for POSIX proactor operations
 //===----------------------------------------------------------------------===//
 
-// Internal flags used by the POSIX proactor for operation state management.
-// These are written to iree_async_operation_t::internal_flags during execution.
-enum iree_async_posix_operation_internal_flags_e {
-  // Cancellation requested from any thread. The poll owner checks this during
-  // registration, native readiness, and cancellation service.
-  IREE_ASYNC_POSIX_INTERNAL_FLAG_CANCELLED = 1u << 0,
-};
-
 // Collections that need cancellation service on the poll owner.
 enum iree_async_posix_cancellation_flag_bits_e {
   IREE_ASYNC_POSIX_CANCELLATION_FLAG_FD = 1u << 0,
@@ -126,22 +118,21 @@ iree_status_t iree_async_proactor_create_posix_with_backend(
     message_pool_capacity = IREE_ASYNC_MESSAGE_POOL_DEFAULT_CAPACITY;
   }
 
-  // Pool capacity from options, with default fallback.
-  iree_host_size_t ready_pool_capacity = options.max_concurrent_operations;
-  if (ready_pool_capacity == 0) {
-    ready_pool_capacity = IREE_ASYNC_POSIX_DEFAULT_POOL_CAPACITY;
+  // The shared pool buffers both submit- and worker-produced completions.
+  iree_host_size_t completion_pool_capacity = options.max_concurrent_operations;
+  if (completion_pool_capacity == 0) {
+    completion_pool_capacity = IREE_ASYNC_POSIX_DEFAULT_POOL_CAPACITY;
   }
-  // Completion pool is larger to avoid backpressure: workers may be holding
-  // ready entries while needing completion entries.
-  iree_host_size_t completion_pool_capacity =
-      ready_pool_capacity + worker_count;
+  if (!iree_host_size_checked_add(completion_pool_capacity, worker_count,
+                                  &completion_pool_capacity)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "POSIX completion pool capacity overflow");
+  }
 
-  // Calculate allocation layout with proper alignment.
-  // Layout: [proactor | workers[] | ready_entries[] | completion_entries[]
-  //          | message_entries[]]
+  // Trailing storage contains workers, shared completion records, and messages.
   iree_host_size_t total_size = 0;
   iree_host_size_t workers_offset = 0;
-  iree_host_size_t ready_entries_offset = 0;
   iree_host_size_t completion_entries_offset = 0;
   iree_host_size_t message_entries_offset = 0;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -150,10 +141,6 @@ iree_status_t iree_async_proactor_create_posix_with_backend(
               IREE_STRUCT_FIELD_ALIGNED(
                   worker_count, iree_async_posix_worker_t,
                   iree_hardware_destructive_interference_size, &workers_offset),
-              IREE_STRUCT_FIELD_ALIGNED(
-                  ready_pool_capacity, iree_async_posix_ready_op_t,
-                  iree_hardware_destructive_interference_size,
-                  &ready_entries_offset),
               IREE_STRUCT_FIELD(completion_pool_capacity,
                                 iree_async_posix_completion_t,
                                 &completion_entries_offset),
@@ -203,10 +190,10 @@ iree_status_t iree_async_proactor_create_posix_with_backend(
   iree_atomic_store(&proactor->shutdown_requested, 0,
                     iree_memory_order_release);
 
-  // Initialize all MPSC queues.
+  // Initialize the work and completion queues.
   iree_atomic_slist_initialize(&proactor->pending_queue);
-  iree_atomic_slist_initialize(&proactor->ready_queue);
-  iree_notification_initialize(&proactor->ready_notification);
+  iree_slim_mutex_initialize(&proactor->file_queue.mutex);
+  iree_notification_initialize(&proactor->file_queue.notification);
   iree_atomic_slist_initialize(&proactor->completion_queue);
   iree_atomic_slist_initialize(&proactor->pending_semaphore_waits);
   iree_async_semaphore_wait_context_initialize(
@@ -214,11 +201,6 @@ iree_status_t iree_async_proactor_create_posix_with_backend(
   iree_atomic_slist_initialize(&proactor->pending_fence_imports);
 
   // Initialize pools with external storage.
-  iree_async_posix_ready_op_t* ready_entries =
-      (iree_async_posix_ready_op_t*)((uint8_t*)proactor + ready_entries_offset);
-  iree_async_posix_ready_pool_initialize_with_storage(
-      ready_pool_capacity, ready_entries, &proactor->ready_pool);
-
   iree_async_posix_completion_t* completion_entries =
       (iree_async_posix_completion_t*)((uint8_t*)proactor +
                                        completion_entries_offset);
@@ -262,9 +244,8 @@ iree_status_t iree_async_proactor_create_posix_with_backend(
          proactor->initialized_workers < worker_count;
        ++proactor->initialized_workers) {
     status = iree_async_posix_worker_initialize(
-        proactor, proactor->initialized_workers, options.worker_affinity,
-        options.worker_processor_set, allocator,
-        &proactor->workers[proactor->initialized_workers]);
+        proactor, options.worker_affinity, options.worker_processor_set,
+        allocator, &proactor->workers[proactor->initialized_workers]);
   }
 
   // Single exit point: assign output on success, release on failure.
@@ -294,23 +275,9 @@ static void iree_async_proactor_posix_destroy(
   iree_atomic_store(&proactor->shutdown_requested, 1,
                     iree_memory_order_release);
 
-  // Three-phase shutdown following iree/task/ patterns.
-  // Only process workers that were actually initialized (handles partial init).
-
-  // Phase 1: Request all workers to exit.
-  // This is fast and non-blocking; just sets a flag and wakes each worker.
-  for (iree_host_size_t i = 0; i < proactor->initialized_workers; ++i) {
-    iree_async_posix_worker_request_exit(&proactor->workers[i]);
-  }
-
-  // Phase 2: Wait for all workers to reach ZOMBIE state.
-  // Workers may take varying times to exit depending on their workload.
-  for (iree_host_size_t i = 0; i < proactor->initialized_workers; ++i) {
-    iree_async_posix_worker_await_exit(&proactor->workers[i]);
-  }
-
-  // Phase 3: Deinitialize all workers now that no threads are running.
-  // Safe to access all worker data structures without synchronization.
+  // User operations have drained before final release. One broadcast wakes all
+  // idle workers, including those still entering their wait during startup.
+  iree_notification_post(&proactor->file_queue.notification, IREE_ALL_WAITERS);
   for (iree_host_size_t i = 0; i < proactor->initialized_workers; ++i) {
     iree_async_posix_worker_deinitialize(&proactor->workers[i]);
   }
@@ -356,17 +323,16 @@ static void iree_async_proactor_posix_destroy(
 
   // Pools use external storage (in our allocation), just reset state.
   iree_async_posix_completion_pool_deinitialize(&proactor->completion_pool);
-  iree_async_posix_ready_pool_deinitialize(&proactor->ready_pool);
 
   // Deinitialize notifications and queues.
-  iree_notification_deinitialize(&proactor->ready_notification);
+  iree_notification_deinitialize(&proactor->file_queue.notification);
+  iree_slim_mutex_deinitialize(&proactor->file_queue.mutex);
   iree_atomic_slist_deinitialize(&proactor->pending_semaphore_waits);
   iree_async_semaphore_wait_context_deinitialize(
       &proactor->semaphore_wait_context);
   iree_atomic_slist_deinitialize(&proactor->pending_fence_imports);
   iree_async_message_pool_deinitialize(&proactor->message_pool);
   iree_atomic_slist_deinitialize(&proactor->completion_queue);
-  iree_atomic_slist_deinitialize(&proactor->ready_queue);
   iree_atomic_slist_deinitialize(&proactor->pending_queue);
 
   // Free the single allocation.
@@ -445,34 +411,6 @@ static void iree_async_proactor_posix_release_reserved_completion(
       iree_async_proactor_posix_take_reserved_completion(operation);
   iree_async_posix_completion_pool_release(&proactor->completion_pool,
                                            completion);
-}
-
-// Pushes an operation directly to the ready queue for worker execution.
-// Used for file operations that don't need to wait for fd readiness.
-// Returns RESOURCE_EXHAUSTED if the ready pool is full.
-static iree_status_t iree_async_proactor_posix_enqueue_for_execution(
-    iree_async_proactor_posix_t* proactor, iree_async_operation_t* operation,
-    iree_async_poll_events_t poll_events) {
-  // Acquire a ready entry from the pool.
-  iree_async_posix_ready_op_t* ready_op =
-      iree_async_posix_ready_pool_acquire(&proactor->ready_pool);
-  if (!ready_op) {
-    return iree_make_status(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        "ready pool exhausted; too many concurrent file operations");
-  }
-
-  // Fill in the ready entry.
-  ready_op->operation = operation;
-  ready_op->poll_events = poll_events;
-
-  // Push to the ready queue for workers.
-  iree_atomic_slist_push(&proactor->ready_queue, &ready_op->slist_entry);
-
-  // Wake a worker to process it.
-  iree_notification_post(&proactor->ready_notification, 1);
-
-  return iree_ok_status();
 }
 
 // Forward declaration — used by execute_fd_operation before definition.
@@ -748,17 +686,6 @@ static iree_host_size_t iree_async_proactor_posix_drain_pending_queue(
         int fd = iree_async_proactor_posix_operation_fd(operation);
         status = iree_async_proactor_posix_register_fd_operation(proactor,
                                                                  operation, fd);
-        break;
-      }
-
-      case IREE_ASYNC_OPERATION_TYPE_FILE_OPEN:
-      case IREE_ASYNC_OPERATION_TYPE_FILE_READ:
-      case IREE_ASYNC_OPERATION_TYPE_FILE_WRITE:
-      case IREE_ASYNC_OPERATION_TYPE_FILE_CLOSE: {
-        // File operations bypass fd polling and go directly to workers for
-        // blocking I/O execution. Files don't poll reliably on all platforms.
-        status = iree_async_proactor_posix_enqueue_for_execution(
-            proactor, operation, IREE_ASYNC_POLL_EVENT_NONE);
         break;
       }
 
@@ -1825,14 +1752,8 @@ static void iree_async_proactor_posix_rollback_reservations(
 // Commits one fully validated and reserved operation. No branch can reject the
 // operation after this point; local failures become poll-thread completions.
 static void iree_async_proactor_posix_commit_operation(
-    iree_async_proactor_posix_t* proactor, iree_async_operation_t* operation) {
-  if (operation->type == IREE_ASYNC_OPERATION_TYPE_SEQUENCE) {
-    iree_async_sequence_prepare_for_submission(
-        (iree_async_sequence_operation_t*)operation);
-  } else {
-    iree_async_operation_clear_internal_flags(operation);
-  }
-
+    iree_async_proactor_posix_t* proactor, iree_async_operation_t* operation,
+    iree_async_posix_file_batch_t* files) {
   switch (operation->type) {
     case IREE_ASYNC_OPERATION_TYPE_NOP:
       iree_async_proactor_posix_push_pending(proactor, operation);
@@ -1932,6 +1853,8 @@ static void iree_async_proactor_posix_commit_operation(
       return;
 
     case IREE_ASYNC_OPERATION_TYPE_SEQUENCE:
+      iree_async_sequence_prepare_for_submission(
+          (iree_async_sequence_operation_t*)operation);
       iree_async_proactor_posix_push_pending(proactor, operation);
       return;
 
@@ -1939,7 +1862,13 @@ static void iree_async_proactor_posix_commit_operation(
     case IREE_ASYNC_OPERATION_TYPE_FILE_READ:
     case IREE_ASYNC_OPERATION_TYPE_FILE_WRITE:
     case IREE_ASYNC_OPERATION_TYPE_FILE_CLOSE:
-      iree_async_proactor_posix_push_pending(proactor, operation);
+      if (files->tail) {
+        files->tail->next = operation;
+      } else {
+        files->head = operation;
+      }
+      files->tail = operation;
+      ++files->count;
       return;
 
     case IREE_ASYNC_OPERATION_TYPE_MESSAGE:
@@ -2002,15 +1931,19 @@ static iree_status_t iree_async_proactor_posix_submit_prepared(
   // the caller's submit-scoped storage has expired.
   iree_async_operation_list_acquire_resources(operations);
 
-  bool committed_any = false;
+  iree_async_posix_file_batch_t files = {0};
+  iree_host_size_t committed_count = 0;
   iree_async_continuation_chain_iterator_t commit_iterator =
       iree_async_continuation_chain_iterator_make(operations);
   while ((operation = iree_async_continuation_chain_iterator_next(
               &commit_iterator)) != NULL) {
-    committed_any = true;
-    iree_async_proactor_posix_commit_operation(proactor, operation);
+    ++committed_count;
+    iree_async_proactor_posix_commit_operation(proactor, operation, &files);
   }
-  if (committed_any) {
+  if (files.head) {
+    iree_async_posix_file_queue_push(proactor, &files);
+  }
+  if (committed_count > files.count) {
     iree_async_proactor_posix_wake_poll_thread(proactor);
   }
   return iree_ok_status();
@@ -2179,8 +2112,12 @@ static iree_host_size_t iree_async_proactor_posix_drain_completion_queue(
     iree_async_completion_flags_t flags = completion->flags;
 
     completion->status = iree_ok_status();
-    iree_async_posix_completion_pool_release(&proactor->completion_pool,
-                                             completion);
+    if (completion->worker_reserved) {
+      iree_async_posix_worker_release_completion(completion);
+    } else {
+      iree_async_posix_completion_pool_release(&proactor->completion_pool,
+                                               completion);
+    }
 
     if (operation) {
       count += iree_async_proactor_posix_complete_direct(proactor, operation,
@@ -3458,6 +3395,16 @@ static iree_status_t iree_async_proactor_posix_cancel(
       iree_async_proactor_posix_wake_poll_thread(proactor);
       return iree_ok_status();
     }
+
+    case IREE_ASYNC_OPERATION_TYPE_FILE_OPEN:
+    case IREE_ASYNC_OPERATION_TYPE_FILE_READ:
+    case IREE_ASYNC_OPERATION_TYPE_FILE_WRITE:
+    case IREE_ASYNC_OPERATION_TYPE_FILE_CLOSE:
+      // Workers observe cancellation before entering a blocking syscall. Once
+      // execution has started its actual result wins, including any OS error.
+      iree_async_operation_set_internal_flags(
+          operation, IREE_ASYNC_POSIX_INTERNAL_FLAG_CANCELLED);
+      return iree_ok_status();
 
     case IREE_ASYNC_OPERATION_TYPE_SEMAPHORE_SIGNAL:
       // Signals complete synchronously during submit — nothing to cancel.

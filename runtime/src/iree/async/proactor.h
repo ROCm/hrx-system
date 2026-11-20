@@ -404,8 +404,8 @@ typedef struct iree_async_proactor_options_t {
   //
   // io_uring: Sets the ring size. Powers of 2 are most efficient.
   // IOCP: Ignored (IOCP is dynamically sized).
-  // kqueue: Sets initial event list allocation.
-  // generic: Sets internal completion queue size.
+  // POSIX (poll, epoll, kqueue): Sizes the shared completion pool. Accepted
+  // file operations may queue beyond this hint while workers are occupied.
   iree_host_size_t max_concurrent_operations;
 
   // Debug name for tracing and diagnostics.

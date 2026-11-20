@@ -14,9 +14,7 @@
 #include "iree/async/file.h"
 #include "iree/async/operations/file.h"
 #include "iree/async/platform/posix/proactor.h"
-#include "iree/async/platform/posix/wake.h"
 #include "iree/async/util/completion_pool.h"
-#include "iree/async/util/ready_pool.h"
 #include "iree/base/internal/atomic_slist.h"
 #include "iree/base/internal/file_io_posix.h"
 #include "iree/base/threading/notification.h"
@@ -164,164 +162,144 @@ static iree_status_t iree_async_posix_execute_file_close(
 }
 
 //===----------------------------------------------------------------------===//
+// File work and completion handoff
+//===----------------------------------------------------------------------===//
+
+void iree_async_posix_file_queue_push(
+    iree_async_proactor_posix_t* proactor,
+    const iree_async_posix_file_batch_t* batch) {
+  iree_async_posix_file_queue_t* queue = &proactor->file_queue;
+  iree_slim_mutex_lock(&queue->mutex);
+  if (queue->tail) {
+    queue->tail->next = batch->head;
+  } else {
+    queue->head = batch->head;
+  }
+  queue->tail = batch->tail;
+  iree_slim_mutex_unlock(&queue->mutex);
+  iree_notification_post(
+      &queue->notification,
+      (int32_t)iree_min(batch->count, proactor->worker_count));
+}
+
+static iree_async_operation_t* iree_async_posix_file_queue_pop(
+    iree_async_posix_file_queue_t* queue) {
+  iree_slim_mutex_lock(&queue->mutex);
+  iree_async_operation_t* operation = queue->head;
+  if (operation) {
+    queue->head = operation->next;
+    if (!queue->head) {
+      queue->tail = NULL;
+    }
+    operation->next = NULL;
+  }
+  iree_slim_mutex_unlock(&queue->mutex);
+  return operation;
+}
+
+static iree_status_t iree_async_posix_execute_file_operation(
+    iree_async_proactor_posix_t* proactor, iree_async_operation_t* operation) {
+  if (iree_any_bit_set(iree_async_operation_load_internal_flags(operation),
+                       IREE_ASYNC_POSIX_INTERNAL_FLAG_CANCELLED)) {
+    return iree_status_from_code(IREE_STATUS_CANCELLED);
+  }
+  switch (operation->type) {
+    case IREE_ASYNC_OPERATION_TYPE_FILE_OPEN:
+      return iree_async_posix_execute_file_open(
+          proactor, (iree_async_file_open_operation_t*)operation);
+    case IREE_ASYNC_OPERATION_TYPE_FILE_READ:
+      return iree_async_posix_execute_file_read(
+          (iree_async_file_read_operation_t*)operation);
+    case IREE_ASYNC_OPERATION_TYPE_FILE_WRITE:
+      return iree_async_posix_execute_file_write(
+          (iree_async_file_write_operation_t*)operation);
+    case IREE_ASYNC_OPERATION_TYPE_FILE_CLOSE:
+      return iree_async_posix_execute_file_close(
+          (iree_async_file_close_operation_t*)operation);
+    default:
+      IREE_ASSERT_UNREACHABLE(
+          "only blocking file operations enter the worker queue");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+}
+
+static bool iree_async_posix_worker_completion_consumed(void* user_data) {
+  iree_async_posix_worker_t* worker = (iree_async_posix_worker_t*)user_data;
+  return !iree_atomic_load(&worker->reserved_completion_pending,
+                           iree_memory_order_acquire);
+}
+
+void iree_async_posix_worker_release_completion(
+    iree_async_posix_completion_t* completion) {
+  iree_async_posix_worker_t* worker = iree_containerof(
+      completion, iree_async_posix_worker_t, reserved_completion);
+  iree_atomic_store(&worker->reserved_completion_pending, 0,
+                    iree_memory_order_release);
+  iree_notification_post(&worker->completion_consumed, 1);
+}
+
+static void iree_async_posix_worker_publish(iree_async_posix_worker_t* worker,
+                                            iree_async_operation_t* operation,
+                                            iree_status_t status) {
+  iree_async_proactor_posix_t* proactor = worker->proactor;
+  iree_async_posix_completion_t* completion =
+      iree_async_posix_completion_pool_acquire(&proactor->completion_pool);
+  const bool use_reserved = !completion;
+  if (use_reserved) {
+    completion = &worker->reserved_completion;
+    iree_atomic_store(&worker->reserved_completion_pending, 1,
+                      iree_memory_order_relaxed);
+  }
+  completion->operation = operation;
+  completion->status = status;
+  completion->flags = IREE_ASYNC_COMPLETION_FLAG_NONE;
+  iree_atomic_slist_push(&proactor->completion_queue, &completion->slist_entry);
+  iree_async_proactor_posix_wake_poll_thread(proactor);
+
+  // Once the shared buffer fills, each worker publishes one last result and
+  // sleeps until the poll owner takes it. The owner returns the slot before
+  // invoking the callback, which may submit more file work.
+  if (use_reserved) {
+    iree_notification_await(&worker->completion_consumed,
+                            iree_async_posix_worker_completion_consumed, worker,
+                            iree_infinite_timeout());
+  }
+}
+
+//===----------------------------------------------------------------------===//
 // Worker thread entry point
 //===----------------------------------------------------------------------===//
 
-// Returns true if the worker is in ZOMBIE state.
-static bool iree_async_posix_worker_is_zombie(
-    iree_async_posix_worker_t* worker) {
-  return iree_atomic_load(&worker->state, iree_memory_order_acquire) ==
-         IREE_ASYNC_POSIX_WORKER_STATE_ZOMBIE;
-}
-
-// Condition function thunk matching iree_condition_fn_t signature.
-static bool iree_async_posix_worker_is_zombie_thunk(void* arg) {
-  return iree_async_posix_worker_is_zombie((iree_async_posix_worker_t*)arg);
-}
-
-static int iree_async_posix_worker_main(iree_async_posix_worker_t* worker) {
+static int iree_async_posix_worker_main(void* user_data) {
   IREE_TRACE_ZONE_BEGIN(z0);
-
-  // Enter running state. If we were already requested to exit, restore that
-  // state so the while loop condition naturally fails.
-  iree_async_posix_worker_state_t prev_state =
-      (iree_async_posix_worker_state_t)iree_atomic_exchange(
-          &worker->state, IREE_ASYNC_POSIX_WORKER_STATE_RUNNING,
-          iree_memory_order_acq_rel);
-  if (prev_state == IREE_ASYNC_POSIX_WORKER_STATE_EXITING) {
-    iree_atomic_store(&worker->state, IREE_ASYNC_POSIX_WORKER_STATE_EXITING,
-                      iree_memory_order_release);
-  }
-
+  iree_async_posix_worker_t* worker = (iree_async_posix_worker_t*)user_data;
   iree_async_proactor_posix_t* proactor = worker->proactor;
-  while (iree_atomic_load(&worker->state, iree_memory_order_acquire) ==
-         IREE_ASYNC_POSIX_WORKER_STATE_RUNNING) {
-    // Event count pattern: prepare_wait captures the current epoch BEFORE
-    // checking any conditions that would prevent sleeping. This ensures we
-    // don't miss notifications that arrive between checking and sleeping.
-    //
-    // Both conditions that prevent sleeping (new work AND exit request) must
-    // be checked AFTER prepare_wait and BEFORE commit_wait. The corresponding
-    // posters (enqueue_for_execution and request_exit) increment the epoch
-    // via post(), so if they fire between prepare_wait and commit_wait, the
-    // epoch will differ from our token and commit_wait returns immediately.
-    iree_wait_token_t wait_token =
-        iree_notification_prepare_wait(&proactor->ready_notification);
-
-    // Try to pop work from ready queue.
-    iree_atomic_slist_entry_t* entry =
-        iree_atomic_slist_pop(&proactor->ready_queue);
-
-    if (entry) {
-      // Got work - cancel the wait (we won't be sleeping).
-      iree_notification_cancel_wait(&proactor->ready_notification);
-
-      iree_async_posix_ready_op_t* ready_op =
-          iree_containerof(entry, iree_async_posix_ready_op_t, slist_entry);
-
-      IREE_TRACE_ZONE_BEGIN_NAMED(z1, "worker_execute_operation");
-
-      // Execute the operation based on its type.
-      iree_status_t status = iree_ok_status();
-      iree_async_completion_flags_t completion_flags =
-          IREE_ASYNC_COMPLETION_FLAG_NONE;
-
-      switch (ready_op->operation->type) {
-        case IREE_ASYNC_OPERATION_TYPE_FILE_OPEN:
-          status = iree_async_posix_execute_file_open(
-              proactor, (iree_async_file_open_operation_t*)ready_op->operation);
-          break;
-
-        case IREE_ASYNC_OPERATION_TYPE_FILE_READ:
-          status = iree_async_posix_execute_file_read(
-              (iree_async_file_read_operation_t*)ready_op->operation);
-          break;
-
-        case IREE_ASYNC_OPERATION_TYPE_FILE_WRITE:
-          status = iree_async_posix_execute_file_write(
-              (iree_async_file_write_operation_t*)ready_op->operation);
-          break;
-
-        case IREE_ASYNC_OPERATION_TYPE_FILE_CLOSE:
-          status = iree_async_posix_execute_file_close(
-              (iree_async_file_close_operation_t*)ready_op->operation);
-          break;
-
-        default:
-          // Socket operations are executed directly on the poll thread via
-          // process_operation_chain (non-blocking I/O after poll readiness).
-          // Workers are exclusively for file operations that require blocking
-          // I/O. Any operation reaching here without a handler is an
-          // implementation bug.
-          status =
-              iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                               "worker received unsupported operation type %d",
-                               (int)ready_op->operation->type);
-          break;
-      }
-
-      IREE_TRACE_ZONE_END(z1);
-
-      // Acquire a completion entry from the pool.
-      // If pool is exhausted, spin with yield until one becomes available.
-      // This provides backpressure without deadlock (poll thread will drain
-      // completions and free entries).
-      iree_async_posix_completion_t* completion = NULL;
-      while (!(completion = iree_async_posix_completion_pool_acquire(
-                   &proactor->completion_pool))) {
-        iree_thread_yield();
-      }
-
-      // Fill in the completion entry.
-      completion->operation = ready_op->operation;
-      completion->status = status;
-      completion->flags = completion_flags;
-
-      // Release ready entry back to pool.
-      iree_async_posix_ready_pool_release(&proactor->ready_pool, ready_op);
-
-      // Push completion to queue for poll thread.
-      iree_atomic_slist_push(&proactor->completion_queue,
-                             &completion->slist_entry);
-
-      // Wake the poll thread to process the completion.
-      iree_async_posix_wake_trigger(&proactor->wake);
-
-    } else if (iree_atomic_load(&worker->state, iree_memory_order_acquire) !=
-               IREE_ASYNC_POSIX_WORKER_STATE_RUNNING) {
-      // Exit requested between the loop-top state check and here. The
-      // request_exit post may have already incremented the epoch past our
-      // wait_token, so commit_wait would return immediately — but if the post
-      // happened before prepare_wait, our token matches the current epoch and
-      // commit_wait would block forever (classic event-count lost wakeup).
-      // Cancel the wait and let the loop condition handle the exit.
-      iree_notification_cancel_wait(&proactor->ready_notification);
-    } else {
-      // No work and no exit request — commit to waiting on the shared
-      // notification. The event count guarantees: if request_exit posts between
-      // our prepare_wait and this commit_wait, the epoch will have changed,
-      // causing commit_wait to return immediately.
-      iree_notification_commit_wait(&proactor->ready_notification, wait_token,
-                                    /*spin_ns=*/0,
-                                    /*deadline_ns=*/IREE_TIME_INFINITE_FUTURE);
+  iree_async_posix_file_queue_t* queue = &proactor->file_queue;
+  for (;;) {
+    // Take the wait token before checking either condition. A racing enqueue
+    // or shutdown then prevents commit_wait from sleeping through its wake.
+    iree_wait_token_t token =
+        iree_notification_prepare_wait(&queue->notification);
+    if (iree_atomic_load(&proactor->shutdown_requested,
+                         iree_memory_order_acquire)) {
+      iree_notification_cancel_wait(&queue->notification);
+      break;
     }
+    iree_async_operation_t* operation = iree_async_posix_file_queue_pop(queue);
+    if (!operation) {
+      iree_notification_commit_wait(&queue->notification, token, /*spin_ns=*/0,
+                                    IREE_TIME_INFINITE_FUTURE);
+      continue;
+    }
+    iree_notification_cancel_wait(&queue->notification);
+    IREE_TRACE_ZONE_BEGIN_NAMED(z1, "worker_execute_operation");
+    iree_status_t status =
+        iree_async_posix_execute_file_operation(proactor, operation);
+    IREE_TRACE_ZONE_END(z1);
+    iree_async_posix_worker_publish(worker, operation, status);
   }
-
-  // Single exit point: transition to zombie state and notify waiters.
-  iree_atomic_store(&worker->state, IREE_ASYNC_POSIX_WORKER_STATE_ZOMBIE,
-                    iree_memory_order_release);
-  iree_notification_post(&worker->state_notification, IREE_ALL_WAITERS);
-
   IREE_TRACE_ZONE_END(z0);
   return 0;
-}
-
-// Thread entry point thunk matching iree_thread_entry_t signature.
-// iree_thread_create expects int (*)(void*) but iree_async_posix_worker_main
-// takes a typed pointer — casting the function pointer directly is undefined
-// behavior (caught by UBSan's -fsanitize=function check).
-static int iree_async_posix_worker_thread_entry(void* entry_arg) {
-  return iree_async_posix_worker_main((iree_async_posix_worker_t*)entry_arg);
 }
 
 //===----------------------------------------------------------------------===//
@@ -329,8 +307,7 @@ static int iree_async_posix_worker_thread_entry(void* entry_arg) {
 //===----------------------------------------------------------------------===//
 
 iree_status_t iree_async_posix_worker_initialize(
-    iree_async_proactor_posix_t* proactor, iree_host_size_t worker_index,
-    iree_thread_affinity_t affinity,
+    iree_async_proactor_posix_t* proactor, iree_thread_affinity_t affinity,
     const iree_thread_affinity_set_t* processor_set, iree_allocator_t allocator,
     iree_async_posix_worker_t* out_worker) {
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -340,15 +317,8 @@ iree_status_t iree_async_posix_worker_initialize(
   memset(out_worker, 0, sizeof(*out_worker));
 
   out_worker->proactor = proactor;
-  out_worker->worker_index = worker_index;
-
-  // Initialize state notification (used for exit synchronization).
-  // Workers share proactor->ready_notification for work-stealing.
-  iree_notification_initialize(&out_worker->state_notification);
-
-  // Set initial state to RUNNING (thread will confirm this on entry).
-  iree_atomic_store(&out_worker->state, IREE_ASYNC_POSIX_WORKER_STATE_RUNNING,
-                    iree_memory_order_release);
+  out_worker->reserved_completion.worker_reserved = true;
+  iree_notification_initialize(&out_worker->completion_consumed);
 
   // Create thread parameters.
   iree_thread_create_params_t params;
@@ -361,70 +331,16 @@ iree_status_t iree_async_posix_worker_initialize(
 
   // Create and start the worker thread.
   iree_status_t status =
-      iree_thread_create(iree_async_posix_worker_thread_entry, out_worker,
-                         params, allocator, &out_worker->thread);
+      iree_thread_create(iree_async_posix_worker_main, out_worker, params,
+                         allocator, &out_worker->thread);
 
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
-void iree_async_posix_worker_request_exit(iree_async_posix_worker_t* worker) {
-  if (!worker->thread) {
-    return;
-  }
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  // Set state to EXITING. If already ZOMBIE, restore ZOMBIE state.
-  iree_async_posix_worker_state_t prev_state =
-      (iree_async_posix_worker_state_t)iree_atomic_exchange(
-          &worker->state, IREE_ASYNC_POSIX_WORKER_STATE_EXITING,
-          iree_memory_order_acq_rel);
-  if (prev_state == IREE_ASYNC_POSIX_WORKER_STATE_ZOMBIE) {
-    // Worker already exited; reset to ZOMBIE.
-    iree_atomic_store(&worker->state, IREE_ASYNC_POSIX_WORKER_STATE_ZOMBIE,
-                      iree_memory_order_release);
-  }
-
-  // Wake workers in case the target is waiting for work. Workers share the
-  // proactor's ready_notification, so we must wake all of them -- only the
-  // targeted worker will see EXITING state and exit its loop.
-  iree_notification_post(&worker->proactor->ready_notification,
-                         IREE_ALL_WAITERS);
-
-  IREE_TRACE_ZONE_END(z0);
-}
-
-void iree_async_posix_worker_await_exit(iree_async_posix_worker_t* worker) {
-  if (!worker->thread) {
-    return;
-  }
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  // Ensure exit was requested.
-  iree_async_posix_worker_request_exit(worker);
-
-  // Wait for the worker to enter ZOMBIE state.
-  iree_notification_await(&worker->state_notification,
-                          iree_async_posix_worker_is_zombie_thunk, worker,
-                          iree_infinite_timeout());
-
-  IREE_TRACE_ZONE_END(z0);
-}
-
 void iree_async_posix_worker_deinitialize(iree_async_posix_worker_t* worker) {
   IREE_TRACE_ZONE_BEGIN(z0);
-
-  // Worker must be in ZOMBIE state (or thread creation failed).
-  IREE_ASSERT(!worker->thread || iree_async_posix_worker_is_zombie(worker),
-              "worker must be in ZOMBIE state before deinitialize");
-
-  // Release thread handle.
   iree_thread_release(worker->thread);
-  worker->thread = NULL;
-
-  // Deinitialize state notification.
-  // Workers share proactor->ready_notification (not deinit'd here).
-  iree_notification_deinitialize(&worker->state_notification);
-
+  iree_notification_deinitialize(&worker->completion_consumed);
   IREE_TRACE_ZONE_END(z0);
 }

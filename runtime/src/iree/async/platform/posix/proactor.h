@@ -22,7 +22,6 @@
 #include "iree/async/proactor.h"
 #include "iree/async/util/completion_pool.h"
 #include "iree/async/util/message_pool.h"
-#include "iree/async/util/ready_pool.h"
 #include "iree/async/util/semaphore_wait.h"
 #include "iree/async/util/sequence_emulation.h"
 #include "iree/async/util/signal.h"
@@ -48,9 +47,13 @@ extern "C" {
 // Default number of worker threads if not specified.
 #define IREE_ASYNC_POSIX_DEFAULT_WORKER_COUNT 4
 
-// Default pool capacity for ready and completion entries.
-// Sized to accommodate CTS stress tests (200+ concurrent operations).
+// Default capacity for buffered completions, excluding the worker allowance.
 #define IREE_ASYNC_POSIX_DEFAULT_POOL_CAPACITY 256
+
+// Cancellation requested before a file syscall or poll-owner dispatch.
+enum iree_async_posix_operation_internal_flags_e {
+  IREE_ASYNC_POSIX_INTERNAL_FLAG_CANCELLED = 1u << 0,
+};
 
 //===----------------------------------------------------------------------===//
 // Event source (persistent fd monitoring)
@@ -95,11 +98,12 @@ typedef struct iree_async_proactor_posix_t {
   iree_async_posix_fd_map_t fd_map;
   iree_async_posix_wake_t wake;
 
-  // MPSC queues.
-  iree_atomic_slist_t pending_queue;  // submit() → poll thread.
-  iree_atomic_slist_t ready_queue;    // poll thread → workers.
-  iree_notification_t ready_notification;
-  iree_atomic_slist_t completion_queue;  // workers → poll thread.
+  // Operations awaiting poll-owner registration or dispatch.
+  iree_atomic_slist_t pending_queue;
+  // Accepted blocking file work, consumed directly by workers.
+  iree_async_posix_file_queue_t file_queue;
+  // Completed operations awaiting poll-owner callbacks.
+  iree_atomic_slist_t completion_queue;
   // Timepoint callbacks funneled to poll thread.
   iree_atomic_slist_t pending_semaphore_waits;
   // Serializes wait operation association with cancellation and completion.
@@ -107,8 +111,7 @@ typedef struct iree_async_proactor_posix_t {
   // Fence imports deferred from arbitrary threads to poll thread.
   iree_atomic_slist_t pending_fence_imports;
 
-  // Pre-allocated pools for hot-path queue entries.
-  iree_async_posix_ready_pool_t ready_pool;
+  // Shared buffered completion records.
   iree_async_posix_completion_pool_t completion_pool;
 
   // Cross-proactor messaging state.

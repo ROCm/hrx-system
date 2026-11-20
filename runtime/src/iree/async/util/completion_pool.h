@@ -4,8 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Fixed-size pool of completion entries for passing results from workers
-// to the poll thread without hot-path allocation.
+// Buffered results from POSIX submitters, workers, and poll-owner dispatch.
 
 #ifndef IREE_ASYNC_UTIL_COMPLETION_POOL_H_
 #define IREE_ASYNC_UTIL_COMPLETION_POOL_H_
@@ -20,18 +19,24 @@ extern "C" {
 
 // A completion entry carrying (operation, status, flags) through the queue.
 typedef struct iree_async_posix_completion_t {
+  // Link in the published completion queue or pool free list.
   iree_atomic_slist_entry_t slist_entry;
+  // Operation whose callback belongs to the poll owner.
   iree_async_operation_t* operation;
+  // Full result transferred to the callback, including diagnostic payload.
   iree_status_t status;
+  // Public flags passed to the callback.
   iree_async_completion_flags_t flags;
+  // True for the dedicated entry embedded in a POSIX file worker.
+  bool worker_reserved;
 } iree_async_posix_completion_t;
 
-// Fixed-size pool of completion entries with lock-free freelist.
+// Fixed-size pool backed by trailing storage in the proactor.
 typedef struct iree_async_posix_completion_pool_t {
-  iree_async_posix_completion_t* entries;  // Contiguous allocation.
+  // Number of buffered results the proactor can reserve from this pool.
   iree_host_size_t capacity;
+  // Entries available for submitters, workers, or the poll owner.
   iree_atomic_slist_t free_list;
-  iree_allocator_t allocator;
 } iree_async_posix_completion_pool_t;
 
 // Initializes a completion pool using externally-provided entry storage.
@@ -42,8 +47,7 @@ void iree_async_posix_completion_pool_initialize_with_storage(
     iree_host_size_t capacity, iree_async_posix_completion_t* entries,
     iree_async_posix_completion_pool_t* out_pool);
 
-// Deinitializes the pool. Frees storage only if it was internally allocated.
-// All entries must have been released back to the pool.
+// Deinitializes the pool after all entries have been returned.
 void iree_async_posix_completion_pool_deinitialize(
     iree_async_posix_completion_pool_t* pool);
 
