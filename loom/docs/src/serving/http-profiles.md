@@ -2,9 +2,8 @@
 
 All TCP and Unix listeners expose the same catalog and HTTP endpoints.
 Inference requests select a registered deployment through the `model` field
-in JSON or multipart form data. Names come from
-[model documents](model-documents.md), not checkpoint filenames or an inferred
-architecture. An absent model returns 404.
+in JSON or multipart form data. An omitted field returns 400. An unregistered
+name returns 404. Deployment names come from [model documents](model-documents.md).
 
 The text, image, embedding, speech and transcription profiles use familiar
 OpenAI response shapes, but are not the entire OpenAI API. Each profile describes
@@ -859,16 +858,21 @@ inspection and outcome counters, but never increment inference-token counters.
 
 ## Raw tokenization
 
-`POST /tokenize` uses the selected deployment's loaded tokenizer:
+With one registered model, send text directly to `POST /tokenize`.
 
 ```json
-{"model":"scout","content":"Hello!","add_special":false,"parse_special":true}
+{"content":"Hello!","add_special":false,"parse_special":true}
 ```
 
 It returns `{"tokens":[...]}`. The shown special-token options are defaults.
-`POST /detokenize` accepts `{"model":"scout","tokens":[...]}` and returns
+`POST /detokenize` accepts `{"tokens":[...]}` and returns
 `{"content":"..."}`, preserving special tokens. Neither operation applies
 chat templates or model-specific prompt framing. Empty text and arrays are valid.
+
+On a shared server, include `"model":"scout"` in both requests to select the
+vocabulary. With multiple registrations, omitting `model` returns 400 even if
+only one model is ready. `GET /v1/models` lists prepared model IDs. An empty
+server returns 404 for either utility.
 
 These CPU utilities do not activate weights, occupy execution rows or wait for
 an inference epoch. They still obey model admission and retain their tokenizer
