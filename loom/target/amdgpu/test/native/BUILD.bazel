@@ -454,11 +454,12 @@ _GFX12_GENERIC_REPRESENTATION = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["am
 loom_test_module(
     name = "gfx12_wave64_matrix_accumulation_module",
     srcs = ["//loom/target/amdgpu/test/native/gfx12:wave64_matrix_accumulation.loom"],
-    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_GFX12_GENERIC_REPRESENTATION),
+    target_compatible_with = _AMDGPU_SOURCE_COMPATIBLE_WITH,
 )
 
 loom_test(
     name = "gfx12_wave64_matrix_accumulation_compile_test",
+    benchmark_smoke = False,
     compile_targets = [
         "//loom/target/amdgpu:gfx1200",
         "//loom/target/amdgpu:gfx1201",
