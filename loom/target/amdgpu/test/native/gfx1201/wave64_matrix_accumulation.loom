@@ -1,5 +1,5 @@
-// Distinct products and nonzero accumulators exercise both C and D ownership.
-// Two row pitches also check that stores preserve all padding.
+// A row-major RHS exercises the native transpose load. Distinct products
+// and nonzero accumulators check C and D ownership at both row pitches.
 amdgpu.target<gfx1201> @rdna4_wave64 {subgroup_size = 64}
 
 kernel.def target(@rdna4_wave64) @matrix_accumulation() {
@@ -12,12 +12,11 @@ kernel.def target(@rdna4_wave64) @matrix_accumulation() {
   %pitch = index.assume %pitch_arg [range(%pitch_arg, 16, 32)] : index
   %strides = encoding.layout.strided [%pitch, 1] : encoding<layout>
   %left = buffer.view %lhs[%base] : buffer -> view<16x16xf16>
-  %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
-  %right = buffer.view %rhs[%base] : buffer -> view<16x16xf16, %rhs_layout>
+  %right = buffer.view %rhs[%base] : buffer -> view<16x16xf16>
   %initial = buffer.view %init[%base] : buffer -> view<16x16xf32, %strides>
   %destination = buffer.view %output[%base] : buffer -> view<16x16xf32, %strides>
   %a = vector.fragment.load<lhs> %left[0, 0] shape [%size, %size] : view<16x16xf16> -> vector<4xf16>
-  %b = vector.fragment.load<rhs> %right[0, 0] shape [%size, %size] : view<16x16xf16, %rhs_layout> -> vector<4xf16>
+  %b = vector.fragment.load<rhs> %right[0, 0] shape [%size, %size] : view<16x16xf16> -> vector<4xf16>
   %c = vector.fragment.load<init> %initial[0, 0] shape [%size, %size] : view<16x16xf32, %strides> -> vector<4xf32>
   %d = vector.mma %a, %b, %c : vector<4xf16>, vector<4xf16>, vector<4xf32>
   vector.fragment.store<result> %d, %destination[0, 0] shape [%size, %size] : vector<4xf32>, view<16x16xf32, %strides>
@@ -31,8 +30,7 @@ func.def @scalar_matrix_accumulation(%pitch_arg: index, %lhs: buffer, %rhs: buff
   %step = index.constant 1 : index
   %pitch = index.assume %pitch_arg [range(%pitch_arg, 16, 32)] : index
   %left = buffer.view %lhs[%base] : buffer -> view<16x16xf16>
-  %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
-  %right = buffer.view %rhs[%base] : buffer -> view<16x16xf16, %rhs_layout>
+  %right = buffer.view %rhs[%base] : buffer -> view<16x16xf16>
   %initial = buffer.view %init[%base] : buffer -> view<512xf32>
   %destination = buffer.view %output[%base] : buffer -> view<512xf32>
   scf.for %row = [%begin to %size step %step] {
@@ -41,7 +39,7 @@ func.def @scalar_matrix_accumulation(%pitch_arg: index, %lhs: buffer, %rhs: buff
       %c = view.load %initial[%offset] : view<512xf32> -> f32
       %d = scf.for %k = [%begin to %size step %step](%acc = %c : f32) -> (f32) {
         %a = view.load %left[%row, %k] : view<16x16xf16> -> f16
-        %b = view.load %right[%k, %column] : view<16x16xf16, %rhs_layout> -> f16
+        %b = view.load %right[%k, %column] : view<16x16xf16> -> f16
         %a32 = scalar.extf %a : f16 to f32
         %b32 = scalar.extf %b : f16 to f32
         %next = scalar.fmaf %a32, %b32, %acc : f32
