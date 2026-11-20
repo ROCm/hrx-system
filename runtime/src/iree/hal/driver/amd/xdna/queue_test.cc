@@ -1017,16 +1017,32 @@ TEST(XdnaQueueTest, PublicationClaimContentionUsesQueuedPublication) {
 TEST(XdnaQueueTest, PendingInvocationsKeepPrivateBindingsAndReuseBacking) {
   QueueHarness harness;
   harness.native.pending_capacity = 2;
-  // Place the instruction aperture at the target floor but below the image's
-  // stronger alignment so this exercises arena-internal alignment padding.
+  // Native bases meet the provider's alignment. Both image rows need a
+  // stronger alignment in their respective device address domains.
   harness.native.next_address = 0x1008000;
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   iree::hal::amd::xdna::testing::ImageFixture fixture;
   fixture.allocations[0].alignment = 65536;
+  fixture.allocations[1].alignment = 131072;
   iree_hal_executable_t* executable = nullptr;
   iree_hal_executable_function_t function;
   ASSERT_NO_FATAL_FAILURE(
       harness.LoadExecutable(fixture, &executable, &function));
+  const auto& catalog = fixture.allocations[1];
+  const auto publication = std::find_if(
+      harness.native.flushes.begin(), harness.native.flushes.end(),
+      [&](const auto& flush) { return flush.length == catalog.byte_length; });
+  ASSERT_NE(publication, harness.native.flushes.end());
+  EXPECT_GT(publication->offset, 0u);
+  const uint64_t catalog_address =
+      publication->memory->address + publication->offset;
+  EXPECT_EQ(catalog_address % catalog.alignment, 0u);
+  const auto& payload = fixture.payloads.back();
+  ASSERT_LE(publication->offset + catalog.byte_length,
+            publication->memory->contents.size());
+  EXPECT_TRUE(
+      std::equal(payload.begin(), payload.end(),
+                 publication->memory->contents.begin() + publication->offset));
   std::array<iree_hal_buffer_t*, 3> buffers = {};
   std::array<iree_hal_semaphore_t*, 2> completions = {};
   for (auto*& buffer : buffers) {
@@ -1058,6 +1074,13 @@ TEST(XdnaQueueTest, PendingInvocationsKeepPrivateBindingsAndReuseBacking) {
     EXPECT_NE(first.offset, second.offset);
     EXPECT_EQ((first.memory->address + first.offset) % 65536, 0u);
     EXPECT_EQ((second.memory->address + second.offset) % 65536, 0u);
+    for (const auto& command : harness.native.pending_commands) {
+      // The first shim descriptor reads from the shared catalog at its addend.
+      const uint64_t address =
+          iree_unaligned_load_le_u64(command.bytes.data()) &
+          UINT64_C(0x0000FFFFFFFFFFFC);
+      EXPECT_EQ(address, catalog_address + fixture.relocations[0].addend);
+    }
     EXPECT_FALSE(std::equal(first.bytes.begin() + 8, first.bytes.end(),
                             second.bytes.begin() + 8));
     // Both commands are ranges in the persistent instruction aperture.

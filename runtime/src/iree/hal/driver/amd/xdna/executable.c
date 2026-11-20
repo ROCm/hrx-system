@@ -294,6 +294,38 @@ static iree_status_t iree_hal_amd_xdna_invocation_initialize_pdi_entry(
       "host_mapping_cache_control(PDI entry)");
 }
 
+// DMA allocations own one native buffer. When CREATE cannot directly align the
+// shim address, reserve the worst-case prefix and load into the aligned range.
+static iree_status_t iree_hal_amd_xdna_executable_allocate_dma_storage(
+    iree_hal_amd_xdna_context_t* context,
+    const iree_xdna_elf_allocation_record_t* record,
+    iree_hal_amd_xdna_memory_t* out_memory,
+    iree_hal_amd_xdna_executable_storage_t* out_storage) {
+  const iree_hal_amd_xdna_memory_source_t* source = &context->data_source;
+  const uint64_t native_alignment =
+      iree_min(record->alignment, source->profile.allocation.maximum_alignment);
+  uint64_t backing_length = 0;
+  if (!iree_checked_add_u64(record->byte_length,
+                            record->alignment - native_alignment,
+                            &backing_length)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "aligned XDNA DMA allocation extent overflows");
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_memory_allocate(
+      context, source, backing_length, native_alignment, out_memory));
+  const uint64_t device_address =
+      iree_align_uint64(out_memory->device_address, record->alignment);
+  const uint64_t offset = device_address - out_memory->device_address;
+  *out_storage = (iree_hal_amd_xdna_executable_storage_t){
+      .mapping = iree_make_byte_span(out_memory->storage.contents.data + offset,
+                                     (iree_host_size_t)record->byte_length),
+      .memory = out_memory->storage.handle,
+      .memory_byte_offset = offset,
+      .device_address = device_address,
+  };
+  return iree_ok_status();
+}
+
 // Creates storage only when the observed in-flight working set grows. Shared
 // views are already published and loading never writes them, even while another
 // invocation is reading them on the device.
@@ -366,21 +398,9 @@ static iree_status_t iree_hal_amd_xdna_invocation_allocate(
         };
       }
     } else {
-      const iree_hal_amd_xdna_memory_source_t* source =
-          &function->context->data_source;
-      // Image alignment constrains the native address domain. Physical
-      // allocation alignment is a distinct provider construction contract.
-      status = iree_hal_amd_xdna_memory_allocate(
-          function->context, source, plan->record.byte_length,
-          source->profile.allocation.minimum_alignment, &allocation->memory);
-      if (iree_status_is_ok(status)) {
-        const iree_hal_amd_xdna_memory_t* memory = &allocation->memory;
-        invocation->storage[i] = (iree_hal_amd_xdna_executable_storage_t){
-            .mapping = memory->storage.contents,
-            .memory = memory->storage.handle,
-            .device_address = memory->device_address,
-        };
-      }
+      status = iree_hal_amd_xdna_executable_allocate_dma_storage(
+          function->context, &plan->record, &allocation->memory,
+          &invocation->storage[i]);
     }
   }
   if (iree_status_is_ok(status)) {
