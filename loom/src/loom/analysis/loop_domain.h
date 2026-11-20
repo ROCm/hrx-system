@@ -43,6 +43,13 @@ bool loom_loop_domain_proven_nonempty(loom_value_facts_t lower_bound,
                                       loom_value_facts_t upper_bound,
                                       loom_value_facts_t step);
 
+// Returns true when every admitted domain executes zero or one iteration. Uses
+// the largest bound distance and smallest positive step, without requiring an
+// exact step or a representable terminal induction value.
+bool loom_loop_domain_proven_at_most_once(loom_value_facts_t lower_bound,
+                                          loom_value_facts_t upper_bound,
+                                          loom_value_facts_t step);
+
 // Bound comparison semantics for a header-tested integer recurrence.
 enum loom_loop_bound_flag_bits_e {
   // Unsigned ascending exclusive comparison: induction value < bound.

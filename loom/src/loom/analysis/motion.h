@@ -169,8 +169,8 @@ typedef struct loom_motion_loop_entry_plan_t {
   loom_op_t** operations;
   // Number of selected operations; zero when no ordinary read can move.
   uint32_t count;
-  // Number of selected ordinary reads whose memory is invariant in the loop.
-  uint32_t read_count;
+  // Whether entry is unproven and the moved operations need an explicit guard.
+  bool requires_guard;
 } loom_motion_loop_entry_plan_t;
 
 // Plans a guarded preheader without mutating IR. The caller must preserve the
@@ -180,7 +180,8 @@ typedef struct loom_motion_loop_entry_plan_t {
 // ordinary reads proven stable by the shared memory analysis. Operands and
 // maintained type/attribute dependencies are visited once in source order.
 // Plans remain valid until loop effects or their input identities change;
-// construct every plan before introducing new regions.
+// construct every plan before introducing new regions. Counted domains proven
+// to execute at most once have no repeated work to remove and return no plan.
 iree_status_t loom_motion_plan_loop_entry(
     loom_motion_analysis_t* analysis, loom_loop_like_t loop,
     loom_motion_loop_entry_plan_t* out_plan);

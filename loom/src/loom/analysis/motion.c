@@ -774,6 +774,24 @@ iree_status_t loom_motion_plan_loop_entry(
     loom_motion_analysis_t* analysis, loom_loop_like_t loop,
     loom_motion_loop_entry_plan_t* out_plan) {
   *out_plan = (loom_motion_loop_entry_plan_t){0};
+  out_plan->requires_guard = true;
+  if (loom_loop_like_has_counted_range(loop)) {
+    const loom_value_id_t lower = loom_loop_like_lower_bound(loop);
+    const loom_value_facts_t lower_facts =
+        loom_value_fact_table_lookup(analysis->fact_table, lower);
+    const loom_value_facts_t upper_facts = loom_value_fact_table_lookup(
+        analysis->fact_table, loom_loop_like_upper_bound(loop));
+    const loom_value_facts_t step_facts = loom_value_fact_table_lookup(
+        analysis->fact_table, loom_loop_like_step(loop));
+    // Pipeline tails frequently contain zero-or-one-iteration loops. Guarding
+    // their reads saves no repeated execution and only grows transient IR.
+    if (loom_loop_domain_proven_at_most_once(lower_facts, upper_facts,
+                                             step_facts)) {
+      return iree_ok_status();
+    }
+    out_plan->requires_guard =
+        !loom_loop_domain_proven_nonempty(lower_facts, upper_facts, step_facts);
+  }
   loom_block_t* body = loom_region_entry_block(loom_loop_like_body(loop));
   if (!analysis->planned_values) {
     const iree_host_size_t word_count =
@@ -788,6 +806,7 @@ iree_status_t loom_motion_plan_loop_entry(
       analysis->arena, body->op_count, sizeof(*out_plan->operations),
       (void**)&out_plan->operations));
 
+  bool has_read = false;
   iree_status_t status = iree_ok_status();
   for (loom_op_t* op = body->first_op; op && iree_status_is_ok(status);
        op = op->next_op) {
@@ -811,7 +830,7 @@ iree_status_t loom_motion_plan_loop_entry(
       continue;
     }
     out_plan->operations[out_plan->count++] = op;
-    out_plan->read_count += is_read;
+    has_read |= is_read;
     const loom_value_id_t* results = loom_op_const_results(op);
     for (uint16_t i = 0; i < op->result_count; ++i) {
       const loom_value_ordinal_t ordinal =
@@ -831,7 +850,7 @@ iree_status_t loom_motion_plan_loop_entry(
           ~(UINT64_C(1) << (ordinal % 64));
     }
   }
-  if (!out_plan->read_count) {
+  if (!has_read) {
     out_plan->count = 0;
   }
   return status;

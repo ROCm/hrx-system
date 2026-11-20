@@ -324,7 +324,7 @@ iree_status_t loom_licm_run(loom_pass_t* pass, loom_module_t* module,
     status = loom_loop_entry_hoist(&rewriter, entry->loop, &entry->plan);
     any_changed = true;
     context.statistics->ops_hoisted += entry->plan.count;
-    ++context.statistics->entry_guards;
+    context.statistics->entry_guards += entry->plan.requires_guard;
   }
 
   if (iree_status_is_ok(status) && any_changed) {

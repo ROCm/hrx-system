@@ -26,7 +26,8 @@ bool loom_loop_entry_can_guard(const loom_module_t* module,
 // the first body iteration executes. The original loop, including its condition
 // and recurrence semantics, is retained. Empty loops yield their original
 // initial/false-condition tuple. Structural mutation invalidates analyses, so
-// callers build all plans before emitting guards.
+// callers build all plans before emitting guards. A plan with proven loop entry
+// moves directly before the loop without constructing an additional guard.
 iree_status_t loom_loop_entry_hoist(loom_rewriter_t* rewriter,
                                     loom_loop_like_t loop,
                                     const loom_motion_loop_entry_plan_t* plan);

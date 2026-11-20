@@ -14,9 +14,9 @@
 typedef struct loom_motion_memory_scope_t {
   // Loop owning these repeated regions; identity in the completed index.
   const loom_op_t* loop;
-  // First effect position in the body, including nested regions.
+  // First effect position in the repeated regions, including nested regions.
   uint32_t begin;
-  // Position following all effects in the body.
+  // Position following all effects in the repeated regions.
   uint32_t end;
 } loom_motion_memory_scope_t;
 

@@ -137,3 +137,51 @@ func.def @nonempty_after_nested_control(%input: view<1xi32>, %again: i1, %initia
   }
   func.return %result : i32
 }
+
+// ====
+
+// A pipeline tail with at most one iteration has no repeated read to remove.
+func.def @single_iteration_tail(%input: view<1xi32>, %length: index, %initial: i32) -> (i32) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %end = index.assume %length [range(%length, 0, 1)] : index
+  %result = scf.for %i = [%c0 to %end step %c1](%carry = %initial : i32) -> (i32) {
+    %loaded = view.load %input[0] : view<1xi32> -> i32
+    %sum = scalar.addi %carry, %loaded : i32
+    scf.yield %sum : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+// Entry is already guaranteed, including for the non-speculatable address
+// conversion. Moving the whole chain needs no additional branch or result tuple.
+func.def @nonempty_address_chain(%input: buffer, %slot: i32, %length: index, %initial: i32) -> (i32) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %end = index.assume %length [range(%length, 2, 8)] : index
+  %result = scf.for %i = [%c0 to %end step %c1](%carry = %initial : i32) -> (i32) {
+    %position = index.cast %slot : i32 to index
+    %view = buffer.view %input[%position] : buffer -> view<1xi32>
+    %loaded = view.load %view[0] : view<1xi32> -> i32
+    %sum = scalar.addi %carry, %loaded : i32
+    scf.yield %sum : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @nonempty_address_chain(%input: buffer, %slot: i32, %length: index, %initial: i32) -> (i32) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %end = index.assume %length [range(%length, 2, 8)] : index
+  %position = index.cast %slot : i32 to index
+  %view = buffer.view %input[%position] : buffer -> view<1xi32>
+  %loaded = view.load %view[0] : view<1xi32> -> i32
+  %result = scf.for %i = [%c0 to %end step %c1](%carry = %initial : i32) -> (i32) {
+    %sum = scalar.addi %carry, %loaded : i32
+    scf.yield %sum : i32
+  }
+  func.return %result : i32
+}

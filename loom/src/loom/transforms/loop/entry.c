@@ -80,6 +80,14 @@ static iree_status_t loom_loop_entry_build_condition(
 static iree_status_t loom_loop_entry_hoist_impl(
     loom_rewriter_t* rewriter, loom_loop_like_t loop,
     const loom_motion_loop_entry_plan_t* plan) {
+  if (!plan->requires_guard) {
+    iree_status_t status = iree_ok_status();
+    for (uint32_t i = 0; i < plan->count && iree_status_is_ok(status); ++i) {
+      status =
+          loom_rewriter_move_before(rewriter, plan->operations[i], loop.op);
+    }
+    return status;
+  }
   loom_builder_t* builder = &rewriter->builder;
   loom_builder_set_before(builder, loop.op);
   loom_ir_remap_t remap;
