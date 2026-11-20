@@ -12,8 +12,8 @@ func.decl import("prepare") @source_scope(%scope: buffer) -> (i32)
 
 func.decl @tiny_storage(%maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64) -> (buffer, buffer, buffer, buffer, buffer)
 
-// One shared command handles every host token/span bucket. The cold program
-// owns storage geometry; the host owns physical page IDs and recurrent slots.
+// One command handles every submission within the token and span capacities.
+// Preparation sizes storage. The host owns physical page IDs and recurrent slots.
 func.def public @text_prepare_v2(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64, %draft_depth: i32, %span_capacity: i64, %weights: buffer, %options: buffer) -> (i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer) {
   %c0_source = scalar.constant 0 : i32
   %origin = index.constant 0 : offset

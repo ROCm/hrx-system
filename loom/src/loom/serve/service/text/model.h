@@ -130,8 +130,9 @@ typedef struct loom_serve_text_options_t {
   // Maximum distinct rows in a submitted epoch. Zero reserves no epoch
   // storage for a model used exclusively through its isolated row entry points.
   iree_host_size_t span_capacity;
-  // Proposed tokens after each known anchor (0-7). Zero disables drafting;
-  // the source bootstrap validates its supported nonzero depths.
+  // Maximum proposals after an anchor, strictly less than
+  // LOOM_SERVICE_TEXT_MAX_EPOCH_OUTPUTS. Zero disables drafting. The model's
+  // preparation program validates the nonzero depths it supports.
   iree_host_size_t draft_depth;
   // Device assertion classes/reporting applied to every JIT kernel pipeline.
   // Initialize structure type and size even when no checks are enabled.
