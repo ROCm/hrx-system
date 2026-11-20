@@ -67,6 +67,10 @@ struct NativeState {
   std::vector<Command> commands;
   // Independent firmware address returned for the private instruction heap.
   uint64_t firmware_address = UINT64_C(0x8000000);
+  // First caller-owned byte, as reported by the context's allocation profile.
+  uint64_t instruction_prefix_size = 0;
+  // PDI address supplied to firmware at CU configuration, live across leases.
+  uint64_t configured_pdi_address = 0;
   // Queried policy controlling native completion-buffer sharing.
   bool shared_kernel_buffers = false;
   // CPU-visible native progress fence.
@@ -171,7 +175,8 @@ NTSTATUS APIENTRY CreateAllocation(D3DKMT_CREATEALLOCATION* create) {
                 &native_state->firmware_address, sizeof(uint64_t));
     // Native storage has no zero-fill contract. Poison both the reserved
     // prefix and the start of the application-visible range.
-    std::memset(allocation.pointer, 0xA5, 32768 + 64);
+    std::memset(allocation.pointer, 0xA5,
+                native_state->instruction_prefix_size + 64);
   }
   info->hAllocation =
       static_cast<D3DKMT_HANDLE>(native_state->allocations.size());
@@ -277,7 +282,7 @@ NTSTATUS APIENTRY Submit(const D3DKMT_SUBMITCOMMANDTOHWQUEUE* submit) {
     EXPECT_EQ(native_state->allocations[ReadU64(bytes, 8)].type, 0x3323u);
     EXPECT_EQ(ReadU64(bytes, 16), 4096u);
     EXPECT_EQ(ReadU64(bytes, 24),
-              AMDF_WINDOWS_XDNA_PRIVATE_BOOTSTRAP_SIZE + 0x10000);
+              native_state->instruction_prefix_size + 0x10000);
     EXPECT_EQ(ReadU64(bytes, 32), opcode == 1 ? 1u : 0u);
     for (size_t offset = 40; offset < 120; offset += 8) {
       EXPECT_EQ(ReadU64(bytes, offset), 0u);
@@ -286,14 +291,17 @@ NTSTATUS APIENTRY Submit(const D3DKMT_SUBMITCOMMANDTOHWQUEUE* submit) {
     EXPECT_EQ(submit->PrivateDriverDataSize, header_length + 520);
     auto* response =
         reinterpret_cast<uint64_t*>(ReadU64(bytes, response_address_offset));
-    const uint64_t pdi_address =
-        native_state->firmware_address +
-        native_state->bootstrap_publication.byte_offset;
-    EXPECT_EQ(response[1], pdi_address);
     const auto* configuration =
         static_cast<const uint8_t*>(bytes) + header_length;
     EXPECT_EQ(ReadU32(configuration, 0), 1u);
-    EXPECT_EQ(ReadU64(configuration, 8), pdi_address);
+    const uint64_t pdi_address = ReadU64(configuration, 8);
+    EXPECT_EQ(response[1], pdi_address);
+    // CONFIG_CU drops the low 15 address bits on NPU4 and NPU5. The address
+    // decoded by firmware must still point to the bytes we published.
+    native_state->configured_pdi_address = (pdi_address >> 15) << 15;
+    EXPECT_EQ(native_state->configured_pdi_address,
+              native_state->firmware_address +
+                  native_state->bootstrap_publication.byte_offset);
     // The interpreter's CU function is zero, independent of its PDI size.
     EXPECT_EQ(ReadU32(configuration, 16), 0u);
     response[0] = native_state->initialize_result;
@@ -338,17 +346,27 @@ NTSTATUS APIENTRY Submit(const D3DKMT_SUBMITCOMMANDTOHWQUEUE* submit) {
       native_state->instruction_address = ReadU64(bytes, header_length + 8);
       native_state->instruction_word_count =
           ReadU32(bytes, header_length + 32) / sizeof(uint32_t);
-      if (native_state->instruction_address == native_state->firmware_address) {
+      const uint64_t offset =
+          native_state->instruction_address - native_state->firmware_address;
+      if (offset < native_state->instruction_prefix_size) {
         const auto& aperture = native_state->allocations[2];
-        EXPECT_EQ(aperture.publication.byte_offset, 0u);
+        EXPECT_EQ(native_state->instruction_address % 32768, 0u);
+        if (offset + 64 > native_state->instruction_prefix_size) {
+          ADD_FAILURE() << "Admission program extends into caller instructions";
+          return static_cast<NTSTATUS>(0xC000000Du);
+        }
+        EXPECT_EQ(aperture.publication.byte_offset, offset);
         EXPECT_EQ(aperture.publication.byte_length, 64u);
-        const auto* transaction = static_cast<const uint8_t*>(aperture.pointer);
+        const auto* transaction =
+            static_cast<const uint8_t*>(aperture.pointer) + offset;
         EXPECT_EQ(transaction[8], 9);
         EXPECT_EQ(transaction[16], 8);
         EXPECT_EQ(ReadU32(transaction, 20), 368u);
+        const uint64_t pdi_address = ReadU64(transaction, 24);
+        EXPECT_EQ(pdi_address, native_state->configured_pdi_address);
         const uint64_t pdi_offset =
-            ReadU64(transaction, 24) - native_state->firmware_address;
-        if (pdi_offset > AMDF_WINDOWS_XDNA_PRIVATE_BOOTSTRAP_SIZE - 368) {
+            pdi_address - native_state->firmware_address;
+        if (pdi_offset > native_state->instruction_prefix_size - 368) {
           ADD_FAILURE() << "Admission PDI outside the provider prefix";
           return static_cast<NTSTATUS>(0xC000000Du);
         }
@@ -492,6 +510,8 @@ class WindowsXdnaKernelExecutionTest
                   &context_, &context_.kernel_execution),
               AMDF_STATUS_OK);
     amdf_xdna_umd_context_query_memory_profile(&context_, &profile_);
+    native_.instruction_prefix_size =
+        profile_.allocation.native_byte_length_prefix;
     create_.byte_length = profile_.allocation.byte_length_granularity;
     create_.minimum_alignment = profile_.allocation.minimum_alignment;
     create_.device_access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
@@ -570,6 +590,7 @@ TEST_P(WindowsXdnaKernelExecutionTest,
   ASSERT_EQ(query, AMDF_STATUS_OK);
   EXPECT_EQ(info.binding_mode, AMDF_XDNA_RESULT_BUFFER_BINDING_RANGE);
   EXPECT_EQ(info.minimum_byte_length, 4096u);
+  EXPECT_EQ(info.maximum_byte_length, profile_.allocation.maximum_byte_length);
   EXPECT_EQ(info.byte_offset_alignment, 4096u);
   EXPECT_EQ(info.byte_length_granularity, 4096u);
   amdf_xdna_umd_memory_result_t result = {};
@@ -630,6 +651,14 @@ TEST_P(WindowsXdnaKernelExecutionTest, AdmitsElfOnlyAfterNativeCompletion) {
   ASSERT_EQ(
       amdf_windows_xdna_kernel_execution_acquire_queue(execution, 2, required),
       AMDF_STATUS_OK);
+  EXPECT_GE(native_.instruction_address, native_.firmware_address);
+  EXPECT_LT(native_.instruction_address, result.device_address);
+  const auto* caller_bytes =
+      static_cast<const uint8_t*>(native_.allocations[2].pointer) +
+      result.source_byte_offset;
+  for (size_t i = 0; i < 64; ++i) {
+    EXPECT_EQ(caller_bytes[i], 0xA5);
+  }
   const amdf_xdna_umd_kernel_command_t command = {result.device_address, 64};
   uint64_t point = 0;
   ASSERT_EQ(amdf_windows_xdna_kernel_execution_submit(execution, 0, 1, &command,
@@ -753,7 +782,7 @@ TEST_P(WindowsXdnaKernelExecutionTest,
     for (uint32_t slot = 0; slot < 7; ++slot) {
       const auto* expected_list =
           static_cast<const uint8_t*>(native_.allocations[2].pointer) +
-          slot * 4096;
+          (slot + 1) * 4096;
       EXPECT_EQ(native_.commands[slot].list, expected_list);
       EXPECT_EQ(native_.commands[slot].command_count, command_count);
     }
@@ -833,7 +862,7 @@ TEST_P(WindowsXdnaKernelExecutionTest,
         AMDF_STATUS_OK);
   }
   EXPECT_EQ(native_.commands[0].list,
-            static_cast<const uint8_t*>(native_.allocations[2].pointer));
+            static_cast<const uint8_t*>(native_.allocations[2].pointer) + 4096);
   *native_.commands[6].response = 5;
   native_.progress = last;
   EXPECT_EQ(amdf_xdna_umd_kernel_queue_query_terminal_status(queue),
@@ -949,7 +978,7 @@ TEST_P(WindowsXdnaKernelExecutionTest,
 
 TEST_P(WindowsXdnaKernelExecutionTest,
        OwnsOneApertureAndSubmitsImmutableRanges) {
-  EXPECT_EQ(profile_.allocation.native_byte_length_prefix, 32768u);
+  const uint64_t prefix = profile_.allocation.native_byte_length_prefix;
   const uint64_t granularity =
       profile_.allocation.native_byte_length_granularity;
   const uint64_t native_byte_length =
@@ -962,9 +991,11 @@ TEST_P(WindowsXdnaKernelExecutionTest,
   ASSERT_EQ(amdf_xdna_umd_memory_prepare_private(&context_, &profile_, &create_,
                                                  &memory_, &result),
             AMDF_STATUS_OK);
-  EXPECT_EQ(result.device_address, native_.firmware_address + 32768);
-  EXPECT_EQ(result.source_byte_offset, 32768u);
-  EXPECT_EQ(result.byte_length, UINT64_C(0x4000000) - 32768);
+  EXPECT_EQ(result.device_address, native_.firmware_address + prefix);
+  EXPECT_EQ(result.device_address % device_info_.instruction.address_alignment,
+            0u);
+  EXPECT_EQ(result.source_byte_offset, prefix);
+  EXPECT_EQ(result.byte_length, UINT64_C(0x4000000) - prefix);
   EXPECT_EQ(result.native_allocation_byte_length, UINT64_C(0x4000000));
   EXPECT_EQ(result.native_allocation_byte_length, native_byte_length);
   EXPECT_EQ(result.address_kinds, UINT64_C(1)
@@ -973,7 +1004,7 @@ TEST_P(WindowsXdnaKernelExecutionTest,
   ASSERT_EQ(native_.allocations.size(), 3u);
   EXPECT_EQ(native_.bootstrap_publication.count, 1u);
   const uint64_t pdi_offset = native_.bootstrap_publication.byte_offset;
-  ASSERT_LE(pdi_offset + 368, 32768u);
+  ASSERT_LE(pdi_offset + 368, prefix);
   EXPECT_EQ(native_.bootstrap_publication.byte_length, 368u);
   const auto* aperture =
       static_cast<const uint8_t*>(native_.allocations[2].pointer);
@@ -981,13 +1012,13 @@ TEST_P(WindowsXdnaKernelExecutionTest,
   EXPECT_EQ(ReadU32(bootstrap, 340), 0x004F4443u);
   EXPECT_EQ(ReadU32(bootstrap, 348), 1u);
   EXPECT_EQ(ReadU32(bootstrap, 356), 0x111u);
-  for (size_t i = 0; i < 32768 + 64; ++i) {
+  for (size_t i = 0; i < prefix + 64; ++i) {
     if (i < pdi_offset || i >= pdi_offset + 368) {
       ASSERT_EQ(aperture[i], 0xA5) << "byte " << i;
     }
   }
-  auto* instructions =
-      static_cast<uint8_t*>(native_.allocations[2].pointer) + 32768;
+  auto* instructions = static_cast<uint8_t*>(native_.allocations[2].pointer) +
+                       result.source_byte_offset;
   std::memset(instructions, 0xA7, 64);
   auto* execution = context_.kernel_execution;
   ASSERT_EQ(amdf_windows_xdna_kernel_execution_acquire_queue(execution, 3, 0),

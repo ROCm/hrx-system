@@ -22,10 +22,13 @@ extern "C" {
 typedef struct amdf_windows_xdna_kernel_execution_t
     amdf_windows_xdna_kernel_execution_t;
 
-// The native context binds one allocation. Its prefix contains bounded command
-// list cells and the bootstrap PDI. The remainder belongs to the caller.
+// The native context binds one instruction allocation of this exact size.
 #define AMDF_WINDOWS_XDNA_PRIVATE_APERTURE_SIZE UINT64_C(0x4000000)
-#define AMDF_WINDOWS_XDNA_PRIVATE_BOOTSTRAP_SIZE UINT64_C(0x8000)
+
+// Byte offset of the caller's first instruction after the retained CU setup
+// PDI, command-list cells, and independently aligned ELF admission program.
+uint64_t amdf_windows_xdna_instruction_prefix_size(
+    uint64_t instruction_alignment);
 
 // Realizes and binds caller-owned instruction backing to this context. The
 // allocation owns partial progress on failure. The context admits one such
