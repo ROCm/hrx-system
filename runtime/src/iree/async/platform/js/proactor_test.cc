@@ -154,7 +154,7 @@ TEST_F(JsProactorTest, SubmitMultipleNops) {
     ops[i] = &nops[i].base;
   }
   iree_async_operation_list_t list = {ops, 4};
-  IREE_ASSERT_OK(proactor_->vtable->submit(proactor_, list));
+  IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
   // All complete on single poll.
   iree_host_size_t poll_completed = 0;
@@ -266,7 +266,7 @@ TEST_F(JsProactorTest, BatchValidationFailureIsAtomic) {
   iree_async_operation_list_t operation_list = {operations,
                                                 IREE_ARRAYSIZE(operations)};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
-                        proactor_->vtable->submit(proactor_, operation_list));
+                        iree_async_proactor_submit(proactor_, operation_list));
 
   EXPECT_EQ(js_proactor()->pending_head, nullptr);
   EXPECT_EQ(nop_completed_count, 0);
@@ -316,7 +316,7 @@ TEST_F(JsProactorTest, BatchReservationFailureIsAtomicAndRetryable) {
   iree_async_operation_list_t operation_list = {operations,
                                                 IREE_ARRAYSIZE(operations)};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
-                        proactor_->vtable->submit(proactor_, operation_list));
+                        iree_async_proactor_submit(proactor_, operation_list));
 
   // The first batch timer acquired the final slot before the second failed.
   // Rollback must leave only the preexisting blocker and publish no work.
@@ -341,7 +341,7 @@ TEST_F(JsProactorTest, BatchReservationFailureIsAtomicAndRetryable) {
   EXPECT_EQ(iree_async_js_token_table_count(&js_proactor()->token_table), 0u);
 
   // The caller can retry the exact same batch once capacity becomes available.
-  IREE_ASSERT_OK(proactor_->vtable->submit(proactor_, operation_list));
+  IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, operation_list));
   EXPECT_EQ(iree_async_js_token_table_count(&js_proactor()->token_table), 2u);
   EXPECT_TRUE(timer0.platform.js.is_token_active);
   EXPECT_TRUE(timer1.platform.js.is_token_active);
@@ -508,7 +508,7 @@ TEST_F(JsProactorTest, TwoLinkedNops) {
 
   iree_async_operation_t* ops[] = {&nop0.base, &nop1.base};
   iree_async_operation_list_t list = {ops, 2};
-  IREE_ASSERT_OK(proactor_->vtable->submit(proactor_, list));
+  IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
   iree_host_size_t poll_completed = 0;
   IREE_ASSERT_OK(iree_async_proactor_poll(proactor_, iree_make_timeout_ms(0),
@@ -537,7 +537,7 @@ TEST_F(JsProactorTest, LinkedNopChain) {
     ops[i] = &nops[i].base;
   }
   iree_async_operation_list_t list = {ops, 4};
-  IREE_ASSERT_OK(proactor_->vtable->submit(proactor_, list));
+  IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
   iree_host_size_t poll_completed = 0;
   IREE_ASSERT_OK(iree_async_proactor_poll(proactor_, iree_make_timeout_ms(0),
@@ -558,7 +558,7 @@ TEST_F(JsProactorTest, TrailingLinkedRejected) {
   iree_async_operation_t* ops[] = {&nop.base};
   iree_async_operation_list_t list = {ops, 1};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        proactor_->vtable->submit(proactor_, list));
+                        iree_async_proactor_submit(proactor_, list));
 }
 
 TEST_F(JsProactorTest, MixedLinkedAndUnlinkedBatch) {
@@ -572,7 +572,7 @@ TEST_F(JsProactorTest, MixedLinkedAndUnlinkedBatch) {
 
   iree_async_operation_t* ops[] = {&nops[0].base, &nops[1].base, &nops[2].base};
   iree_async_operation_list_t list = {ops, 3};
-  IREE_ASSERT_OK(proactor_->vtable->submit(proactor_, list));
+  IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
   iree_host_size_t poll_completed = 0;
   IREE_ASSERT_OK(iree_async_proactor_poll(proactor_, iree_make_timeout_ms(0),

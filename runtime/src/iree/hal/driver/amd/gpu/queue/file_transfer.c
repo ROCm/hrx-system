@@ -483,7 +483,7 @@ static void iree_hal_amd_gpu_file_window_io(
             iree_hal_amd_gpu_file_window_io_complete, window});
   }
   iree_atomic_store(&window->pending, window->count, iree_memory_order_relaxed);
-  status = iree_async_proactor_submit(
+  status = iree_hal_file_request_submit_batch(
       window->proactor, (iree_async_operation_list_t){requests, window->count});
   if (!iree_status_is_ok(status)) {
     // A rejected list owns no callbacks. Accepted earlier windows still drain.

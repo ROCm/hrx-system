@@ -253,7 +253,8 @@ static iree_host_size_t iree_async_proactor_js_complete(
 }
 
 static iree_status_t iree_async_proactor_js_submit(
-    iree_async_proactor_t* proactor, iree_async_operation_list_t operations) {
+    iree_async_proactor_t* proactor, iree_async_operation_list_t operations,
+    iree_host_size_t* out_retry_batch_size) {
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_async_proactor_js_t* js_proactor = iree_async_proactor_js_cast(proactor);
 

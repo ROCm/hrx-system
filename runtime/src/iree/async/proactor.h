@@ -651,8 +651,11 @@ typedef struct iree_async_proactor_vtable_t {
   iree_async_proactor_capabilities_t (*query_capabilities)(
       iree_async_proactor_t* proactor);
 
+  // A caller that can defer admission supplies a zero-initialized retry size.
+  // Set it only when native submission slots prevented whole-batch admission.
   iree_status_t (*submit)(iree_async_proactor_t* proactor,
-                          iree_async_operation_list_t operations);
+                          iree_async_operation_list_t operations,
+                          iree_host_size_t* out_retry_batch_size);
   iree_status_t (*poll)(iree_async_proactor_t* proactor, iree_timeout_t timeout,
                         iree_host_size_t* out_completed_count);
   void (*end_polling)(iree_async_proactor_t* proactor);
@@ -931,14 +934,29 @@ iree_async_proactor_query_capabilities(iree_async_proactor_t* proactor) {
 //   IREE_STATUS_INVALID_ARGUMENT: Malformed operation in the batch.
 static inline iree_status_t iree_async_proactor_submit(
     iree_async_proactor_t* proactor, iree_async_operation_list_t operations) {
-  return proactor->vtable->submit(proactor, operations);
+  return proactor->vtable->submit(proactor, operations, NULL);
+}
+
+// Attempts whole-batch submission with the same validation and ownership as
+// submit(). On OK, zero |out_retry_batch_size| means the entire list was
+// accepted. A positive value means none was accepted. The poll owner can
+// progress previously prepared work and submit up to that many operations at
+// a time. A smaller size is returned only for unlinked operations. A caller
+// that requires atomic submission always retries the whole list or reports
+// that it is too large. Allocation, platform, and other failures return their
+// original status and transfer no ownership.
+static inline iree_status_t iree_async_proactor_try_submit(
+    iree_async_proactor_t* proactor, iree_async_operation_list_t operations,
+    iree_host_size_t* out_retry_batch_size) {
+  *out_retry_batch_size = 0;
+  return proactor->vtable->submit(proactor, operations, out_retry_batch_size);
 }
 
 // Submits a single operation. Convenience wrapper around submit().
 static inline iree_status_t iree_async_proactor_submit_one(
     iree_async_proactor_t* proactor, iree_async_operation_t* operation) {
   iree_async_operation_list_t list = {&operation, 1};
-  return proactor->vtable->submit(proactor, list);
+  return iree_async_proactor_submit(proactor, list);
 }
 
 // Drains completions and invokes callbacks.

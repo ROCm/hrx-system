@@ -413,7 +413,7 @@ void iree_async_proactor_io_uring_submit_continuation_chain(
 
   iree_async_operation_list_t chain_list = {chain_array, chain_count};
   iree_status_t submit_status =
-      iree_async_proactor_io_uring_submit(&proactor->base, chain_list);
+      iree_async_proactor_io_uring_submit(&proactor->base, chain_list, NULL);
   if (!iree_status_is_ok(submit_status)) {
     // Submission may have rebuilt or consumed the intrusive links. Restore the
     // caller-owned chain before queueing the failed head and cancelled tail.
