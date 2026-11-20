@@ -34,6 +34,34 @@ struct ScopedMemoryGate {
   ~ScopedMemoryGate() { gate->Release(); }
 };
 
+TEST(XdnaQueueTest, RejectsDmaImageRangeBeyondNativeCapacity) {
+  QueueHarness harness;
+  harness.native.next_address = 0x1001000;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  auto& limits = harness.context->data_source.profile.allocation;
+  limits.minimum_alignment = 4096;
+  limits.maximum_alignment = 4096;
+  limits.maximum_byte_length = 7 * 4096;
+  iree::hal::amd::xdna::testing::ImageFixture fixture;
+  fixture.allocations[1].alignment = 8 * 4096;
+  const auto bytes = fixture.Build();
+
+  const auto* targets =
+      iree_hal_device_spec_executables(iree_hal_device_spec(harness.device));
+  iree_hal_executable_load_params_t params;
+  iree_hal_executable_load_params_initialize(&params);
+  params.executable_data =
+      iree_make_const_byte_span(bytes.data(), bytes.size());
+  iree_hal_executable_t* executable = nullptr;
+  const size_t live_before = harness.native.live_memories;
+  IREE_EXPECT_STATUS_IS(
+      iree::StatusCode::kOutOfRange,
+      iree_hal_executable_load(iree_hal_queue_family(harness.queue),
+                               &targets->targets[0], &params, &executable));
+  EXPECT_EQ(executable, nullptr);
+  EXPECT_EQ(harness.native.live_memories, live_before);
+}
+
 TEST(XdnaQueueTest, CachedQueueAllocationPublishesContractBeforeDispatch) {
   QueueHarness harness;
   harness.native.HoldRetirement();
