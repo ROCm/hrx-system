@@ -273,7 +273,7 @@ In another terminal, download the small reference recording and submit it:
 
 ```sh
 curl --fail --location https://raw.githubusercontent.com/ROCm/hrx-loom-library/4317508bf5adb251a284ea8dc4e5a24a11bd1c17/model/moonshine-ai/moonshine-streaming-tiny/test/short.pcm --output=short.pcm
-curl --fail-with-body -H 'Expect:' http://127.0.0.1:8080/v1/audio/transcriptions -F model=moonshine-ai/moonshine-streaming-tiny -F 'file=@short.pcm;headers="Content-Type: audio/pcm;rate=16000;channels=1"'
+curl --fail-with-body http://127.0.0.1:8080/v1/audio/transcriptions -F model=moonshine-ai/moonshine-streaming-tiny -F 'file=@short.pcm;headers="Content-Type: audio/pcm;rate=16000;channels=1"'
 ```
 
 On Windows PowerShell, download the same recording and preserve the multipart
@@ -281,7 +281,7 @@ header's quotes with the `--%` stop-parsing token:
 
 ```powershell
 curl.exe --fail --location https://raw.githubusercontent.com/ROCm/hrx-loom-library/4317508bf5adb251a284ea8dc4e5a24a11bd1c17/model/moonshine-ai/moonshine-streaming-tiny/test/short.pcm --output=short.pcm
-curl.exe --% --fail-with-body -H "Expect:" http://127.0.0.1:8080/v1/audio/transcriptions -F model=moonshine-ai/moonshine-streaming-tiny -F "file=@short.pcm;headers=\"Content-Type: audio/pcm;rate=16000;channels=1\""
+curl.exe --% --fail-with-body http://127.0.0.1:8080/v1/audio/transcriptions -F model=moonshine-ai/moonshine-streaming-tiny -F "file=@short.pcm;headers=\"Content-Type: audio/pcm;rate=16000;channels=1\""
 ```
 
 The response contains:
