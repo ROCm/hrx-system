@@ -74,19 +74,20 @@ TEST(Aie2pProgramCatalogTest, SharesRelocatedStreamsAndPreservesInvocation) {
       &transport, &binding, &layout, &linked, &arena, &catalog, &requirement));
   ASSERT_TRUE(iree_string_view_is_empty(requirement));
   EXPECT_EQ(catalog.offset, 132u);
-  EXPECT_EQ(catalog.byte_length, 88u);
+  EXPECT_EQ(catalog.memory.column, binding.memory.column);
+  EXPECT_EQ(catalog.memory.row, binding.memory.row);
   EXPECT_EQ(occupancy[1].memory_length, 220u);
-  ASSERT_EQ(catalog.record_count, 6u);
-  const auto& first = catalog.records[1].value.register_block_write32;
-  const auto& repeated = catalog.records[2].value.register_block_write32;
-  const auto& relocated = catalog.records[3].value.register_block_write32;
+  ASSERT_EQ(catalog.descriptor_count, 3u);
+  const auto& first = catalog.descriptors[0].value.register_block_write32;
+  const auto& repeated = catalog.descriptors[1].value.register_block_write32;
+  const auto& relocated = catalog.descriptors[2].value.register_block_write32;
   EXPECT_EQ(first.address, 0x1a0000u + 24 * 32);
   EXPECT_EQ(repeated.address, first.address + 32);
   EXPECT_EQ(relocated.address, first.address + 64);
   EXPECT_EQ(first.words[0], 11u);
   EXPECT_EQ(repeated.words[1], first.words[1]);
   EXPECT_EQ(relocated.words[1], first.words[1] + 11);
-  const auto& payload = catalog.records[4].value.register_block_write32;
+  const auto& payload = catalog.contents;
   EXPECT_EQ(payload.address, 0x100000u + catalog.offset);
   ASSERT_EQ(payload.word_count, 22u);
   for (size_t i = 0; i < 2; ++i) {
@@ -135,6 +136,15 @@ TEST(Aie2pProgramCatalogTest, SharesRelocatedStreamsAndPreservesInvocation) {
                                                     &arena, &program));
   EXPECT_EQ(program.array_record_count, 7u);
   EXPECT_EQ(program.array_records[0].value.register_write32.value, 2u);
+  EXPECT_EQ(program.array_records[1].value.register_write32.address,
+            catalog.reset.address);
+  EXPECT_EQ(program.array_records[1].value.register_write32.value,
+            catalog.reset.value);
+  EXPECT_EQ(program.array_records[5].value.register_block_write32.words,
+            payload.words);
+  EXPECT_EQ(program.array_records[6].value.register_write32.address,
+            catalog.reset.address);
+  EXPECT_EQ(program.array_records[6].value.register_write32.value, 0u);
   EXPECT_EQ(program.control_records, &invoke);
   EXPECT_EQ(program.control_record_count, 1u);
 
@@ -144,7 +154,7 @@ TEST(Aie2pProgramCatalogTest, SharesRelocatedStreamsAndPreservesInvocation) {
   IREE_ASSERT_OK(loom_aie2p_program_catalog_build(
       &transport, &binding, &layout, &linked, &arena, &catalog, &requirement));
   EXPECT_FALSE(iree_string_view_is_empty(requirement));
-  EXPECT_EQ(catalog.record_count, 0u);
+  EXPECT_EQ(catalog.descriptor_count, 0u);
   EXPECT_EQ(occupancy[1].memory_length, full);
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&pool);

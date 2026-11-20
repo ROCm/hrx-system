@@ -1248,7 +1248,8 @@ static iree_status_t loom_aie2p_configuration_place_workers(
       }
       if (plan->report) {
         const loom_source_storage_packing_range_t range = {
-            catalogs[i].offset, catalogs[i].byte_length};
+            catalogs[i].offset,
+            catalogs[i].contents.word_count * sizeof(uint32_t)};
         IREE_RETURN_IF_ERROR(loom_aie2p_configuration_report_reservations(
             plan->report, binding.memory, &range, 1));
       }

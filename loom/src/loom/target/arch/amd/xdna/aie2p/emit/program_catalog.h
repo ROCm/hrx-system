@@ -18,14 +18,18 @@ extern "C" {
 
 // Immutable, fully relocated control streams and their SRAM DMA descriptors.
 typedef struct loom_aie2p_program_catalog_t {
-  // Initialization records; the producer keeps all compute cores reset.
-  const loom_aie2p_program_record_t* records;
-  // Number of records needed for this worker's complete catalog.
-  iree_host_size_t record_count;
-  // Catalog offset within its admitted SRAM tile's allocation space.
+  // SRAM tile receiving the framed code.
+  loom_xdna_tile_coordinate_t memory;
+  // Starting byte offset in the tile's local SRAM.
   uint32_t offset;
-  // Framed bytes retained across every invocation.
-  uint32_t byte_length;
+  // Framed code at its absolute firmware write address.
+  loom_aie2p_program_register_block_write32_t contents;
+  // Engine control register and reset value used to publish the descriptors.
+  loom_aie2p_program_register_write32_t reset;
+  // Complete SRAM descriptor writes in native group order.
+  const loom_aie2p_program_record_t* descriptors;
+  // Number of descriptors; zero for workers with no replacement code.
+  iree_host_size_t descriptor_count;
 } loom_aie2p_program_catalog_t;
 
 // Reserves catalog storage after existing physical allocations, frames exact
