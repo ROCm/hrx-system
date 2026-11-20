@@ -162,22 +162,14 @@ static iree_status_t loom_pass_value_fact_owner_reserve_scope(
                                      reserved_values.first_value_id) {
     return loom_value_fact_table_reserve_range(&owner->table, reserved_values);
   }
-  const uint64_t reserved_end =
-      (uint64_t)reserved_values.first_value_id + reserved_values.capacity;
-  const uint64_t table_end =
-      (uint64_t)owner->table.first_value_id + owner->table.capacity;
-  const bool table_covers_range =
-      reserved_values.first_value_id >= owner->table.first_value_id &&
-      reserved_end <= table_end;
-  if (table_covers_range) {
-    return iree_ok_status();
-  }
-  const loom_value_id_t storage_first_value_id =
-      reserved_values.first_value_id &
-      ~(loom_value_id_t)LOOM_VALUE_FACT_SEGMENT_MASK;
-  const bool omits_existing_prefix =
-      storage_first_value_id > owner->table.first_value_id;
-  if (owner->table.capacity != 0 && omits_existing_prefix) {
+  const uint32_t first_page =
+      reserved_values.first_value_id >> LOOM_VALUE_FACT_SEGMENT_SHIFT;
+  const loom_value_id_t last_value_id =
+      reserved_values.first_value_id +
+      (loom_value_id_t)(reserved_values.capacity - 1);
+  const uint32_t last_page = last_value_id >> LOOM_VALUE_FACT_SEGMENT_SHIFT;
+  if (owner->table.page_count && first_page > owner->table.first_page &&
+      last_page >= owner->table.first_page + owner->table.page_count) {
     // The previous scope is dead and its direct-address interval cannot serve
     // this later producer-owned range. Return its blocks instead of retaining
     // both intervals or widening through unrelated earlier module values.

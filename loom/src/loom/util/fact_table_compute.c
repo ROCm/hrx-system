@@ -1491,10 +1491,6 @@ static bool loom_value_fact_table_operands_unchanged(
   uint32_t evaluated = UINT32_MAX;
   const loom_value_id_t* results = loom_op_const_results(op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
-    if ((iree_host_size_t)results[i] - table->first_value_id >=
-        table->capacity) {
-      return false;
-    }
     const uint32_t generation =
         loom_value_fact_table_replay_generation(table, results[i]);
     if (!generation || (generation & UINT32_C(1))) {

@@ -167,137 +167,102 @@ struct loom_value_fact_region_entry_t {
 static_assert(sizeof(loom_value_fact_region_entry_t) <= 80,
               "region execution facts must retain a compact cache footprint");
 
-static loom_value_facts_t* loom_value_fact_table_mutable_entry(
-    loom_value_fact_table_t* table, loom_value_id_t value_id) {
-  const iree_host_size_t index =
-      (iree_host_size_t)value_id - table->first_value_id;
-  if (index >= table->capacity) {
-    return NULL;
-  }
-  return &table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT]
-              ->entries[index & LOOM_VALUE_FACT_SEGMENT_MASK];
-}
-
-static iree_status_t loom_value_fact_table_allocate_segment(
-    loom_value_fact_table_t* table, loom_value_fact_segment_t** out_segment) {
-  loom_value_fact_segment_t* segment = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate(table->arena, sizeof(*segment), (void**)&segment));
-  memset(segment, 0, sizeof(*segment));
-  segment->next_touched_segment_id = LOOM_VALUE_ID_INVALID;
-  if (table->replay.generation) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        table->transient_arena, LOOM_VALUE_FACT_SEGMENT_CAPACITY,
-        sizeof(*segment->replay_generations),
-        (void**)&segment->replay_generations));
-    memset(segment->replay_generations, 0,
-           LOOM_VALUE_FACT_SEGMENT_CAPACITY *
-               sizeof(*segment->replay_generations));
-  }
-  *out_segment = segment;
+static iree_status_t loom_value_fact_segment_initialize_generations(
+    loom_value_fact_table_t* table, loom_value_fact_segment_t* segment) {
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      table->transient_arena, LOOM_VALUE_FACT_SEGMENT_CAPACITY,
+      sizeof(*segment->replay_generations),
+      (void**)&segment->replay_generations));
+  memset(
+      segment->replay_generations, 0,
+      LOOM_VALUE_FACT_SEGMENT_CAPACITY * sizeof(*segment->replay_generations));
   return iree_ok_status();
 }
 
-static iree_status_t loom_value_fact_table_ensure_range(
-    loom_value_fact_table_t* table, loom_value_id_t first_value_id,
-    iree_host_size_t end_value_id) {
-  if (first_value_id >= table->first_value_id &&
-      end_value_id <= table->first_value_id + table->capacity) {
+// Numeric definitions and reservations allocate the header and entries
+// together. Independent auxiliary publications need just the header until a
+// numeric definition actually lands in the same page.
+static iree_status_t loom_value_fact_table_back_page(
+    loom_value_fact_table_t* table, uint32_t page, bool numeric) {
+  loom_value_fact_page_t* slot = &table->segments[page - table->first_page];
+  if (*slot && (!numeric || (*slot & LOOM_VALUE_FACT_PAGE_NUMERIC))) {
     return iree_ok_status();
   }
-  const iree_host_size_t old_capacity = table->capacity;
-  first_value_id &= ~(loom_value_id_t)LOOM_VALUE_FACT_SEGMENT_MASK;
-  end_value_id =
-      iree_host_align(end_value_id, LOOM_VALUE_FACT_SEGMENT_CAPACITY);
-  if (old_capacity) {
-    first_value_id = iree_min(first_value_id, table->first_value_id);
-    end_value_id = iree_max(end_value_id, table->first_value_id + old_capacity);
+  loom_value_fact_segment_t* state = NULL;
+  const iree_host_size_t size =
+      numeric ? sizeof(loom_value_fact_numeric_segment_t) : sizeof(*state);
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(table->arena, size, (void**)&state));
+  memset(state, 0, size);
+  if (*slot) {
+    // A header-only page has never exposed a numeric pointer. Both lists use
+    // absolute page identities, so adding entries preserves every live link.
+    *state = *loom_value_fact_page_state(*slot);
+  } else {
+    if (table->replay.generation) {
+      IREE_RETURN_IF_ERROR(
+          loom_value_fact_segment_initialize_generations(table, state));
+    }
+    state->next_touched_segment_id = LOOM_VALUE_ID_INVALID;
+    state->next_allocated_page = table->first_allocated_page;
+    table->first_allocated_page = page + 1;
   }
-  const iree_host_size_t new_capacity = end_value_id - first_value_id;
-  const iree_host_size_t old_segment_count =
-      old_capacity >> LOOM_VALUE_FACT_SEGMENT_SHIFT;
-  const iree_host_size_t new_segment_count =
-      new_capacity >> LOOM_VALUE_FACT_SEGMENT_SHIFT;
-  const iree_host_size_t prefix_segment_count =
-      old_capacity ? (table->first_value_id - first_value_id) >>
-                         LOOM_VALUE_FACT_SEGMENT_SHIFT
-                   : 0;
+  *slot = (uintptr_t)state | (numeric ? LOOM_VALUE_FACT_PAGE_NUMERIC : 0);
+  return iree_ok_status();
+}
 
-  loom_value_fact_segment_t** segments = NULL;
-  const iree_host_size_t old_directory_offset =
-      old_capacity
+static iree_status_t loom_value_fact_table_ensure_directory(
+    loom_value_fact_table_t* table, uint32_t begin, uint32_t end) {
+  const uint32_t old_begin = table->first_page;
+  const uint32_t old_end = old_begin + table->page_count;
+  if (begin >= old_begin && end <= old_end) {
+    return iree_ok_status();
+  }
+  if (table->page_count) {
+    begin = iree_min(begin, old_begin);
+    end = iree_max(end, old_end);
+  }
+  const uint32_t count = end - begin;
+  const uint32_t prefix = table->page_count ? old_begin - begin : 0;
+  const uint32_t suffix = count - prefix - table->page_count;
+  const iree_host_size_t offset =
+      table->page_count
           ? (iree_host_size_t)(table->segments - table->segment_directory)
           : 0;
-  const iree_host_size_t old_directory_suffix =
-      table->segment_directory_capacity - old_directory_offset -
-      old_segment_count;
-  const iree_host_size_t suffix_segment_count =
-      new_segment_count - prefix_segment_count - old_segment_count;
-  loom_value_fact_segment_t** segment_directory = table->segment_directory;
-  iree_host_size_t segment_directory_capacity =
-      table->segment_directory_capacity;
-  if (prefix_segment_count <= old_directory_offset &&
-      suffix_segment_count <= old_directory_suffix) {
-    segments = table->segments - prefix_segment_count;
+  loom_value_fact_page_t* pages = NULL;
+  if (prefix <= offset && suffix <= table->segment_directory_capacity - offset -
+                                        table->page_count) {
+    pages = table->segments - prefix;
   } else {
-    iree_host_size_t directory_capacity = 1;
-    if (table->segment_directory_capacity &&
-        !iree_host_size_checked_mul(table->segment_directory_capacity, 2,
-                                    &directory_capacity)) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "fact segment directory overflow");
-    }
-    while (directory_capacity < new_segment_count) {
-      if (!iree_host_size_checked_mul(directory_capacity, 2,
-                                      &directory_capacity)) {
-        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "fact segment directory overflow");
-      }
-    }
-    loom_value_fact_segment_t** directory = NULL;
+    // A value ID has at most 26 page bits. Doubling the previous directory
+    // or rounding a valid span to a power of two fits in a 32-bit count.
+    const uint32_t directory_capacity =
+        iree_max(iree_math_round_up_to_pow2_u32(count),
+                 (uint32_t)table->segment_directory_capacity * 2u);
+    loom_value_fact_page_t* directory = NULL;
     IREE_RETURN_IF_ERROR(
         iree_arena_allocate_array(table->arena, directory_capacity,
                                   sizeof(*directory), (void**)&directory));
     memset(directory, 0, directory_capacity * sizeof(*directory));
-    const iree_host_size_t directory_offset =
-        (directory_capacity - new_segment_count) / 2;
-    segments = directory + directory_offset;
-    if (old_segment_count) {
-      memcpy(segments + prefix_segment_count, table->segments,
-             old_segment_count * sizeof(*segments));
+    pages = directory + (directory_capacity - count) / 2;
+    if (table->page_count) {
+      memcpy(pages + prefix, table->segments,
+             table->page_count * sizeof(*pages));
     }
-    segment_directory = directory;
-    segment_directory_capacity = directory_capacity;
+    table->segment_directory = directory;
+    table->segment_directory_capacity = directory_capacity;
   }
-
-  // Visit only the newly exposed directory slots. Scanning retained segments
-  // would make repeated one-segment growth quadratic even though their
-  // payloads never move.
-  for (iree_host_size_t i = 0; i < prefix_segment_count; ++i) {
-    if (!segments[i]) {
-      IREE_RETURN_IF_ERROR(
-          loom_value_fact_table_allocate_segment(table, &segments[i]));
-    }
-  }
-  const iree_host_size_t suffix_segment_start =
-      prefix_segment_count + old_segment_count;
-  for (iree_host_size_t i = suffix_segment_start; i < new_segment_count; ++i) {
-    if (!segments[i]) {
-      IREE_RETURN_IF_ERROR(
-          loom_value_fact_table_allocate_segment(table, &segments[i]));
-    }
-  }
-  table->segment_directory = segment_directory;
-  table->segment_directory_capacity = segment_directory_capacity;
-  table->segments = segments;
-  table->first_value_id = first_value_id;
-  table->capacity = new_capacity;
+  table->segments = pages;
+  table->first_page = begin;
+  table->page_count = count;
   return iree_ok_status();
 }
 
-static iree_status_t loom_value_fact_table_allocate_initial_capacity(
-    loom_value_fact_table_t* table, iree_host_size_t capacity) {
-  return loom_value_fact_table_ensure_range(table, 0, capacity);
+static iree_status_t loom_value_fact_table_back_range(
+    loom_value_fact_table_t* table, uint32_t begin, uint32_t end) {
+  for (uint32_t page = begin; page < end; ++page) {
+    IREE_RETURN_IF_ERROR(loom_value_fact_table_back_page(table, page, true));
+  }
+  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
@@ -358,8 +323,33 @@ iree_status_t loom_value_fact_table_initialize_with_arenas(
   table->transient_arena = transient_arena;
   table->first_touched_segment_id = LOOM_VALUE_ID_INVALID;
   table->context.table = table;
-  return loom_value_fact_table_allocate_initial_capacity(table,
-                                                         initial_capacity);
+  return loom_value_fact_table_reserve(table, initial_capacity);
+}
+
+static iree_status_t loom_value_fact_table_reserve_pages(
+    loom_value_fact_table_t* table, uint32_t begin, uint32_t end) {
+  const uint32_t reserved_begin = table->reserved_page_begin;
+  const uint32_t reserved_end = table->reserved_page_end;
+  if (begin >= reserved_begin && end <= reserved_end) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_value_fact_table_ensure_directory(table, begin, end));
+  // Retain one contiguous reservation. Repeated or growing requests skip their
+  // common interior, even if the table also has distant sparse publications.
+  if (reserved_end && begin <= reserved_end && reserved_begin <= end) {
+    IREE_RETURN_IF_ERROR(
+        loom_value_fact_table_back_range(table, begin, reserved_begin));
+    IREE_RETURN_IF_ERROR(
+        loom_value_fact_table_back_range(table, reserved_end, end));
+    begin = iree_min(begin, reserved_begin);
+    end = iree_max(end, reserved_end);
+  } else {
+    IREE_RETURN_IF_ERROR(loom_value_fact_table_back_range(table, begin, end));
+  }
+  table->reserved_page_begin = begin;
+  table->reserved_page_end = end;
+  return iree_ok_status();
 }
 
 iree_status_t loom_value_fact_table_reserve_range(
@@ -372,24 +362,36 @@ iree_status_t loom_value_fact_table_reserve_range(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "fact range capacity overflow");
   }
-  return loom_value_fact_table_ensure_range(
-      table, range.first_value_id, range.first_value_id + range.capacity);
+  const loom_value_id_t last =
+      range.first_value_id + (loom_value_id_t)(range.capacity - 1);
+  return loom_value_fact_table_reserve_pages(
+      table, range.first_value_id >> LOOM_VALUE_FACT_SEGMENT_SHIFT,
+      (last >> LOOM_VALUE_FACT_SEGMENT_SHIFT) + 1);
 }
 
 iree_status_t loom_value_fact_table_reserve(loom_value_fact_table_t* table,
                                             iree_host_size_t minimum_capacity) {
-  if (minimum_capacity == 0 ||
-      (table->first_value_id == 0 && minimum_capacity <= table->capacity)) {
+  if (!minimum_capacity) {
     return iree_ok_status();
   }
-  iree_host_size_t capacity =
-      table->capacity ? table->capacity : minimum_capacity;
-  while (capacity < minimum_capacity) {
-    if (!iree_host_size_checked_mul(capacity, 2, &capacity)) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE, "capacity overflow");
-    }
+  if (minimum_capacity > LOOM_VALUE_ID_INVALID) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "fact range capacity overflow");
   }
-  return loom_value_fact_table_ensure_range(table, 0, capacity);
+  const uint32_t minimum_pages =
+      ((uint32_t)(minimum_capacity - 1) >> LOOM_VALUE_FACT_SEGMENT_SHIFT) + 1;
+  uint32_t pages =
+      table->reserved_page_begin == 0 ? table->reserved_page_end : 0;
+  if (pages >= minimum_pages) {
+    return iree_ok_status();
+  }
+  if (!pages) {
+    pages = minimum_pages;
+  }
+  while (pages < minimum_pages) {
+    pages = iree_min(pages * 2, LOOM_VALUE_FACT_MAX_PAGES);
+  }
+  return loom_value_fact_table_reserve_pages(table, 0, pages);
 }
 
 void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table) {
@@ -422,20 +424,22 @@ void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table) {
   loom_value_fact_table_clear_origin_scope(table);
   loom_value_id_t segment_value_id = table->first_touched_segment_id;
   while (segment_value_id != LOOM_VALUE_ID_INVALID) {
-    const iree_host_size_t index = segment_value_id - table->first_value_id;
-    loom_value_fact_segment_t* segment =
-        table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT];
-    uint64_t touched_bits = segment->touched_bits;
+    const uint32_t index =
+        (segment_value_id >> LOOM_VALUE_FACT_SEGMENT_SHIFT) - table->first_page;
+    loom_value_fact_numeric_segment_t* segment =
+        (loom_value_fact_numeric_segment_t*)loom_value_fact_page_state(
+            table->segments[index]);
+    uint64_t touched_bits = segment->state.touched_bits;
     while (touched_bits) {
       const uint32_t segment_offset =
           iree_math_count_trailing_zeros_u64(touched_bits);
       segment->entries[segment_offset] = (loom_value_facts_t){0};
       touched_bits &= touched_bits - 1;
     }
-    segment_value_id = segment->next_touched_segment_id;
-    segment->touched_bits = 0;
-    segment->numeric_endpoint_bits = 0;
-    segment->next_touched_segment_id = LOOM_VALUE_ID_INVALID;
+    segment_value_id = segment->state.next_touched_segment_id;
+    segment->state.touched_bits = 0;
+    segment->state.numeric_endpoint_bits = 0;
+    segment->state.next_touched_segment_id = LOOM_VALUE_ID_INVALID;
   }
   table->first_touched_segment_id = LOOM_VALUE_ID_INVALID;
   table->touched_count = 0;
@@ -983,15 +987,11 @@ iree_status_t loom_value_fact_table_get_or_build_cfg_region(
 
 void loom_value_fact_table_record_numeric_endpoint(
     loom_value_fact_table_t* table, loom_value_id_t value_id) {
-  const iree_host_size_t index =
-      (iree_host_size_t)value_id - table->first_value_id;
-  if (index < table->capacity) {
-    loom_value_fact_segment_t* segment =
-        table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT];
-    if (segment->touched_bits) {
-      segment->numeric_endpoint_bits |= UINT32_C(1) << (value_id & 31);
-      return;
-    }
+  loom_value_fact_segment_t* state = loom_value_fact_page_state(
+      loom_value_fact_table_find_page(table, value_id));
+  if (state && state->touched_bits) {
+    state->numeric_endpoint_bits |= UINT32_C(1) << (value_id & 31);
+    return;
   }
   // A projected input can come from outside the populated function (or
   // before its own definition). Do not allocate fact storage for that value.
@@ -1011,23 +1011,34 @@ bool loom_value_fact_table_may_project_integer_endpoint(
           table->identities.range, value_id)]) {
     return true;
   }
-  const iree_host_size_t index =
-      (iree_host_size_t)value_id - table->first_value_id;
-  return index < table->capacity &&
-         (table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT]
-              ->numeric_endpoint_bits &
-          (UINT32_C(1) << (value_id & 31)));
+  loom_value_fact_segment_t* state = loom_value_fact_page_state(
+      loom_value_fact_table_find_page(table, value_id));
+  return state &&
+         (state->numeric_endpoint_bits & (UINT32_C(1) << (value_id & 31)));
 }
 
-iree_status_t loom_value_fact_table_touch(loom_value_fact_table_t* table,
-                                          loom_value_id_t value_id) {
-  IREE_RETURN_IF_ERROR(loom_value_fact_table_ensure_range(
-      table, value_id, (iree_host_size_t)value_id + 1));
-  const iree_host_size_t index = value_id - table->first_value_id;
-  loom_value_fact_segment_t* segment =
-      table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT];
+static iree_status_t loom_value_fact_table_grow_page(
+    loom_value_fact_table_t* table, loom_value_id_t value_id, bool numeric) {
+  const uint32_t page = value_id >> LOOM_VALUE_FACT_SEGMENT_SHIFT;
+  IREE_RETURN_IF_ERROR(
+      loom_value_fact_table_ensure_directory(table, page, page + 1));
+  return loom_value_fact_table_back_page(table, page, numeric);
+}
+
+static iree_status_t loom_value_fact_table_touch_entry(
+    loom_value_fact_table_t* table, loom_value_id_t value_id,
+    loom_value_facts_t** out_entry) {
+  loom_value_fact_page_t page =
+      loom_value_fact_table_find_page(table, value_id);
+  if (!(page & LOOM_VALUE_FACT_PAGE_NUMERIC)) {
+    IREE_RETURN_IF_ERROR(
+        loom_value_fact_table_grow_page(table, value_id, true));
+    page = table->segments[(value_id >> LOOM_VALUE_FACT_SEGMENT_SHIFT) -
+                           table->first_page];
+  }
+  loom_value_fact_segment_t* segment = loom_value_fact_page_state(page);
   const uint64_t touched_bit = UINT64_C(1)
-                               << (index & LOOM_VALUE_FACT_SEGMENT_MASK);
+                               << (value_id & LOOM_VALUE_FACT_SEGMENT_MASK);
   if (!(segment->touched_bits & touched_bit)) {
     if (!segment->touched_bits) {
       segment->next_touched_segment_id = table->first_touched_segment_id;
@@ -1037,7 +1048,15 @@ iree_status_t loom_value_fact_table_touch(loom_value_fact_table_t* table,
     segment->touched_bits |= touched_bit;
     ++table->touched_count;
   }
+  *out_entry = &((loom_value_fact_numeric_segment_t*)segment)
+                    ->entries[value_id & LOOM_VALUE_FACT_SEGMENT_MASK];
   return iree_ok_status();
+}
+
+iree_status_t loom_value_fact_table_touch(loom_value_fact_table_t* table,
+                                          loom_value_id_t value_id) {
+  loom_value_facts_t* entry = NULL;
+  return loom_value_fact_table_touch_entry(table, value_id, &entry);
 }
 
 void loom_value_fact_table_scope_begin(
@@ -1051,10 +1070,11 @@ void loom_value_fact_table_scope_begin(
     return;
   }
   const loom_value_id_t segment_value_id = table->first_touched_segment_id;
-  const iree_host_size_t index = segment_value_id - table->first_value_id;
+  const uint32_t index =
+      (segment_value_id >> LOOM_VALUE_FACT_SEGMENT_SHIFT) - table->first_page;
   out_iterator->segment_value_id = segment_value_id;
   out_iterator->remaining_bits =
-      table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT]->touched_bits;
+      loom_value_fact_page_state(table->segments[index])->touched_bits;
 }
 
 loom_value_id_t loom_value_fact_scope_next(
@@ -1068,17 +1088,18 @@ loom_value_id_t loom_value_fact_scope_next(
       return value_id;
     }
     const loom_value_fact_table_t* table = iterator->table;
-    const iree_host_size_t index =
-        iterator->segment_value_id - table->first_value_id;
+    const uint32_t index =
+        (iterator->segment_value_id >> LOOM_VALUE_FACT_SEGMENT_SHIFT) -
+        table->first_page;
     const loom_value_fact_segment_t* segment =
-        table->segments[index >> LOOM_VALUE_FACT_SEGMENT_SHIFT];
+        loom_value_fact_page_state(table->segments[index]);
     iterator->segment_value_id = segment->next_touched_segment_id;
     if (iterator->segment_value_id != LOOM_VALUE_ID_INVALID) {
-      const iree_host_size_t next_index =
-          iterator->segment_value_id - table->first_value_id;
+      const uint32_t next_index =
+          (iterator->segment_value_id >> LOOM_VALUE_FACT_SEGMENT_SHIFT) -
+          table->first_page;
       iterator->remaining_bits =
-          table->segments[next_index >> LOOM_VALUE_FACT_SEGMENT_SHIFT]
-              ->touched_bits;
+          loom_value_fact_page_state(table->segments[next_index])->touched_bits;
     }
   }
   return LOOM_VALUE_ID_INVALID;
@@ -1089,17 +1110,12 @@ iree_status_t loom_value_fact_table_enable_replay_generations(
   if (table->replay.generation) {
     return iree_ok_status();
   }
-  const iree_host_size_t segment_count =
-      table->capacity >> LOOM_VALUE_FACT_SEGMENT_SHIFT;
-  for (iree_host_size_t i = 0; i < segment_count; ++i) {
-    loom_value_fact_segment_t* segment = table->segments[i];
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        table->transient_arena, LOOM_VALUE_FACT_SEGMENT_CAPACITY,
-        sizeof(*segment->replay_generations),
-        (void**)&segment->replay_generations));
-    memset(segment->replay_generations, 0,
-           LOOM_VALUE_FACT_SEGMENT_CAPACITY *
-               sizeof(*segment->replay_generations));
+  for (uint32_t link = table->first_allocated_page; link;) {
+    loom_value_fact_segment_t* segment = loom_value_fact_page_state(
+        table->segments[link - 1 - table->first_page]);
+    link = segment->next_allocated_page;
+    IREE_RETURN_IF_ERROR(
+        loom_value_fact_segment_initialize_generations(table, segment));
   }
   table->replay.generation = 2;
   return iree_ok_status();
@@ -1108,12 +1124,13 @@ iree_status_t loom_value_fact_table_enable_replay_generations(
 static IREE_ATTRIBUTE_NOINLINE void loom_value_fact_table_restart_generations(
     loom_value_fact_table_t* table) {
   // Zero invalidates every evaluation watermark before the counter restarts.
-  const iree_host_size_t segment_count =
-      table->capacity >> LOOM_VALUE_FACT_SEGMENT_SHIFT;
-  for (iree_host_size_t i = 0; i < segment_count; ++i) {
-    memset(table->segments[i]->replay_generations, 0,
+  for (uint32_t link = table->first_allocated_page; link;) {
+    loom_value_fact_segment_t* segment = loom_value_fact_page_state(
+        table->segments[link - 1 - table->first_page]);
+    link = segment->next_allocated_page;
+    memset(segment->replay_generations, 0,
            LOOM_VALUE_FACT_SEGMENT_CAPACITY *
-               sizeof(*table->segments[i]->replay_generations));
+               sizeof(*segment->replay_generations));
   }
   table->replay.generation = 2;
 }
@@ -1158,6 +1175,12 @@ iree_status_t loom_value_fact_table_define_uniform_scope(
         &definitions->range, (void**)&definitions->scopes));
     entry = loom_value_fact_table_definition_scope_entry(table, value_id);
   }
+  // A definition proof has its own scope-local lifetime and can precede a
+  // numeric definition. Its withdrawal must be able to invalidate a reader.
+  if (!loom_value_fact_table_find_page(table, value_id)) {
+    IREE_RETURN_IF_ERROR(
+        loom_value_fact_table_grow_page(table, value_id, false));
+  }
   *entry = (uint8_t)scope;
   loom_value_fact_table_publish_change(table, value_id);
   return iree_ok_status();
@@ -1167,9 +1190,9 @@ iree_status_t loom_value_fact_table_define(loom_value_fact_table_t* table,
                                            loom_value_id_t value_id,
                                            loom_value_facts_t facts) {
   IREE_ASSERT_NE(facts.known_divisor, 0);
-  IREE_RETURN_IF_ERROR(loom_value_fact_table_touch(table, value_id));
-  loom_value_facts_t* entry =
-      loom_value_fact_table_mutable_entry(table, value_id);
+  loom_value_facts_t* entry = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_value_fact_table_touch_entry(table, value_id, &entry));
   uint8_t* definition_scope =
       loom_value_fact_table_definition_scope_entry(table, value_id);
   const bool clears_definition = definition_scope && *definition_scope != 0;
@@ -1196,16 +1219,22 @@ void loom_value_fact_table_undefine(loom_value_fact_table_t* table,
   loom_value_fact_table_clear_origins(table, value_id);
   uint8_t* definition_scope =
       loom_value_fact_table_definition_scope_entry(table, value_id);
-  if (definition_scope) {
+  const bool clears_scope = definition_scope && *definition_scope;
+  if (clears_scope) {
     *definition_scope = 0;
   }
   if (table->vector_partitions) {
     loom_value_fact_table_clear_vector_partition(table, value_id);
   }
-  loom_value_facts_t* entry =
-      loom_value_fact_table_mutable_entry(table, value_id);
-  if (entry) {
-    *entry = (loom_value_facts_t){0};
+  const loom_value_fact_page_t page =
+      loom_value_fact_table_find_page(table, value_id);
+  if (page & LOOM_VALUE_FACT_PAGE_NUMERIC) {
+    loom_value_fact_numeric_segment_t* segment =
+        (loom_value_fact_numeric_segment_t*)loom_value_fact_page_state(page);
+    segment->entries[value_id & LOOM_VALUE_FACT_SEGMENT_MASK] =
+        (loom_value_facts_t){0};
+  }
+  if ((page & LOOM_VALUE_FACT_PAGE_NUMERIC) || clears_scope) {
     loom_value_fact_table_publish_change(table, value_id);
   }
   loom_value_fact_table_undefine_identity(table, value_id);

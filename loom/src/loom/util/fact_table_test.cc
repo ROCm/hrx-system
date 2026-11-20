@@ -233,7 +233,7 @@ TEST_F(FactTableTest, ZeroInitIsValid) {
 TEST_F(FactTableTest, InitializePreallocates) {
   loom_value_fact_table_t table = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 100));
-  EXPECT_EQ(table.capacity, (iree_host_size_t)128);
+  EXPECT_EQ(table.page_count, 2u);
   // All entries are undefined (unknown).
   loom_value_facts_t facts = loom_value_fact_table_lookup(&table, 0);
   EXPECT_TRUE(loom_value_facts_is_unknown(facts));
@@ -390,7 +390,7 @@ TEST_F(FactTableTest, ClearScopeClearsOnlyTouchedEntriesAndKeepsStorage) {
   IREE_ASSERT_OK(
       loom_value_fact_table_define(&table, 8, loom_value_facts_exact_i64(7)));
 
-  loom_value_fact_segment_t* const first_segment = table.segments[0];
+  const auto first_segment = table.segments[0];
   EXPECT_EQ(table.touched_count, 2u);
   EXPECT_TRUE(
       loom_value_facts_is_exact(loom_value_fact_table_lookup(&table, 5)));
@@ -449,7 +449,7 @@ TEST_F(FactTableTest, LazyScopeOmitsUnrelatedValuePrefix) {
   IREE_ASSERT_OK(loom_value_fact_table_define(&table, kFirst + 1,
                                               loom_value_facts_exact_i64(19)));
 
-  EXPECT_LE(table.capacity, 128u);
+  EXPECT_LE(table.page_count, 2u);
   EXPECT_EQ(loom_value_fact_table_lookup(&table, kFirst).range_lo, 17);
   EXPECT_EQ(loom_value_fact_table_lookup(&table, kFirst + 1).range_lo, 19);
   EXPECT_FALSE(loom_value_fact_table_has_entry(&table, 0));
@@ -466,7 +466,92 @@ TEST_F(FactTableTest, LazyScopeOmitsUnrelatedValuePrefix) {
   EXPECT_EQ(loom_value_fact_table_lookup(&cloned, kFirst).range_lo, 17);
   EXPECT_FALSE(loom_value_fact_table_has_entry(&cloned, kFirst + 1));
   EXPECT_FALSE(loom_value_fact_table_has_entry(&cloned, kFirst + 2));
-  EXPECT_LE(cloned.capacity, 64u);
+  EXPECT_LE(cloned.page_count, 1u);
+}
+
+TEST_F(FactTableTest, SparsePublicationsBackOnlyTheirPagesAndExplicitRanges) {
+  loom_value_fact_table_t table = {};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
+  constexpr loom_value_id_t low = 7, high = (1u << 17) - 257;
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table, high,
+                                              loom_value_facts_exact_i64(19)));
+  const auto* original = loom_value_fact_table_find_entry(&table, high);
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table, low,
+                                              loom_value_facts_exact_i64(17)));
+  // Two numeric pages and a pointer directory cover a 128K-value span.
+  // Eagerly backing that span would use over 4 MiB.
+  EXPECT_LT(arena_.used_allocation_size, 64u * 1024);
+  EXPECT_EQ(loom_value_fact_table_find_entry(&table, 2048), nullptr);
+  EXPECT_FALSE(loom_value_fact_table_has_entry(&table, 2048));
+  loom_value_fact_table_undefine(&table, 2048);
+  EXPECT_FALSE(
+      loom_value_fact_table_may_project_integer_endpoint(&table, 2048));
+
+  IREE_ASSERT_OK(loom_value_fact_table_reserve_range(&table, {2047, 66}));
+  const auto bytes_reserved = arena_.used_allocation_size;
+  for (auto id : {2047u, 2048u, 2112u}) {
+    ASSERT_NE(loom_value_fact_table_find_entry(&table, id), nullptr);
+    EXPECT_FALSE(loom_value_fact_table_has_entry(&table, id));
+  }
+  IREE_ASSERT_OK(loom_value_fact_table_reserve_range(&table, {2048, 64}));
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table, 2048,
+                                              loom_value_facts_exact_i64(23)));
+  EXPECT_EQ(arena_.used_allocation_size, bytes_reserved);
+  EXPECT_EQ(loom_value_fact_table_find_entry(&table, 4096), nullptr);
+  IREE_ASSERT_OK(loom_value_fact_table_reserve(&table, 128));
+  EXPECT_NE(loom_value_fact_table_find_entry(&table, 127), nullptr);
+  EXPECT_EQ(loom_value_fact_table_find_entry(&table, 128), nullptr);
+  EXPECT_EQ(loom_value_fact_table_find_entry(&table, high), original);
+  EXPECT_EQ(original->range_lo, 19);
+  EXPECT_EQ(CollectScopeValues(&table),
+            (std::vector<loom_value_id_t>{low, 2048, high}));
+
+  loom_value_fact_table_record_numeric_endpoint(&table, 4096);
+  EXPECT_TRUE(loom_value_fact_table_may_project_integer_endpoint(&table, 4096));
+  loom_value_fact_table_clear_scope(&table);
+  EXPECT_FALSE(
+      loom_value_fact_table_may_project_integer_endpoint(&table, 4096));
+  EXPECT_TRUE(CollectScopeValues(&table).empty());
+  EXPECT_EQ(loom_value_fact_table_find_entry(&table, high), original);
+  EXPECT_FALSE(loom_value_fact_table_has_entry(&table, high));
+}
+
+TEST_F(FactTableTest, AuxiliaryOnlyPagesKeepTheirOwnReplayHistory) {
+  iree_arena_allocator_t transient = {};
+  iree_arena_initialize(&block_pool_, &transient);
+  loom_value_fact_table_t table = {};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize_with_arenas(&table, &arena_,
+                                                              &transient, 0));
+  constexpr loom_value_id_t value = 1024;
+  IREE_ASSERT_OK(loom_value_fact_table_define_uniform_scope(
+      &table, value, LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP));
+  IREE_ASSERT_OK(loom_value_fact_table_enable_replay_generations(&table));
+  EXPECT_EQ(loom_value_fact_table_replay_generation(&table, value), 0u);
+  loom_value_fact_table_undefine(&table, value);
+  const auto withdrawn = loom_value_fact_table_replay_generation(&table, value);
+  EXPECT_NE(withdrawn, 0u);
+  EXPECT_EQ(loom_value_fact_table_find_entry(&table, value), nullptr);
+  EXPECT_TRUE(CollectScopeValues(&table).empty());
+
+  IREE_ASSERT_OK(loom_value_fact_table_define_uniform_scope(
+      &table, value + 1024, LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP));
+  EXPECT_GT(loom_value_fact_table_replay_generation(&table, value + 1024),
+            withdrawn);
+  EXPECT_EQ(loom_value_fact_table_replay_generation(&table, value + 64), 0u);
+  IREE_ASSERT_OK(loom_value_fact_table_reserve_range(&table, {value, 1}));
+  EXPECT_NE(loom_value_fact_table_find_entry(&table, value), nullptr);
+  EXPECT_EQ(loom_value_fact_table_replay_generation(&table, value), withdrawn);
+  table.replay.generation = UINT32_MAX - 1;
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table, value,
+                                              loom_value_facts_exact_i64(5)));
+  EXPECT_EQ(loom_value_fact_table_replay_generation(&table, value + 1024), 0u);
+  EXPECT_NE(loom_value_fact_table_replay_generation(&table, value), 0u);
+
+  loom_value_fact_table_clear_scope(&table);
+  iree_arena_reset(&transient);
+  IREE_ASSERT_OK(loom_value_fact_table_enable_replay_generations(&table));
+  EXPECT_EQ(loom_value_fact_table_replay_generation(&table, value), 0u);
+  iree_arena_deinitialize(&transient);
 }
 
 TEST_F(FactTableTest, RangeGrowthRetainsUndefinedMembershipAndScopeReuse) {
@@ -485,7 +570,7 @@ TEST_F(FactTableTest, RangeGrowthRetainsUndefinedMembershipAndScopeReuse) {
   EXPECT_EQ(table.touched_count, 3u);
 
   IREE_ASSERT_OK(loom_value_fact_table_reserve(&table, 1024));
-  EXPECT_EQ(table.first_value_id, 0u);
+  EXPECT_EQ(table.first_page, 0u);
   IREE_ASSERT_OK(loom_value_fact_table_define(&table, 320,
                                               loom_value_facts_exact_i64(23)));
   EXPECT_EQ(table.touched_count, 3u);
@@ -511,23 +596,20 @@ TEST_F(FactTableTest, ReserveRangeOmitsPrefixAndPreservesFacts) {
                                                       .first_value_id = 1027,
                                                       .capacity = 97,
                                                   }));
-  EXPECT_EQ(table.first_value_id, 1024u);
-  EXPECT_EQ(table.capacity, 128u);
+  EXPECT_EQ(table.first_page, 16u);
+  EXPECT_EQ(table.page_count, 2u);
   EXPECT_FALSE(loom_value_fact_table_has_entry(&table, 1027));
 
   IREE_ASSERT_OK(loom_value_fact_table_define(&table, 1050,
                                               loom_value_facts_exact_i64(17)));
-  loom_value_fact_segment_t* const retained_segment =
-      table.segments[(1050 - table.first_value_id) >>
-                     LOOM_VALUE_FACT_SEGMENT_SHIFT];
+  const loom_value_facts_t* const retained_segment =
+      loom_value_fact_table_find_entry(&table, 1050);
   IREE_ASSERT_OK(
       loom_value_fact_table_reserve_range(&table, (loom_value_fact_range_t){
                                                       .first_value_id = 1030,
                                                       .capacity = 32,
                                                   }));
-  EXPECT_EQ(table.segments[(1050 - table.first_value_id) >>
-                           LOOM_VALUE_FACT_SEGMENT_SHIFT],
-            retained_segment);
+  EXPECT_EQ(loom_value_fact_table_find_entry(&table, 1050), retained_segment);
   EXPECT_EQ(loom_value_fact_table_lookup(&table, 1050).range_lo, 17);
 
   IREE_ASSERT_OK(
@@ -535,11 +617,26 @@ TEST_F(FactTableTest, ReserveRangeOmitsPrefixAndPreservesFacts) {
                                                       .first_value_id = 960,
                                                       .capacity = 300,
                                                   }));
-  EXPECT_EQ(table.first_value_id, 960u);
-  EXPECT_GE(table.capacity, 300u);
+  EXPECT_EQ(table.first_page, 15u);
+  EXPECT_GE(table.page_count, 5u);
   EXPECT_EQ(loom_value_fact_table_lookup(&table, 1050).range_lo, 17);
   EXPECT_FALSE(loom_value_fact_table_has_entry(&table, 959));
   EXPECT_FALSE(loom_value_fact_table_has_entry(&table, 1259));
+}
+
+TEST_F(FactTableTest, ReservationCanEndAtTheLastValidValueId) {
+  loom_value_fact_table_t table = {};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
+  constexpr loom_value_id_t last = LOOM_VALUE_ID_INVALID - 1;
+  IREE_ASSERT_OK(loom_value_fact_table_reserve_range(&table, {last - 70, 71}));
+  EXPECT_EQ(table.page_count, 2u);
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table, last,
+                                              loom_value_facts_exact_i64(17)));
+  EXPECT_EQ(loom_value_fact_table_lookup(&table, last).range_lo, 17);
+  EXPECT_FALSE(loom_value_fact_table_has_entry(&table, 0));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        loom_value_fact_table_reserve_range(&table, {last, 2}));
+  EXPECT_EQ(table.page_count, 2u);
 }
 
 TEST_F(FactTableTest, ReserveEmptyRangeDoesNotAllocate) {
@@ -548,7 +645,7 @@ TEST_F(FactTableTest, ReserveEmptyRangeDoesNotAllocate) {
   IREE_ASSERT_OK(loom_value_fact_table_reserve_range(
       &table, (loom_value_fact_range_t){0}));
   EXPECT_EQ(table.segments, nullptr);
-  EXPECT_EQ(table.capacity, 0u);
+  EXPECT_EQ(table.page_count, 0u);
 }
 
 TEST_F(FactTableTest, DescendingGrowthBoundsStorageAndPreservesMembership) {
@@ -556,9 +653,9 @@ TEST_F(FactTableTest, DescendingGrowthBoundsStorageAndPreservesMembership) {
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
   constexpr loom_value_id_t kLast = (1u << 20) + 7;
   constexpr uint32_t kCount = 16;
-  loom_value_fact_segment_t** previous_directory = nullptr;
+  loom_value_fact_page_t* previous_directory = nullptr;
   iree_host_size_t directory_allocation_count = 0;
-  loom_value_fact_segment_t* last_segment = nullptr;
+  loom_value_fact_page_t last_segment = 0;
   for (uint32_t i = 0; i < kCount; ++i) {
     IREE_ASSERT_OK(loom_value_fact_table_define(
         &table, kLast - 64 * i, loom_value_facts_exact_i64(i + 1)));
@@ -571,7 +668,7 @@ TEST_F(FactTableTest, DescendingGrowthBoundsStorageAndPreservesMembership) {
     }
     // Stop on excessive growth before a broken implementation can exhaust
     // memory. Each definition adds one touched-membership word to the span.
-    ASSERT_LE(table.capacity, 2u * (i + 1) * 64);
+    ASSERT_LE(table.page_count, 2u * (i + 1));
     if (i == 1) {
       loom_value_fact_table_undefine(&table, kLast - 64);
     }
@@ -592,17 +689,15 @@ TEST_F(FactTableTest, DescendingGrowthBoundsStorageAndPreservesMembership) {
                                               loom_value_facts_exact_i64(42)));
   EXPECT_EQ(table.touched_count, kCount);
 
-  loom_value_fact_segment_t* const retained_segment =
-      table.segments[(kLast - 64 - table.first_value_id) >>
-                     LOOM_VALUE_FACT_SEGMENT_SHIFT];
+  const loom_value_facts_t* const retained_segment =
+      loom_value_fact_table_find_entry(&table, kLast - 64);
   loom_value_fact_table_clear_scope(&table);
   for (uint32_t i = 0; i < kCount; ++i) {
     EXPECT_FALSE(loom_value_fact_table_has_entry(&table, kLast - 64 * i));
   }
   IREE_ASSERT_OK(loom_value_fact_table_define(&table, kLast - 64,
                                               loom_value_facts_exact_i64(7)));
-  EXPECT_EQ(table.segments[(kLast - 64 - table.first_value_id) >>
-                           LOOM_VALUE_FACT_SEGMENT_SHIFT],
+  EXPECT_EQ(loom_value_fact_table_find_entry(&table, kLast - 64),
             retained_segment);
   EXPECT_EQ(table.touched_count, 1u);
   EXPECT_EQ(loom_value_fact_table_lookup(&table, kLast - 64).range_lo, 7);
@@ -617,7 +712,7 @@ TEST_F(FactTableTest, DefineBeyondCapacityGrowsAndPreservesEntries) {
   IREE_ASSERT_OK(
       loom_value_fact_table_define(&table, 7, loom_value_facts_exact_i64(70)));
 
-  EXPECT_GE(table.capacity, (iree_host_size_t)8);
+  EXPECT_GE(table.page_count, 1u);
   EXPECT_EQ(loom_value_fact_table_lookup(&table, 0).range_lo, 10);
   EXPECT_TRUE(
       loom_value_facts_is_unknown(loom_value_fact_table_lookup(&table, 6)));
@@ -631,7 +726,7 @@ TEST_F(FactTableTest, ReserveAllocatesPooledSegmentsWithoutOversizedStorage) {
   iree_arena_block_pool_query_statistics(&block_pool_, &before);
 
   IREE_ASSERT_OK(loom_value_fact_table_reserve(&table, 9548));
-  EXPECT_EQ(table.capacity, 16384u);
+  EXPECT_EQ(table.page_count, 256u);
   EXPECT_EQ(table.count, 0u);
   EXPECT_EQ(table.touched_count, 0u);
   iree_arena_block_pool_statistics_t after;
@@ -644,7 +739,7 @@ TEST_F(FactTableTest, ReserveAllocatesPooledSegmentsWithoutOversizedStorage) {
 #endif  // IREE_STATISTICS_ENABLE
 
   // Subsequent definitions use the reserved pooled payloads directly.
-  loom_value_fact_segment_t* const first_segment = table.segments[0];
+  const auto first_segment = table.segments[0];
   IREE_ASSERT_OK(loom_value_fact_table_define(&table, 9755,
                                               loom_value_facts_exact_i64(23)));
   EXPECT_EQ(table.segments[0], first_segment);
@@ -660,7 +755,7 @@ TEST_F(FactTableTest, ReservePreservesFactsAndUndefinedMembership) {
       loom_value_fact_table_define(&table, 2, loom_value_facts_exact_i64(9)));
   loom_value_fact_table_undefine(&table, 2);
   IREE_ASSERT_OK(loom_value_fact_table_reserve(&table, 130));
-  EXPECT_EQ(table.capacity, 256u);
+  EXPECT_EQ(table.page_count, 4u);
   EXPECT_EQ(loom_value_fact_table_lookup(&table, 1).range_lo, 7);
   EXPECT_FALSE(loom_value_fact_table_has_entry(&table, 2));
   EXPECT_FALSE(loom_value_fact_table_has_entry(&table, 129));
@@ -687,16 +782,16 @@ TEST_F(FactTableTest, ReserveUsesExistingCapacityAndPreservesSatisfiedStorage) {
   IREE_ASSERT_OK(loom_value_fact_table_reserve(&table, 0));
   EXPECT_EQ(table.segments, nullptr);
   IREE_ASSERT_OK(loom_value_fact_table_reserve(&table, 3));
-  EXPECT_EQ(table.capacity, 64u);
+  EXPECT_EQ(table.page_count, 1u);
   IREE_ASSERT_OK(loom_value_fact_table_reserve(&table, 130));
-  EXPECT_EQ(table.capacity, 256u);
-  loom_value_fact_segment_t* const first_segment = table.segments[0];
-  loom_value_fact_segment_t** const segments = table.segments;
+  EXPECT_EQ(table.page_count, 4u);
+  const auto first_segment = table.segments[0];
+  loom_value_fact_page_t* const pages = table.segments;
   IREE_ASSERT_OK(loom_value_fact_table_reserve(&table, 256));
   IREE_ASSERT_OK(loom_value_fact_table_reserve(&table, 0));
-  EXPECT_EQ(table.segments, segments);
+  EXPECT_EQ(table.segments, pages);
   EXPECT_EQ(table.segments[0], first_segment);
-  EXPECT_EQ(table.capacity, 256u);
+  EXPECT_EQ(table.page_count, 4u);
 }
 
 //===----------------------------------------------------------------------===//
