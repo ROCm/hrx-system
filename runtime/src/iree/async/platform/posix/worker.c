@@ -13,6 +13,7 @@
 
 #include "iree/async/file.h"
 #include "iree/async/operations/file.h"
+#include "iree/async/platform/posix/close.h"
 #include "iree/async/platform/posix/proactor.h"
 #include "iree/async/util/completion_pool.h"
 #include "iree/base/internal/atomic_slist.h"
@@ -142,23 +143,10 @@ static iree_status_t iree_async_posix_execute_file_close(
     iree_async_file_close_operation_t* op) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  int fd = op->file->primitive.value.fd;
-
-  // Execute the close syscall.
-  int result = close(fd);
-  if (result < 0) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(iree_status_code_from_errno(errno),
-                            "close failed for fd %d: %s", fd, strerror(errno));
-  }
-
-  // Mark the fd as invalid to prevent double-close in file destroy.
-  // The caller's file reference is consumed by release_operation_resources
-  // during completion dispatch (no prior retain to balance it).
-  op->file->primitive.value.fd = -1;
-
+  iree_status_t status =
+      iree_async_posix_close_fd(&op->file->primitive.value.fd);
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  return status;
 }
 
 //===----------------------------------------------------------------------===//
