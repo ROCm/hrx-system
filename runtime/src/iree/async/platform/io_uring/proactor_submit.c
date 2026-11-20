@@ -738,6 +738,16 @@ static bool iree_async_proactor_io_uring_is_submission_software_op(
              (const iree_async_message_operation_t*)operation);
 }
 
+// Number of native submission entries in one active operation. EVENT_WAIT
+// pairs a readiness poll with a read, both in the same native LINK chain.
+static uint32_t iree_async_proactor_io_uring_submission_entry_count(
+    const iree_async_operation_t* operation) {
+  if (iree_async_proactor_io_uring_is_submission_software_op(operation)) {
+    return 0;
+  }
+  return operation->type == IREE_ASYNC_OPERATION_TYPE_EVENT_WAIT ? 2 : 1;
+}
+
 // Returns true when a successful operation can produce a negative CQE result
 // or otherwise requires userspace continuation dispatch. IOSQE_IO_LINK treats
 // every negative result as failure and would cancel the remaining chain before
@@ -1222,9 +1232,32 @@ static void iree_async_proactor_io_uring_commit_software_operation(
 // Submit
 //===----------------------------------------------------------------------===//
 
+// A batch that fits can be retried intact by the poll owner. Only independent
+// operations can be regrouped when the list exceeds an empty ring. Size each
+// group for its most expensive operation so the same bound covers every slice.
+static iree_host_size_t iree_async_proactor_io_uring_retry_batch_size(
+    iree_async_operation_list_t operations, iree_host_size_t sqes_needed,
+    uint32_t sq_capacity) {
+  if (sqes_needed <= sq_capacity) {
+    return operations.count;
+  }
+  uint32_t max_entries = 1;
+  for (iree_host_size_t i = 0; i < operations.count; ++i) {
+    const iree_async_operation_t* operation = operations.values[i];
+    if (operation->flags & IREE_ASYNC_OPERATION_FLAG_LINKED) {
+      return 0;
+    }
+    max_entries = iree_max(
+        max_entries,
+        iree_async_proactor_io_uring_submission_entry_count(operation));
+  }
+  return sq_capacity / max_entries;
+}
+
 iree_status_t iree_async_proactor_io_uring_submit(
     iree_async_proactor_t* base_proactor,
-    iree_async_operation_list_t operations) {
+    iree_async_operation_list_t operations,
+    iree_host_size_t* out_retry_batch_size) {
   iree_async_proactor_io_uring_t* proactor =
       iree_async_proactor_io_uring_cast(base_proactor);
 
@@ -1277,14 +1310,8 @@ iree_status_t iree_async_proactor_io_uring_submit(
     }
     iree_async_operation_t* operation = operations.values[i];
     operation->next = NULL;
-    if (iree_async_proactor_io_uring_is_submission_software_op(operation)) {
-      continue;
-    }
-    if (operation->type == IREE_ASYNC_OPERATION_TYPE_EVENT_WAIT) {
-      sqes_needed += 2;
-    } else {
-      sqes_needed += 1;
-    }
+    sqes_needed +=
+        iree_async_proactor_io_uring_submission_entry_count(operation);
   }
   iree_async_operation_t* software_operations = NULL;
 
@@ -1334,17 +1361,24 @@ iree_status_t iree_async_proactor_io_uring_submit(
     // Check SQ capacity.
     uint32_t available = iree_io_uring_ring_sq_space_left(&proactor->ring);
     iree_status_t admission_status = iree_ok_status();
-    if (available < sqes_needed && sqes_needed <= proactor->ring.sq_entries &&
-        iree_atomic_load(&proactor->polling.owner_tid,
-                         iree_memory_order_relaxed) ==
-            (int32_t)syscall(__NR_gettid)) {
+    const bool owner_can_admit = available < sqes_needed &&
+                                 sqes_needed <= proactor->ring.sq_entries &&
+                                 iree_atomic_load(&proactor->polling.owner_tid,
+                                                  iree_memory_order_relaxed) ==
+                                     (int32_t)syscall(__NR_gettid);
+    if (owner_can_admit) {
       // A callback cannot poll recursively to admit its next operation. Submit
       // prepared SQEs without waiting for completions and retain the SQ lock
       // until this batch reserves the freed slots. External producers cannot
       // enter a SINGLE_ISSUER ring and retain their rejection contract.
-      admission_status =
-          iree_io_uring_ring_submit_pending_locked(&proactor->ring);
-      available = iree_io_uring_ring_sq_space_left(&proactor->ring);
+      uint32_t previous_available;
+      do {
+        previous_available = available;
+        admission_status =
+            iree_io_uring_ring_submit_pending_locked(&proactor->ring);
+        available = iree_io_uring_ring_sq_space_left(&proactor->ring);
+      } while (iree_status_is_ok(admission_status) && available < sqes_needed &&
+               available > previous_available);
     }
     if (!iree_status_is_ok(admission_status) || available < sqes_needed) {
       iree_io_uring_ring_sq_unlock(&proactor->ring);
@@ -1355,6 +1389,13 @@ iree_status_t iree_async_proactor_io_uring_submit(
         operation->next = NULL;
       }
       if (iree_status_is_ok(admission_status)) {
+        if (out_retry_batch_size && !owner_can_admit) {
+          *out_retry_batch_size = iree_async_proactor_io_uring_retry_batch_size(
+              operations, sqes_needed, proactor->ring.sq_entries);
+          if (*out_retry_batch_size) {
+            return iree_ok_status();
+          }
+        }
         admission_status = iree_make_status(
             IREE_STATUS_RESOURCE_EXHAUSTED,
             "SQ has %u slots but %zu SQEs needed for %zu operations", available,

@@ -454,7 +454,7 @@ static void iree_hal_amd_xdna_file_submit(iree_hal_amd_xdna_file_t* transfer,
     return;
   }
   if (iree_status_is_ok(transfer->status)) {
-    transfer->status = iree_async_proactor_submit(
+    transfer->status = iree_hal_file_request_submit_batch(
         proactor, (iree_async_operation_list_t){requests, count});
   }
   if (!iree_status_is_ok(transfer->status)) {

@@ -6,6 +6,7 @@
 
 #include "iree/hal/utils/file_request.h"
 
+#include "iree/async/operations/scheduling.h"
 #include "iree/async/proactor.h"
 
 static void iree_hal_file_request_complete(void* user_data,
@@ -70,6 +71,84 @@ iree_status_t iree_hal_file_request_prepare(
   return iree_ok_status();
 }
 
+typedef struct iree_hal_file_submission_t {
+  // One software wake transfers the window to the native submission owner.
+  iree_async_nop_operation_t admission;
+  // Borrowed from the files retained by the enclosing transfer.
+  iree_async_proactor_t* proactor;
+  // Maximum number of independent requests to admit together on the poller.
+  iree_host_size_t batch_size;
+  // Number of requests retained in the trailing pointer list.
+  iree_host_size_t count;
+  // Requests remain owned by the file transfer until their terminal callbacks.
+  iree_async_operation_t* operations[];
+} iree_hal_file_submission_t;
+
+static void iree_hal_file_submission_admit(
+    void* user_data, iree_async_operation_t* operation, iree_status_t status,
+    iree_async_completion_flags_t flags) {
+  (void)operation;
+  (void)flags;
+  iree_hal_file_submission_t* submission = user_data;
+  iree_allocator_t allocator = submission->proactor->allocator;
+  iree_host_size_t issued = 0;
+  while (issued < submission->count && iree_status_is_ok(status)) {
+    const iree_host_size_t count =
+        iree_min(submission->batch_size, submission->count - issued);
+    status = iree_async_proactor_submit(
+        submission->proactor,
+        iree_async_operation_list_make(submission->operations + issued, count));
+    if (iree_status_is_ok(status)) {
+      issued += count;
+    }
+  }
+  // Accepted prefixes own their callbacks. Deliver the original error to the
+  // first unissued request; each remaining request owns a diagnostic snapshot.
+  for (; issued < submission->count; ++issued) {
+    iree_hal_file_request_t* request = iree_containerof(
+        submission->operations[issued], iree_hal_file_request_t, read.base);
+    iree_status_t request_status = status;
+    if (issued + 1 < submission->count) {
+      status = iree_status_clone(request_status);
+    }
+    request->callback.fn(request->callback.user_data, request_status);
+  }
+  iree_allocator_free(allocator, submission);
+}
+
+iree_status_t iree_hal_file_request_submit_batch(
+    iree_async_proactor_t* proactor, iree_async_operation_list_t operations) {
+  iree_host_size_t retry_batch_size = 0;
+  IREE_RETURN_IF_ERROR(
+      iree_async_proactor_try_submit(proactor, operations, &retry_batch_size));
+  if (!retry_batch_size) {
+    return iree_ok_status();
+  }
+
+  iree_host_size_t size = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      sizeof(iree_hal_file_submission_t), &size,
+      IREE_STRUCT_FIELD_FAM(operations.count, iree_async_operation_t*)));
+  iree_hal_file_submission_t* submission = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(proactor->allocator, size, (void**)&submission));
+  submission->proactor = proactor;
+  submission->batch_size = retry_batch_size;
+  submission->count = operations.count;
+  memcpy(submission->operations, operations.values,
+         operations.count * sizeof(*operations.values));
+  iree_async_operation_initialize(&submission->admission.base,
+                                  IREE_ASYNC_OPERATION_TYPE_NOP,
+                                  IREE_ASYNC_OPERATION_FLAG_NONE,
+                                  iree_hal_file_submission_admit, submission);
+  iree_status_t status =
+      iree_async_proactor_submit_one(proactor, &submission->admission.base);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(proactor->allocator, submission);
+  }
+  return status;
+}
+
 static iree_status_t iree_hal_file_request_issue(
     iree_hal_file_request_t* request) {
   iree_async_operation_t* operation = &request->read.base;
@@ -77,7 +156,8 @@ static iree_status_t iree_hal_file_request_issue(
       operation->type == IREE_ASYNC_OPERATION_TYPE_FILE_READ
           ? request->read.file
           : request->write.file;
-  return iree_async_proactor_submit_one(file->proactor, operation);
+  return iree_hal_file_request_submit_batch(
+      file->proactor, iree_async_operation_list_make(&operation, 1));
 }
 
 static void iree_hal_file_request_complete(

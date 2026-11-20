@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include "iree/async/event.h"
 #include "iree/async/file.h"
 #include "iree/async/notification.h"
 #include "iree/async/operations/file.h"
@@ -597,16 +598,64 @@ TEST_F(IoUringSubmitTest, FullSqRejectsBatchWithoutPublishingNotification) {
       iree_async_operation_list_make(operations, IREE_ARRAYSIZE(operations));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                         iree_async_proactor_submit(proactor_, batch));
+  iree_host_size_t retry_size = 0;
+  IREE_ASSERT_OK(iree_async_proactor_try_submit(proactor_, batch, &retry_size));
+  EXPECT_EQ(retry_size, batch.count);
   EXPECT_EQ(iree_async_notification_query_epoch(notification), initial_epoch);
   EXPECT_EQ(completion.call_count, 0);
   DrainFillers();
-  IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, batch));
+  IREE_ASSERT_OK(iree_async_proactor_try_submit(proactor_, batch, &retry_size));
+  EXPECT_EQ(retry_size, 0u);
   PollUntil(proactor_, [&] { return completion.call_count == 2; });
   EXPECT_EQ(completion.status_codes,
             (std::vector<iree_status_code_t>{IREE_STATUS_OK, IREE_STATUS_OK}));
   EXPECT_EQ(iree_async_notification_query_epoch(notification),
             initial_epoch + 1);
   iree_async_notification_release(notification);
+}
+
+TEST_F(IoUringSubmitTest, OversizedIndependentWaitsFitInReportedGroups) {
+  // Each event wait uses a native poll/read pair. Even deferring one linked
+  // successor leaves a batch larger than an empty ring.
+  constexpr size_t kWaitCount = kSubmissionQueueEntries / 2 + 2;
+  std::array<iree_async_event_wait_operation_t, kWaitCount> waits = {};
+  std::array<iree_async_operation_t*, kWaitCount> operations;
+  CompletionState completion;
+  for (size_t i = 0; i < waits.size(); ++i) {
+    IREE_ASSERT_OK(iree_async_event_create(proactor_, &waits[i].event));
+    iree_async_operation_initialize(
+        &waits[i].base, IREE_ASYNC_OPERATION_TYPE_EVENT_WAIT,
+        IREE_ASYNC_OPERATION_FLAG_NONE, CompletionState::Callback, &completion);
+    operations[i] = &waits[i].base;
+  }
+  auto batch =
+      iree_async_operation_list_make(operations.data(), operations.size());
+  iree_host_size_t retry_size = 0;
+  waits.front().base.flags = IREE_ASYNC_OPERATION_FLAG_LINKED;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_async_proactor_try_submit(proactor_, batch, &retry_size));
+  EXPECT_EQ(retry_size, 0u);
+  waits.front().base.flags = IREE_ASYNC_OPERATION_FLAG_NONE;
+  IREE_ASSERT_OK(iree_async_proactor_try_submit(proactor_, batch, &retry_size));
+  ASSERT_EQ(retry_size, kSubmissionQueueEntries / 2);
+  for (auto& wait : waits) {
+    iree_async_event_set(wait.event);
+  }
+  for (size_t i = 0; i < operations.size(); i += retry_size) {
+    const size_t count = iree_min(retry_size, operations.size() - i);
+    IREE_ASSERT_OK(iree_async_proactor_submit(
+        proactor_,
+        iree_async_operation_list_make(operations.data() + i, count)));
+    PollUntil(proactor_, [&] {
+      return completion.call_count == static_cast<int>(i + count);
+    });
+  }
+  EXPECT_EQ(completion.status_codes,
+            std::vector<iree_status_code_t>(kWaitCount, IREE_STATUS_OK));
+  for (auto& wait : waits) {
+    iree_async_event_release(wait.event);
+  }
 }
 
 TEST_F(IoUringSubmitTest, MalformedTailDoesNotConsumeCloseOwnership) {

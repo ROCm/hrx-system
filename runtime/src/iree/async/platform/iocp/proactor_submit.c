@@ -1199,7 +1199,8 @@ static iree_status_t iree_async_proactor_iocp_submit_prepared(
 
 iree_status_t iree_async_proactor_iocp_submit(
     iree_async_proactor_t* base_proactor,
-    iree_async_operation_list_t operations) {
+    iree_async_operation_list_t operations,
+    iree_host_size_t* out_retry_batch_size) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_async_proactor_iocp_t* proactor =

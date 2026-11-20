@@ -2018,7 +2018,8 @@ static iree_status_t iree_async_proactor_posix_submit_prepared(
 
 static iree_status_t iree_async_proactor_posix_submit(
     iree_async_proactor_t* base_proactor,
-    iree_async_operation_list_t operations) {
+    iree_async_operation_list_t operations,
+    iree_host_size_t* out_retry_batch_size) {
   iree_async_proactor_posix_t* proactor =
       iree_async_proactor_posix_cast(base_proactor);
 

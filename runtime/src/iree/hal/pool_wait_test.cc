@@ -62,7 +62,8 @@ struct SubmissionGate {
   std::atomic<bool> reject_waits{false};
 
   static iree_status_t Submit(iree_async_proactor_t* proactor,
-                              iree_async_operation_list_t operations) {
+                              iree_async_operation_list_t operations,
+                              iree_host_size_t* out_retry_batch_size) {
     for (iree_host_size_t i = 0; i < operations.count; ++i) {
       if (operations.values[i]->type ==
               IREE_ASYNC_OPERATION_TYPE_NOTIFICATION_WAIT &&
@@ -70,7 +71,7 @@ struct SubmissionGate {
         return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
       }
     }
-    return current->native->submit(proactor, operations);
+    return current->native->submit(proactor, operations, out_retry_batch_size);
   }
 };
 SubmissionGate* SubmissionGate::current = nullptr;

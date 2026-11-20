@@ -25,8 +25,7 @@ typedef struct iree_hal_file_transfer_callback_t {
 
 // One placed native request with independent partial-I/O progress. Its owner
 // retains the file and span through completion; the request borrows their
-// immutable geometry and native handles. Preparation and submission allocate
-// no storage, perform no cache maintenance, and create no progress service.
+// immutable geometry and native handles.
 typedef struct iree_hal_file_request_t {
   // Absolute first byte in the file, independent of other requests' progress.
   uint64_t file_offset;
@@ -66,9 +65,9 @@ iree_status_t iree_hal_file_request_prepare(
     uint64_t file_offset, uint64_t remaining_length, iree_async_span_t span,
     iree_hal_file_request_t* out_request);
 
-// Binds terminal completion and returns the prepared native operation for batch
-// submission. The request is caller-owned until its proactor accepts the batch;
-// synchronous rejection invokes no callback and leaves it available for reuse.
+// Binds terminal completion and returns the prepared operation for
+// iree_hal_file_request_submit_batch. The caller owns the request until batch
+// acceptance. Synchronous rejection leaves it available for reuse.
 // All operations submitted together belong to the same proactor. The enclosing
 // owner joins the submit call with every accepted callback before reclaiming
 // request storage, as completion may run concurrently with submission.
@@ -79,6 +78,14 @@ static inline iree_async_operation_t* iree_hal_file_request_bind(
   request->callback = callback;
   return &request->read.base;
 }
+
+// Submits independently completable, bound file requests to their common
+// proactor. OK transfers the whole window to its callbacks. A synchronous
+// failure transfers none. The caller can drop the pointer list on return and
+// retains each request, file, and span through its callback. When native slots
+// are scarce, the helper copies the list for admission by the polling thread.
+iree_status_t iree_hal_file_request_submit_batch(
+    iree_async_proactor_t* proactor, iree_async_operation_list_t operations);
 
 // Submits the prepared request and continues partial I/O until its exact span
 // retires or fails. Rejection retains caller ownership and invokes no callback.

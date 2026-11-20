@@ -39,11 +39,19 @@ struct NativeFile {
   }
 
   static iree_status_t Submit(iree_async_proactor_t* proactor,
-                              iree_async_operation_list_t operations) {
+                              iree_async_operation_list_t operations,
+                              iree_host_size_t* out_retry_batch_size) {
     auto* self = iree_containerof(proactor, NativeFile, proactor);
     self->submission_sizes.push_back(operations.count);
+    if (out_retry_batch_size && operations.count > self->capacity) {
+      *out_retry_batch_size = self->capacity;
+      return iree_ok_status();
+    }
     if (self->submission_failure != IREE_STATUS_OK) {
       return iree_status_from_code(self->submission_failure);
+    }
+    if (operations.count && operations.values[0] == self->rejected_operation) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS, "file unavailable");
     }
     for (iree_host_size_t i = 0; i < operations.count; ++i) {
       self->pending.push_back(operations.values[i]);
@@ -64,7 +72,7 @@ struct NativeFile {
         std::memcpy(iree_async_span_ptr(read->buffer),
                     bytes.data() + read->offset, length);
         read->bytes_read = length;
-      } else {
+      } else if (operation->type == IREE_ASYNC_OPERATION_TYPE_FILE_WRITE) {
         auto* write =
             reinterpret_cast<iree_async_file_write_operation_t*>(operation);
         ASSERT_LE(length, write->buffer.length);
@@ -96,8 +104,12 @@ struct NativeFile {
   std::vector<iree_async_operation_t*> pending;
   // Admission calls distinguish one batch from repeated scalar submissions.
   std::vector<iree_host_size_t> submission_sizes;
+  // Largest batch admitted intact by this platform.
+  iree_host_size_t capacity = IREE_HOST_SIZE_MAX;
   // Synchronous native rejection, with no accepted operation or callback.
   iree_status_code_t submission_failure = IREE_STATUS_OK;
+  // Native request rejected during admission of a previously deferred batch.
+  iree_async_operation_t* rejected_operation = nullptr;
 };
 
 struct Completion {
@@ -141,14 +153,20 @@ class FileRequestTest : public ::testing::TestWithParam<bool> {
     return iree_hal_file_request_submit(
         &requests_[index], {Completion::Complete, &completions_[index]});
   }
+  void PreparePair() {
+    for (size_t i = 0; i < requests_.size(); ++i) {
+      IREE_ASSERT_OK(Prepare(
+          i, i * 32, 16, iree_async_span_from_ptr(bytes_.data() + i * 32, 16)));
+    }
+  }
   iree_status_t SubmitBatch() {
     std::array<iree_async_operation_t*, 2> operations;
     for (size_t i = 0; i < operations.size(); ++i) {
       operations[i] = iree_hal_file_request_bind(
           &requests_[i], {Completion::Complete, &completions_[i]});
     }
-    return iree_async_proactor_submit(&file_.proactor,
-                                      {operations.data(), operations.size()});
+    return iree_hal_file_request_submit_batch(
+        &file_.proactor, {operations.data(), operations.size()});
   }
   // Controlled native file and submission dependency.
   NativeFile file_;
@@ -265,10 +283,7 @@ TEST_P(FileRequestTest, BatchAdmitsOnceAndRetiresPartialIoIndependently) {
 }
 
 TEST_P(FileRequestTest, RejectedBatchRetainsAllRequestsAndCanBeResubmitted) {
-  for (size_t i = 0; i < requests_.size(); ++i) {
-    IREE_ASSERT_OK(Prepare(
-        i, i * 32, 16, iree_async_span_from_ptr(bytes_.data() + i * 32, 16)));
-  }
+  ASSERT_NO_FATAL_FAILURE(PreparePair());
   file_.submission_failure = IREE_STATUS_RESOURCE_EXHAUSTED;
   EXPECT_THAT(
       iree::Status(SubmitBatch()),
@@ -288,6 +303,43 @@ TEST_P(FileRequestTest, RejectedBatchRetainsAllRequestsAndCanBeResubmitted) {
   file_.Complete(0, 16);
   EXPECT_EQ(completions_[1].count, 1u);
   EXPECT_EQ(completions_[1].code, IREE_STATUS_OK);
+  EXPECT_TRUE(file_.pending.empty());
+}
+
+TEST_P(FileRequestTest, CancelledHandoffCompletesEveryUnissuedRequest) {
+  const auto initial_file = file_.bytes;
+  const auto initial_buffer = bytes_;
+  ASSERT_NO_FATAL_FAILURE(PreparePair());
+  file_.capacity = 1;
+  IREE_ASSERT_OK(SubmitBatch());
+  ASSERT_EQ(file_.pending.size(), 1u);
+  ASSERT_EQ(file_.pending.front()->type, IREE_ASYNC_OPERATION_TYPE_NOP);
+  file_.Complete(0, 0, IREE_STATUS_CANCELLED);
+  for (const auto& completion : completions_) {
+    EXPECT_EQ(completion.count, 1u);
+    EXPECT_EQ(completion.code, IREE_STATUS_CANCELLED);
+  }
+  EXPECT_TRUE(file_.pending.empty());
+  EXPECT_EQ(file_.bytes, initial_file);
+  EXPECT_EQ(bytes_, initial_buffer);
+}
+
+TEST_P(FileRequestTest, HandoffRejectionPreservesAcceptedPrefix) {
+  ASSERT_NO_FATAL_FAILURE(PreparePair());
+  file_.capacity = 1;
+  IREE_ASSERT_OK(SubmitBatch());
+  ASSERT_EQ(file_.pending.size(), 1u);
+  ASSERT_EQ(file_.pending.front()->type, IREE_ASYNC_OPERATION_TYPE_NOP);
+  file_.rejected_operation = &requests_[1].read.base;
+  file_.Complete(0, 0);
+  EXPECT_EQ(completions_[1].count, 1u);
+  EXPECT_EQ(completions_[1].code, IREE_STATUS_DATA_LOSS);
+  EXPECT_EQ(completions_[0].count, 0u);
+  ASSERT_EQ(file_.pending.size(), 1u);
+  EXPECT_EQ(file_.pending.front(), &requests_[0].read.base);
+  file_.Complete(0, 16);
+  EXPECT_EQ(completions_[0].count, 1u);
+  EXPECT_EQ(completions_[0].code, IREE_STATUS_OK);
   EXPECT_TRUE(file_.pending.empty());
 }
 

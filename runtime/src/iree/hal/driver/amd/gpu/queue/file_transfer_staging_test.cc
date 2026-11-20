@@ -10,6 +10,7 @@
 #include <thread>
 #include <vector>
 
+#include "iree/async/operations/scheduling.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/driver/amd/fabric/memory_backend_test_base.h"
 #include "iree/hal/driver/amd/gpu/queue/file_transfer.h"
@@ -119,8 +120,12 @@ class FileTransferStagingTest : public MemoryBackendTest,
         reinterpret_cast<FakeNative::Memory*>(facts->memory->handle)->data);
 
     ASSERT_NO_FATAL_FAILURE(InitializeNativeQueue());
-    IREE_ASSERT_OK(iree_async_proactor_create_platform(
-        iree_async_proactor_options_default(), allocator_, &proactor_));
+    auto proactor_options = iree_async_proactor_options_default();
+    proactor_options.max_concurrent_operations = 32;
+    proactor_options.threading_mode =
+        IREE_ASYNC_PROACTOR_THREADING_CROSS_THREAD;
+    IREE_ASSERT_OK(iree_async_proactor_create_platform(proactor_options,
+                                                       allocator_, &proactor_));
     IREE_ASSERT_OK(iree_hal_host_semaphore_create(proactor_, 0, allocator_,
                                                   completion_.out()));
     native_.host_mappable = native_.host_visibility_guaranteed = true;
@@ -503,17 +508,25 @@ class FileTransferStagingTest : public MemoryBackendTest,
     observer_.original = proactor_->vtable;
     observer_.vtable = *proactor_->vtable;
     observer_.vtable.submit = [](iree_async_proactor_t* proactor,
-                                 iree_async_operation_list_t operations) {
+                                 iree_async_operation_list_t operations,
+                                 iree_host_size_t* out_retry_batch_size) {
       const auto* observer =
           reinterpret_cast<const SubmissionObserver*>(proactor->vtable);
+      uint64_t file_requests = 0;
       for (iree_host_size_t i = 0; i < operations.count; ++i) {
         const auto type = operations.values[i]->type;
         if (type == IREE_ASYNC_OPERATION_TYPE_FILE_READ ||
             type == IREE_ASYNC_OPERATION_TYPE_FILE_WRITE) {
-          ++observer->file_requests;
+          ++file_requests;
         }
       }
-      return observer->original->submit(proactor, operations);
+      iree_status_t status = observer->original->submit(proactor, operations,
+                                                        out_retry_batch_size);
+      if (iree_status_is_ok(status) &&
+          (!out_retry_batch_size || !*out_retry_batch_size)) {
+        observer->file_requests += file_requests;
+      }
+      return status;
     };
     proactor_->vtable = &observer_.vtable;
   }
@@ -912,11 +925,37 @@ void FileTransferStagingTest::DirectRows(bool indirect) {
   ExpectPending();
   ASSERT_NE(queue_.visibility_callback.fn, nullptr);
   EXPECT_EQ(observer_.file_requests, 0u);
-  queue_.visibility_callback.fn(queue_.visibility_callback.user_data,
-                                iree_ok_status(), nullptr, true);
+  // Establish the file polling thread, then leave one native slot occupied
+  // while a separate queue thread releases a full window on first visibility.
+  iree_status_t poll_status =
+      iree_async_proactor_poll(proactor_, iree_immediate_timeout(), nullptr);
+  if (iree_status_is_deadline_exceeded(poll_status)) {
+    iree_status_free(poll_status);
+  } else {
+    IREE_ASSERT_OK(poll_status);
+  }
+  bool timer_completed = false;
+  iree_async_timer_operation_t timer = {};
+  iree_async_operation_initialize(
+      &timer.base, IREE_ASYNC_OPERATION_TYPE_TIMER,
+      IREE_ASYNC_OPERATION_FLAG_NONE,
+      [](void* data, iree_async_operation_t*, iree_status_t status,
+         iree_async_completion_flags_t) {
+        IREE_EXPECT_OK(status);
+        *static_cast<bool*>(data) = true;
+      },
+      &timer_completed);
+  timer.deadline_ns = iree_time_now();
+  IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &timer.base));
+  std::thread producer([&] {
+    queue_.visibility_callback.fn(queue_.visibility_callback.user_data,
+                                  iree_ok_status(), nullptr, true);
+  });
+  producer.join();
+  PumpUntil([&] { return timer_completed; });
   ASSERT_NO_FATAL_FAILURE(RunToCompletion());
   ExpectCompletion(IREE_STATUS_OK);
-  EXPECT_EQ(observer_.file_requests, 64u);
+  ASSERT_EQ(observer_.file_requests, 64u);
   EXPECT_TRUE(queue_.copies.empty());
   iree_io_file_contents_t* file_contents = nullptr;
   const uint8_t* actual = buffer_contents_;
