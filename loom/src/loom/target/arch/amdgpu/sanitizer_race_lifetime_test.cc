@@ -490,17 +490,22 @@ TEST_F(AmdgpuSanitizerRaceLifetimeTest,
   ASSERT_EQ(exec_restore_ops.size(), 1u);
   EXPECT_LT(exec_narrow_ops[0]->block_ordinal, clear_store->block_ordinal);
   EXPECT_LT(clear_store->block_ordinal, exec_restore_ops[0]->block_ordinal);
-  uint32_t bitmap_step_count = 0;
-  loom_op_t* clear_body_op = nullptr;
-  loom_block_for_each_op(clear_body_block, clear_body_op) {
-    int64_t immediate = 0;
-    if (TryGetAttrI64(loom_low_op_attrs(clear_body_op), IREE_SV("imm32"),
-                      &immediate) &&
-        immediate == LOOM_AMDGPU_TSAN_SHADOW_CHUNK_STATE_BITMAP_ALIGNMENT) {
-      ++bitmap_step_count;
-    }
-  }
-  EXPECT_EQ(bitmap_step_count, 1u);
+  const loom_value_slice_t clear_backedge =
+      loom_low_br_args(clear_body_terminator);
+  ASSERT_EQ(clear_backedge.count, 1u);
+  const loom_op_t* bitmap_step = ValueDefiningOp(clear_backedge.values[0]);
+  ASSERT_NE(bitmap_step, nullptr);
+  ASSERT_TRUE(
+      LowOpHasDescriptorRef(bitmap_step,
+                            LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_U32_SRC0_INLINE) ||
+      LowOpHasDescriptorRef(bitmap_step,
+                            LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_U32_LIT));
+  EXPECT_EQ(loom_low_op_operands(bitmap_step).values[0],
+            loom_block_arg_id(clear_header_block, 0));
+  int64_t bitmap_stride = 0;
+  ASSERT_TRUE(LowOpImmediate(bitmap_step, &bitmap_stride));
+  EXPECT_EQ(bitmap_stride,
+            LOOM_AMDGPU_TSAN_SHADOW_CHUNK_STATE_BITMAP_ALIGNMENT);
 
   loom_block_t* publish_block = publish_store->parent_block;
   std::vector<loom_op_t*> header_stores;
