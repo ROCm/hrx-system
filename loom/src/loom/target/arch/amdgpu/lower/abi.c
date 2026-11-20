@@ -17,6 +17,7 @@
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/kinds.h"
+#include "loom/target/arch/amdgpu/lower/preamble.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
@@ -503,9 +504,6 @@ iree_status_t loom_amdgpu_map_abi_layout(
   uint16_t parameter_count = 0;
   const loom_low_lower_abi_argument_t* argument_map =
       loom_low_lower_context_argument_map(context, &parameter_count);
-  if (parameter_count == 0) {
-    return iree_ok_status();
-  }
   uint16_t source_argument_count = 0;
   const loom_value_id_t* source_arguments =
       loom_func_like_arg_ids(source_function, &source_argument_count);
@@ -564,13 +562,19 @@ iree_status_t loom_amdgpu_map_abi_layout(
       LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_ALIGNMENT);
   IREE_ASSERT_LE(constant_count, UINT32_MAX);
 
+  const uint8_t geometry_args =
+      loom_amdgpu_preamble_set_kernarg_base(context, (uint32_t)kernarg_offset);
+  if (!parameter_count && !geometry_args) {
+    return iree_ok_status();
+  }
   const loom_amdgpu_hal_kernel_abi_layout_t layout = {
       .function_op = NULL,
       .parameter_count = parameter_count,
-      .kernarg_segment_size = (uint32_t)kernarg_offset,
+      .explicit_kernarg_size = (uint32_t)kernarg_offset,
       .kernarg_segment_alignment =
           LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_ALIGNMENT,
-      .uses_kernarg_segment_ptr = resource_count != 0 || direct_arg_count != 0,
+      .uses_kernarg_segment_ptr = true,
+      .geometry_args = geometry_args,
       .constant_count = (uint32_t)constant_count,
       .resources = resources,
       .resource_count = resource_count,

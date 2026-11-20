@@ -28,6 +28,18 @@ static iree_string_view_t loom_amdgpu_metadata_argument_value_kind(
       return IREE_SV("global_buffer");
     case LOOM_AMDGPU_METADATA_ARGUMENT_HIDDEN_NONE:
       return IREE_SV("hidden_none");
+    case LOOM_AMDGPU_METADATA_ARGUMENT_HIDDEN_BLOCK_COUNT_X:
+      return IREE_SV("hidden_block_count_x");
+    case LOOM_AMDGPU_METADATA_ARGUMENT_HIDDEN_BLOCK_COUNT_Y:
+      return IREE_SV("hidden_block_count_y");
+    case LOOM_AMDGPU_METADATA_ARGUMENT_HIDDEN_BLOCK_COUNT_Z:
+      return IREE_SV("hidden_block_count_z");
+    case LOOM_AMDGPU_METADATA_ARGUMENT_HIDDEN_REMAINDER_X:
+      return IREE_SV("hidden_remainder_x");
+    case LOOM_AMDGPU_METADATA_ARGUMENT_HIDDEN_REMAINDER_Y:
+      return IREE_SV("hidden_remainder_y");
+    case LOOM_AMDGPU_METADATA_ARGUMENT_HIDDEN_REMAINDER_Z:
+      return IREE_SV("hidden_remainder_z");
   }
   return iree_string_view_empty();
 }

@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "iree/base/internal/math.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
 
@@ -82,19 +83,53 @@ typedef struct loom_amdgpu_hal_kernarg_direct_arg_t {
   loom_type_t abi_type;
 } loom_amdgpu_hal_kernarg_direct_arg_t;
 
+// HSA V5/V6 implicit launch arguments follow the explicitly authored arguments.
+// The low three bits select complete group counts, the next three partial
+// sizes.
+enum {
+  LOOM_AMDGPU_HAL_BLOCK_COUNT_X = 0,
+  LOOM_AMDGPU_HAL_REMAINDER_X = 3,
+  LOOM_AMDGPU_HAL_GEOMETRY_ARG_COUNT = 6,
+};
+
+static inline uint32_t loom_amdgpu_hal_geometry_arg_offset(uint32_t field) {
+  return field < LOOM_AMDGPU_HAL_REMAINDER_X
+             ? field * 4
+             : 18 + (field - LOOM_AMDGPU_HAL_REMAINDER_X) * 2;
+}
+
+static inline uint32_t loom_amdgpu_hal_geometry_arg_size(uint32_t field) {
+  return field < LOOM_AMDGPU_HAL_REMAINDER_X ? 4 : 2;
+}
+
+// Byte extent up to the last requested implicit field, aligned like kernarg.
+static inline uint32_t loom_amdgpu_hal_geometry_byte_length(uint32_t fields) {
+  if (!fields) {
+    return 0;
+  }
+  const uint32_t last = 31u - iree_math_count_leading_zeros_u32(fields);
+  return (uint32_t)iree_align_uint64(
+      loom_amdgpu_hal_geometry_arg_offset(last) +
+          loom_amdgpu_hal_geometry_arg_size(last),
+      8);
+}
+
 typedef struct loom_amdgpu_hal_kernel_abi_layout_t {
   // Target-low function operation whose resources are laid out.
   const loom_op_t* function_op;
   // Authored source kernel parameter count represented by this ABI layout.
   uint32_t parameter_count;
-  // Total kernarg segment size in bytes.
-  uint32_t kernarg_segment_size;
+  // Aligned byte extent of the explicit parameters and base of HSA implicit
+  // arguments.
+  uint32_t explicit_kernarg_size;
   // Required kernarg segment alignment in bytes.
   uint32_t kernarg_segment_alignment;
-  // True when surviving parameter uses require the kernarg segment pointer.
+  // True when the entry reads explicit or implicit kernel arguments.
   // Source lowering may initialize this conservatively; HAL ABI materialization
   // refines it after low-level dead-code elimination.
   bool uses_kernarg_segment_ptr;
+  // HSA implicit launch fields consumed by the lowered entry point.
+  uint8_t geometry_args;
   // Physical kernarg word count occupied by direct arguments.
   uint32_t constant_count;
   // Resource records in HAL binding/kernarg offset order.

@@ -33,6 +33,13 @@ typedef enum loom_amdgpu_metadata_argument_kind_e {
   LOOM_AMDGPU_METADATA_ARGUMENT_GLOBAL_BUFFER = 1,
   // Argument reserves hidden ABI space but does not need a value.
   LOOM_AMDGPU_METADATA_ARGUMENT_HIDDEN_NONE = 2,
+  // HSA launch geometry fields, in native implicit-argument order.
+  LOOM_AMDGPU_METADATA_ARGUMENT_HIDDEN_BLOCK_COUNT_X,
+  LOOM_AMDGPU_METADATA_ARGUMENT_HIDDEN_BLOCK_COUNT_Y,
+  LOOM_AMDGPU_METADATA_ARGUMENT_HIDDEN_BLOCK_COUNT_Z,
+  LOOM_AMDGPU_METADATA_ARGUMENT_HIDDEN_REMAINDER_X,
+  LOOM_AMDGPU_METADATA_ARGUMENT_HIDDEN_REMAINDER_Y,
+  LOOM_AMDGPU_METADATA_ARGUMENT_HIDDEN_REMAINDER_Z,
 } loom_amdgpu_metadata_argument_kind_t;
 
 typedef struct loom_amdgpu_metadata_argument_t {

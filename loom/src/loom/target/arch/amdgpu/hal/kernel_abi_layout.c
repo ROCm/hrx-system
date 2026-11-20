@@ -349,7 +349,7 @@ iree_status_t loom_amdgpu_hal_kernel_abi_make_layout_attr(
       LOOM_AMDGPU_HAL_KERNEL_ABI_LAYOUT_ARRAY_RESOURCE_PARAMETER_INDICES,
       scratch_arena, &resource_parameter_indices_attr));
 
-  loom_named_attr_t entries[12] = {0};
+  loom_named_attr_t entries[13] = {0};
   iree_host_size_t entry_count = 0;
   entries[entry_count++] = (loom_named_attr_t){
       .name_id = keys.constant_count,
@@ -375,6 +375,13 @@ iree_status_t loom_amdgpu_hal_kernel_abi_make_layout_attr(
       .name_id = keys.direct_arg_sizes,
       .value = direct_arg_sizes_attr,
   };
+  if (layout->geometry_args) {
+    loom_string_id_t key = LOOM_STRING_ID_INVALID;
+    IREE_RETURN_IF_ERROR(
+        loom_module_intern_string(module, IREE_SV("geometry_args"), &key));
+    entries[entry_count++] = (loom_named_attr_t){
+        .name_id = key, .value = loom_attr_i64(layout->geometry_args)};
+  }
   entries[entry_count++] = (loom_named_attr_t){
       .name_id = keys.parameter_count,
       .value = loom_attr_i64(layout->parameter_count),
@@ -568,7 +575,7 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_build(
   *out_layout = (loom_amdgpu_hal_kernel_abi_layout_t){
       .function_op = function_op,
       .parameter_count = (uint32_t)(resource_count + direct_arg_count),
-      .kernarg_segment_size = (uint32_t)kernarg_segment_size,
+      .explicit_kernarg_size = (uint32_t)kernarg_segment_size,
       .kernarg_segment_alignment =
           LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_ALIGNMENT,
       .uses_kernarg_segment_ptr = resource_used || direct_arg_used,
@@ -952,9 +959,24 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_attr(
     }
     previous_end = (uint64_t)offset + size;
   }
+  uint32_t geometry_args = 0;
+  const loom_attribute_t* geometry =
+      loom_amdgpu_hal_layout_find(&decoder, attrs, IREE_SV("geometry_args"));
+  if (geometry) {
+    if (geometry->kind != LOOM_ATTR_I64 ||
+        (uint64_t)loom_attr_as_i64(*geometry) >=
+            (1u << LOOM_AMDGPU_HAL_GEOMETRY_ARG_COUNT)) {
+      loom_amdgpu_hal_layout_reject(
+          &decoder, IREE_SV("geometry_args"),
+          IREE_SV("an HSA launch geometry field mask"));
+      return decoder.status;
+    }
+    geometry_args = (uint32_t)loom_attr_as_i64(*geometry);
+  }
   const uint64_t segment_size = iree_align_uint64(
       segment_end, LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_ALIGNMENT);
-  if (segment_size > UINT32_MAX) {
+  if (segment_size + loom_amdgpu_hal_geometry_byte_length(geometry_args) >
+      UINT32_MAX) {
     loom_amdgpu_hal_layout_reject(
         &decoder, IREE_SV("kernarg_segment_size"),
         IREE_SV("an aligned kernarg extent no greater than 4294967295 bytes"));
@@ -963,10 +985,11 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_attr(
   *out_layout = (loom_amdgpu_hal_kernel_abi_layout_t){
       .function_op = function_op,
       .parameter_count = parameter_count,
-      .kernarg_segment_size = (uint32_t)segment_size,
+      .explicit_kernarg_size = (uint32_t)segment_size,
       .kernarg_segment_alignment =
           LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_ALIGNMENT,
       .uses_kernarg_segment_ptr = loom_attr_as_bool(*uses_kernarg),
+      .geometry_args = (uint8_t)geometry_args,
       .constant_count = constant_count,
       .resources = resources,
       .resource_count = resource_count,

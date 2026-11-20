@@ -47,6 +47,17 @@ iree_status_t loom_amdgpu_lower_preamble_op(loom_low_lower_context_t* context,
                                             const loom_op_t* source_op,
                                             loom_low_lower_plan_t plan);
 
+// Accumulates the geometry inputs required by one finalized launch query or
+// race instrumentation operation.
+iree_status_t loom_amdgpu_finalize_launch_count_plan(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_plan_t plan);
+
+// Binds HSA implicit launch fields to the end of the explicit native arguments.
+// Returns the field mask to serialize in the kernel ABI layout.
+uint8_t loom_amdgpu_preamble_set_kernarg_base(loom_low_lower_context_t* context,
+                                              uint32_t byte_offset);
+
 // Looks up the current dispatch packet pointer live-in.
 iree_status_t loom_amdgpu_lookup_current_dispatch_ptr(
     loom_low_lower_context_t* context, loom_value_id_t* out_low_value_id);

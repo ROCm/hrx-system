@@ -554,7 +554,8 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
         "abi_layout({constant_count = 1, direct_arg_count = 1, "
         "direct_arg_names = {arg0 = \"extent\"}, direct_arg_offsets = [8], "
         "direct_arg_parameter_indices = [1], direct_arg_sizes = [4], "
-        "parameter_count = 2, resource_count = 1, resource_offsets = [0], "
+        "geometry_args = 13, parameter_count = 2, resource_count = 1, "
+        "resource_offsets = [0], "
         "resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) "
         "workgroup_size(64, 1, 1) @loom_kernel() {\n"
         "  %kernarg = low.live_in<amdgpu.kernarg_segment_ptr> : "
@@ -1728,16 +1729,34 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsArgumentMetadataFromLowKernelAbi) {
   IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
       module, &options, iree_allocator_system(), &emitted, &library));
 
-  EXPECT_TRUE(emitted);
-  EXPECT_TRUE(capture.diagnostics.empty());
-  ASSERT_NE(library.hsaco_data, nullptr);
-  std::string hsaco;
-  IREE_ASSERT_OK(CloneByteSequenceToString(library.hsaco_data, &hsaco));
-  EXPECT_NE(hsaco.find("binding0"), std::string::npos);
-  EXPECT_NE(hsaco.find("global_buffer"), std::string::npos);
-  EXPECT_NE(hsaco.find("extent"), std::string::npos);
-  EXPECT_NE(hsaco.find("by_value"), std::string::npos);
+  ASSERT_TRUE(emitted) << DiagnosticSummary(capture);
+  ASSERT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
+  iree_hal_amd_gpu_image_t image = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_hsaco_image_initialize(
+      library.hsaco_data, iree_allocator_system(), &image));
+  ASSERT_EQ(image.metadata.kernel_count, 1u);
+  const auto& kernel = image.metadata.kernels[0];
+  ASSERT_EQ(kernel.argument_count, 5u);
+  EXPECT_EQ(StringViewToString(kernel.arguments[0].name), "binding0");
+  EXPECT_EQ(StringViewToString(kernel.arguments[1].name), "extent");
+  const iree_hal_amd_gpu_metadata_argument_kind_t kinds[] = {
+      IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_GLOBAL_BUFFER,
+      IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_BY_VALUE,
+      IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_X,
+      IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_Z,
+      IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_REMAINDER_X,
+  };
+  const uint32_t offsets[] = {0, 8, 16, 24, 34};
+  const uint32_t sizes[] = {8, 4, 4, 4, 2};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(kinds); ++i) {
+    SCOPED_TRACE(i);
+    EXPECT_EQ(kernel.arguments[i].kind, kinds[i]);
+    EXPECT_EQ(kernel.arguments[i].offset, offsets[i]);
+    EXPECT_EQ(kernel.arguments[i].size, sizes[i]);
+  }
+  EXPECT_EQ(kernel.kernarg_segment_size, 40u);
 
+  iree_hal_amd_gpu_image_deinitialize(&image);
   loom_amdgpu_hal_kernel_library_deinitialize(&library,
                                               iree_allocator_system());
   loom_module_free(module);
