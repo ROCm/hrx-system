@@ -14,12 +14,11 @@ void iree_async_posix_completion_pool_initialize_with_storage(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   memset(out_pool, 0, sizeof(*out_pool));
-  out_pool->allocator = iree_allocator_null();  // Signals external storage.
   out_pool->capacity = capacity;
-  out_pool->entries = entries;
 
   iree_atomic_slist_initialize(&out_pool->free_list);
   for (iree_host_size_t i = 0; i < capacity; ++i) {
+    entries[i].worker_reserved = false;
     iree_atomic_slist_push(&out_pool->free_list, &entries[i].slist_entry);
   }
 
@@ -30,10 +29,6 @@ void iree_async_posix_completion_pool_deinitialize(
     iree_async_posix_completion_pool_t* pool) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Only free entries if we allocated them (allocator is non-null).
-  if (pool->allocator.ctl) {
-    iree_allocator_free(pool->allocator, pool->entries);
-  }
   iree_atomic_slist_deinitialize(&pool->free_list);
   memset(pool, 0, sizeof(*pool));
 
@@ -61,8 +56,7 @@ iree_async_posix_completion_t* iree_async_posix_completion_pool_acquire(
 void iree_async_posix_completion_pool_release(
     iree_async_posix_completion_pool_t* pool,
     iree_async_posix_completion_t* completion) {
-  // The poll thread must have passed status ownership to the callback before
-  // releasing. Assert this is true (status field should be reset after invoke).
+  // Callers transfer ownership of the status before returning the slot.
   IREE_ASSERT(iree_status_is_ok(completion->status),
               "completion released with unconsumed status");
 

@@ -222,17 +222,6 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
-    name = "ready_pool",
-    srcs = ["ready_pool.c"],
-    hdrs = ["ready_pool.h"],
-    deps = [
-        "//runtime/src/iree/async",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:atomic_slist",
-    ],
-)
-
-iree_runtime_cc_library(
     name = "semaphore_wait",
     srcs = ["semaphore_wait.c"],
     hdrs = ["semaphore_wait.h"],

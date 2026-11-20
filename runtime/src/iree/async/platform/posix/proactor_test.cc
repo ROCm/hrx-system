@@ -109,6 +109,17 @@ class PosixProactorTest : public ::testing::Test {
   iree_status_t completion_status_ = iree_ok_status();
 };
 
+TEST_F(PosixProactorTest, RejectsOverflowingCompletionCapacity) {
+  auto options = iree_async_proactor_options_default();
+  options.max_concurrent_operations = IREE_HOST_SIZE_MAX;
+  iree_async_proactor_t* proactor = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        iree_async_proactor_create_posix(
+                            options, iree_allocator_system(), &proactor));
+  EXPECT_EQ(proactor, nullptr);
+  iree_async_proactor_release(proactor);
+}
+
 TEST_F(PosixProactorTest, UnavailableWorkerNodeFailsCreation) {
   auto options = iree_async_proactor_options_default();
   iree_thread_affinity_set_group_any(UINT32_MAX - 1, &options.worker_affinity);

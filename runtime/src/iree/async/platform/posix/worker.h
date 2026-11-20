@@ -6,9 +6,8 @@
 
 // Worker thread for the POSIX proactor.
 //
-// Workers execute async operations whose fds are ready (non-blocking I/O).
-// They wait on the ready_queue, pop operations, execute them, and push
-// completions back to the completion_queue for the poll thread to process.
+// Workers execute blocking file operations and return their results to the
+// poll owner. The poll owner handles descriptor readiness independently.
 //
 // Workers are self-contained structs with an initialize/deinitialize lifecycle.
 // The proactor allocates workers as a trailing array and initializes each one.
@@ -17,8 +16,11 @@
 #ifndef IREE_ASYNC_PLATFORM_POSIX_WORKER_H_
 #define IREE_ASYNC_PLATFORM_POSIX_WORKER_H_
 
+#include "iree/async/operation.h"
+#include "iree/async/util/completion_pool.h"
 #include "iree/base/api.h"
 #include "iree/base/internal/atomics.h"
+#include "iree/base/threading/mutex.h"
 #include "iree/base/threading/notification.h"
 #include "iree/base/threading/thread.h"
 
@@ -28,84 +30,67 @@ extern "C" {
 
 struct iree_async_proactor_posix_t;
 
-// Worker state machine: RUNNING → EXITING → ZOMBIE.
-//
-// Transition graph:
-//   RUNNING → EXITING → ZOMBIE
-//
-// RUNNING: Worker is idle or actively processing work.
-// EXITING: Worker should exit (or is exiting) and will soon enter ZOMBIE.
-// ZOMBIE: Worker has exited and is waiting for join/deinitialize.
-typedef enum iree_async_posix_worker_state_e {
-  IREE_ASYNC_POSIX_WORKER_STATE_RUNNING = 0,
-  IREE_ASYNC_POSIX_WORKER_STATE_EXITING = 1,
-  IREE_ASYNC_POSIX_WORKER_STATE_ZOMBIE = 2,
-} iree_async_posix_worker_state_t;
+// Submitter-local chain of independent files. Each may have linked successors
+// that remain owned by the poll owner until the preceding operation completes.
+typedef struct iree_async_posix_file_batch_t {
+  // First active file operation in this submission.
+  iree_async_operation_t* head;
+  // Last active file operation in this submission.
+  iree_async_operation_t* tail;
+  // Number of file heads available to wake idle workers.
+  iree_host_size_t count;
+} iree_async_posix_file_batch_t;
 
-// A worker within the POSIX proactor's thread pool.
-//
-// Workers are self-contained and use an initialize/deinitialize lifecycle.
-// The proactor allocates workers as a trailing array in its single allocation,
-// then initializes each. Each worker has a back-pointer to the proactor.
-//
-// Workers share proactor->ready_notification for work-stealing: all workers
-// wait on the same notification, and enqueue_for_execution posts to it to
-// wake exactly one idle worker.
+// FIFO of admitted file operations. The queue borrows their intrusive next
+// pointers until a worker claims them. Linked continuations use linked_next.
+typedef struct iree_async_posix_file_queue_t {
+  // Protects both ends of the queue across submitters and workers.
+  iree_slim_mutex_t mutex;
+  // First operation available for a worker to claim.
+  iree_async_operation_t* head;
+  // Last operation, for splicing a whole submission in constant time.
+  iree_async_operation_t* tail;
+  // Signaled when files arrive or workers must exit.
+  iree_notification_t notification;
+} iree_async_posix_file_queue_t;
+
+// Splices a nonempty, fully acquired batch onto the file queue and wakes
+// enough workers to consume it. The submitter terminates the chain at its tail.
+void iree_async_posix_file_queue_push(
+    struct iree_async_proactor_posix_t* proactor,
+    const iree_async_posix_file_batch_t* batch);
+
+// One blocking file worker. Its result storage outlives every publication.
 typedef struct iree_async_posix_worker_t {
-  // Current state (atomic for cross-thread visibility).
-  // Written by request_exit, read by worker loop.
-  iree_atomic_int32_t state;
-
-  // Signaled when worker changes state (for await_exit).
-  // Worker posts on state transition to ZOMBIE.
-  iree_notification_t state_notification;
-
-  // Fields below are thread-local (only touched by this worker's thread).
-
-  // Owning proactor (for queue access, pool access, wake).
-  // Set during initialize, never changes.
+  // Owning proactor, including the file queue and shutdown flag.
   struct iree_async_proactor_posix_t* proactor;
-
-  // Worker index within pool (for debugging/tracing).
-  iree_host_size_t worker_index;
-
-  // Thread handle (owned, released in deinitialize).
+  // Owned thread handle. Its final release joins the worker.
   iree_thread_t* thread;
-
-  // Padding to ensure struct spans at least one cache line (64 bytes) to
-  // minimize false sharing when workers are stored in a contiguous array.
-  uint8_t _padding[24];
+  // Guaranteed result storage while the shared completion pool is full.
+  iree_async_posix_completion_t reserved_completion;
+  // Set by this worker before publication and cleared by the poll owner.
+  iree_atomic_int32_t reserved_completion_pending;
+  // Wakes this worker after the poll owner has taken its reserved result.
+  iree_notification_t completion_consumed;
 } iree_async_posix_worker_t;
 
-// Verify worker struct spans at least one cache line to minimize false sharing
-// when workers are stored in a contiguous array.
-static_assert(sizeof(iree_async_posix_worker_t) >=
-                  iree_hardware_constructive_interference_size,
-              "worker struct should span at least one cache line");
+// Returns the worker's reserved entry after the poll owner has taken its
+// result.
+void iree_async_posix_worker_release_completion(
+    iree_async_posix_completion_t* completion);
 
 // Initializes a worker and starts its thread.
 // |out_worker| must point to caller-allocated storage (typically in the
 // proactor's trailing data array).
 // On failure, caller should still call deinitialize for cleanup.
 iree_status_t iree_async_posix_worker_initialize(
-    struct iree_async_proactor_posix_t* proactor, iree_host_size_t worker_index,
+    struct iree_async_proactor_posix_t* proactor,
     iree_thread_affinity_t affinity,
     const iree_thread_affinity_set_t* processor_set, iree_allocator_t allocator,
     iree_async_posix_worker_t* out_worker);
 
-// Requests that the worker begin exiting.
-// Non-blocking; worker will exit after completing current work (if any).
-// May be called from any thread.
-void iree_async_posix_worker_request_exit(iree_async_posix_worker_t* worker);
-
-// Blocks until the worker has entered ZOMBIE state.
-// Must be called before deinitialize.
-// May be called from any thread (but not from the worker itself).
-void iree_async_posix_worker_await_exit(iree_async_posix_worker_t* worker);
-
-// Deinitializes a worker that has exited (ZOMBIE state).
-// Releases thread handle and cleans up notifications.
-// The worker must have been requested to exit and awaited first.
+// Joins the worker and releases its completion storage after the proactor has
+// signaled shutdown. Also cleans up a worker whose thread failed to start.
 void iree_async_posix_worker_deinitialize(iree_async_posix_worker_t* worker);
 
 #ifdef __cplusplus

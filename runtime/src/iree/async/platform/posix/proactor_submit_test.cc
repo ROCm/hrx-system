@@ -6,9 +6,12 @@
 
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstdint>
@@ -22,6 +25,7 @@
 #include "iree/async/platform/posix/proactor.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "iree/testing/temp_file.h"
 
 namespace {
 
@@ -70,14 +74,15 @@ class ScopedFd {
 struct CompletionTracker {
   int call_count = 0;
   std::vector<iree_status_code_t> status_codes;
+  std::vector<iree_async_operation_t*> operations;
 
   static void Callback(void* user_data, iree_async_operation_t* operation,
                        iree_status_t status,
                        iree_async_completion_flags_t flags) {
-    (void)operation;
     (void)flags;
     auto* tracker = static_cast<CompletionTracker*>(user_data);
     ++tracker->call_count;
+    tracker->operations.push_back(operation);
     tracker->status_codes.push_back(iree_status_code(status));
     iree_status_free(status);
   }
@@ -195,14 +200,14 @@ iree_status_t CreateManagedUdpSender(iree_async_proactor_t* proactor,
 
 class PosixProactorSubmitTest : public ::testing::Test {
  protected:
-  static constexpr iree_host_size_t kReadyPoolCapacity = 1;
+  static constexpr iree_host_size_t kConcurrencyHint = 1;
   static constexpr iree_host_size_t kCompletionPoolCapacity =
-      kReadyPoolCapacity + IREE_ASYNC_POSIX_DEFAULT_WORKER_COUNT;
+      kConcurrencyHint + IREE_ASYNC_POSIX_DEFAULT_WORKER_COUNT;
 
   void SetUp() override {
     iree_async_proactor_options_t options =
         iree_async_proactor_options_default();
-    options.max_concurrent_operations = kReadyPoolCapacity;
+    options.max_concurrent_operations = kConcurrencyHint;
     options.message_pool_capacity = 1;
     IREE_ASSERT_OK(iree_async_proactor_create_posix(
         options, iree_allocator_system(), &proactor_));
@@ -256,6 +261,184 @@ class PosixProactorSubmitTest : public ::testing::Test {
 
   iree_async_proactor_t* proactor_ = nullptr;
 };
+
+TEST_F(PosixProactorSubmitTest, AcceptedFileChainsSurviveCompletionPressure) {
+  iree::testing::TempFilePath path("file_chains");
+  ScopedFd fd(open(path.path().c_str(), O_CREAT | O_EXCL | O_RDWR, 0600));
+  ASSERT_GE(fd.get(), 0);
+  ASSERT_TRUE(path.Remove());
+  iree_async_file_t* file = nullptr;
+  IREE_ASSERT_OK(iree_async_file_import(proactor_,
+                                        iree_async_primitive_from_fd(fd.get()),
+                                        IREE_ASYNC_FILE_FLAG_NONE, &file));
+  fd.Release();
+  std::unique_ptr<iree_async_file_t, decltype(&iree_async_file_release)>
+      file_owner(file, iree_async_file_release);
+
+  iree_async_notification_t* notification = nullptr;
+  IREE_ASSERT_OK(iree_async_notification_create(
+      proactor_, IREE_ASYNC_NOTIFICATION_FLAG_NONE, &notification));
+  std::unique_ptr<iree_async_notification_t,
+                  decltype(&iree_async_notification_release)>
+      notification_owner(notification, iree_async_notification_release);
+
+  // Fill the shared completion pool before any workers can publish results.
+  CompletionTracker tracker;
+  std::array<iree_async_notification_signal_operation_t,
+             kCompletionPoolCapacity>
+      signals;
+  for (auto& signal : signals) {
+    InitializeNotificationSignal(&signal, notification, &tracker);
+    IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &signal.base));
+  }
+
+  // Each byte has an independent write → read chain.
+  constexpr size_t kByteCount = 2 * kCompletionPoolCapacity;
+  std::array<uint8_t, kByteCount> input = {}, output = {};
+  std::array<iree_async_file_write_operation_t, kByteCount> writes;
+  std::array<iree_async_file_read_operation_t, kByteCount> reads;
+  std::array<iree_async_operation_t*, 2 * kByteCount> batch;
+  for (size_t i = 0; i < kByteCount; ++i) {
+    input[i] = static_cast<uint8_t>(i + 1);
+    InitializeOperation(&writes[i], IREE_ASYNC_OPERATION_TYPE_FILE_WRITE,
+                        &tracker);
+    writes[i].base.flags = IREE_ASYNC_OPERATION_FLAG_LINKED;
+    writes[i].file = file;
+    writes[i].offset = i;
+    writes[i].buffer = iree_async_span_from_ptr(&input[i], 1);
+    InitializeOperation(&reads[i], IREE_ASYNC_OPERATION_TYPE_FILE_READ,
+                        &tracker);
+    reads[i].file = file;
+    reads[i].offset = i;
+    reads[i].buffer = iree_async_span_from_ptr(&output[i], 1);
+    batch[2 * i] = &writes[i].base;
+    batch[2 * i + 1] = &reads[i].base;
+  }
+  // Isolate the next worker wake from the signal submissions' pending wakes.
+  // Withhold poll() until a file result has been published into the full queue.
+  iree_async_posix_wake_drain(&posix_proactor()->wake);
+  iree_host_size_t retry_batch_size = 0;
+  IREE_ASSERT_OK(iree_async_proactor_try_submit(
+      proactor_, iree_async_operation_list_make(batch.data(), batch.size()),
+      &retry_batch_size));
+  ASSERT_EQ(retry_batch_size, 0u);
+  file_owner.reset();  // All writes and their linked reads now own the file.
+  struct pollfd wake = {iree_async_posix_wake_fd(&posix_proactor()->wake),
+                        POLLIN, 0};
+  int ready;
+  do {
+    ready = poll(&wake, 1, -1);
+  } while (ready < 0 && errno == EINTR);
+  ASSERT_EQ(ready, 1);
+  EXPECT_EQ(wake.revents, POLLIN);
+  EXPECT_EQ(tracker.call_count, 0);
+
+  const int expected_count = static_cast<int>(batch.size() + signals.size());
+  size_t completed_count = 0;
+  while (tracker.call_count < expected_count) {
+    iree_host_size_t polled = 0;
+    IREE_ASSERT_OK(
+        iree_async_proactor_poll(proactor_, iree_infinite_timeout(), &polled));
+    completed_count += polled;
+  }
+  EXPECT_EQ(completed_count, expected_count);
+  ExpectSuccessfulCompletions(tracker, expected_count);
+  EXPECT_EQ(output, input);
+  for (size_t i = 0; i < kByteCount; ++i) {
+    auto write = std::find(tracker.operations.begin(), tracker.operations.end(),
+                           &writes[i].base);
+    auto read = std::find(tracker.operations.begin(), tracker.operations.end(),
+                          &reads[i].base);
+    EXPECT_NE(read, tracker.operations.end());
+    EXPECT_LT(write, read);
+    EXPECT_EQ(writes[i].bytes_written, 1u);
+    EXPECT_EQ(reads[i].bytes_read, 1u);
+  }
+}
+
+TEST_F(PosixProactorSubmitTest,
+       BlockedFilesLeaveDescriptorReadinessIndependent) {
+  iree::testing::TempFilePath fifo("worker_fifo");
+  ASSERT_EQ(mkfifo(fifo.path().c_str(), 0600), 0);
+  // Keeps the writer openable even if every async open fails.
+  ScopedFd gate_reader(open(fifo.path().c_str(), O_RDONLY | O_NONBLOCK));
+  ASSERT_GE(gate_reader.get(), 0);
+  iree::testing::TempFilePath output("cancelled_open");
+
+  int pipe_fds[2];
+  ASSERT_EQ(pipe(pipe_fds), 0);
+  ScopedFd reader(pipe_fds[0]), writer(pipe_fds[1]);
+  ASSERT_EQ(write(writer.get(), "x", 1), 1);
+
+  // With no FIFO writer, none of these opens can finish. Later file operations
+  // stay queued while the poll owner dispatches the independent readable pipe.
+  CompletionTracker files, ready, cancelled;
+  std::array<iree_async_file_open_operation_t,
+             IREE_ASYNC_POSIX_DEFAULT_WORKER_COUNT>
+      opens;
+  for (auto& op : opens) {
+    InitializeOperation(&op, IREE_ASYNC_OPERATION_TYPE_FILE_OPEN, &files);
+    op.path = fifo.path().c_str();
+    op.open_flags = IREE_ASYNC_FILE_OPEN_FLAG_READ;
+    IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &op.base));
+  }
+  iree_async_handle_poll_operation_t handle;
+  InitializeOperation(&handle, IREE_ASYNC_OPERATION_TYPE_HANDLE_POLL, &ready);
+  handle.primitive = iree_async_primitive_from_fd(reader.get());
+  handle.events = IREE_ASYNC_POLL_EVENT_IN;
+  handle.base.flags = IREE_ASYNC_OPERATION_FLAG_LINKED;
+
+  // Cancel both an active queue entry and a file still owned by its linked
+  // predecessor. Neither may create the output file.
+  iree_async_file_open_operation_t queued, linked;
+  for (auto* op : {&queued, &linked}) {
+    InitializeOperation(op, IREE_ASYNC_OPERATION_TYPE_FILE_OPEN, &cancelled);
+    op->path = output.path().c_str();
+    op->open_flags =
+        IREE_ASYNC_FILE_OPEN_FLAG_CREATE | IREE_ASYNC_FILE_OPEN_FLAG_WRITE;
+  }
+  iree_async_operation_t* batch[] = {&queued.base, &handle.base, &linked.base};
+  IREE_ASSERT_OK(iree_async_proactor_submit(
+      proactor_, iree_async_operation_list_make(batch, IREE_ARRAYSIZE(batch))));
+  IREE_EXPECT_OK(iree_async_proactor_cancel(proactor_, &queued.base));
+  IREE_EXPECT_OK(iree_async_proactor_cancel(proactor_, &linked.base));
+  PollUntilCallbacks(proactor_, &ready, 1);
+  ExpectSuccessfulCompletions(ready, 1);
+  EXPECT_EQ(handle.result_events, IREE_ASYNC_POLL_EVENT_IN);
+  EXPECT_EQ(files.call_count, 0);
+
+  ScopedFd gate(open(fifo.path().c_str(), O_WRONLY | O_NONBLOCK));
+  ASSERT_GE(gate.get(), 0);
+  PollUntilCallbacks(proactor_, &files, opens.size());
+  PollUntilCallbacks(proactor_, &cancelled, 2);
+  ExpectSuccessfulCompletions(files, opens.size());
+  EXPECT_EQ(cancelled.status_codes,
+            (std::vector<iree_status_code_t>{IREE_STATUS_CANCELLED,
+                                             IREE_STATUS_CANCELLED}));
+  EXPECT_FALSE(output.Exists());
+  EXPECT_TRUE(fifo.Remove());
+  for (auto& op : opens) {
+    iree_async_file_release(op.opened_file);
+  }
+  iree_async_file_release(queued.opened_file);
+  iree_async_file_release(linked.opened_file);
+
+  // Reuse a cancelled operation. Its actual ENOENT must reach the caller.
+  queued.open_flags = IREE_ASYNC_FILE_OPEN_FLAG_READ;
+  queued.base.completion_fn =
+      +[](void* user_data, iree_async_operation_t* op, iree_status_t status,
+          iree_async_completion_flags_t flags) {
+#if IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS
+        auto* open_op = reinterpret_cast<iree_async_file_open_operation_t*>(op);
+        EXPECT_THAT(iree::Status::ToString(status),
+                    ::testing::HasSubstr(open_op->path));
+#endif
+        CompletionTracker::Callback(user_data, op, status, flags);
+      };
+  IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &queued.base));
+  PollUntilCallbacks(proactor_, &cancelled, 3);
+  EXPECT_EQ(cancelled.status_codes.back(), IREE_STATUS_NOT_FOUND);
+}
 
 TEST_F(PosixProactorSubmitTest,
        CompletionExhaustionPreservesStreamAndNotificationState) {
