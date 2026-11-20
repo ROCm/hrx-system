@@ -1080,9 +1080,9 @@ enum loom_low_lower_emit_kind_e {
   LOOM_LOW_LOWER_EMIT_REGISTER_SLICE_CLASS = 12,
   // Collects one fixed-width group from the final per-lane sequence action.
   LOOM_LOW_LOWER_EMIT_REGISTER_CONCAT_PER_LANE_SEQUENCE = 13,
-  // One literal register temporary whose final sequence update restores the
-  // seed value. An admitted latch can forward that update across its backedge.
-  LOOM_LOW_LOWER_EMIT_DESCRIPTOR_RESTORED_CONST = 14,
+  // A sequence temporary whose final update restores a literal seed or
+  // advances its source address by the full contiguous access extent.
+  LOOM_LOW_LOWER_EMIT_DESCRIPTOR_LOOP_FEEDBACK = 14,
   // Maximum emit kind plus one.
   LOOM_LOW_LOWER_EMIT_COUNT_,
 };

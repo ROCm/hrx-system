@@ -1199,9 +1199,9 @@ iree_status_t loom_low_lower_rule_set_emit_rule(
             source_memory));
         break;
       }
-      case LOOM_LOW_LOWER_EMIT_DESCRIPTOR_RESTORED_CONST:
+      case LOOM_LOW_LOWER_EMIT_DESCRIPTOR_LOOP_FEEDBACK:
       case LOOM_LOW_LOWER_EMIT_DESCRIPTOR_CONST: {
-        if (emit->kind == LOOM_LOW_LOWER_EMIT_DESCRIPTOR_RESTORED_CONST) {
+        if (emit->kind == LOOM_LOW_LOWER_EMIT_DESCRIPTOR_LOOP_FEEDBACK) {
           loom_low_lower_rule_feedback_t* feedback =
               loom_low_lower_rule_feedback(resolved_emit);
           if (feedback->realization != NULL) {
@@ -1209,6 +1209,12 @@ iree_status_t loom_low_lower_rule_set_emit_rule(
                 loom_low_lower_realization_value(feedback->realization);
             feedback->next = feedbacks;
             feedbacks = feedback;
+            break;
+          }
+          if (emit->operand_ref_count != 0) {
+            IREE_RETURN_IF_ERROR(loom_low_lower_rule_emit_descriptor_op(
+                context, rule_set, source_op, &state, resolved_emit,
+                source_memory));
             break;
           }
         }

@@ -141,7 +141,7 @@ def test_sequence_can_forward_a_restored_literal_to_the_next_source_iteration() 
     )
     table = compile_lower_rule_set(fragment, dialect_ops={"vector": ALL_VECTOR_OPS})
     initialize, _, advance, _ = table.emits
-    assert initialize.kind is LowerEmitKind.DESCRIPTOR_RESTORED_CONST
+    assert initialize.kind is LowerEmitKind.DESCRIPTOR_LOOP_FEEDBACK
     assert (
         table.value_refs[initialize.result_bind_ref_start]
         == table.value_refs[advance.result_bind_ref_start]

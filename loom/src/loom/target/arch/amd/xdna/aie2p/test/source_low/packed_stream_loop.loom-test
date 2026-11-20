@@ -30,39 +30,36 @@ func.def @read_groups(%input: buffer, %output: buffer) {
 
 // ----
 low.func.def noinline target<amd.xdna.aie2p.core> @last_records(%first: reg<aie2p.ep>, %destination: reg<aie2p.ep>) asm {
-  %32 = mova.fifo.position 0
+  %33 = mov.load-fifo.pointer %first
+  %34 = mova.fifo.position 0
   %begin = mov.short 0
   %step = mov.short 1
   %size = mov.short 8
-  low.br ^_bb1(%begin: reg<aie2p.er>, %first: reg<aie2p.ep>, %32: reg<aie2p.erf2>)
-^_bb1(%i: reg<aie2p.er>, %current: reg<aie2p.ep>, %31: reg<aie2p.erf2>):
-  %36 = lt %i, %size
-  low.cond_br %36, ^_bb2, ^_bb3 : reg<aie2p.er>
+  low.br ^_bb1(%begin: reg<aie2p.er>, %33: reg<aie2p.eps>, %34: reg<aie2p.erf2>)
+^_bb1(%i: reg<aie2p.er>, %31: reg<aie2p.eps>, %32: reg<aie2p.erf2>):
+  %38 = lt %i, %size
+  low.cond_br %38, ^_bb2, ^_bb3 : reg<aie2p.er>
 ^_bb2:
-  %37 = mov.load-fifo.pointer %current
-  %38, %39, %40 = vldb.fill.512.empty %37, %31
-  %41, %42, %43, %44 = vldb.pop.bfp16ebs8.buffered64 %38, %39, %40
-  %45, %46, %47, %48 = vldb.pop.bfp16ebs8 %42, %43, %44
-  %49, %50, %51, %52 = vldb.pop.bfp16ebs8 %46, %47, %48
-  %53, %54, %55, %56 = vldb.pop.bfp16ebs8 %50, %51, %52
-  %57, %58, %59, %60 = vldb.pop.bfp16ebs8 %54, %55, %56
-  %61, %62, %63, %64 = vldb.pop.bfp16ebs8 %58, %59, %60
-  %65, %66, %67, %68 = vldb.pop.bfp16ebs8 %62, %63, %64
-  %69, %70, %71, %72 = vldb.pop.bfp16ebs8 %66, %67, %68
-  %75 = copy %destination : reg<aie2p.ep> -> reg<aie2p.ep>
-  %76 = mov.i32 72
-  %77 = mul %i, %76
-  %78 = mov.modifier %77
-  %79 = paddb.modifier %75, %78
-  %80 = mov.store-fifo.pointer %79
-  %81 = mova.fifo.store.position 0
-  %82, %83, %84 = vst.push.bfp16ebs8.empty %69, %80, %81
-  %85, %86, %87 = vst.flush.512 %82, %83, %84
-  %88 = copy %current : reg<aie2p.ep> -> reg<aie2p.ep>
-  %89 = mova.modifier 576
-  %next = paddb.modifier %88, %89
-  %91 = add.nc %i, %step
-  low.br ^_bb1(%91: reg<aie2p.er>, %next: reg<aie2p.ep>, %72: reg<aie2p.erf2>)
+  %39, %40, %41 = vldb.fill.512.empty %31, %32
+  %42, %43, %44, %45 = vldb.pop.bfp16ebs8.buffered64 %39, %40, %41
+  %46, %47, %48, %49 = vldb.pop.bfp16ebs8 %43, %44, %45
+  %50, %51, %52, %53 = vldb.pop.bfp16ebs8 %47, %48, %49
+  %54, %55, %56, %57 = vldb.pop.bfp16ebs8 %51, %52, %53
+  %58, %59, %60, %61 = vldb.pop.bfp16ebs8 %55, %56, %57
+  %62, %63, %64, %65 = vldb.pop.bfp16ebs8 %59, %60, %61
+  %66, %67, %68, %69 = vldb.pop.bfp16ebs8 %63, %64, %65
+  %70, %71, %72, %73 = vldb.pop.bfp16ebs8 %67, %68, %69
+  %76 = copy %destination : reg<aie2p.ep> -> reg<aie2p.ep>
+  %77 = mov.i32 72
+  %78 = mul %i, %77
+  %79 = mov.modifier %78
+  %80 = paddb.modifier %76, %79
+  %81 = mov.store-fifo.pointer %80
+  %82 = mova.fifo.store.position 0
+  %83, %84, %85 = vst.push.bfp16ebs8.empty %70, %81, %82
+  %86, %87, %88 = vst.flush.512 %83, %84, %85
+  %92 = add.nc %i, %step
+  low.br ^_bb1(%92: reg<aie2p.er>, %71: reg<aie2p.eps>, %73: reg<aie2p.erf2>)
 ^_bb3:
   return
 }

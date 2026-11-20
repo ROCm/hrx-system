@@ -63,6 +63,8 @@ class DescriptorEmitForm(Enum):
     CONST = "const"
     # The sequence restores the initial value of this carried temporary.
     RESTORED_CONST = "restored_const"
+    # The sequence ends at the input address plus the contiguous access extent.
+    POST_INCREMENT_ADDRESS = "post_increment_address"
     COND_BR = "cond_br"
     FIRST_LANE = "first_lane"
     PER_LANE = "per_lane"
@@ -422,25 +424,39 @@ class EmitDescriptorOp:
         if self.accumulator is not None and not self.accumulator:
             raise ValueError("descriptor accumulator field must be non-empty")
 
-    def _validate_restored_const(
+    def _validate_loop_feedback(
         self, source_op: Op, sequence_carried: Sequence[str]
     ) -> None:
-        if (
-            len(self.results) != 1
-            or self.operands
-            or self.source_memory is not None
-            or self.descriptor.effects
-            or (self.immediates and not isinstance(self.immediates, Mapping))
-            or (
-                isinstance(self.immediates, Mapping)
-                and any(
-                    not isinstance(value, int) for value in self.immediates.values()
-                )
+        if len(self.results) != 1 or self.descriptor.effects:
+            raise ValueError(
+                f"{source_op.name}: loop feedback requires a pure single-result seed"
             )
+        if self.form is DescriptorEmitForm.RESTORED_CONST:
+            if (
+                self.operands
+                or self.source_memory is not None
+                or (self.immediates and not isinstance(self.immediates, Mapping))
+                or (
+                    isinstance(self.immediates, Mapping)
+                    and any(
+                        not isinstance(value, int) for value in self.immediates.values()
+                    )
+                )
+            ):
+                raise ValueError(
+                    f"{source_op.name}: restored constants require literal immediates"
+                )
+        elif (
+            tuple(self.operands.values()) != (ValueRef.source_memory_root(),)
+            or self.source_memory is None
+            or self.immediates
+            or self.copy_operands
+            or self.operand_materialization
+            is not DescriptorOperandMaterialization.DIRECT
         ):
             raise ValueError(
-                f"{source_op.name}: restored constants require a pure "
-                "single-result constant with literal immediates"
+                f"{source_op.name}: a post-increment address requires a direct copy "
+                "of the source memory root"
             )
         (seed,) = self.results.values()
         if (
@@ -448,7 +464,7 @@ class EmitDescriptorOp:
             or seed.field not in sequence_carried
         ):
             raise ValueError(
-                f"{source_op.name}: restored constants require a carried temporary"
+                f"{source_op.name}: loop feedback requires a carried temporary"
             )
 
     def validate(
@@ -473,6 +489,7 @@ class EmitDescriptorOp:
             self.form
             in (
                 DescriptorEmitForm.OP,
+                DescriptorEmitForm.POST_INCREMENT_ADDRESS,
                 DescriptorEmitForm.FIRST_LANE,
                 DescriptorEmitForm.PER_LANE,
                 DescriptorEmitForm.PER_LANE_SEQUENCE,
@@ -549,8 +566,11 @@ class EmitDescriptorOp:
                 defined_temporaries=defined_temporaries,
             )
         produced_temporaries = []
-        if self.form is DescriptorEmitForm.RESTORED_CONST:
-            self._validate_restored_const(source_op, sequence_carried)
+        if self.form in (
+            DescriptorEmitForm.RESTORED_CONST,
+            DescriptorEmitForm.POST_INCREMENT_ADDRESS,
+        ):
+            self._validate_loop_feedback(source_op, sequence_carried)
         for descriptor_field, value_ref in result_bindings.items():
             operand = _require_descriptor_operand(
                 self.descriptor, descriptor_field, "descriptor result binding"
@@ -711,6 +731,7 @@ class EmitDescriptorOp:
         if self.source_memory is not None and self.form not in (
             DescriptorEmitForm.AUTO,
             DescriptorEmitForm.OP,
+            DescriptorEmitForm.POST_INCREMENT_ADDRESS,
             DescriptorEmitForm.CONST,
             DescriptorEmitForm.PER_LANE_SEQUENCE,
         ):

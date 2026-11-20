@@ -8,6 +8,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/math.h"
+#include "loom/analysis/view_regions.h"
 #include "loom/codegen/low/source_memory_plan.h"
 #include "loom/ir/facts.h"
 
@@ -53,6 +54,26 @@ bool loom_low_source_memory_access_plan_lane_byte_envelope(
   *out_begin_offset = begin_offset;
   *out_end_offset = end_offset;
   return true;
+}
+
+bool loom_low_source_memory_access_advances_root_to_view(
+    const loom_low_source_memory_access_plan_t* plan,
+    const loom_view_region_table_t* views, loom_value_id_t next_view) {
+  if (plan->static_byte_offset != 0 || plan->dynamic_term_count != 0 ||
+      plan->vector_lane_byte_stride != plan->element_byte_count ||
+      plan->vector_offset_kind == LOOM_LOW_SOURCE_MEMORY_VECTOR_OFFSET_OTHER) {
+    return false;
+  }
+  const loom_view_region_t* region = NULL;
+  const uint64_t extent =
+      (uint64_t)plan->vector_lane_count * plan->element_byte_count;
+  return loom_view_region_table_try_lookup(views, next_view, &region) &&
+         region->base_view_value_id ==
+             loom_low_source_memory_access_address_value_id(plan) &&
+         region->address_projection == NULL &&
+         loom_symbolic_expr_is_constant(&region->projection_byte_offset) &&
+         region->projection_byte_offset.constant >= 0 &&
+         (uint64_t)region->projection_byte_offset.constant == extent;
 }
 
 static bool loom_low_source_memory_access_plan_strided_interval(

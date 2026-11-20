@@ -544,7 +544,11 @@ def _bfp_group_load_rule(
             results={"dst": pointer},
             result_types={"dst": DescriptorResultType()},
             source_memory=memory,
-            form=DescriptorEmitForm.OP,
+            form=(
+                DescriptorEmitForm.POST_INCREMENT_ADDRESS
+                if loop_carried and address_form is _MemoryAddressForm.IMMEDIATE
+                else DescriptorEmitForm.OP
+            ),
         )
     ]
     if address_form is not _MemoryAddressForm.IMMEDIATE:

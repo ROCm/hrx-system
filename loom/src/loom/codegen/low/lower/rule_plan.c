@@ -22,6 +22,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
+#include "loom/ops/cfg/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/registers.h"
 
@@ -1470,8 +1471,8 @@ static uint32_t loom_low_lower_rule_emit_data_size(
     loom_low_lower_rule_operand_masks_t operand_masks) {
   return (uint32_t)iree_host_align(
       loom_low_lower_rule_materializer_data_size(operand_masks.materializers) +
-          (emit->kind == LOOM_LOW_LOWER_EMIT_DESCRIPTOR_RESTORED_CONST
-               ? sizeof(loom_low_lower_rule_feedback_t)
+          (emit->kind == LOOM_LOW_LOWER_EMIT_DESCRIPTOR_LOOP_FEEDBACK
+               ? loom_low_lower_rule_feedback_size()
                : 0) +
           emit->attr_copy_count * sizeof(loom_named_attr_t) +
           loom_low_lower_rule_read_only_attributes_size(emit) +
@@ -1495,6 +1496,14 @@ static iree_status_t loom_low_lower_rule_initialize_feedback(
   const loom_type_t type = loom_type_table_get(
       &context->module->types,
       loom_low_lower_resolved_emit_result_type_id(resolved, 0));
+  if (resolved->emit->operand_ref_count != 0) {
+    loom_value_id_t address = loom_low_lower_lookup_value(
+        context, loom_low_lower_rule_feedback(resolved)->initial_address);
+    return loom_low_lower_rule_source_memory_emit_resolved_op(
+        context, &resolved->descriptor, &address, 1,
+        /*consumable_operand_mask=*/0, type, loom_named_attr_slice_empty(),
+        source_op->location, out_value);
+  }
   loom_op_t* constant = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_const(
       context, &resolved->descriptor,
@@ -1512,9 +1521,39 @@ static iree_status_t loom_low_lower_rule_forward_feedback(
   return iree_ok_status();
 }
 
+// A native sequence advances past the complete contiguous memory access. Its
+// result supplies the next address only when the source advances identically.
+static iree_status_t loom_low_lower_rule_feedback_initial_address(
+    loom_low_lower_context_t* context,
+    const loom_low_lower_realization_loop_t* loop,
+    const loom_low_source_memory_access_plan_t* access,
+    loom_value_id_t* out_address) {
+  *out_address = LOOM_VALUE_ID_INVALID;
+  const loom_value_id_t root =
+      loom_low_source_memory_access_address_value_id(access);
+  if (!loom_low_source_memory_value_is_block_argument(context->module, root)) {
+    return iree_ok_status();
+  }
+  const loom_value_t* value = loom_module_value(context->module, root);
+  if (loom_value_def_block(value) != loop->header) {
+    return iree_ok_status();
+  }
+  const uint16_t ordinal = loom_value_def_index(value);
+  const loom_value_id_t next =
+      loom_value_slice_get(loom_cfg_br_args(loop->backedge), ordinal);
+  const loom_view_region_table_t* views = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_context_view_regions(context, &views));
+  if (loom_low_source_memory_access_advances_root_to_view(access, views,
+                                                          next)) {
+    *out_address = loom_value_slice_get(loom_cfg_br_args(loop->entry), ordinal);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_lower_rule_prepare_feedback(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
+    const loom_low_source_memory_access_plan_t* access,
     const loom_low_lower_resolved_emit_t* resolved) {
   loom_low_lower_rule_feedback_t* feedback =
       loom_low_lower_rule_feedback(resolved);
@@ -1530,8 +1569,18 @@ static iree_status_t loom_low_lower_rule_prepare_feedback(
           ->value_refs[loom_low_lower_rule_emit_result_bind_ref_index(
               resolved->emit, 0)]
           .index;
-  // Equal literal bits at different sites do not identify the same feedback:
-  // each initializer consumes the final update from its own source sequence.
+  loom_low_lower_realization_input_t input = {0};
+  const bool has_address = resolved->emit->operand_ref_count != 0;
+  if (has_address) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_rule_feedback_initial_address(
+        context, loop, access, &feedback->initial_address));
+    if (feedback->initial_address == LOOM_VALUE_ID_INVALID) {
+      return iree_ok_status();
+    }
+    input.kind = LOOM_LOW_LOWER_REALIZATION_INPUT_SOURCE;
+    input.value.identity = feedback->initial_address;
+  }
+  // Each site consumes the final update from its own native sequence.
   const uint64_t key[] = {source_op->block_ordinal, feedback->temporary_index};
   static const uint8_t kFeedbackFamily = 0;
   const loom_low_lower_realization_recipe_t recipe = {
@@ -1540,6 +1589,8 @@ static iree_status_t loom_low_lower_rule_prepare_feedback(
           loom_low_lower_resolved_emit_result_type_id(resolved, 0)),
       .id = (loom_low_lower_plan_id_t)(uintptr_t)&kFeedbackFamily,
       .key = iree_make_const_byte_span(key, sizeof(key)),
+      .inputs = has_address ? &input : NULL,
+      .input_count = has_address ? 1 : 0,
       .initialize = loom_low_lower_rule_initialize_feedback,
       .update = loom_low_lower_rule_forward_feedback,
       .data = resolved,
@@ -1671,8 +1722,8 @@ iree_status_t loom_low_lower_rule_plan_finalize(
     const uint32_t data_size =
         loom_low_lower_rule_emit_data_size(rule_set, emit, operand_masks);
     const uint32_t prefix_size =
-        emit->kind == LOOM_LOW_LOWER_EMIT_DESCRIPTOR_RESTORED_CONST
-            ? sizeof(loom_low_lower_rule_feedback_t)
+        emit->kind == LOOM_LOW_LOWER_EMIT_DESCRIPTOR_LOOP_FEEDBACK
+            ? loom_low_lower_rule_feedback_size()
             : 0;
     if (data_size != 0) {
       resolved->data_offset =
@@ -1775,10 +1826,11 @@ iree_status_t loom_low_lower_rule_plan_finalize(
           context->module, low_type,
           (loom_type_id_t*)(source_values + source_value_index)));
     }
-    if (emit->kind == LOOM_LOW_LOWER_EMIT_DESCRIPTOR_RESTORED_CONST) {
+    if (emit->kind == LOOM_LOW_LOWER_EMIT_DESCRIPTOR_LOOP_FEEDBACK) {
       IREE_RETURN_IF_ERROR(loom_low_lower_rule_prepare_feedback(
           context, rule_set,
-          loom_low_lower_selected_plan_emission_op(selected_plan), resolved));
+          loom_low_lower_selected_plan_emission_op(selected_plan),
+          source_memory_access, resolved));
     }
     data += data_size;
   }

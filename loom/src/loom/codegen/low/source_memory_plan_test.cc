@@ -205,6 +205,62 @@ TEST_F(SourceMemoryPlanTest, StaticDenseLoadIncludesViewBase) {
   EXPECT_EQ(plan.dynamic_view_base_term_count, 0u);
 }
 
+TEST_F(SourceMemoryPlanTest, PostIncrementRequiresTheExactNextViewAddress) {
+  const auto view_type = ViewType1D(32, BuildDenseLayout());
+  const auto root = DefineArg(view_type);
+  const auto other_root = DefineArg(view_type);
+  const auto offset = DefineIndexArg();
+  const auto subview = [&](loom_value_id_t base, int64_t index) {
+    loom_op_t* op = nullptr;
+    const bool dynamic = index == INT64_MIN;
+    IREE_EXPECT_OK(loom_view_subview_build(
+        &builder_, base, dynamic ? &offset : nullptr, dynamic ? 1 : 0, &index,
+        1, &view_type, 1, LOOM_LOCATION_UNKNOWN, &op));
+    return loom_view_subview_result(op);
+  };
+  // Each load consumes four f32 values. Only the first projection starts
+  // sixteen bytes beyond the loaded root.
+  const loom_value_id_t next[] = {
+      subview(root, 4), subview(root, -4),        subview(root, 3),
+      subview(root, 5), subview(root, INT64_MIN), subview(other_root, 4),
+  };
+  const int64_t starts[] = {0, 1, INT64_MIN};
+  loom_op_t* loads[IREE_ARRAYSIZE(starts)] = {};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(starts); ++i) {
+    const bool dynamic = starts[i] == INT64_MIN;
+    IREE_ASSERT_OK(loom_vector_load_build(
+        &builder_, 0, 0, root, dynamic ? &offset : nullptr, dynamic ? 1 : 0,
+        &starts[i], 1, 0, 0, VectorType1D(4), LOOM_LOCATION_UNKNOWN,
+        &loads[i]));
+  }
+
+  loom_value_fact_table_t facts = {};
+  ComputeFacts(&facts);
+  loom_local_value_domain_t domain = {};
+  IREE_ASSERT_OK(loom_local_value_domain_acquire_for_region(
+      module_, loom_func_like_body(function_), &analysis_arena_, &domain));
+  loom_symbolic_expr_context_t expressions = {};
+  loom_symbolic_expr_context_initialize(module_, &domain, &facts,
+                                        &analysis_arena_, &expressions);
+  loom_view_region_table_t views = {};
+  IREE_ASSERT_OK(
+      loom_view_region_table_initialize(&domain, &expressions, &views));
+  IREE_ASSERT_OK(loom_view_region_table_analyze(&views));
+  for (size_t i = 0; i < IREE_ARRAYSIZE(loads); ++i) {
+    loom_low_source_memory_access_plan_t plan = {};
+    loom_low_source_memory_access_diagnostic_t diagnostic = {};
+    ASSERT_TRUE(loom_low_source_memory_access_plan_build(
+        &views, loads[i], nullptr, &plan, &diagnostic));
+    for (size_t j = 0; j < IREE_ARRAYSIZE(next); ++j) {
+      EXPECT_EQ(loom_low_source_memory_access_advances_root_to_view(
+                    &plan, &views, next[j]),
+                i == 0 && j == 0)
+          << "load " << i << ", projection " << j;
+    }
+  }
+  loom_local_value_domain_release(&domain);
+}
+
 TEST_F(SourceMemoryPlanTest, MaterializedCarrierKeepsStorageProvenance) {
   const auto root = DefineBufferArg();
   const auto view_type = loom_type_shaped_1d(

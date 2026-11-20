@@ -543,7 +543,14 @@ def test_bfp_group_address_setup_preserves_the_fifo_pointer_domain() -> None:
             and ".fifo.pop.buffered64" in emit.descriptor.key
         )
         assert preload.operands["ptr"] == pointer
-        if Guard.value_loop_carried("view") in rule.guards:
+        loop_carried = Guard.value_loop_carried("view") in rule.guards
+        direct = (
+            memory.static_byte_offset_maximum == 0 and memory.dynamic_term_count == 0
+        )
+        assert (pointer_move.form is DescriptorEmitForm.POST_INCREMENT_ADDRESS) == (
+            loop_carried and direct
+        )
+        if loop_carried:
             assert first_pop.operands["ptr"] == preload.results["ptr_out"]
             assert first_pop.operands["fifo_reg"] == preload.results["fifo_reg_out"]
             assert first_pop.operands["pos"] == preload.results["pos_out"]

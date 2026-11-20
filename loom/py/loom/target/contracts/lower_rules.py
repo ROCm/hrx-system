@@ -2251,16 +2251,6 @@ class _LowerRuleSetCompiler:
 
         source_memory_ordinal = LOWER_SOURCE_MEMORY_NONE
         if emit.source_memory is not None:
-            if emit_kind not in (
-                LowerEmitKind.DESCRIPTOR_OP,
-                LowerEmitKind.DESCRIPTOR_CONST,
-                LowerEmitKind.DESCRIPTOR_OP_PER_LANE_SEQUENCE,
-            ):
-                raise ValueError(
-                    f"{source_op.name}: "
-                    "source-memory emits require op, constant, "
-                    "or per-lane-sequence form"
-                )
             source_memory_ordinal = self._append_source_memory(
                 source_op,
                 emit.source_memory,
