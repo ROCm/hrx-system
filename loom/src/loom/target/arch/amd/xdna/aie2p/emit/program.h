@@ -122,6 +122,30 @@ typedef struct loom_aie2p_program_relocation_t {
   uint64_t required_alignment;
 } loom_aie2p_program_relocation_t;
 
+// One shim DMA descriptor reading immutable loader data during initialization.
+typedef struct loom_aie2p_program_upload_patch_t {
+  // Initialization record publishing the complete shim descriptor.
+  uint32_t record_index;
+  // First byte in the immutable DMA allocation.
+  uint32_t source_offset;
+  // Number of bytes accessed by this descriptor.
+  uint32_t byte_length;
+} loom_aie2p_program_upload_patch_t;
+
+// Equivalent initialization using DMA in place of inline firmware writes.
+typedef struct loom_aie2p_program_upload_t {
+  // Initialization including the loader's temporary circuits and queue drains.
+  const loom_aie2p_program_record_t* records;
+  // Number of initialization records.
+  iree_host_size_t record_count;
+  // Immutable bytes in device DMA order, shared across cold invocations.
+  iree_const_byte_span_t contents;
+  // Shim address fixups in increasing initialization-record order.
+  const loom_aie2p_program_upload_patch_t* patches;
+  // Number of shim DMA descriptors referencing contents.
+  iree_host_size_t patch_count;
+} loom_aie2p_program_upload_t;
+
 // Executable array initialization and invocation-control programs.
 typedef struct loom_aie2p_array_program_t {
   // Resident array configuration and core activation records.
@@ -145,6 +169,8 @@ typedef struct loom_aie2p_array_program_t {
     // Control-record boundary after measured work, possibly record_count.
     uint32_t end_record;
   } measurement;
+  // Optional bulk loader for product directories with room for its DMA backing.
+  const loom_aie2p_program_upload_t* upload;
 } loom_aie2p_array_program_t;
 
 #ifdef __cplusplus

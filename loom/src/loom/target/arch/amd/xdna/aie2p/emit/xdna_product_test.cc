@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+#include "iree/hal/driver/amd/xdna/image/aie2p/npu2.h"
+#include "iree/hal/driver/amd/xdna/image/image.h"
 #include "iree/io/vec_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -30,6 +32,7 @@ class XdnaProductTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    iree_hal_amd_xdna_image_free(image_);
     iree_io_stream_release(stream_);
     iree_arena_deinitialize(&arena_);
     iree_arena_block_pool_deinitialize(&pool_);
@@ -77,6 +80,33 @@ class XdnaProductTest : public ::testing::Test {
     };
   }
 
+  void LoadOnNpu2(const loom_aie2p_xdna_product_t& product, uint16_t columns) {
+    loom_aie2p_xdna_product_issue_t issue = {};
+    loom_aie2p_xdna_product_admission_t* admission = nullptr;
+    bool admitted = false;
+    IREE_ASSERT_OK(loom_aie2p_xdna_product_admit(&product, &arena_, &admitted,
+                                                 &admission, &issue));
+    ASSERT_TRUE(admitted);
+    loom_aie2p_xdna_product_image_t* native = nullptr;
+    bool finalized = false;
+    IREE_ASSERT_OK(loom_aie2p_xdna_product_finalize(admission, &finalized,
+                                                    &native, &issue));
+    ASSERT_TRUE(finalized) << issue.kind;
+    IREE_ASSERT_OK(loom_aie2p_xdna_product_write(native, stream_));
+    iree_arena_reset(&arena_);
+    iree_hal_amd_xdna_aie2p_target_t target;
+    IREE_ASSERT_OK(iree_hal_amd_xdna_aie2p_npu2_target_initialize(
+        IREE_SV("amd.xdna.strix_halo.17f0_11"), columns, &target));
+    iree_byte_sequence_t* sequence = nullptr;
+    IREE_ASSERT_OK(iree_io_vec_stream_move_contents(stream_, &sequence));
+    iree_status_t status = iree_hal_amd_xdna_image_allocate(
+        sequence, &target, iree_allocator_system(), &image_);
+    iree_byte_sequence_release(sequence);
+    IREE_ASSERT_OK(status);
+  }
+
+  // Image admitted by the runtime, independent of the native emitter's arena.
+  iree_hal_amd_xdna_image_t* image_ = nullptr;
   // Backing blocks for temporary native emission data.
   iree_arena_block_pool_t pool_;
   // Scratch storage used only while constructing the product.
@@ -194,63 +224,19 @@ TEST_F(XdnaProductTest, PreservesRequirementsIndependentOfWorkerTopology) {
   const loom_aie2p_xdna_product_t product = {
       loom_xdna_device_profile_lookup(profile_key), entries,
       IREE_ARRAYSIZE(entries)};
-  loom_aie2p_xdna_product_issue_t issue = {};
-  loom_aie2p_xdna_product_admission_t* admission = nullptr;
-  bool admitted = false;
-  IREE_ASSERT_OK(loom_aie2p_xdna_product_admit(&product, &arena_, &admitted,
-                                               &admission, &issue));
-  ASSERT_TRUE(admitted);
-  loom_aie2p_xdna_product_image_t* image = nullptr;
-  bool finalized = false;
-  IREE_ASSERT_OK(
-      loom_aie2p_xdna_product_finalize(admission, &finalized, &image, &issue));
-  ASSERT_TRUE(finalized);
-  IREE_ASSERT_OK(loom_aie2p_xdna_product_write(image, stream_));
-  std::vector<uint8_t> bytes(iree_io_stream_length(stream_));
-  IREE_ASSERT_OK(iree_io_stream_seek(stream_, IREE_IO_STREAM_SEEK_SET, 0));
-  IREE_ASSERT_OK(
-      iree_io_stream_read(stream_, bytes.size(), bytes.data(), nullptr));
-  iree_arena_reset(&arena_);
-
-  // ELF32's first program header describes the native metadata. Decode its
-  // public wire records independently of the compiler's scratch allocation.
-  ASSERT_GE(bytes.size(), 52u);
-  const uint32_t program_header_offset =
-      iree_unaligned_load_le_u32(bytes.data() + 28);
-  ASSERT_LE(uint64_t(program_header_offset) + 32, bytes.size());
-  const auto* program_header = bytes.data() + program_header_offset;
-  ASSERT_EQ(iree_unaligned_load_le_u32(program_header),
-            IREE_XDNA_ELF_PROGRAM_TYPE_METADATA);
-  const uint32_t metadata_offset =
-      iree_unaligned_load_le_u32(program_header + 4);
-  const uint32_t metadata_length =
-      iree_unaligned_load_le_u32(program_header + 16);
-  ASSERT_LE(uint64_t(metadata_offset) + metadata_length, bytes.size());
-  ASSERT_GE(metadata_length, IREE_XDNA_ELF_HEADER_RECORD_SIZE);
-  const auto* metadata = bytes.data() + metadata_offset;
-  const auto header = iree_xdna_elf_decode_header(metadata);
+  ASSERT_NO_FATAL_FAILURE(LoadOnNpu2(product, 8));
+  const auto* tables = iree_hal_amd_xdna_image_tables(image_);
+  const auto& header = tables->header;
   EXPECT_EQ(header.column_count, 8u);
   ASSERT_EQ(header.allocation_count, 2u);
   ASSERT_EQ(header.allocation_use_count, 2u);
   ASSERT_EQ(header.entry_count, 2u);
   ASSERT_EQ(header.binding_count, 2u);
-  const uint32_t entry_offset =
-      IREE_XDNA_ELF_HEADER_RECORD_SIZE +
-      header.allocation_count * IREE_XDNA_ELF_ALLOCATION_RECORD_SIZE +
-      header.allocation_use_count * sizeof(uint32_t);
-  const uint32_t binding_offset =
-      entry_offset + header.entry_count * IREE_XDNA_ELF_ENTRY_RECORD_SIZE;
-  ASSERT_LE(
-      binding_offset + header.binding_count * IREE_XDNA_ELF_BINDING_RECORD_SIZE,
-      metadata_length);
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(entries); ++i) {
-    const auto entry = iree_xdna_elf_decode_entry(
-        metadata + entry_offset + i * IREE_XDNA_ELF_ENTRY_RECORD_SIZE);
+    const auto& entry = tables->entries[i];
     ASSERT_EQ(entry.first_binding, i);
     EXPECT_EQ(entry.binding_count, 1u);
-    const auto binding = iree_xdna_elf_decode_binding(
-        metadata + binding_offset +
-        entry.first_binding * IREE_XDNA_ELF_BINDING_RECORD_SIZE);
+    const auto& binding = tables->bindings[entry.first_binding];
     EXPECT_EQ(binding.kind, bindings[i].kind);
     EXPECT_EQ(binding.address_space, bindings[i].address_space);
     EXPECT_EQ(binding.access, bindings[i].access);
@@ -259,14 +245,8 @@ TEST_F(XdnaProductTest, PreservesRequirementsIndependentOfWorkerTopology) {
     EXPECT_EQ(binding.minimum_alignment, bindings[i].minimum_alignment);
     EXPECT_EQ(binding.minimum_byte_offset, bindings[i].minimum_byte_offset);
     EXPECT_EQ(binding.maximum_byte_offset, bindings[i].maximum_byte_offset);
-    const uint32_t invocation_offset =
-        binding_offset +
-        header.binding_count * IREE_XDNA_ELF_BINDING_RECORD_SIZE +
-        header.relocation_count * IREE_XDNA_ELF_RELOCATION_RECORD_SIZE;
     for (uint32_t j = 0; j < entry.invocation_count; ++j) {
-      const auto invocation = iree_xdna_elf_decode_invocation(
-          metadata + invocation_offset +
-          (entry.first_invocation + j) * IREE_XDNA_ELF_INVOCATION_RECORD_SIZE);
+      const auto& invocation = tables->invocations[entry.first_invocation + j];
       // Both forms preserve ordinary command lengths; only the first entry
       // declares a measured interval, including its final record boundary.
       EXPECT_EQ(invocation.byte_length, 40u);
@@ -412,6 +392,143 @@ class SyntheticXdnaProduct {
   std::vector<loom_aie2p_xdna_entry_t> entries_;
   loom_aie2p_xdna_product_t product_ = {};
 };
+
+TEST_F(XdnaProductTest, StaticLoaderAddressesPrecedeBothBindingRelocations) {
+  SyntheticXdnaProduct fixture(4, 1);
+  auto product = *fixture.product();
+  std::vector<loom_aie2p_xdna_entry_t> entries(product.entries,
+                                               product.entries + 4);
+  product.entries = entries.data();
+  auto regular = *entries[0].array_program;
+  const uint32_t descriptor[8] = {1, 0, 0, 0, 0, 0, 0, 1};
+  const loom_aie2p_program_record_t shim = {
+      .type = LOOM_AIE2P_PROGRAM_RECORD_REGISTER_BLOCK_WRITE32,
+      .value = {.register_block_write32 = {0x1d000u, descriptor, 8}},
+  };
+  const loom_aie2p_program_relocation_t call_address = {
+      .target_word_index = 1,
+      .maximum_value = (UINT64_C(1) << 48) - 4,
+      .required_alignment = 4,
+  };
+  const iree_xdna_elf_binding_record_t binding = {
+      .kind = IREE_XDNA_ELF_BINDING_KIND_BUFFER,
+      .address_space = IREE_XDNA_ELF_BINDING_ADDRESS_SPACE_GLOBAL,
+      .access = IREE_XDNA_ELF_BINDING_ACCESS_READ,
+      .usage = IREE_XDNA_ELF_BINDING_USAGE_DEVICE_VISIBLE,
+      .minimum_byte_length = 4,
+      .minimum_alignment = 4,
+      .maximum_byte_offset = UINT64_MAX,
+  };
+  regular.control_records = &shim;
+  regular.control_record_count = 1;
+  regular.relocations = &call_address;
+  regular.relocation_count = 1;
+  auto bulk = regular;
+  const loom_aie2p_program_record_t initialize[] = {
+      regular.array_records[0],
+      shim,
+  };
+  const std::array<uint8_t, 8> data = {1, 2, 3, 4, 5, 6, 7, 8};
+  const loom_aie2p_program_upload_patch_t patch = {1, 4, 4};
+  const loom_aie2p_program_upload_t upload = {
+      .records = initialize,
+      .record_count = IREE_ARRAYSIZE(initialize),
+      .contents = iree_make_const_byte_span(data.data(), data.size()),
+      .patches = &patch,
+      .patch_count = 1,
+  };
+  bulk.upload = &upload;
+  for (size_t i = 0; i < entries.size(); ++i) {
+    entries[i].array_program = i % 2 ? &bulk : &regular;
+    entries[i].bindings = &binding;
+    entries[i].binding_count = 1;
+  }
+  ASSERT_NO_FATAL_FAILURE(LoadOnNpu2(product, 1));
+  const auto* tables = iree_hal_amd_xdna_image_tables(image_);
+  ASSERT_EQ(tables->header.allocation_count, 6u);
+  ASSERT_EQ(tables->header.relocation_count, 10u);
+  uint32_t first_use = 0;
+  for (uint32_t i = 0; i < entries.size(); ++i) {
+    const auto& entry = tables->entries[i];
+    const bool uploads = (i % 2) != 0;
+    ASSERT_EQ(entry.first_allocation_use, first_use);
+    ASSERT_EQ(entry.allocation_use_count, uploads ? 2u : 1u);
+    EXPECT_EQ(entry.static_relocation_count, uploads ? 1u : 0u);
+    ASSERT_EQ(entry.dynamic_relocation_count, 2u);
+    const auto& cold = tables->invocations[entry.first_invocation];
+    const auto& warm = tables->invocations[entry.first_invocation + 1];
+    // Header, block-write header, and four bytes of spliced tile code.
+    constexpr uint32_t kTileEnd = 16 + 16 + 4;
+    constexpr uint32_t kDescriptorSize = 16 + sizeof(descriptor);
+    constexpr uint32_t kAddress = 16 + sizeof(uint32_t);
+    EXPECT_EQ(cold.byte_length, kTileEnd + kDescriptorSize * (uploads ? 2 : 1));
+    EXPECT_EQ(warm.byte_length, 16u + kDescriptorSize);
+    EXPECT_EQ(tables->relocations[entry.first_dynamic_relocation].byte_offset,
+              kTileEnd + (uploads ? kDescriptorSize : 0) + kAddress);
+    EXPECT_EQ(
+        tables->relocations[entry.first_dynamic_relocation + 1].byte_offset,
+        warm.byte_offset + 16 + kAddress);
+    if (uploads) {
+      const auto& fixup = tables->relocations[entry.first_static_relocation];
+      EXPECT_EQ(fixup.destination_use, 0u);
+      EXPECT_EQ(fixup.source_ordinal, 1u);
+      EXPECT_EQ(fixup.byte_offset, kTileEnd + kAddress);
+      EXPECT_EQ(fixup.addend, 4);
+      EXPECT_EQ(fixup.maximum_value, call_address.maximum_value);
+      EXPECT_EQ(fixup.alignment, 4u);
+      const uint32_t source = tables->allocation_uses[first_use + 1];
+      const auto& allocation = tables->allocations[source];
+      EXPECT_EQ(allocation.domain, IREE_XDNA_ELF_ALLOCATION_DOMAIN_DMA);
+      EXPECT_EQ(allocation.flags, IREE_XDNA_ELF_ALLOCATION_FLAG_IMMUTABLE);
+      ASSERT_EQ(allocation.byte_length, data.size());
+      std::array<uint8_t, 8> loaded = {};
+      IREE_ASSERT_OK(iree_hal_amd_xdna_image_load_allocation(image_, source,
+                                                             loaded.data()));
+      EXPECT_EQ(loaded, data);
+    }
+    first_use += entry.allocation_use_count;
+  }
+}
+
+TEST_F(XdnaProductTest, InlineLoaderFitsDirectoryAtProgramHeaderLimit) {
+  // Each inline entry has three segments. Its DMA alternative adds a trailing
+  // descriptor fragment and a data segment. The same native code is shared by
+  // all entries in both layouts.
+  constexpr uint32_t kEntries =
+      (IREE_XDNA_ELF_MAX_PROGRAM_HEADER_COUNT - 1) / 3;
+  SyntheticXdnaProduct fixture(kEntries, 1);
+  auto product = *fixture.product();
+  std::vector<loom_aie2p_xdna_entry_t> entries(product.entries,
+                                               product.entries + kEntries);
+  product.entries = entries.data();
+  auto program = *entries[0].array_program;
+  const uint32_t words[8] = {1, 0, 0, 0, 0, 0, 0, 1};
+  const loom_aie2p_program_record_t records[] = {
+      program.array_records[0],
+      {
+          .type = LOOM_AIE2P_PROGRAM_RECORD_REGISTER_BLOCK_WRITE32,
+          .value = {.register_block_write32 = {0x1d000u, words, 8}},
+      },
+  };
+  const uint8_t bytes[4] = {};
+  const loom_aie2p_program_upload_patch_t patch = {1, 0, sizeof(bytes)};
+  const loom_aie2p_program_upload_t upload = {
+      .records = records,
+      .record_count = IREE_ARRAYSIZE(records),
+      .contents = iree_make_const_byte_span(bytes, sizeof(bytes)),
+      .patches = &patch,
+      .patch_count = 1,
+  };
+  program.upload = &upload;
+  for (auto& entry : entries) {
+    entry.array_program = &program;
+  }
+  ASSERT_NO_FATAL_FAILURE(LoadOnNpu2(product, 1));
+  const auto* tables = iree_hal_amd_xdna_image_tables(image_);
+  EXPECT_EQ(tables->header.entry_count, kEntries);
+  EXPECT_EQ(tables->header.allocation_count, kEntries);
+  EXPECT_EQ(tables->header.relocation_count, 0u);
+}
 
 TEST_F(XdnaProductTest, LoadsInitializedTileSectionsBeforeActivation) {
   const loom_xdna_device_profile_t* profile =

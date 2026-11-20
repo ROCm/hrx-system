@@ -615,6 +615,8 @@ loom_cc_test(
         "//loom/src/loom/target/arch/amd/xdna/device:profile",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal/driver/amd/xdna/image",
+        "//runtime/src/iree/hal/driver/amd/xdna/image/aie2p:npu2",
         "//runtime/src/iree/io:stream",
         "//runtime/src/iree/schemas:xdna_executable",
         "//runtime/src/iree/testing:gtest",
