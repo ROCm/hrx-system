@@ -163,23 +163,25 @@ TEST_P(InputTest, BoundedTokensAndZeroPadding) {
   }
 }
 
-TEST_P(InputTest, BoundedModesMatchCompleteTokenizer) {
+TEST_P(InputTest, PrefixesAndMeasurementMatchCompleteTokenizer) {
   const iree_tokenizer_encode_flags_t modes[] = {
       IREE_TOKENIZER_ENCODE_FLAG_NONE,
       IREE_TOKENIZER_ENCODE_FLAG_ADD_SPECIAL_TOKENS,
       IREE_TOKENIZER_ENCODE_FLAG_NO_SPECIAL_TOKEN_MATCHING,
       IREE_TOKENIZER_ENCODE_FLAG_ADD_SPECIAL_TOKENS |
           IREE_TOKENIZER_ENCODE_FLAG_NO_SPECIAL_TOKEN_MATCHING};
+  // With framing enabled, BOS and the payload fill a chunk before EOS.
+  const std::string long_text(255, 'a');
   for (iree_tokenizer_encode_flags_t flags : modes) {
-    for (const char* text : {"", "ab", "azzb"}) {
-      int32_t expected[16] = {};
+    for (const char* text : {"", "ab", "azzb", long_text.c_str()}) {
+      int32_t expected[257] = {};
       iree_host_size_t expected_count = 0;
       IREE_ASSERT_OK(iree_tokenizer_encode(
           tokenizer, iree_make_cstring_view(text), flags,
           iree_tokenizer_make_token_output(expected, nullptr, nullptr,
                                            IREE_ARRAYSIZE(expected)),
           host_allocator, &expected_count));
-      for (int64_t capacity : {0, 1, 3, 4, 8}) {
+      for (int64_t capacity : {-1, 0, 1, 3, 4, 8}) {
         SCOPED_TRACE(::testing::Message() << "flags=" << flags << " text="
                                           << text << " capacity=" << capacity);
         iree_vm_variant_t arguments[] = {Text(iree_make_cstring_view(text)),
@@ -191,14 +193,16 @@ TEST_P(InputTest, BoundedModesMatchCompleteTokenizer) {
                               iree_vm_variant_span_from_array(results)));
         int64_t count = 0;
         IREE_ASSERT_OK(iree_vm_i64_from_variant(results[1], &count));
-        EXPECT_EQ(count, iree_min(capacity, (int64_t)expected_count));
+        EXPECT_EQ(count, capacity < 0
+                             ? (int64_t)expected_count
+                             : iree_min(capacity, (int64_t)expected_count));
         iree_vm_buffer_t* buffer = nullptr;
         IREE_ASSERT_OK(iree_vm_buffer_ptr_from_variant_borrowed(
             &types, results[0], &buffer));
         iree_const_byte_span_t bytes = iree_const_byte_span_empty();
         IREE_ASSERT_OK(iree_vm_buffer_map_read(
             buffer, 0, iree_vm_buffer_length(buffer), &bytes));
-        ASSERT_EQ(bytes.data_length, capacity * 4);
+        ASSERT_EQ(bytes.data_length, capacity < 0 ? 0 : capacity * 4);
         for (int64_t i = 0; i < capacity; ++i) {
           EXPECT_EQ(iree_unaligned_load_le_u32(bytes.data + i * 4),
                     i < count ? (uint32_t)expected[i] : 0u);
@@ -219,7 +223,7 @@ TEST_P(InputTest, ComposedExpansionUsesOnlyRequestedPrefixCapacity) {
       std::string(32, 'c') +
       R"("}]},"model":{"type":"BPE","vocab":{"c":1},"merges":[]}})";
   LoadTokenizer(configuration);
-  for (int64_t capacity : {0, 1, 31, 4096, 8192, 8193}) {
+  for (int64_t capacity : {-1, 0, 1, 31, 4096, 8192, 8193}) {
     SCOPED_TRACE(capacity);
     iree_vm_variant_t arguments[] = {Text(IREE_SV("aaaaaaaa")),
                                      iree_vm_variant_from_i32(0),
@@ -230,14 +234,14 @@ TEST_P(InputTest, ComposedExpansionUsesOnlyRequestedPrefixCapacity) {
                           iree_vm_variant_span_from_array(results)));
     int64_t count = 0;
     IREE_ASSERT_OK(iree_vm_i64_from_variant(results[1], &count));
-    EXPECT_EQ(count, iree_min(capacity, int64_t{8192}));
+    EXPECT_EQ(count, capacity < 0 ? 8192 : iree_min(capacity, int64_t{8192}));
     iree_vm_buffer_t* buffer = nullptr;
     IREE_ASSERT_OK(
         iree_vm_buffer_ptr_from_variant_borrowed(&types, results[0], &buffer));
     iree_const_byte_span_t bytes = iree_const_byte_span_empty();
     IREE_ASSERT_OK(iree_vm_buffer_map_read(
         buffer, 0, iree_vm_buffer_length(buffer), &bytes));
-    ASSERT_EQ(bytes.data_length, capacity * 4);
+    ASSERT_EQ(bytes.data_length, capacity < 0 ? 0 : capacity * 4);
     for (int64_t i = 0; i < capacity; ++i) {
       EXPECT_EQ(iree_unaligned_load_le_u32(bytes.data + i * 4),
                 i < count ? 1u : 0u);
@@ -314,7 +318,7 @@ TEST_P(InputTest, InputRejectionLeavesInvocationReusable) {
   }
   iree_vm_variant_t arguments[] = {Text(IREE_SV("a")),
                                    iree_vm_variant_from_i32(0),
-                                   iree_vm_variant_from_i64(-1)};
+                                   iree_vm_variant_from_i64(-2)};
   iree_vm_variant_t results[2] = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,

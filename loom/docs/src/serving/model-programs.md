@@ -344,8 +344,11 @@ separate execution mechanism.
 
 Request preparation can use the `input` capability to encode text and decode
 token spans with the deployment's tokenizer. `encode(text, flags, capacity)`
-returns a zero-padded little-endian I32 ID buffer and live token count; it can
-stop at the requested capacity. `decode(ids, flags, byte_capacity)` consumes
+returns a zero-padded little-endian I32 ID buffer and live token count. A
+nonnegative capacity limits the number of IDs. With capacity `-1`, it consumes
+the complete input and returns the exact count and an empty ID buffer. Both
+modes apply the same tokenizer flags, including beginning- and end-of-sequence
+framing. `decode(ids, flags, byte_capacity)` consumes
 the complete ID buffer and returns a zero-padded UTF-8 buffer and live byte
 length. An insufficient decoding capacity fails instead of returning partial
 text. Pass only live IDs, excluding encoding padding. Each call starts fresh
@@ -478,6 +481,28 @@ token, fork/rewind, cancellation and full-replay equivalence. Those boundaries
 matter more than getting one unretained prompt to emit plausible text. The
 [text service](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/service/text/README.md)
 links the storage, epoch and chat-policy declarations beside their owners.
+
+### Count a prompt beyond the execution window
+
+`prepare_input(text, markers, marker_count, format, boundary, capacity)`
+returns token IDs, a position count, and media spans. The service first offers
+the deployment's available input capacity. When the prompt fits, the source
+returns the IDs and spans used by generation. A count request reads the count
+from that same result.
+
+A source that supports measuring larger prompts signals insufficient capacity
+by returning two empty buffers and a count greater than the offered capacity.
+Probing for one extra ID distinguishes overflow from an exact fit. Generation
+rejects the oversized request immediately. For a stateless count, the service
+invokes the same export once more with the same rendered text and marker plan
+and capacity `-1`. The source returns an empty
+ID buffer, its exact full position count, and the same validated media spans
+it would return with enough room for all IDs.
+
+The source owns framing and validation in both calls. A text-only policy can
+use `input.encode(text, flags, -1)` to measure without retaining IDs. A model
+that checks projected image markers against token IDs can obtain the IDs it
+needs for that check. Authored errors propagate to the client on either call.
 
 Cold image preparation selects stages and parameter domains for default geometry.
 Warm source receives the requested height and width alongside prompt, seed, and

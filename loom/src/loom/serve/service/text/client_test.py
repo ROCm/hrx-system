@@ -146,6 +146,40 @@ class ClientTest(unittest.TestCase):
         result = post("\n" + json.dumps(body, indent=2) + "\n", 200)
         self.check_completion(result, "bx", "length", 4, 2)
 
+    def check_prompt_compaction(self, address):
+        (model,) = control(address, "GET", "/v1/models", 200)["data"]
+        window = model["context_length"]
+        content = "ab" * window
+        message = {"role": "user", "content": content}
+        body = self.body(
+            model=model["id"],
+            messages=[message],
+            tools=[{"type": "function", "function": {"name": "read"}}],
+            max_tokens=1,
+        )
+
+        def count():
+            return control(
+                address,
+                "POST",
+                "/v1/chat/completions/input_tokens",
+                200,
+                body=json.dumps(body),
+                headers={"Content-Type": "application/json"},
+            )["input_tokens"]
+
+        full_count = count()
+        # The fixture renders one token per character and one for the tool.
+        self.assertEqual(full_count, len(content) + 1)
+        self.request(address, body, expected=400)
+        excess = full_count - (window - 1)
+        message["content"] = content[excess:]
+        trimmed_count = count()
+        self.assertEqual(trimmed_count, window - 1)
+        result = self.request(address, body)
+        self.assertEqual(result["usage"]["prompt_tokens"], trimmed_count)
+        self.assertEqual(result["usage"]["completion_tokens"], 1)
+
     def test_output_forms_share_execution_history_and_failure_semantics(self):
         # HTTP response semantics are independent of worker count. This suite
         # owns concurrent response forms, while pressure coverage owns the
@@ -195,6 +229,7 @@ class ClientTest(unittest.TestCase):
                     self.assertIsNotNone(bound, log.read_text())
                     address = urlsplit(f"http://{bound}")
                     self.check_request_diagnostics(address)
+                    self.check_prompt_compaction(address)
                     for options in (
                         {},
                         {"stream": False},
@@ -329,10 +364,11 @@ class ClientTest(unittest.TestCase):
                             ),
                             expected=400,
                         )
-                        self.assertEqual(rejected["error"]["code"], "INVALID_ARGUMENT")
+                        self.assertEqual(rejected["error"]["code"], "OUT_OF_RANGE")
                         self.assertEqual(
                             rejected["error"]["message"],
-                            "input exceeds the available context size",
+                            "input exceeds the available context size of 96 tokens; "
+                            "compact history or shorten the prompt",
                         )
 
                     # Real concurrent requests can use different output modes

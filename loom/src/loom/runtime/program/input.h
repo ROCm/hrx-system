@@ -24,7 +24,10 @@ extern "C" {
 //       -> (buffer text, i64 byte_length)
 //   lookup(buffer token) -> i32 id
 // encode retains at most capacity IDs and returns a zero-padded capacity*4 byte
-// buffer plus its live count. Flags use iree_tokenizer_encode_flags_t:
+// buffer plus its live count. A capacity of -1 measures the complete input
+// with the same flags and returns an empty ID buffer and the exact count.
+// The encoder drains IDs into fixed scratch in this mode. Other negative
+// capacities are invalid. Flags use iree_tokenizer_encode_flags_t:
 // ADD_SPECIAL_TOKENS (4) enables tokenizer-defined framing, and
 // NO_SPECIAL_TOKEN_MATCHING (8) encodes literal special-token spellings as
 // ordinary text. Zero selects raw encoding with special-token matching. Every

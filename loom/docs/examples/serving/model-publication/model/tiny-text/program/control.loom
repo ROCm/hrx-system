@@ -285,14 +285,15 @@ func.def public @text_prepare_input_v1(%text: buffer, %markers: buffer, %marker_
     %valid = scalar.ori %ab, %xh : i1
     func.call @check(%valid) : (i1)
   }
-  %probe = scalar.addi %capacity, %c1_i64 : i64
+  %measure = scalar.constant -1 : i64
+  %measuring = scalar.cmpi eq, %capacity, %measure : i64
+  %bounded_probe = scalar.addi %capacity, %c1_i64 : i64
+  %probe = scf.select %measuring, %measure, %bounded_probe : i64
   %tokens, %count = func.call @encode(%input, %c0_i32, %probe) : (buffer, i32, i64) -> (buffer, i64)
   %fits = scalar.cmpi ule, %count, %capacity : i64
-  %fits32 = scalar.extui %fits : i1 to i32
-  %error = buffer.constant utf8("input exceeds the available context size") : buffer
-  func.call @require(%fits32, %error) : (i32, buffer)
   %empty = buffer.constant utf8("") : buffer
-  func.return %tokens, %count, %empty : buffer, i64, buffer
+  %output = scf.select %fits, %tokens, %empty : buffer
+  func.return %output, %count, %empty : buffer, i64, buffer
 }
 
 func.def public @text_output_next_v1(%response: buffer, %previous: i64, %state: i64, %phase: i32) -> (i64, i64, i64, i64) {

@@ -843,11 +843,15 @@ source-policy invocation, so it waits for an existing CPU borrower to retire;
 it does not create another VM or block a worker waiting for model capacity.
 The normal model routing and drain policy still applies.
 
-The request's generation fields remain validated, but `stream:true` still
-returns one JSON count and no output budget is reserved. Source input is bounded
-by the deployment's context capacity; an oversized input rejects instead of
-returning a truncated count. A successful count is not a promise that input plus
-the requested completion budget will fit, or that execution memory is available.
+Clients can use the full count to compact history. For example, if a model
+reports 12,400 input tokens for an 8,192-position window, a client targeting
+7,680 input positions must trim at least 4,720 positions. Recount the
+edited messages, then send the generation request. Generation enforces its
+usual context and resource limits. Older model programs that enforce their
+window during counting return HTTP 400 for oversized prompts.
+
+The service validates the request's generation fields. A request with
+`stream:true` still receives one JSON count and reserves no output budget.
 Omit `X-Loom-Session` and `X-Loom-Checkpoint`: this stateless endpoint rejects
 them rather than selecting cached history. The count queue uses
 `pending_capacity`; a full queue returns 503. Utility requests appear in request

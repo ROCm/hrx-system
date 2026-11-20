@@ -33,42 +33,44 @@ enum loom_runtime_input_function_ordinal_e {
   INPUT_FUNCTION_DECODE = 3,
 };
 
-// Pull only the requested prefix; all stream phases share destination credit.
-static iree_status_t loom_runtime_input_encode_prefix(
-    const iree_tokenizer_t* tokenizer, iree_string_view_t text,
-    iree_tokenizer_encode_flags_t flags, iree_host_size_t capacity,
-    iree_allocator_t host_allocator, int32_t* out_tokens,
-    iree_host_size_t* out_count) {
-  *out_count = 0;
+static iree_status_t loom_runtime_input_encoder_initialize(
+    const iree_tokenizer_t* tokenizer, iree_tokenizer_encode_flags_t flags,
+    iree_host_size_t transform_size, iree_allocator_t host_allocator,
+    uint8_t** out_storage, iree_tokenizer_encode_state_t** out_state) {
   iree_host_size_t state_size = 0;
   IREE_RETURN_IF_ERROR(
       iree_tokenizer_encode_state_calculate_size(tokenizer, &state_size));
-  const iree_host_size_t transform_size =
-      iree_tokenizer_transform_buffer_oneshot_size(text.size);
   if (!transform_size || state_size > SIZE_MAX - transform_size) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "prompt tokenizer storage size overflow");
   }
-  uint8_t* storage = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      host_allocator, state_size + transform_size, (void**)&storage));
-  iree_tokenizer_encode_state_t* state = NULL;
-  iree_status_t status = iree_tokenizer_encode_state_initialize(
-      tokenizer, iree_make_byte_span(storage, state_size),
-      iree_make_byte_span(storage + state_size, transform_size),
+      host_allocator, state_size + transform_size, (void**)out_storage));
+  return iree_tokenizer_encode_state_initialize(
+      tokenizer, iree_make_byte_span(*out_storage, state_size),
+      iree_make_byte_span(*out_storage + state_size, transform_size),
       (iree_tokenizer_offset_run_list_t){0},
       IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START | flags, host_allocator,
-      &state);
+      out_state);
+}
+
+// Pulls up to capacity IDs, retaining the unconsumed UTF-8 suffix for the
+// next pull. Finalization may span more than one destination.
+static iree_status_t loom_runtime_input_pull(
+    iree_tokenizer_encode_state_t* state, iree_string_view_t* text,
+    iree_host_size_t capacity, int32_t* out_tokens,
+    iree_host_size_t* out_count) {
+  iree_status_t status = iree_ok_status();
   iree_host_size_t count = 0;
-  while (iree_status_is_ok(status) && text.size && count < capacity) {
+  while (iree_status_is_ok(status) && text->size && count < capacity) {
     iree_host_size_t consumed = 0;
     iree_host_size_t produced = 0;
     status = iree_tokenizer_encode_state_feed(
-        state, text,
+        state, *text,
         iree_tokenizer_make_token_output(out_tokens + count, NULL, NULL,
                                          capacity - count),
         &consumed, &produced);
-    text = iree_string_view_substr(text, consumed, IREE_STRING_VIEW_NPOS);
+    *text = iree_string_view_substr(*text, consumed, IREE_STRING_VIEW_NPOS);
     count += produced;
   }
   if (iree_status_is_ok(status) && count < capacity) {
@@ -79,6 +81,61 @@ static iree_status_t loom_runtime_input_encode_prefix(
                                          capacity - count),
         &produced);
     count += produced;
+  }
+  *out_count = count;
+  return status;
+}
+
+// Pull only the requested prefix; all stream phases share destination credit.
+static iree_status_t loom_runtime_input_encode_prefix(
+    const iree_tokenizer_t* tokenizer, iree_string_view_t text,
+    iree_tokenizer_encode_flags_t flags, iree_host_size_t capacity,
+    iree_allocator_t host_allocator, int32_t* out_tokens,
+    iree_host_size_t* out_count) {
+  uint8_t* storage = NULL;
+  iree_tokenizer_encode_state_t* state = NULL;
+  iree_status_t status = loom_runtime_input_encoder_initialize(
+      tokenizer, flags, iree_tokenizer_transform_buffer_oneshot_size(text.size),
+      host_allocator, &storage, &state);
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_runtime_input_pull(state, &text, capacity, out_tokens, out_count);
+  }
+  if (state) {
+    iree_tokenizer_encode_state_deinitialize(state);
+  }
+  iree_allocator_free(host_allocator, storage);
+  return status;
+}
+
+// Pull the complete encoding into reusable ID storage, including any prefix
+// and suffix tokens selected by the source's postprocessor flags.
+static iree_status_t loom_runtime_input_measure(
+    const iree_tokenizer_t* tokenizer, iree_string_view_t text,
+    iree_tokenizer_encode_flags_t flags, iree_allocator_t host_allocator,
+    iree_host_size_t* out_count) {
+  *out_count = 0;
+  uint8_t* storage = NULL;
+  iree_tokenizer_encode_state_t* state = NULL;
+  iree_status_t status = loom_runtime_input_encoder_initialize(
+      tokenizer, flags,
+      iree_tokenizer_transform_buffer_recommended_size(text.size),
+      host_allocator, &storage, &state);
+  int32_t tokens[256];
+  iree_host_size_t count = 0;
+  if (iree_status_is_ok(status)) {
+    iree_host_size_t produced = 0;
+    do {
+      status = loom_runtime_input_pull(state, &text, IREE_ARRAYSIZE(tokens),
+                                       tokens, &produced);
+      if (iree_status_is_ok(status) &&
+          !iree_host_size_checked_add(count, produced, &count)) {
+        status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "prompt token count overflow");
+      }
+    } while (iree_status_is_ok(status) &&
+             (produced == IREE_ARRAYSIZE(tokens) ||
+              iree_tokenizer_encode_state_has_pending(state)));
   }
   if (state) {
     iree_tokenizer_encode_state_deinitialize(state);
@@ -220,19 +277,23 @@ static iree_status_t loom_runtime_input_module_start(
                             "tokenizer input must be complete UTF-8");
   }
   const uint64_t capacity = iree_vm_call_value_argument_load(call, 1);
-  if (capacity > SIZE_MAX / sizeof(int32_t)) {
+  const bool measuring = capacity == UINT64_MAX;
+  if (!measuring && capacity > SIZE_MAX / sizeof(int32_t)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "token output byte capacity overflow");
   }
   iree_vm_buffer_t* output = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_buffer_create(
-      (iree_host_size_t)capacity * sizeof(int32_t), iree_alignof(int32_t),
-      module->host_allocator, &output));
+      measuring ? 0 : (iree_host_size_t)capacity * sizeof(int32_t),
+      iree_alignof(int32_t), module->host_allocator, &output));
   iree_byte_span_t storage = iree_byte_span_empty();
   iree_status_t status = iree_vm_buffer_map_write(
       output, 0, iree_vm_buffer_length(output), &storage);
   iree_host_size_t count = 0;
-  if (iree_status_is_ok(status) && capacity) {
+  if (iree_status_is_ok(status) && measuring) {
+    status = loom_runtime_input_measure(module->tokenizer, text, flags,
+                                        module->host_allocator, &count);
+  } else if (iree_status_is_ok(status) && capacity) {
     IREE_TRACE_ZONE_BEGIN_NAMED(z_encode, "loom_serve_input_encode_prefix");
     IREE_TRACE_ZONE_APPEND_VALUE_I64(z_encode, text.size);
     status = loom_runtime_input_encode_prefix(
@@ -240,11 +301,13 @@ static iree_status_t loom_runtime_input_module_start(
         module->host_allocator, (int32_t*)storage.data, &count);
     IREE_TRACE_ZONE_END(z_encode);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && !measuring) {
     for (iree_host_size_t i = 0; i < count; ++i) {
       const int32_t id = ((int32_t*)storage.data)[i];
       iree_unaligned_store_le_u32(storage.data + i * 4, (uint32_t)id);
     }
+  }
+  if (iree_status_is_ok(status)) {
     iree_vm_ref_t result =
         iree_vm_buffer_ref_from_ptr_move(&module->types, &output);
     iree_vm_call_ref_result_store_move(call, 0, &result);

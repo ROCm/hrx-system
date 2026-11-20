@@ -113,8 +113,11 @@ typedef enum loom_serve_text_chat_boundary_e {
 // out_tokens owns exact writable native-endian storage for input_shift prefix
 // IDs followed by at most capacity encoded IDs. The caller fills any prefix
 // before publishing immutable input. A null out_tokens validates and counts the
-// same input without copying IDs. All outputs are empty on failure; no source
-// VM references escape. Tokens and media spans use host_allocator.
+// same input without copying IDs. A source can report insufficient capacity
+// with two empty buffers and a count above capacity. Only a count query
+// repeats that call with capacity -1 to obtain the full count and spans. All
+// outputs are empty on failure; no source VM references escape. Tokens and
+// media spans use host_allocator.
 iree_status_t loom_serve_text_chat_prepare_input(
     const loom_serve_text_chat_t* chat, iree_host_size_t prompt_offset,
     loom_serve_text_chat_input_format_t format,
