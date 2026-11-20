@@ -378,13 +378,7 @@ static iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish(
   iree_status_t failure = iree_hal_amd_gpu_pm4_check_failure(queue);
   if (!iree_status_is_ok(failure)) {
     if (queue->kernel && queue->kernel->pending.byte_length) {
-      queue->producer.ring.reserved_words = queue->kernel->rollback.words;
-      if (queue->kernel->rollback.storage) {
-        queue->kernel->rollback.storage->end = queue->kernel->rollback.bytes;
-      }
-      queue->kernel->pending.byte_length = 0;
-      iree_hal_amd_gpu_byte_storage_pool_rollback(queue->samples);
-      iree_hal_amd_gpu_byte_storage_pool_rollback(&queue->values);
+      iree_hal_amd_gpu_pm4_rollback_kernel(queue, submission);
     }
     iree_hal_amd_gpu_pm4_abandon(queue, submission, failure);
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;

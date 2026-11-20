@@ -38,7 +38,8 @@ const iree_hal_amd_gpu_dma_transfer_encoding_t
 iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
     const iree_hal_amd_gpu_transfer_t* transfer,
     const iree_hal_amd_gpu_pm4_launch_t* launch, uint32_t word_capacity,
-    iree_byte_span_t storage, uint64_t storage_address,
+    iree_byte_span_t arguments, uint64_t arguments_address,
+    iree_byte_span_t staging, uint64_t staging_address,
     iree_hal_amd_gpu_dma_transfer_chunk_t* out_chunk,
     uint32_t* out_argument_length) {
   out_chunk->word_count = 0;
@@ -60,25 +61,23 @@ iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
     const bool fill = operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
     const bool download =
         operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
-    if ((!copy && !operation->rectangular) || staged != (!copy && !fill)) {
+    if ((!copy && !download && !operation->rectangular) ||
+        staged != (!copy && !fill)) {
       break;
     }
-    // A publication borrows one backing generation. Keep staged payloads
-    // beside their arguments so native rejection restores one byte cursor.
-    const uint32_t argument_offset =
-        staged ? (uint32_t)iree_align_uint64(
-                     *out_argument_length + out_chunk->staging_length, 16)
-               : *out_argument_length;
-    const uint32_t payload_offset =
+    const uint32_t argument_offset = *out_argument_length;
+    const uint32_t argument_end =
         argument_offset + sizeof(iree_hal_amd_gpu_blit_arguments_t);
-    if (payload_offset + (staged ? 1 : 0) > storage.data_length) {
+    if (argument_end > arguments.data_length ||
+        (staged && out_chunk->staging_length == staging.data_length)) {
       break;
     }
     const uint64_t total_length =
         iree_hal_amd_gpu_transfer_operation_length(operation);
     uint64_t length = total_length - out_chunk->next.offset;
     if (staged) {
-      length = iree_min(length, storage.data_length - payload_offset);
+      length =
+          iree_min(length, staging.data_length - out_chunk->staging_length);
     }
     iree_hal_amd_gpu_blit_arguments_t blit_arguments = {
         .source = out_chunk->next.offset,
@@ -108,15 +107,14 @@ iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
       blit_arguments.source += source;
       blit_arguments.target += target;
       if (staged) {
-        uint8_t* bytes = storage.data + payload_offset;
-        const uint64_t address = storage_address + payload_offset;
+        uint8_t* bytes = staging.data + out_chunk->staging_length;
+        const uint64_t address = staging_address + out_chunk->staging_length;
         if (download) {
           blit_arguments.target = address;
           blit_arguments.target_row_stride = blit_arguments.length;
           blit_arguments.target_slice_stride =
               blit_arguments.length * blit_arguments.row_count;
-          // One contiguous download extent per publication: later argument
-          // records must never become bytes in the retirement scatter.
+          // One contiguous download extent per publication.
           out_chunk->download = (iree_hal_amd_gpu_download_t){
               .source = bytes,
               .operation = operation,
@@ -132,7 +130,7 @@ iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
                                               length, bytes);
         }
       }
-      memcpy(storage.data + argument_offset, &blit_arguments,
+      memcpy(arguments.data + argument_offset, &blit_arguments,
              sizeof(blit_arguments));
       const uint32_t size[3] = {64, 1, 1};
       const uint32_t partial[3] = {0, 0, 0};
@@ -140,7 +138,7 @@ iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
           iree_hal_amd_gpu_blit_workgroup_count(blit_arguments.length),
           blit_arguments.groups_y, blit_arguments.groups_z};
       const iree_hal_amd_gpu_pm4_launch_inputs_t inputs = {
-          .kernarg_pointer = storage_address + argument_offset,
+          .kernarg_pointer = arguments_address + argument_offset,
       };
       uint32_t* words = iree_hal_amd_gpu_pm4_launch_emit(
           out_chunk->words + out_chunk->word_count, launch, size, partial, 0,
@@ -148,7 +146,7 @@ iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
       words = iree_hal_amd_gpu_pm4_emit_dispatch_direct(
           words, groups, launch->dispatch_initiator);
       out_chunk->word_count = (uint32_t)(words - out_chunk->words);
-      *out_argument_length = payload_offset - out_chunk->staging_length;
+      *out_argument_length = argument_end;
       if (staged) {
         out_chunk->staging_length += (uint32_t)length;
       }

@@ -93,6 +93,12 @@ iree_hal_amd_gpu_pm4_publish_allocation(
 iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_kernel(
     struct iree_hal_amd_gpu_pm4_queue_t* queue, uint64_t position);
 
+// Restores reservations owned by the one unaccepted KERNEL piece. The caller
+// retains its submission and exclusively owns publication.
+void iree_hal_amd_gpu_pm4_rollback_kernel(
+    struct iree_hal_amd_gpu_pm4_queue_t* queue,
+    const iree_hal_amd_gpu_pm4_submission_t* submission);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

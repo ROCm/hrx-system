@@ -4,7 +4,9 @@
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
+#include <vector>
 
 #include "benchmark/benchmark.h"
 #include "hrx_runtime_cxx.h"
@@ -39,6 +41,7 @@ void Check(hrx_status_t status) {
 void CheckNative(iree_status_t status) { Check(hrx_status_from_iree(status)); }
 
 enum class Operation { kFill, kDispatch };
+enum class ReadbackPath { kLinear, kRectangle, kMapped };
 enum class EventOperation {
   kRecord,
   kAlternateRecord,
@@ -266,6 +269,118 @@ class Environment {
     Check(hrx_buffer_unmap(output_));
   }
   bool has_executable() const { return !!executable_; }
+
+  template <ReadbackPath Path, bool Complete, bool Dispatch>
+  void Readback(benchmark::State& state) {
+    const size_t length = state.range(0);
+    const size_t row_length = length / 2;
+    if constexpr (Dispatch) {
+      expected_ = 0xA5C30000u ^ static_cast<uint32_t>(length);
+    }
+    constexpr bool rectangle = Path == ReadbackPath::kRectangle;
+    constexpr size_t kGuard = 64;
+    std::vector<uint8_t> source(length);
+    std::vector<uint8_t> target(length + 2 * kGuard, 0xCD);
+    for (size_t i = 0; i < length; ++i) {
+      source[i] = static_cast<uint8_t>((i * 17) ^ (i >> 9));
+    }
+    hrx::runtime::buffer_ptr device_buffer;
+    const hrx_buffer_params_t device_params = {
+        .type = HRX_MEMORY_TYPE_DEVICE_LOCAL,
+        .access = HRX_MEMORY_ACCESS_ALL,
+        .usage = HRX_BUFFER_USAGE_DEFAULT,
+    };
+    Check(hrx_allocator_allocate_buffer(hrx_device_allocator(device_),
+                                        device_params, length,
+                                        device_buffer.for_output()));
+    hrx::runtime::buffer_ptr mapped_buffer;
+    void* mapped = nullptr;
+    if constexpr (Path == ReadbackPath::kMapped) {
+      const hrx_buffer_params_t host_params = {
+          .type = HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_HOST_COHERENT,
+          .access = HRX_MEMORY_ACCESS_ALL,
+          .usage =
+              HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_PERSISTENT,
+      };
+      Check(hrx_allocator_allocate_buffer(hrx_device_allocator(device_),
+                                          host_params, length,
+                                          mapped_buffer.for_output()));
+      Check(hrx_buffer_map(mapped_buffer, HRX_MAP_READ, 0, length, &mapped));
+    }
+    hrx::runtime::stream_ptr stream;
+    Check(hrx_stream_create(queue_, 0, stream.for_output()));
+    Check(hrx_stream_copy_h2d_linear(stream, source.data(), device_buffer, 0,
+                                     length));
+    Check(hrx_stream_synchronize(stream));
+    const auto enqueue = [&] {
+      if constexpr (Dispatch) {
+        const hrx_buffer_ref_t binding = {output_, 0, sizeof(expected_)};
+        Check(hrx_stream_dispatch(stream, executable_, ordinal_, &config_,
+                                  &expected_, sizeof(expected_), &binding, 1,
+                                  HRX_DISPATCH_FLAG_NONE));
+      }
+      if constexpr (Path == ReadbackPath::kMapped) {
+        Check(hrx_stream_copy_buffer_linear(stream, device_buffer, 0,
+                                            mapped_buffer, 0, length));
+      } else if constexpr (rectangle) {
+        const hrx_transfer_region_t region = {
+            .row_length = row_length,
+            .row_count = 2,
+            .slice_count = 1,
+            .source_strides = {.row_stride = row_length},
+            .target_strides = {.row_stride = row_length + kGuard},
+        };
+        Check(hrx_stream_copy_d2h(stream, device_buffer, 0, target.data(),
+                                  &region));
+      } else {
+        Check(hrx_stream_copy_d2h_linear(stream, device_buffer, 0,
+                                         target.data(), length));
+      }
+      Check(hrx_stream_flush(stream));
+    };
+    const auto complete = [&] {
+      Check(hrx_stream_synchronize(stream));
+      if constexpr (Path == ReadbackPath::kMapped) {
+        std::memcpy(target.data(), mapped, length);
+      }
+    };
+    const auto verify = [&] {
+      if constexpr (Dispatch) {
+        Verify();
+      }
+      for (size_t i = 0; i < target.size(); ++i) {
+        const bool gap =
+            rectangle && i >= row_length && i < row_length + kGuard;
+        const size_t source_offset =
+            rectangle && i >= row_length + kGuard ? i - kGuard : i;
+        const uint8_t expected =
+            !gap && source_offset < length ? source[source_offset] : 0xCD;
+        Require(target[i] == expected, "readback payload or padding mismatch");
+      }
+    };
+    for (int i = 0; i < 10; ++i) {
+      enqueue();
+      complete();
+    }
+    verify();
+    std::memset(target.data(), 0xCD, target.size());
+    for (auto _ : state) {
+      enqueue();
+      if constexpr (!Complete) {
+        state.PauseTiming();
+      }
+      complete();
+      if constexpr (!Complete) {
+        state.ResumeTiming();
+      }
+    }
+    verify();
+    if (mapped) {
+      Check(hrx_buffer_unmap(mapped_buffer));
+    }
+    Describe(state);
+    state.SetBytesProcessed(state.iterations() * length);
+  }
 
   template <bool AlternateProducers>
   void RecordEvents(benchmark::State& state) {
@@ -591,6 +706,39 @@ template <EventOperation Op, bool Complete>
 void EventBatch(benchmark::State& state) {
   GetEnvironment().EventBatches<Op, Complete>(state);
 }
+
+template <ReadbackPath Path, bool Complete, bool Dispatch>
+void Readback(benchmark::State& state) {
+  auto& environment = GetEnvironment();
+  if constexpr (Dispatch) {
+    if (!environment.has_executable()) {
+      state.SkipWithMessage("dispatch rows require a GPU device URI");
+      return;
+    }
+  }
+  environment.Readback<Path, Complete, Dispatch>(state);
+}
+
+#define READBACK_CASE(path, complete, dispatch, name)                  \
+  BENCHMARK_TEMPLATE(Readback, ReadbackPath::path, complete, dispatch) \
+      ->Name("HRX/Readback/" name)                                     \
+      ->Arg(4096)                                                      \
+      ->Arg(128 * 1024)                                                \
+      ->Arg(1024 * 1024)                                               \
+      ->Arg(16 * 1024 * 1024)                                          \
+      ->UseRealTime()                                                  \
+      ->MeasureProcessCPUTime()                                        \
+      ->Unit(benchmark::kNanosecond)
+READBACK_CASE(kLinear, true, false, "Linear");
+READBACK_CASE(kRectangle, true, false, "Rectangle");
+READBACK_CASE(kMapped, true, false, "Mapped");
+READBACK_CASE(kLinear, false, false, "LinearSubmit");
+READBACK_CASE(kRectangle, false, false, "RectangleSubmit");
+READBACK_CASE(kMapped, false, false, "MappedSubmit");
+READBACK_CASE(kLinear, true, true, "DispatchLinear");
+READBACK_CASE(kRectangle, true, true, "DispatchRectangle");
+READBACK_CASE(kMapped, true, true, "DispatchMapped");
+#undef READBACK_CASE
 
 #define QUEUE_BENCHMARK(native, operation, complete, name)          \
   BENCHMARK_TEMPLATE(Queue, native, Operation::operation, complete) \

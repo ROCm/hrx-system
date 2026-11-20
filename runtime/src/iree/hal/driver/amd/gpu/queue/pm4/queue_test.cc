@@ -891,8 +891,8 @@ TEST_F(KernelQueueTest, RejectionRollsBackTheBorrowedPayloadGeneration) {
   IREE_EXPECT_OK(iree_hal_queue_update_linear(
       queues_[0], {}, {1, &rejected_handle, &one}, pending.data(), 0, buffer,
       80, pending.size(), nullptr, 0));
-  EXPECT_EQ(queue->kernel->rollback.storage, borrowed);
-  EXPECT_EQ(queue->kernel->rollback.bytes, warm.size());
+  EXPECT_EQ(queue->issued[1].rollback_transfers, borrowed);
+  EXPECT_EQ(queue->issued[1].rollback_transfer_bytes, warm.size());
   EXPECT_NE(queue->kernel->pending.byte_length, 0u);
   const uint64_t reserved_end = borrowed->end;
   resume_allocation.release();
@@ -902,7 +902,7 @@ TEST_F(KernelQueueTest, RejectionRollsBackTheBorrowedPayloadGeneration) {
   ASSERT_NE(queue->producer.transfers.current, borrowed);
   EXPECT_EQ(queue->producer.transfers.retired, borrowed);
   EXPECT_EQ(queue->producer.transfers.current->begin, reserved_end);
-  EXPECT_EQ(queue->kernel->rollback.storage, borrowed);
+  EXPECT_EQ(queue->issued[1].rollback_transfers, borrowed);
 
   ASSERT_NO_FATAL_FAILURE(Execute(0));
   Poll(0);
@@ -930,7 +930,8 @@ TEST_F(KernelQueueTest, RejectionRollsBackTheBorrowedPayloadGeneration) {
   EXPECT_EQ(queue->producer.transfers.retired, nullptr);
 }
 
-TEST_F(KernelQueueTest, StagedShaderRejectionRestoresOneBackingCursor) {
+TEST_F(KernelQueueTest,
+       StagedShaderRejectionRestoresArgumentAndPayloadCursors) {
   auto buffer = Buffer(512);
   auto failed = Semaphore();
   iree_hal_semaphore_t* failed_handle = failed;
@@ -973,24 +974,30 @@ TEST_F(KernelQueueTest, StagedShaderRejectionRestoresOneBackingCursor) {
   IREE_ASSERT_OK(iree_hal_semaphore_query(failed, &value));
   EXPECT_EQ(value, 0u);
   ASSERT_NE(queue->kernel->pending.byte_length, 0u);
-  EXPECT_EQ(queue->kernel->rollback.storage, storage);
-  EXPECT_EQ(queue->kernel->rollback.bytes, before);
-  EXPECT_EQ(storage->end,
-            before + sizeof(iree_hal_amd_gpu_blit_arguments_t) + 51);
-  EXPECT_EQ(queue->producer.arguments->end, 0u);
+  EXPECT_EQ(queue->kernel->rollback.storage, queue->producer.arguments);
+  EXPECT_EQ(queue->issued[2].rollback_transfers, storage);
+  EXPECT_EQ(queue->kernel->rollback.bytes, 0u);
+  EXPECT_EQ(queue->issued[2].rollback_transfer_bytes, before);
+  EXPECT_EQ(storage->end, before + 51);
+  EXPECT_EQ(queue->producer.arguments->end,
+            sizeof(iree_hal_amd_gpu_blit_arguments_t));
   iree_hal_amd_gpu_blit_arguments_t arguments;
-  std::memcpy(&arguments, storage->memory.contents.data, sizeof(arguments));
-  EXPECT_EQ(arguments.source, storage->address + sizeof(arguments));
+  std::memcpy(&arguments, queue->producer.arguments->memory.contents.data,
+              sizeof(arguments));
+  EXPECT_EQ(arguments.source, storage->address);
   EXPECT_EQ(arguments.length, 17u);
   EXPECT_EQ(arguments.row_count, 3u);
-  const std::vector<uint8_t> captured(
-      storage->memory.contents.data,
-      storage->memory.contents.data + sizeof(arguments) + 51);
+  const std::vector<uint8_t> captured(storage->memory.contents.data,
+                                      storage->memory.contents.data + 51);
   Publish(0);
   EXPECT_EQ(std::memcmp(captured.data(), storage->memory.contents.data,
                         captured.size()),
             0);
   native_queues_[0].busy = false;
+  EXPECT_EQ(
+      std::memcmp(&arguments, queue->producer.arguments->memory.contents.data,
+                  sizeof(arguments)),
+      0);
   native_queues_[0].rejection =
       amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
   ASSERT_NO_FATAL_FAILURE(Execute(0));

@@ -480,7 +480,8 @@ TEST(TransferBatchTest, ProgramCopiesRespectPacketArgumentsAndOperationBounds) {
         IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
             &transfer, &launch, word_capacity,
             iree_make_byte_span(bytes.data() + 1, byte_capacity),
-            UINT64_C(0xABCDEF010020), &chunk, &argument_length));
+            UINT64_C(0xABCDEF010020), iree_byte_span_empty(), 0, &chunk,
+            &argument_length));
         const size_t count = std::min(
             {size_t{2}, size_t{word_capacity / 31},
              byte_capacity / sizeof(iree_hal_amd_gpu_blit_arguments_t)});
@@ -604,8 +605,8 @@ TEST(TransferBatchTest, ProgramRectanglesKeepOneLaunchForCopyAndFill) {
     uint32_t argument_length = 0;
     IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
         &transfer, &launch, 31,
-        iree_make_byte_span(&arguments, sizeof(arguments)), 0x2000, &chunk,
-        &argument_length));
+        iree_make_byte_span(&arguments, sizeof(arguments)), 0x2000,
+        iree_byte_span_empty(), 0, &chunk, &argument_length));
     EXPECT_EQ(chunk.word_count, 31u);
     EXPECT_EQ(chunk.next.index, 1u);
     EXPECT_EQ(argument_length, sizeof(arguments));
@@ -673,6 +674,8 @@ TEST(TransferBatchTest, StagedRectanglesPreserveEveryPartialWindow) {
         SCOPED_TRACE(capacity);
         std::array<uint8_t, 256> storage;
         storage.fill(0xCD);
+        std::array<uint8_t, sizeof(iree_hal_amd_gpu_blit_arguments_t)> abi;
+        abi.fill(0xCD);
         output.fill(0xCD);
         auto expected = output;
         const iree_hal_amd_gpu_transfer_t transfer = {
@@ -683,11 +686,9 @@ TEST(TransferBatchTest, StagedRectanglesPreserveEveryPartialWindow) {
         iree_hal_amd_gpu_dma_transfer_chunk_t chunk;
         uint32_t argument_length = 0;
         IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
-            &transfer, &launch, 31,
-            iree_make_byte_span(
-                storage.data(),
-                sizeof(iree_hal_amd_gpu_blit_arguments_t) + capacity),
-            0x2000, &chunk, &argument_length));
+            &transfer, &launch, 31, iree_make_byte_span(abi.data(), abi.size()),
+            0x3000, iree_make_byte_span(storage.data(), capacity), 0x2000,
+            &chunk, &argument_length));
         if (!capacity) {
           EXPECT_EQ(chunk.word_count, 0u);
           EXPECT_EQ(chunk.next.offset, offset);
@@ -697,7 +698,7 @@ TEST(TransferBatchTest, StagedRectanglesPreserveEveryPartialWindow) {
           continue;
         }
         iree_hal_amd_gpu_blit_arguments_t arguments;
-        std::memcpy(&arguments, storage.data(), sizeof(arguments));
+        std::memcpy(&arguments, abi.data(), sizeof(arguments));
         EXPECT_EQ(chunk.word_count, 31u);
         EXPECT_EQ(argument_length, sizeof(arguments));
         ASSERT_GT(chunk.staging_length, 0u);
@@ -705,8 +706,7 @@ TEST(TransferBatchTest, StagedRectanglesPreserveEveryPartialWindow) {
                   std::min(capacity, size_t(78 - offset)));
         EXPECT_EQ(chunk.staging_length, arguments.length * arguments.row_count *
                                             arguments.slice_count);
-        EXPECT_EQ(download ? arguments.target : arguments.source,
-                  0x2000u + sizeof(arguments));
+        EXPECT_EQ(download ? arguments.target : arguments.source, 0x2000u);
         size_t consumed = 0;
         for (uint32_t z = 0; z < arguments.slice_count; ++z) {
           for (uint32_t y = 0; y < arguments.row_count; ++y) {
@@ -726,19 +726,19 @@ TEST(TransferBatchTest, StagedRectanglesPreserveEveryPartialWindow) {
                             y * arguments.target_row_stride + x,
                   0x1010u + (download ? source : target));
               if (download) {
-                storage[sizeof(arguments) + consumed] = input[source];
+                storage[consumed] = input[source];
                 expected[target] = input[source];
               } else {
-                EXPECT_EQ(storage[sizeof(arguments) + consumed], input[source]);
+                EXPECT_EQ(storage[consumed], input[source]);
               }
             }
           }
         }
         EXPECT_EQ(chunk.next.index ? 78u : chunk.next.offset,
                   offset + chunk.staging_length);
-        EXPECT_TRUE(std::all_of(
-            storage.begin() + argument_length + chunk.staging_length,
-            storage.end(), [](uint8_t byte) { return byte == 0xCD; }));
+        EXPECT_TRUE(std::all_of(storage.begin() + chunk.staging_length,
+                                storage.end(),
+                                [](uint8_t byte) { return byte == 0xCD; }));
         if (download) {
           iree_hal_amd_gpu_download_complete(&chunk.download);
           EXPECT_EQ(output, expected);
@@ -792,42 +792,43 @@ TEST(TransferBatchTest, StagedBatchSeparatesArgumentsFromDownloadBytes) {
   };
   std::array<uint8_t, 512> storage;
   storage.fill(0xCD);
+  std::array<uint8_t, 512> abi;
+  abi.fill(0xCD);
   iree_hal_amd_gpu_dma_transfer_chunk_t chunk;
   uint32_t argument_length = 0;
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
-      &transfer, &launch, 124,
-      iree_make_byte_span(storage.data(), storage.size()), 0x2000, &chunk,
-      &argument_length));
+      &transfer, &launch, 124, iree_make_byte_span(abi.data(), abi.size()),
+      0x2000, iree_make_byte_span(storage.data(), storage.size()), 0x3000,
+      &chunk, &argument_length));
   EXPECT_EQ(chunk.word_count, 93u);
   EXPECT_EQ(chunk.next.index, 3u);
   EXPECT_EQ(chunk.next.offset, 0u);
   EXPECT_EQ(chunk.staging_length, 18u);
-  EXPECT_EQ(argument_length, 260u);
+  EXPECT_EQ(argument_length, 3 * sizeof(iree_hal_amd_gpu_blit_arguments_t));
   for (size_t i = 0; i < 3; ++i) {
     iree_hal_amd_gpu_blit_arguments_t arguments;
-    std::memcpy(&arguments, storage.data() + i * 96, sizeof(arguments));
-    EXPECT_EQ(i == 2 ? arguments.target : arguments.source,
-              0x2000u + i * 96 + 80);
+    std::memcpy(&arguments, abi.data() + i * sizeof(arguments),
+                sizeof(arguments));
+    EXPECT_EQ(i == 2 ? arguments.target : arguments.source, 0x3000u + i * 6);
     EXPECT_EQ(i == 2 ? arguments.source : arguments.target, 0x1000u + i * 32);
     if (i < 2) {
       for (size_t j = 0; j < 6; ++j) {
-        EXPECT_EQ(storage[i * 96 + 80 + j], i * 6 + j + 1);
+        EXPECT_EQ(storage[i * 6 + j], i * 6 + j + 1);
       }
-      EXPECT_TRUE(std::all_of(storage.begin() + i * 96 + 86,
-                              storage.begin() + (i + 1) * 96,
-                              [](uint8_t byte) { return byte == 0xCD; }));
     }
   }
-  ASSERT_EQ(chunk.download.source, storage.data() + 272);
+  ASSERT_EQ(chunk.download.source, storage.data() + 12);
   EXPECT_EQ(chunk.download.operation, &operations[2]);
   ASSERT_EQ(chunk.download.length, 6u);
-  std::memcpy(storage.data() + 272, "abcdef", 6);
+  std::memcpy(storage.data() + 12, "abcdef", 6);
   iree_hal_amd_gpu_download_complete(&chunk.download);
   const std::array<uint8_t, 14> expected = {'a',  'b',  'c',  0xCD, 0xCD,
                                             0xCD, 0xCD, 'd',  'e',  'f',
                                             0xCD, 0xCD, 0xCD, 0xCD};
   EXPECT_EQ(output, expected);
-  EXPECT_TRUE(std::all_of(storage.begin() + 278, storage.end(),
+  EXPECT_TRUE(std::all_of(storage.begin() + 18, storage.end(),
+                          [](uint8_t byte) { return byte == 0xCD; }));
+  EXPECT_TRUE(std::all_of(abi.begin() + argument_length, abi.end(),
                           [](uint8_t byte) { return byte == 0xCD; }));
 }
 

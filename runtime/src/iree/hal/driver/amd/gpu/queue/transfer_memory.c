@@ -34,13 +34,14 @@ static bool iree_hal_amd_gpu_transfer_memory_pair_supported(
 iree_status_t iree_hal_amd_gpu_transfer_memory_initialize(
     const iree_hal_amd_gpu_context_t* context, uint32_t family_ordinal,
     iree_hal_amd_gpu_transfer_memory_t* out_memory) {
+  // Payload can use GPU caches: the directional queries below require the
+  // queue to provide every acquire/release needed for CPU visibility.
   const amdf_memory_device_access_t access = {
       .device = context->device,
       .requirements = {
           .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
-          .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
-                   AMDF_MEMORY_FLAG_HOST_COHERENT |
-                   AMDF_MEMORY_FLAG_DEVICE_UNCACHED,
+          .flags =
+              AMDF_MEMORY_FLAG_DEVICE_ADDRESS | AMDF_MEMORY_FLAG_HOST_COHERENT,
           .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU}};
   amdf_memory_scope_info_t info = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,

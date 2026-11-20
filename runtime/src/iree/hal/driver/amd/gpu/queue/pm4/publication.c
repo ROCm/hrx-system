@@ -209,6 +209,28 @@ iree_hal_amd_gpu_pm4_publish_allocation(
                                                true);
 }
 
+void iree_hal_amd_gpu_pm4_rollback_kernel(
+    iree_hal_amd_gpu_pm4_queue_t* queue,
+    const iree_hal_amd_gpu_pm4_submission_t* submission) {
+  iree_hal_amd_gpu_pm4_kmq_storage_t* kernel = queue->kernel;
+  queue->producer.ring.reserved_words = kernel->rollback.words;
+  if (kernel->rollback.storage) {
+    kernel->rollback.storage->end = kernel->rollback.bytes;
+  }
+  if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER) {
+    const uint64_t position = (uint64_t)iree_atomic_load(
+        &queue->producer.count, iree_memory_order_relaxed);
+    const iree_hal_amd_gpu_pm4_retirement_slot_t* slot =
+        &queue->issued[position & queue->retirement.capacity_mask];
+    if (slot->rollback_transfers) {
+      slot->rollback_transfers->end = slot->rollback_transfer_bytes;
+    }
+  }
+  kernel->pending.byte_length = 0;
+  iree_hal_amd_gpu_byte_storage_pool_rollback(queue->samples);
+  iree_hal_amd_gpu_byte_storage_pool_rollback(&queue->values);
+}
+
 // The exclusive publisher keeps one prepared, unaccepted KERNEL piece. Native
 // capacity leaves its bytes/cursors intact. Rejection rolls back storage only;
 // accepted earlier pieces retain their independent references and retirement.
@@ -225,13 +247,8 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_kernel(
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_CAPACITY;
   }
   if (!amdf_status_is_ok(status)) {
-    queue->producer.ring.reserved_words = kernel->rollback.words;
-    if (kernel->rollback.storage) {
-      kernel->rollback.storage->end = kernel->rollback.bytes;
-    }
-    kernel->pending.byte_length = 0;
-    iree_hal_amd_gpu_byte_storage_pool_rollback(queue->samples);
-    iree_hal_amd_gpu_byte_storage_pool_rollback(&queue->values);
+    iree_hal_amd_gpu_pm4_rollback_kernel(
+        queue, iree_hal_amd_gpu_pm4_retirement_submission(action));
     iree_hal_amd_gpu_pm4_abandon(
         queue, iree_hal_amd_gpu_pm4_retirement_submission(action),
         IREE_HAL_AMD_STATUS_FROM_AMDF(status, "gpu.kernel_queue_submit"));
@@ -317,6 +334,45 @@ iree_hal_amd_gpu_pm4_publish_commit(
                                                terminal);
 }
 
+// Non-owning reservation within one current generation. Only publication
+// commits its end; completed prefixes allow an empty ring to rebase to zero.
+typedef struct iree_hal_amd_gpu_pm4_transfer_span_t {
+  // Monotonic first reserved byte, after alignment and any wrap.
+  uint64_t start;
+  // First byte relative to this generation's native allocation.
+  uint64_t offset;
+  // Available contiguous bytes; no cursor has consumed them yet.
+  uint64_t available;
+} iree_hal_amd_gpu_pm4_transfer_span_t;
+
+static iree_hal_amd_gpu_pm4_transfer_span_t
+iree_hal_amd_gpu_pm4_transfer_reserve(iree_hal_amd_gpu_byte_storage_t* storage,
+                                      uint64_t completed, uint64_t alignment,
+                                      uint64_t minimum) {
+  if (completed >= storage->end) {
+    storage->begin = storage->end;
+    return (iree_hal_amd_gpu_pm4_transfer_span_t){
+        .start = storage->end, .available = storage->capacity};
+  }
+  uint64_t relative =
+      iree_align_uint64(storage->end - storage->begin, alignment);
+  uint64_t offset = relative & (storage->capacity - 1);
+  if (minimum > storage->capacity - offset) {
+    relative += storage->capacity - offset;
+    offset = 0;
+  }
+  const uint64_t start = storage->begin + relative;
+  const uint64_t used = start - iree_max(completed, storage->begin);
+  return (iree_hal_amd_gpu_pm4_transfer_span_t){
+      .start = start,
+      .offset = offset,
+      .available =
+          used >= storage->capacity
+              ? 0
+              : iree_min(storage->capacity - used, storage->capacity - offset),
+  };
+}
+
 iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
     iree_hal_amd_gpu_pm4_queue_t* queue,
     iree_hal_amd_gpu_pm4_submission_t* submission, uint64_t position) {
@@ -326,74 +382,63 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
   const iree_hal_amd_gpu_transfer_operation_t* operation =
       &transfer->operations[transfer->cursor.index];
   iree_hal_amd_gpu_byte_storage_t* staging = queue->producer.transfers.current;
-  // A source fitting one admitted span needs no publication boundary. Larger
-  // uploads overlap preparation with native reads in two bounded regions.
-  // Downloads keep short retirement copies so independent work can progress.
+  // Small transfers use the full admitted span. Bulk uploads overlap host
+  // preparation with native reads; downloads bound each retirement copy so
+  // independent work can progress.
   const uint64_t maximum_staging_length =
       transfer->host_completion_required
           ? IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_DOWNLOAD_LENGTH
           : IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_UPLOAD_LENGTH;
-  const bool overlap = transfer->host_completion_required ||
-                       (transfer->staging_capacity &&
-                        iree_hal_amd_gpu_transfer_operation_length(operation) >
-                            transfer->staging_capacity);
-  const uint64_t staging_window_length =
+  const uint64_t operation_length =
+      iree_hal_amd_gpu_transfer_operation_length(operation);
+  const bool download =
+      operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+  const bool overlap = transfer->staging_capacity &&
+                       operation_length > transfer->staging_capacity;
+  uint64_t staging_window_length =
       staging ? iree_min(overlap ? staging->capacity / 2 : staging->capacity,
                          maximum_staging_length)
               : 0;
+  if (download &&
+      operation_length >= IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_DOWNLOAD_LENGTH) {
+    // Bulk downloads overlap GPU transport with the preceding host copy even
+    // when a previous request has grown the ring beyond this payload's size.
+    staging_window_length =
+        iree_min(staging_window_length, operation_length / 2);
+  }
   const bool staged =
       operation->type != IREE_HAL_TRANSFER_OPERATION_TYPE_COPY &&
       operation->type != IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
-  // Shader copies avoid CP-DMA's synchronous transfer and drain costs.
-  // Staged rectangles keep their ABI and packed payload in the transfer ring,
-  // under one retirement and native rollback owner. Tiny configured rings
-  // retain DMA rather than allocating more backing just for the arguments.
+  // Shader downloads avoid CP-DMA's fixed drain cost. Arguments use the
+  // existing ABI ring, leaving all transfer capacity for payload. Tiny argument
+  // rings retain DMA rather than growing for a blit.
   const bool program =
       transfer->program_accessible &&
-      (staged
-           ? staging_window_length > sizeof(iree_hal_amd_gpu_blit_arguments_t)
-           : arguments->capacity >=
-                 sizeof(iree_hal_amd_gpu_blit_arguments_t)) &&
-      (operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_COPY ||
+      arguments->capacity >= sizeof(iree_hal_amd_gpu_blit_arguments_t) &&
+      (operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_COPY || download ||
        operation->rectangular);
-  const bool program_arguments = program && !staged;
-  iree_hal_amd_gpu_byte_storage_t* storage =
-      program_arguments ? arguments : staging;
-  if (!program_arguments && transfer->staging_capacity &&
-      (!storage || storage->capacity < transfer->staging_capacity)) {
+  if (transfer->staging_capacity &&
+      (!staging || staging->capacity < transfer->staging_capacity)) {
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_TRANSFERS;
   }
-  uint64_t offset = 0, start = 0, available = 0;
-  if (storage) {
-    const uint64_t completed = (uint64_t)iree_atomic_load(
-        program_arguments ? &queue->completed.arguments
-                          : &queue->completed.transfers,
-        iree_memory_order_acquire);
-    if (completed >= storage->end) {
-      // Every byte has retired. Rebase byte zero at the monotonic end so
-      // the previous write position cannot split the next transfer.
-      start = storage->end;
-      storage->begin = start;
-      available = storage->capacity;
-    } else {
-      uint64_t relative =
-          iree_align_uint64(storage->end - storage->begin, program ? 32 : 8);
-      offset = relative & (storage->capacity - 1);
-      // Payload bytes can split at the ring end, but a shader argument record
-      // must be contiguous. Charge the unused tail to this next publication.
-      if (program &&
-          sizeof(iree_hal_amd_gpu_blit_arguments_t) + (staged ? 1 : 0) >
-              storage->capacity - offset) {
-        relative += storage->capacity - offset;
-        offset = 0;
-      }
-      start = storage->begin + relative;
-      const uint64_t used = start - iree_max(completed, storage->begin);
-      available =
-          used >= storage->capacity
-              ? 0
-              : iree_min(storage->capacity - used, storage->capacity - offset);
+  iree_hal_amd_gpu_pm4_transfer_span_t argument_span = {0};
+  if (program) {
+    argument_span = iree_hal_amd_gpu_pm4_transfer_reserve(
+        arguments,
+        (uint64_t)iree_atomic_load(&queue->completed.arguments,
+                                   iree_memory_order_acquire),
+        32, sizeof(iree_hal_amd_gpu_blit_arguments_t));
+    if (argument_span.available < sizeof(iree_hal_amd_gpu_blit_arguments_t)) {
+      return IREE_HAL_AMD_GPU_PM4_PUBLICATION_CAPACITY;
     }
+  }
+  iree_hal_amd_gpu_pm4_transfer_span_t staging_span = {0};
+  if (staging && (!program || staged)) {
+    staging_span = iree_hal_amd_gpu_pm4_transfer_reserve(
+        staging,
+        (uint64_t)iree_atomic_load(&queue->completed.transfers,
+                                   iree_memory_order_acquire),
+        8, 1);
   }
   // Admission reserves launch capacity beyond native waits. Keep 96 words for
   // signals, retirement, notification, and alignment, leaving room for DMA
@@ -406,19 +451,23 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
   const uint32_t word_capacity =
       iree_min(IREE_HAL_AMD_GPU_DMA_TRANSFER_MAX_WORDS,
                word_budget - maximum_wait_words - 96);
-  const iree_byte_span_t bytes = iree_make_byte_span(
-      storage ? storage->memory.contents.data + offset : NULL,
-      program_arguments ? available
-                        : iree_min(available, staging_window_length));
-  const uint64_t address = storage ? storage->address + offset : 0;
+  const iree_byte_span_t argument_bytes = iree_make_byte_span(
+      arguments->memory.contents.data + argument_span.offset,
+      argument_span.available);
+  const iree_byte_span_t staging_bytes = iree_make_byte_span(
+      staging ? staging->memory.contents.data + staging_span.offset : NULL,
+      iree_min(staging_span.available, staging_window_length));
+  const uint64_t staging_address =
+      staging ? staging->address + staging_span.offset : 0;
   uint32_t argument_length = 0;
   iree_status_t status =
       program ? iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
                     transfer, &queue->options.programs->blit, word_capacity,
-                    bytes, address, &chunk, &argument_length)
+                    argument_bytes, arguments->address + argument_span.offset,
+                    staging_bytes, staging_address, &chunk, &argument_length)
               : iree_hal_amd_gpu_dma_transfer_prepare_chunk(
                     &iree_hal_amd_gpu_pm4_transfer_encoding, transfer,
-                    word_capacity, bytes, address, &chunk);
+                    word_capacity, staging_bytes, staging_address, &chunk);
   if (!iree_status_is_ok(status)) {
     iree_hal_amd_gpu_pm4_abandon(queue, submission, status);
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;
@@ -427,7 +476,7 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
     // Aligned fills and device copies need no payload storage. A narrow fill
     // edge first discovers its transport requirement at native address
     // resolution.
-    if (!storage) {
+    if (!staging) {
       return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_TRANSFERS;
     }
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_CAPACITY;
@@ -485,17 +534,19 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
       return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_SIGNALS;
     }
   }
-  if (queue->kernel && !program_arguments) {
-    queue->kernel->rollback.storage = storage;
-    queue->kernel->rollback.bytes = storage ? storage->end : 0;
+  iree_hal_amd_gpu_pm4_retirement_slot_t* slot =
+      &queue->issued[position & queue->retirement.capacity_mask];
+  if (queue->kernel) {
+    slot->rollback_transfers = chunk.staging_length ? staging : NULL;
+    slot->rollback_transfer_bytes = staging ? staging->end : 0;
   }
-  const uint64_t storage_length = argument_length + chunk.staging_length;
-  if (storage_length) {
-    storage->end = start + storage_length;
+  if (argument_length) {
+    arguments->end = argument_span.start + argument_length;
   }
-  queue->issued[position & queue->retirement.capacity_mask].consumed_transfers =
-      queue->producer.transfers.current ? queue->producer.transfers.current->end
-                                        : 0;
+  if (chunk.staging_length) {
+    staging->end = staging_span.start + chunk.staging_length;
+  }
+  slot->consumed_transfers = staging ? staging->end : 0;
   queue->producer.ring.reserved_words = candidate.reserved_words;
   transfer->cursor = chunk.next;
   uint32_t* words = iree_hal_amd_gpu_pm4_wait_emit(

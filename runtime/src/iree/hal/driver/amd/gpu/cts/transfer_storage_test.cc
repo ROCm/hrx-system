@@ -79,9 +79,9 @@ TEST_P(TransferStorageTest, GrowthPreservesLaunchStorageAndOutput) {
   Ref<iree_hal_pool_t> pool;
   IREE_ASSERT_OK(iree_hal_slab_pool_create(
       group_, scope, &pool_options, iree_allocator_system(), pool.out()));
-  // Three increasing demands require initial payload acquisition and two real
-  // replacements. The final demand also crosses the bounded download window.
-  constexpr std::array<size_t, 3> kByteLengths = {256, 8192,
+  // Increasing demands require real replacements and exercise both sides of
+  // the bounded download window, including an exactly full payload ring.
+  constexpr std::array<size_t, 4> kByteLengths = {256, 8192, 1024 * 1024,
                                                   2 * 1024 * 1024 + 4};
   Ref<iree_hal_buffer_t> buffer;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
@@ -117,6 +117,12 @@ TEST_P(TransferStorageTest, GrowthPreservesLaunchStorageAndOutput) {
   ASSERT_FALSE(HasFatalFailure());
   for (uint32_t i = 0; i < queues_.size(); ++i) {
     auto* queue = queues_[i];
+    const auto publication_count = [queue] {
+      return (uint64_t)iree_atomic_load(
+          &reinterpret_cast<iree_hal_amd_gpu_pm4_queue_t*>(queue)
+               ->producer.count,
+          iree_memory_order_acquire);
+    };
     uint64_t payload_capacity = 0;
     uint32_t acquisitions = 0;
     // Repeating from the smaller requests exercises reuse of the last
@@ -126,6 +132,7 @@ TEST_P(TransferStorageTest, GrowthPreservesLaunchStorageAndOutput) {
         SCOPED_TRACE(i);
         SCOPED_TRACE(round);
         SCOPED_TRACE(byte_length);
+        const uint64_t published_before = aql ? 0 : publication_count();
         const size_t word_count = byte_length / sizeof(uint32_t);
         for (size_t j = 0; j < word_count; ++j) {
           source[j] = 0xCAFE0000u ^ (j * 17u) ^ (round * 97u) ^ i;
@@ -161,6 +168,11 @@ TEST_P(TransferStorageTest, GrowthPreservesLaunchStorageAndOutput) {
         EXPECT_EQ(observed[word_count + 1], 0xDEADBEEFu);
         EXPECT_TRUE(std::equal(source.begin(), source.begin() + word_count,
                                observed.begin() + 1));
+        if (!aql && byte_length < 1024 * 1024) {
+          // One upload, one dispatch, and one download. Shader arguments must
+          // not consume payload capacity or split an otherwise fitting copy.
+          EXPECT_EQ(publication_count() - published_before, 3u);
+        }
 
         // No submissions remain. Their native completion and final host copy
         // synchronize these observations of the publisher-owned generations.
@@ -180,7 +192,7 @@ TEST_P(TransferStorageTest, GrowthPreservesLaunchStorageAndOutput) {
         }
         EXPECT_GE(payload_capacity, byte_length);
       }
-      EXPECT_EQ(acquisitions, 3u);
+      EXPECT_EQ(acquisitions, kByteLengths.size());
       IREE_ASSERT_OK(iree_hal_device_trim(device_));
     }
   }
