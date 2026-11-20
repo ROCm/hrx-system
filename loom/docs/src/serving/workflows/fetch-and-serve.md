@@ -29,6 +29,46 @@ To share your own programs and model cards, the
 [Hugging Face publishing guide](../sharing/hugging-face.md) provides a small
 copyable repository, explicit metadata refresh, and an end-to-end smoke test.
 
+## Discover other models and services
+
+`loom-fetch --list` shows the library catalog pinned by your SDK release. Bare
+`loom-fetch` opens the same catalog in a terminal picker. Publishers can also
+distribute runnable model cards directly. The
+[loom-fun collection on Hugging Face](https://huggingface.co/loom-fun/models)
+includes community ports with device and memory guidance in their READMEs.
+
+To see which presets a card offers before downloading weights, pass its
+repository to `--list`. Then fetch the preset that matches your hardware.
+
+```sh
+loom-fetch huggingface:loom-fun/unsloth-Qwen3-0.6B-loom --list
+loom-fetch huggingface:loom-fun/unsloth-Qwen3-0.6B-loom:chat --output=./qwen3
+```
+
+### Use a GGUF you already have
+
+The Qwen3 card above uses `Qwen3-0.6B-Q4_K_M.gguf` from its `checkpoint`
+origin. If you have that file from a browser download or another inference
+tool, point fetch at the directory containing it. This works on the first
+install with an empty cache.
+
+```sh
+loom-fetch huggingface:loom-fun/unsloth-Qwen3-0.6B-loom:chat "--origin=checkpoint=/path/to/my weights" --output=./qwen3
+```
+
+Fetch verifies the local file against the size and SHA-256 in the publisher's
+lock and downloads the programs and tokenizer. On Windows the same argument
+can be written as `"--origin=checkpoint=D:\Models"`. Keeping the installation
+on the same filesystem lets fetch share weights by hardlink when available.
+
+An override supplies every selected file from that origin. For a vision
+model this can include a separate projection file alongside the language
+weights. If you have only the language weights, run the preset with
+`--dry-run --json` to find their installation path in `files[].path`. Place
+or link your GGUF there under the output directory, then fetch to that directory
+without the override. Fetch verifies the file in place and retrieves the
+missing files. A different quantization needs a card that accepts those weights.
+
 ## Fetch a published repository
 
 A publisher can share a repository URL, without a `model.json` suffix or an
@@ -300,11 +340,10 @@ decoding; it does not provide speaker diarization or word alignment.
 Ctrl-C in the server terminal stops admission and joins accepted work before
 exiting. The fetched model remains available for the next run.
 
-## Discover other models and services
+## Inspect the SDK library catalog
 
-A release SDK can name a compatible library catalog. With that association,
-`loom-fetch --list` shows its models and bare `loom-fetch` opens the terminal
-picker. A development SDK requires a card URL or explicit catalog:
+To select a specific library revision, including from a development SDK,
+pass its catalog explicitly.
 
 ```sh
 loom-fetch --catalog=github:ROCm/hrx-loom-library@4317508bf5adb251a284ea8dc4e5a24a11bd1c17 --list --json
@@ -342,9 +381,9 @@ choices require a separately built publication.
 
 ## Reuse local assets and configure a deployment
 
-After a successful fetch, `--offline` forbids all network requests and reuses
-cached documents and payloads. An origin override can use an already provisioned
-checkpoint directory while retaining lock verification:
+After a successful fetch, `--offline` uses cached documents and payloads
+and forbids network requests. It can also use a provisioned checkpoint
+directory through the same [origin override](#use-a-gguf-you-already-have).
 
 ```sh
 loom-fetch "$model_url/model.json" --preset=streaming --offline --origin=checkpoint=/srv/checkpoints/moonshine --output=./moonshine-local

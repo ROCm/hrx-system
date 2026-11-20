@@ -1315,6 +1315,58 @@ def test_program_only_asset_lock_is_empty_and_repeatable(tmp_path):
     assert json.loads((tmp_path / "output/model.json.lock").read_text()) == lock
 
 
+@pytest.mark.parametrize("supply_origin", [True, False], ids=["origin", "single-file"])
+def test_first_install_reuses_verified_local_weights(tmp_path, supply_origin):
+    card = _card()
+    parameters = card["variants"]["v"]["services"]["text"]["parameters"]
+    parameters["scope"]["origin"] = "@checkpoint/"
+    parameters["scope"]["files"].append("projection.data")
+    assets = {"weights.data": b"weights", "projection.data": b"projection"}
+    upstream = {"upstream/" + name: data for name, data in assets.items()}
+    output = tmp_path / "installed"
+    directory = tmp_path / "downloads" if supply_origin else output
+    directory.mkdir()
+    weights = directory / "weights.data"
+    with _server(card, {"code.loom": b"code", **upstream}) as (
+        base,
+        requests,
+        resources,
+    ):
+        origin = {"kind": "url", "url": base + "/upstream/"}
+        card["origins"] = {"checkpoint": origin}
+        resources["/model.json"] = json.dumps(card).encode()
+        lock = ModelLock.snapshot(
+            {"checkpoint": {"requested": origin}},
+            [
+                FileIdentity(
+                    "@checkpoint/" + name, len(data), hashlib.sha256(data).hexdigest()
+                )
+                for name, data in assets.items()
+            ],
+            scope="assets",
+        )
+        resources["/model.json.lock"] = json.dumps(lock).encode()
+        arguments = [
+            base + "/model.json",
+            f"--output={output}",
+            f"--cache={tmp_path / 'cache'}",
+            "--no-input",
+        ]
+        if supply_origin:
+            arguments.append(f"--origin=checkpoint={directory}")
+            (directory / "projection.data").write_bytes(assets["projection.data"])
+        weights.write_bytes(b"changed")
+        assert main(arguments) == 1
+        assert not (output / "model.json").exists()
+        weights.write_bytes(assets["weights.data"])
+        assert main(arguments) == 0
+        for name, data in assets.items():
+            assert (output / name).read_bytes() == data
+        assert (output / "code.loom").read_bytes() == b"code"
+        assert "/upstream/weights.data" not in requests
+        assert ("/upstream/projection.data" in requests) == (not supply_origin)
+
+
 def test_override_retains_logical_hf_identity_in_installed_card(tmp_path):
     card = _card()
     card["origins"] = {
