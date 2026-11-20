@@ -290,6 +290,36 @@ the fence itself does not require `%future` to complete.
 the corresponding boundary in source IR and composes with
 [scheduled unrolling](#preserve-source-order-through-unrolling).
 
+A mask, select, conversion, or address calculation is already a consumer of a
+loaded value. Scheduling it early can force the load's readiness wait ahead of
+independent arithmetic. Source fences can keep that arithmetic between a read
+and its first consumer:
+
+```loom
+func.def @read_ahead(%next: view<32xf16>, %current: vector<32xf16>, %weights: vector<32xf16>, %accumulator: vector<32xf16>, %valid: i1) -> (vector<32xf16>, vector<32xf16>) {
+  %prefetched = vector.load %next[0] : view<32xf16> -> vector<32xf16>
+  scf.schedule.fence
+  %step0 = vector.fmaf %current, %weights, %accumulator : vector<32xf16>
+  %step1 = vector.fmaf %current, %weights, %step0 : vector<32xf16>
+  %updated = vector.fmaf %current, %weights, %step1 : vector<32xf16>
+  scf.schedule.fence
+  %padding = vector.splatf 0.0 : vector<32xf16>
+  %next_value = scf.select %valid, %prefetched, %padding : vector<32xf16>
+  func.return %updated, %next_value : vector<32xf16>, vector<32xf16>
+}
+```
+
+The first fence places the read before the independent arithmetic; the second
+keeps the select after it. These are instruction-issue boundaries, so the
+arithmetic can overlap the pending read. Normal operand-readiness waits remain
+where the target needs them; neither fence waits for outstanding memory work.
+
+The validity predicate still expresses the actual padding rule. Comparing a
+loaded floating-point value with itself to manufacture a dependency would
+change that rule for NaNs. Fences express the scheduling intent without changing
+values or introducing artificial data dependencies. They constrain surviving
+instructions and do not keep otherwise unused computations alive.
+
 `schedule(locked)` on a Low function or kernel preserves authored order within
 each block under every scheduling strategy. Here the second load stays after
 the multiply even though its address is already available:
