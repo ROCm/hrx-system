@@ -1143,15 +1143,20 @@ def _emit_result_to_lhs_repack_projections() -> str:
     for ordinal, (projection, native_transition_reference) in enumerate(projection_rows, start=1):
         if not isinstance(projection, MatrixFragmentResultToLhsBf16Projection):
             raise TypeError("unexpected result-to-LHS projection type")
+        group_term_lines = []
+        if projection.source_lane_group_terms:
+            group_term_lines.append("        .source_lane_group_terms = (const loom_amdgpu_fragment_repack_group_term_t[]){")
+            for bits, shift in projection.source_lane_group_terms:
+                group_term_lines.append(f"            {{.lane_bits = {{.and_mask = 0x{bits.and_mask:x}, .right_shift = {bits.right_shift}}}, .byte_shift = {shift}}},")
+            group_term_lines.append("        },")
         lines.extend(
             [
                 f"    [{ordinal}] = {{",
                 f"        .source_register_selector_and_mask = UINT16_C(0x{projection.source_register_selector.and_mask:x}),",
-                f"        .source_lane_group_and_mask = UINT16_C(0x{projection.source_lane_group.and_mask:x}),",
-                f"        .source_lane_group_byte_shift = UINT8_C({projection.source_lane_group_byte_shift}),",
+                f"        .source_lane_group_term_count = {len(projection.source_lane_group_terms)},",
                 f"        .result_lane_div_byte_shift = UINT8_C({projection.result_lane_div_byte_shift}),",
                 f"        .source_register_selector_right_shift = UINT8_C({projection.source_register_selector.right_shift}),",
-                f"        .source_lane_group_right_shift = UINT8_C({projection.source_lane_group.right_shift}),",
+                *group_term_lines,
                 f"        .transpose_bit_count = UINT8_C({projection.transpose_bit_count}),",
                 f"        .half_wave_request_invariant = {'true' if projection.half_wave_request_invariant else 'false'},",
                 f"        .cross_half_lane_mask = UINT64_C(0x{projection.cross_half_lane_mask:016x}),",
@@ -1224,9 +1229,10 @@ def _fragment_coordinate_plan_catalog() -> tuple[tuple[CoordinateProjectionPlan,
     for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS:
         for role in layout_roles(layout):
             plan = matrix_fragment_role_storage_projection_plan(layout, role)
-            participant_destinations = tuple(term.destination_dimension for term in plan.forward_terms if term.source_dimension == "participant")
-            if len(participant_destinations) != len(set(participant_destinations)):
-                raise ValueError(f"AMDGPU matrix fragment layout '{layout.key}' role '{role.role}' requires multiple participant digits for one stored coordinate")
+            # Static strides combine equal lane digits across view axes.
+            lane_digits = {(term.source_divisor, term.source_modulus) for term in plan.forward_terms if term.source_dimension == "participant"}
+            if len(lane_digits) > 4:
+                raise ValueError(f"AMDGPU matrix fragment layout '{layout.key}' role '{role.role}' exceeds the four lane terms in a fragment memory address")
             plan_index = plan_indices.get(plan)
             if plan_index is None:
                 plan_index = len(plans)

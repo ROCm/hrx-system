@@ -39,6 +39,11 @@ def test_result_to_lhs_half_wave_gathers_preserve_every_owner() -> None:
     mechanisms = set()
     for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY.values():
         projection = matrix_fragment_result_to_lhs_bf16_projection(layout)
+        if layout.key in (
+            "rdna4_wmma_f32_16x16x16_f16_w64",
+            "rdna4_wmma_f32_16x16x16_bf16_w64",
+        ):
+            assert projection is not None
         if projection is None:
             continue
         source = operation_local_coordinate_map(
@@ -58,10 +63,23 @@ def test_result_to_lhs_half_wave_gathers_preserve_every_owner() -> None:
             else "exchange_source"
         )
         for lane in range(64):
+            group, row_lane = divmod(lane, layout.tile_shape[1])
+            byte_base = sum(
+                ((row_lane & bits.and_mask) >> bits.right_shift) << byte_shift
+                for bits, byte_shift in projection.source_lane_group_terms
+            )
+            if projection.result_lane_div_byte_shift:
+                byte_base += group << projection.result_lane_div_byte_shift
+            selector = projection.source_register_selector
+            register = (row_lane & selector.and_mask) >> selector.right_shift
             cross_half = bool(projection.cross_half_lane_mask & (1 << lane))
             for element in range(layout.lhs.coordinate_element_count):
                 expected = destination.evaluate((lane, element))
                 owner_lane, owner_register = source.evaluate_canonical_inverse(expected)
+                assert (byte_base // 4 + element, register) == (
+                    owner_lane,
+                    owner_register,
+                ), (layout.key, lane, element)
                 local_lane = (lane & 32) | (owner_lane & 31)
                 local_value = source.evaluate((local_lane, owner_register))
                 # General composition exchanges prepared source registers before
@@ -217,6 +235,15 @@ def test_validation_rejects_non_power_of_two_lane_factor() -> None:
         validate_matrix_fragment_layout(layout)
 
 
+def test_validation_rejects_repeated_lane_group() -> None:
+    layout = _test_layout()
+    row = layout.result.axes[1]
+    assert row is not None
+    result = _replace_role_axis(layout.result, 1, replace(row, thread_order=(1, 1)))
+    with pytest.raises(ValueError, match="must permute every lane group"):
+        validate_matrix_fragment_layout(replace(layout, result=result))
+
+
 def test_validation_rejects_noncompressing_reduction_group() -> None:
     layout = _test_layout()
     layout = replace(
@@ -318,6 +345,31 @@ def test_cdna_dense_input_layouts_match_isa_lane_equations() -> None:
                         lane,
                         item,
                     )
+
+
+def test_rdna4_accumulator_and_result_match_isa_register_layout() -> None:
+    # RDNA4 ISA 7.12.2 specifies the owner of C[m,n] and D[m,n] for
+    # both WMMA and SWMMAC, including packed 16-bit results.
+    families = set()
+    for key, layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY.items():
+        if not key.startswith(("rdna4_wmma_", "rdna4_swmmac_")):
+            continue
+        families.add((layout.family, layout.wave_size))
+        for role in (layout.accumulator, layout.result):
+            coordinates = matrix_fragment_role_storage_coordinate_map(layout, role)
+            for row in range(16):
+                for column in range(16):
+                    lane = column + 16 * (row // 8)
+                    if layout.wave_size == 64:
+                        lane += 32 * ((row // 4) % 2)
+                    item = row % (256 // layout.wave_size)
+                    assert coordinates.evaluate((lane, item)) == (0, row, column), (
+                        key,
+                        role.role,
+                        lane,
+                        item,
+                    )
+    assert families == {(None, 32), (None, 64), ("swmmac", 32), ("swmmac", 64)}
 
 
 def test_cdna_result_layouts_match_isa_lane_equations() -> None:

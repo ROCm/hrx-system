@@ -37,7 +37,7 @@ typedef struct loom_amdgpu_address_component_key_t {
   int64_t coefficients[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY];
   // ABI lane-coordinate recipe; all unused entries are zero.
   loom_amdgpu_fragment_memory_lane_term_t
-      lane_terms[LOOM_MATRIX_FRAGMENT_AXIS_COUNT];
+      lane_terms[LOOM_AMDGPU_FRAGMENT_MEMORY_LANE_TERM_CAPACITY];
   // Linear lane byte stride when the physical layout selects that recipe.
   uint32_t linear_lane_byte_stride;
   // Alternating byte-address bit, or zero for an invariant.

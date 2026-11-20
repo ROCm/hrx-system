@@ -61,10 +61,10 @@ class MatrixFragmentLaneBitProjection:
 class MatrixFragmentResultToLhsBf16Projection:
     """Generated AMDGPU movement facts for one result-to-LHS repack."""
 
-    source_lane_group_byte_shift: int
     result_lane_div_byte_shift: int
     source_register_selector: MatrixFragmentLaneBitProjection
-    source_lane_group: MatrixFragmentLaneBitProjection
+    # Lane digits of the source group and their bit positions in its byte address.
+    source_lane_group_terms: tuple[tuple[MatrixFragmentLaneBitProjection, int], ...]
     transpose_bit_count: int
     # Destination lanes whose source owner lies in the other 32-lane half.
     cross_half_lane_mask: int
@@ -243,25 +243,15 @@ def matrix_fragment_result_to_lhs_bf16_projection(
             lane_div_transfers.append(transfer)
         else:
             return None
-    if len(lane_mod_transfers) > 1 or len(lane_div_transfers) > 1:
+    if len(lane_div_transfers) > 1:
         return None
 
-    source_lane_group_byte_shift = 0
-    source_lane_group = _contiguous_lane_bit_projection(0, 0, row_bit_count)
-    if lane_mod_transfers:
-        (
-            source_lane_group_start_bit,
-            source_lane_group_destination_start_bit,
-            source_lane_group_bit_count,
-        ) = lane_mod_transfers[0]
-        if source_lane_group_destination_start_bit < destination_value_bit_count:
+    source_lane_group_terms = []
+    for start_bit, destination_start_bit, bit_count in lane_mod_transfers:
+        if destination_start_bit < destination_value_bit_count:
             return None
-        source_lane_group_byte_shift = source_lane_group_destination_start_bit + 2
-        source_lane_group = _contiguous_lane_bit_projection(
-            source_lane_group_start_bit,
-            source_lane_group_bit_count,
-            row_bit_count,
-        )
+        lane_bits = _contiguous_lane_bit_projection(start_bit, bit_count, row_bit_count)
+        source_lane_group_terms.append((lane_bits, destination_start_bit + 2))
 
     result_lane_div_byte_shift = 0
     if lane_div_transfers:
@@ -298,10 +288,9 @@ def matrix_fragment_result_to_lhs_bf16_projection(
                 )
 
     return MatrixFragmentResultToLhsBf16Projection(
-        source_lane_group_byte_shift=source_lane_group_byte_shift,
         result_lane_div_byte_shift=result_lane_div_byte_shift,
         source_register_selector=source_register_selector,
-        source_lane_group=source_lane_group,
+        source_lane_group_terms=tuple(source_lane_group_terms),
         transpose_bit_count=min(
             source_value_bit_count, destination_value_bit_count - 1
         ),

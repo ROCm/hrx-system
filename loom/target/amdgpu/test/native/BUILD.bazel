@@ -448,3 +448,9 @@ loom_test(
     srcs = ["//loom/target/amdgpu/test/native/gfx1250:cluster_b128_multicast.loom"],
     compile_targets = ["//loom/target/amdgpu:gfx1250"],
 )
+
+loom_test(
+    name = "gfx1201_wave64_matrix_accumulation_test",
+    srcs = ["//loom/target/amdgpu/test/native/gfx1201:wave64_matrix_accumulation.loom"],
+    compile_targets = ["//loom/target/amdgpu:gfx1201"],
+)

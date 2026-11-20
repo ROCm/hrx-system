@@ -53,12 +53,8 @@ typedef struct loom_amdgpu_fragment_memory_address_product_key_t {
 } loom_amdgpu_fragment_memory_address_product_key_t;
 
 typedef struct loom_amdgpu_fragment_memory_runtime_axis_base_key_t {
-  // Power-of-two divisor applied to the subgroup lane ID.
-  uint16_t lane_divisor;
-  // Optional power-of-two modulus applied after division; zero omits it.
-  uint16_t lane_modulus;
-  // Logical coordinate scale applied to the resulting lane digit.
-  uint16_t lane_coordinate_scale;
+  // Lane digits multiplied by this runtime stride.
+  loom_amdgpu_fragment_lane_projection_t lane_projection;
   // Runtime byte-stride product materialized for the axis.
   loom_amdgpu_fragment_memory_address_product_key_t byte_stride;
 } loom_amdgpu_fragment_memory_runtime_axis_base_key_t;
@@ -72,7 +68,7 @@ typedef struct loom_amdgpu_fragment_memory_address_base_key_t {
   uint8_t lane_term_count;
   // Lane coordinate terms in the compiled address layout.
   loom_amdgpu_fragment_memory_lane_term_t
-      lane_terms[LOOM_MATRIX_FRAGMENT_AXIS_COUNT];
+      lane_terms[LOOM_AMDGPU_FRAGMENT_MEMORY_LANE_TERM_CAPACITY];
   // Number of dynamic source terms in the key.
   uint8_t dynamic_term_count;
   // Source products used for dynamic byte-address terms.
