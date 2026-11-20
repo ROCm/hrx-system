@@ -177,6 +177,7 @@ loom_corpus_test(
             "memory/address/address.loom",
             "memory/address/logical_shift_loop.loom",
             "memory/address/origins.loom",
+            "memory/address/strided_walk.loom",
             "memory/address/uniform_loads.loom",
             "memory/buffer/boundaries.loom",
             "memory/buffer/buffer_access.loom",

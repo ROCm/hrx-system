@@ -26,6 +26,7 @@ loom_corpus_test(
             "control/loop/memory_effects.loom",
             "function/rodata.loom",
             "memory/address/origins.loom",
+            "memory/address/strided_walk.loom",
             "memory/address/tiled_channel.loom",
             "memory/buffer/null.loom",
             "memory/buffer/positions.loom",

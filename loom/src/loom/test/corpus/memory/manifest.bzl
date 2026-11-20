@@ -27,6 +27,7 @@ MEMORY_CORPUS = loom_corpus_manifest(
         "address/scaling.loom",
         "address/selection.loom",
         "address/signed_terms.loom",
+        "address/strided_walk.loom",
         "address/table_index.loom",
         "address/tiled_channel.loom",
         "address/uniform_add.loom",

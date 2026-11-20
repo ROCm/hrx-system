@@ -483,49 +483,119 @@ TEST(LoopDomainAdditiveRecurrenceTest, OverflowPublishesNoPartialProof) {
                   UINT64_MAX);
 }
 
+TEST(LoopDomainAdditiveRecurrenceTest, RangedStepRetainsInteriorDivisibility) {
+  loom_loop_recurrence_facts_t facts;
+  ASSERT_TRUE(loom_loop_domain_additive_range_facts(
+      loom_value_facts_exact_i64(0), loom_value_facts_make(2, 4, 1), 3,
+      &facts));
+  ExpectNumericRange(facts.values, 0, 12, 1);
+  ExpectNumericRange(facts.body_values, 0, 8, 1);
+  ExpectNumericRange(facts.exit_value, 6, 12, 3);
+
+  ASSERT_TRUE(loom_loop_domain_additive_range_facts(
+      loom_value_facts_exact_i64(0), loom_value_facts_make(4, 12, 4), 3,
+      &facts));
+  ExpectNumericRange(facts.values, 0, 36, 4);
+  ExpectNumericRange(facts.body_values, 0, 24, 4);
+  ExpectNumericRange(facts.exit_value, 12, 36, 12);
+
+  ASSERT_TRUE(loom_loop_domain_additive_range_facts(
+      loom_value_facts_make(24, 48, 24), loom_value_facts_make(-16, -8, 8), 4,
+      &facts));
+  ExpectNumericRange(facts.values, -40, 48, 8);
+  ExpectNumericRange(facts.body_values, -24, 48, 8);
+  ExpectNumericRange(facts.exit_value, -40, 16, 8);
+}
+
+TEST(LoopDomainAdditiveRecurrenceTest, RangedStepFullSignedSpan) {
+  loom_loop_recurrence_facts_t facts;
+  ASSERT_TRUE(loom_loop_domain_additive_range_facts(
+      loom_value_facts_exact_i64(0), loom_value_facts_make(-1, 1, 1), INT64_MAX,
+      &facts));
+  ExpectNumericRange(facts.values, -INT64_MAX, INT64_MAX, 1);
+  ExpectNumericRange(facts.body_values, -INT64_MAX + 1, INT64_MAX - 1, 1);
+  ExpectNumericRange(facts.exit_value, -INT64_MAX, INT64_MAX, INT64_MAX);
+
+  ASSERT_TRUE(loom_loop_domain_additive_range_facts(
+      loom_value_facts_exact_i64(0), loom_value_facts_make(-1, 0, 1),
+      UINT64_C(1) << 63, &facts));
+  ExpectNumericRange(facts.values, INT64_MIN, 0, 1);
+  ExpectNumericRange(facts.body_values, INT64_MIN + 1, 0, 1);
+  ExpectNumericRange(facts.exit_value, INT64_MIN, 0, 1);
+}
+
+TEST(LoopDomainAdditiveRecurrenceTest,
+     RangedStepOverflowPublishesNoPartialProof) {
+  for (const auto step :
+       {loom_value_facts_make(-2, 0, 1), loom_value_facts_make(0, 2, 1)}) {
+    loom_loop_recurrence_facts_t facts;
+    EXPECT_FALSE(loom_loop_domain_additive_range_facts(
+        loom_value_facts_exact_i64(0), step, INT64_MAX, &facts));
+    EXPECT_TRUE(loom_value_facts_is_unknown(facts.values));
+    EXPECT_TRUE(loom_value_facts_is_unknown(facts.body_values));
+    EXPECT_TRUE(loom_value_facts_is_unknown(facts.exit_value));
+    EXPECT_EQ(facts.trip_count, static_cast<uint64_t>(INT64_MAX));
+    EXPECT_EQ(facts.trip_count_kind, LOOM_LOOP_TRIP_COUNT_EXACT);
+  }
+
+  loom_loop_recurrence_facts_t facts;
+  ASSERT_TRUE(loom_loop_domain_additive_range_facts(
+      loom_value_facts_make(8, 16, 4), loom_value_facts_unknown(), 0, &facts));
+  ExpectNumericRange(facts.values, 8, 16, 4);
+  EXPECT_TRUE(loom_value_facts_is_unknown(facts.body_values));
+  ExpectNumericRange(facts.exit_value, 8, 16, 4);
+}
+
 TEST(LoopDomainAdditiveRecurrenceTest, SmallRangesMatchExplicitIteration) {
   for (int64_t lower = -4; lower <= 4; ++lower) {
     for (int64_t upper = lower; upper <= 4; ++upper) {
-      for (int64_t step = -4; step <= 4; ++step) {
-        for (uint64_t count = 0; count <= 8; ++count) {
-          SCOPED_TRACE(::testing::Message()
-                       << "initial=[" << lower << "," << upper
-                       << "] step=" << step << " count=" << count);
-          int64_t header_lower = INT64_MAX, header_upper = INT64_MIN;
-          int64_t body_lower = INT64_MAX, body_upper = INT64_MIN;
-          int64_t exit_lower = INT64_MAX, exit_upper = INT64_MIN;
-          int64_t header_divisor = 0, body_divisor = 0, exit_divisor = 0;
-          for (int64_t initial = lower; initial <= upper; ++initial) {
-            int64_t value = initial;
-            for (uint64_t iteration = 0; iteration <= count; ++iteration) {
-              header_lower = std::min(header_lower, value);
-              header_upper = std::max(header_upper, value);
-              header_divisor = std::gcd(header_divisor, value);
-              if (iteration != count) {
-                body_lower = std::min(body_lower, value);
-                body_upper = std::max(body_upper, value);
-                body_divisor = std::gcd(body_divisor, value);
-                value += step;
+      for (int64_t step_lower = -4; step_lower <= 4; ++step_lower) {
+        for (int64_t step_upper = step_lower; step_upper <= 4; ++step_upper) {
+          for (uint64_t count = 0; count <= 8; ++count) {
+            SCOPED_TRACE(::testing::Message()
+                         << "initial=[" << lower << "," << upper << "] step=["
+                         << step_lower << "," << step_upper
+                         << "] count=" << count);
+            int64_t header_lower = INT64_MAX, header_upper = INT64_MIN;
+            int64_t body_lower = INT64_MAX, body_upper = INT64_MIN;
+            int64_t exit_lower = INT64_MAX, exit_upper = INT64_MIN;
+            int64_t header_divisor = 0, body_divisor = 0, exit_divisor = 0;
+            for (int64_t initial = lower; initial <= upper; ++initial) {
+              for (int64_t step = step_lower; step <= step_upper; ++step) {
+                int64_t value = initial;
+                for (uint64_t iteration = 0; iteration <= count; ++iteration) {
+                  header_lower = std::min(header_lower, value);
+                  header_upper = std::max(header_upper, value);
+                  header_divisor = std::gcd(header_divisor, value);
+                  if (iteration != count) {
+                    body_lower = std::min(body_lower, value);
+                    body_upper = std::max(body_upper, value);
+                    body_divisor = std::gcd(body_divisor, value);
+                    value += step;
+                  }
+                }
+                exit_lower = std::min(exit_lower, value);
+                exit_upper = std::max(exit_upper, value);
+                exit_divisor = std::gcd(exit_divisor, value);
               }
             }
-            exit_lower = std::min(exit_lower, value);
-            exit_upper = std::max(exit_upper, value);
-            exit_divisor = std::gcd(exit_divisor, value);
-          }
-          loom_loop_recurrence_facts_t facts;
-          ASSERT_TRUE(loom_loop_domain_additive_recurrence_facts(
-              loom_value_facts_make(lower, upper, 1), step, count, &facts));
-          EXPECT_EQ(facts.trip_count_kind, LOOM_LOOP_TRIP_COUNT_EXACT);
-          EXPECT_EQ(facts.trip_count, count);
-          ExpectNumericRange(facts.values, header_lower, header_upper,
-                             std::max(INT64_C(1), header_divisor));
-          ExpectNumericRange(facts.exit_value, exit_lower, exit_upper,
-                             std::max(INT64_C(1), exit_divisor));
-          if (count != 0) {
-            ExpectNumericRange(facts.body_values, body_lower, body_upper,
-                               std::max(INT64_C(1), body_divisor));
-          } else {
-            EXPECT_TRUE(loom_value_facts_is_unknown(facts.body_values));
+            loom_loop_recurrence_facts_t facts;
+            ASSERT_TRUE(loom_loop_domain_additive_range_facts(
+                loom_value_facts_make(lower, upper, 1),
+                loom_value_facts_make(step_lower, step_upper, 1), count,
+                &facts));
+            EXPECT_EQ(facts.trip_count_kind, LOOM_LOOP_TRIP_COUNT_EXACT);
+            EXPECT_EQ(facts.trip_count, count);
+            ExpectNumericRange(facts.values, header_lower, header_upper,
+                               std::max(INT64_C(1), header_divisor));
+            ExpectNumericRange(facts.exit_value, exit_lower, exit_upper,
+                               std::max(INT64_C(1), exit_divisor));
+            if (count != 0) {
+              ExpectNumericRange(facts.body_values, body_lower, body_upper,
+                                 std::max(INT64_C(1), body_divisor));
+            } else {
+              EXPECT_TRUE(loom_value_facts_is_unknown(facts.body_values));
+            }
           }
         }
       }

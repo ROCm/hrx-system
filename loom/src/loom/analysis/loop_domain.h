@@ -141,6 +141,16 @@ bool loom_loop_domain_additive_recurrence_facts(
     loom_value_facts_t initial_values, int64_t step, uint64_t trip_count,
     loom_loop_recurrence_facts_t* out_facts);
 
+// Evaluates the same finite recurrence for an invariant integer step with
+// range and divisibility facts. Every combination of initial value and step
+// must fit; correlations between them are not represented. The endpoints bound
+// the range, while step.known_divisor covers the admitted interior values.
+// Exact steps use additive_recurrence_facts directly, and a zero-trip loop does
+// not require a known step. Failure and output scope match that evaluator.
+bool loom_loop_domain_additive_range_facts(
+    loom_value_facts_t initial_values, loom_value_facts_t step,
+    uint64_t trip_count, loom_loop_recurrence_facts_t* out_facts);
+
 // Proves execution counts and source-integer ranges for a header-tested loop.
 // Exact initial and bound values use trip_count's raw-carrier semantics. Ranged
 // operands must fit the carrier without truncation and describe contiguous

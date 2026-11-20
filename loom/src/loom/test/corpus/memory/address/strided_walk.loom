@@ -1,0 +1,113 @@
+// Runtime row pitches advance two addresses in opposite directions. The seed,
+// trip count, and stride cross the device boundary as data; no trial specializes
+// the compiled loop. Both body reads and terminal addresses are observable.
+func.def @strided_address_walk(%metadata: buffer, %input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %parameters = buffer.view %metadata[%origin] : buffer -> view<3xi32>
+  %raw_start = view.load %parameters[0] : view<3xi32> -> i32
+  %raw_count = view.load %parameters[1] : view<3xi32> -> i32
+  %raw_stride = view.load %parameters[2] : view<3xi32> -> i32
+  %bounded_start = scalar.assume %raw_start [range(%raw_start, 128, 144)] : i32
+  %bounded_count = scalar.assume %raw_count [range(%raw_count, 0, 16)] : i32
+  %bounded_stride = scalar.assume %raw_stride [range(%raw_stride, -4, 4)] : i32
+  %start = index.cast %bounded_start : i32 to index
+  %count = index.cast %bounded_count : i32 to index
+  %stride = index.cast %bounded_stride : i32 to index
+  %source = buffer.view %input[%origin] : buffer -> view<257xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<4xi32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial_sum = scalar.constant 0 : i32
+  %forward_end, %backward_end, %forward_sum, %backward_sum = scf.for %i = [%begin to %count step %step](%forward = %start : index, %backward = %start : index, %forward_total = %initial_sum : i32, %backward_total = %initial_sum : i32) -> (index, index, i32, i32) {
+    %forward_value = view.load %source[%forward] : view<257xi32> -> i32
+    %backward_value = view.load %source[%backward] : view<257xi32> -> i32
+    %next_forward_total = scalar.addi %forward_total, %forward_value : i32
+    %next_backward_total = scalar.addi %backward_total, %backward_value : i32
+    %next_forward = index.add %forward, %stride : index
+    %next_backward = index.sub %backward, %stride : index
+    scf.yield %next_forward, %next_backward, %next_forward_total, %next_backward_total : index, index, i32, i32
+  }
+  %forward_final = view.load %source[%forward_end] : view<257xi32> -> i32
+  %backward_final = view.load %source[%backward_end] : view<257xi32> -> i32
+  view.store %forward_sum, %destination[0] : i32, view<4xi32>
+  view.store %backward_sum, %destination[1] : i32, view<4xi32>
+  view.store %forward_final, %destination[2] : i32, view<4xi32>
+  view.store %backward_final, %destination[3] : i32, view<4xi32>
+  func.return
+}
+
+// Recompute each address from the ordinal instead of carrying it. This checks
+// address recurrence semantics independently of the carried-state analysis.
+func.def @strided_address_walk_oracle(%metadata: buffer, %input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %parameters = buffer.view %metadata[%origin] : buffer -> view<3xi32>
+  %raw_start = view.load %parameters[0] : view<3xi32> -> i32
+  %raw_count = view.load %parameters[1] : view<3xi32> -> i32
+  %raw_stride = view.load %parameters[2] : view<3xi32> -> i32
+  %bounded_start = scalar.assume %raw_start [range(%raw_start, 128, 144)] : i32
+  %bounded_count = scalar.assume %raw_count [range(%raw_count, 0, 16)] : i32
+  %bounded_stride = scalar.assume %raw_stride [range(%raw_stride, -4, 4)] : i32
+  %start = index.cast %bounded_start : i32 to index
+  %count = index.cast %bounded_count : i32 to index
+  %stride = index.cast %bounded_stride : i32 to index
+  %source = buffer.view %input[%origin] : buffer -> view<257xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<4xi32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial_sum = scalar.constant 0 : i32
+  %forward_sum, %backward_sum = scf.for %i = [%begin to %count step %step](%forward_total = %initial_sum : i32, %backward_total = %initial_sum : i32) -> (i32, i32) {
+    %distance = index.mul %i, %stride : index
+    %forward = index.add %start, %distance : index
+    %backward = index.sub %start, %distance : index
+    %forward_value = view.load %source[%forward] : view<257xi32> -> i32
+    %backward_value = view.load %source[%backward] : view<257xi32> -> i32
+    %next_forward_total = scalar.addi %forward_total, %forward_value : i32
+    %next_backward_total = scalar.addi %backward_total, %backward_value : i32
+    scf.yield %next_forward_total, %next_backward_total : i32, i32
+  }
+  %final_distance = index.mul %count, %stride : index
+  %forward_end = index.add %start, %final_distance : index
+  %backward_end = index.sub %start, %final_distance : index
+  %forward_final = view.load %source[%forward_end] : view<257xi32> -> i32
+  %backward_final = view.load %source[%backward_end] : view<257xi32> -> i32
+  view.store %forward_sum, %destination[0] : i32, view<4xi32>
+  view.store %backward_sum, %destination[1] : i32, view<4xi32>
+  view.store %forward_final, %destination[2] : i32, view<4xi32>
+  view.store %backward_final, %destination[3] : i32, view<4xi32>
+  func.return
+}
+
+func.def @strided_address_walk_inputs(%metadata: buffer, %trial: index) {
+  %stride_count = index.constant 9 : index
+  %stride_bias = index.constant 4 : index
+  %base = index.constant 128 : index
+  %count = index.div %trial, %stride_count : index
+  %residue = index.rem %trial, %stride_count : index
+  %stride = index.sub %residue, %stride_bias : index
+  %start = index.add %base, %count : index
+  %start_word = index.cast %start : index to i32
+  %count_word = index.cast %count : index to i32
+  %stride_word = index.cast %stride : index to i32
+  %origin = index.constant 0 : offset
+  %parameters = buffer.view %metadata[%origin] : buffer -> view<3xi32>
+  view.store %start_word, %parameters[0] : i32, view<3xi32>
+  view.store %count_word, %parameters[1] : i32, view<3xi32>
+  view.store %stride_word, %parameters[2] : i32, view<3xi32>
+  func.return
+}
+
+check.scenario @strided_address_walk_values {
+  check.trial[153](%trial: index, %entropy: check.entropy) {
+    %metadata = check.generate.fill value(0) : tensor<3xi32>
+    check.generate<@strided_address_walk_inputs>(%metadata, %trial) : (tensor<3xi32>, index) -> ()
+    %input = check.generate.iota offset(17) step(3) : tensor<257xi32>
+    %storage = check.generate.fill value(-99) : tensor<6xi32>
+    %output = check.tensor.view %storage offset(4) : tensor<6xi32> -> tensor<4xi32>
+    check.compare<@strided_address_walk, @strided_address_walk_oracle>(%metadata, %input, %output) : (tensor<3xi32>, tensor<257xi32>, tensor<4xi32>) -> () {
+      check.expect.bitwise actual(%metadata) expected(%metadata) : tensor<3xi32>
+      check.expect.bitwise actual(%input) expected(%input) : tensor<257xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<6xi32>
+    }
+  }
+  check.return
+}
