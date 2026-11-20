@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <unistd.h>
 
+#include "iree/async/platform/io_uring/close.h"
 #include "iree/async/platform/io_uring/notification.h"
 #include "iree/async/platform/io_uring/proactor.h"
 #include "iree/async/platform/io_uring/relay.h"
@@ -101,6 +102,8 @@ void iree_async_proactor_io_uring_destroy(
     IREE_TRACE_ZONE_END(z0);
     return;
   }
+  iree_async_io_uring_close_workers_free(proactor);
+  iree_slim_mutex_deinitialize(&proactor->close_workers_mutex);
   iree_io_uring_ring_deinitialize(&proactor->ring);
 
   iree_async_message_pool_deinitialize(&proactor->message_pool);

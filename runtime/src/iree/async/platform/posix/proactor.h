@@ -16,6 +16,7 @@
 #include "iree/async/notification.h"
 #include "iree/async/platform/posix/event_set.h"
 #include "iree/async/platform/posix/fd_map.h"
+#include "iree/async/platform/posix/file_queue.h"
 #include "iree/async/platform/posix/timer_list.h"
 #include "iree/async/platform/posix/wake.h"
 #include "iree/async/platform/posix/worker.h"
@@ -91,7 +92,6 @@ struct iree_async_event_source_t {
 typedef struct iree_async_proactor_posix_t {
   // Must be first for safe casting.
   iree_async_proactor_t base;
-  iree_atomic_int32_t shutdown_requested;
 
   // Poll thread state.
   iree_async_posix_event_set_t* event_set;  // Pluggable: poll/epoll/kqueue.

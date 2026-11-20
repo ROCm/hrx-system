@@ -16,11 +16,9 @@
 #ifndef IREE_ASYNC_PLATFORM_POSIX_WORKER_H_
 #define IREE_ASYNC_PLATFORM_POSIX_WORKER_H_
 
-#include "iree/async/operation.h"
 #include "iree/async/util/completion_pool.h"
 #include "iree/base/api.h"
 #include "iree/base/internal/atomics.h"
-#include "iree/base/threading/mutex.h"
 #include "iree/base/threading/notification.h"
 #include "iree/base/threading/thread.h"
 
@@ -29,36 +27,6 @@ extern "C" {
 #endif  // __cplusplus
 
 struct iree_async_proactor_posix_t;
-
-// Submitter-local chain of independent files. Each may have linked successors
-// that remain owned by the poll owner until the preceding operation completes.
-typedef struct iree_async_posix_file_batch_t {
-  // First active file operation in this submission.
-  iree_async_operation_t* head;
-  // Last active file operation in this submission.
-  iree_async_operation_t* tail;
-  // Number of file heads available to wake idle workers.
-  iree_host_size_t count;
-} iree_async_posix_file_batch_t;
-
-// FIFO of admitted file operations. The queue borrows their intrusive next
-// pointers until a worker claims them. Linked continuations use linked_next.
-typedef struct iree_async_posix_file_queue_t {
-  // Protects both ends of the queue across submitters and workers.
-  iree_slim_mutex_t mutex;
-  // First operation available for a worker to claim.
-  iree_async_operation_t* head;
-  // Last operation, for splicing a whole submission in constant time.
-  iree_async_operation_t* tail;
-  // Signaled when files arrive or workers must exit.
-  iree_notification_t notification;
-} iree_async_posix_file_queue_t;
-
-// Splices a nonempty, fully acquired batch onto the file queue and wakes
-// enough workers to consume it. The submitter terminates the chain at its tail.
-void iree_async_posix_file_queue_push(
-    struct iree_async_proactor_posix_t* proactor,
-    const iree_async_posix_file_batch_t* batch);
 
 // One blocking file worker. Its result storage outlives every publication.
 typedef struct iree_async_posix_worker_t {

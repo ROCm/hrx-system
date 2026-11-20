@@ -33,6 +33,7 @@
 #include "iree/async/operations/net.h"
 #include "iree/async/operations/scheduling.h"
 #include "iree/async/operations/semaphore.h"
+#include "iree/async/platform/io_uring/close.h"
 #include "iree/async/platform/io_uring/defs.h"
 #include "iree/async/platform/io_uring/notification.h"
 #include "iree/async/platform/io_uring/proactor.h"
@@ -629,20 +630,6 @@ static bool iree_async_proactor_io_uring_fill_file_write(
   return !iree_any_bit_set(write_op->file->flags, IREE_ASYNC_FILE_FLAG_DIRECT);
 }
 
-// Fills an SQE for a FILE_CLOSE operation.
-// Uses IORING_OP_CLOSE to close the file descriptor asynchronously.
-// The file reference is consumed (not retained) — it will be released
-// during completion resource cleanup.
-static void iree_async_proactor_io_uring_fill_file_close(
-    iree_io_uring_sqe_t* sqe, iree_async_operation_t* base_operation) {
-  iree_async_file_close_operation_t* close_op =
-      (iree_async_file_close_operation_t*)base_operation;
-
-  sqe->opcode = IREE_IORING_OP_CLOSE;
-  sqe->fd = close_op->file->primitive.value.fd;
-  sqe->user_data = (uint64_t)(uintptr_t)base_operation;
-}
-
 // Fills an SQE for a FUTEX_WAIT operation.
 // Uses IORING_OP_FUTEX_WAIT to wait on a futex address in the kernel.
 // Requires IREE_ASYNC_PROACTOR_CAPABILITY_FUTEX_OPERATIONS (kernel 6.7+).
@@ -725,7 +712,8 @@ static bool iree_async_proactor_io_uring_message_uses_fallback(
 static bool iree_async_proactor_io_uring_is_submission_software_op(
     const iree_async_operation_t* operation) {
   if (iree_async_proactor_io_uring_is_inline_software_op(operation->type) ||
-      operation->type == IREE_ASYNC_OPERATION_TYPE_SEQUENCE) {
+      operation->type == IREE_ASYNC_OPERATION_TYPE_SEQUENCE ||
+      operation->type == IREE_ASYNC_OPERATION_TYPE_FILE_CLOSE) {
     return true;
   }
   return operation->type == IREE_ASYNC_OPERATION_TYPE_MESSAGE &&
@@ -743,13 +731,13 @@ static uint32_t iree_async_proactor_io_uring_submission_entry_count(
   return operation->type == IREE_ASYNC_OPERATION_TYPE_EVENT_WAIT ? 2 : 1;
 }
 
-// Returns true when a successful operation can produce a negative CQE result
-// or otherwise requires userspace continuation dispatch. IOSQE_IO_LINK treats
-// every negative result as failure and would cancel the remaining chain before
-// the proactor can apply its operation-specific status mapping.
+// These operations own their continuation in userspace. Timer and futex CQEs
+// can encode success with a negative result. A skipped socket close can still
+// own a last-reference retirement before its successor callback may run.
 static inline bool iree_async_proactor_io_uring_requires_userspace_continuation(
     const iree_async_operation_t* operation) {
-  return operation->type == IREE_ASYNC_OPERATION_TYPE_TIMER ||
+  return operation->type == IREE_ASYNC_OPERATION_TYPE_SOCKET_CLOSE ||
+         operation->type == IREE_ASYNC_OPERATION_TYPE_TIMER ||
          operation->type == IREE_ASYNC_OPERATION_TYPE_FUTEX_WAIT ||
          iree_async_proactor_io_uring_is_submission_software_op(operation);
 }
@@ -905,6 +893,11 @@ void iree_async_proactor_io_uring_dispatch_continuation_chain(
     iree_async_operation_t* chain_head) {
   iree_async_operation_t* op = chain_head;
   while (op) {
+    if (op->type == IREE_ASYNC_OPERATION_TYPE_FILE_CLOSE) {
+      iree_async_io_uring_enqueue_file_close(
+          proactor, (iree_async_file_close_operation_t*)op, iree_ok_status());
+      return;
+    }
     if (!iree_async_proactor_io_uring_is_inline_software_op(op->type)) {
       // Kernel op: submit the remaining chain (op + its linked_next tail).
       // Kernel ops produce CQEs; their completions are counted by the CQE
@@ -977,20 +970,8 @@ void iree_async_proactor_io_uring_dispatch_continuation_chain(
 void iree_async_proactor_io_uring_cancel_continuation_chain_to_mpsc(
     iree_async_proactor_io_uring_t* proactor,
     iree_async_operation_t* chain_head) {
-  iree_async_operation_t* op = chain_head;
-  while (op) {
-    iree_async_operation_t* next = op->linked_next;
-    op->linked_next = NULL;
-    if (op->completion_fn) {
-      iree_async_proactor_io_uring_push_software_operation(
-          proactor, op, iree_status_from_code(IREE_STATUS_CANCELLED));
-    } else {
-      iree_async_operation_complete(
-          op, iree_status_from_code(IREE_STATUS_CANCELLED),
-          IREE_ASYNC_COMPLETION_FLAG_NONE);
-    }
-    op = next;
-  }
+  iree_async_io_uring_fail_chain(proactor, chain_head,
+                                 iree_status_from_code(IREE_STATUS_CANCELLED));
 }
 
 //===----------------------------------------------------------------------===//
@@ -1141,6 +1122,13 @@ static void iree_async_proactor_io_uring_commit_software_operation(
     iree_async_operation_t* operation) {
   IREE_TRACE({ operation->submit_time_ns = iree_time_now(); });
 
+  if (operation->type == IREE_ASYNC_OPERATION_TYPE_FILE_CLOSE) {
+    iree_async_io_uring_enqueue_file_close(
+        proactor, (iree_async_file_close_operation_t*)operation,
+        iree_ok_status());
+    return;
+  }
+
   if (operation->type == IREE_ASYNC_OPERATION_TYPE_NOTIFICATION_WAIT) {
     iree_async_io_uring_notification_submit_wait(
         (iree_async_notification_wait_operation_t*)operation);
@@ -1266,6 +1254,7 @@ iree_status_t iree_async_proactor_io_uring_submit(
   // Phase 1: Validate and plan the complete batch.
   //=========================================================================
 
+  bool needs_close_workers = false;
   for (iree_host_size_t i = 0; i < operations.count; ++i) {
     if (operations.values[i]->resources_acquired) {
       // Accepted continuations were validated with their original batch and
@@ -1274,10 +1263,15 @@ iree_status_t iree_async_proactor_io_uring_submit(
     }
     IREE_RETURN_IF_ERROR(iree_async_proactor_io_uring_validate_operation(
         proactor, operations.values[i]));
+    needs_close_workers |=
+        operations.values[i]->type == IREE_ASYNC_OPERATION_TYPE_FILE_CLOSE;
     if (operations.values[i]->type ==
         IREE_ASYNC_OPERATION_TYPE_NOTIFICATION_WAIT) {
       iree_async_operation_clear_internal_flags(operations.values[i]);
     }
+  }
+  if (needs_close_workers) {
+    IREE_RETURN_IF_ERROR(iree_async_io_uring_ensure_close_workers(proactor));
   }
   for (iree_host_size_t i = 0; i < operations.count; ++i) {
     iree_async_operation_t* operation = operations.values[i];
@@ -1494,9 +1488,6 @@ iree_status_t iree_async_proactor_io_uring_submit(
           case IREE_ASYNC_OPERATION_TYPE_FILE_WRITE:
             chain_has_buffered_io |=
                 iree_async_proactor_io_uring_fill_file_write(sqe, operation);
-            break;
-          case IREE_ASYNC_OPERATION_TYPE_FILE_CLOSE:
-            iree_async_proactor_io_uring_fill_file_close(sqe, operation);
             break;
           default:
             IREE_ASSERT_UNREACHABLE("operation type must be validated");

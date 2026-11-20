@@ -165,8 +165,14 @@ typedef struct iree_async_proactor_io_uring_t {
     iree_async_event_source_t* event_source;
   } signal;
 
-  // Optional native cpu_set_t in the trailing allocation. Cleared after the
-  // first poll applies it to that task's kernel workers, before admitting I/O.
+  // Serializes first admission to the checked file-close workers.
+  iree_slim_mutex_t close_workers_mutex;
+  // Allocated and published on the first explicit file-close submission.
+  struct iree_async_io_uring_close_workers_t* close_workers;
+  // Poll-owned final socket releases waiting for a native submission slot.
+  iree_async_operation_t* retiring_sockets;
+  // Optional native cpu_set_t in trailing storage, shared by io-wq and
+  // checked file-close workers for the lifetime of the proactor.
   void* worker_affinity;
 } iree_async_proactor_io_uring_t;
 
@@ -217,6 +223,8 @@ typedef enum iree_io_uring_internal_tag_e {
   IREE_IO_URING_TAG_EVENT_SOURCE_CANCEL = 10,
   // Primitive relay cancellation key retirement, independent of its poll.
   IREE_IO_URING_TAG_RELAY_CANCEL = 11,
+  // Private final close of a socket whose public operation was skipped.
+  IREE_IO_URING_TAG_SOCKET_RETIRE = 12,
 } iree_io_uring_internal_tag_t;
 
 // Helpers for encoding/decoding internal user_data.

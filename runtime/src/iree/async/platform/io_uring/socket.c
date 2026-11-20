@@ -7,7 +7,6 @@
 #include "iree/async/platform/io_uring/socket.h"
 
 #include <errno.h>
-#include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
@@ -16,6 +15,7 @@
 
 #include "iree/async/platform/io_uring/proactor.h"
 #include "iree/async/platform/linux/socket_options.h"
+#include "iree/async/platform/posix/descriptor.h"
 
 //===----------------------------------------------------------------------===//
 // Socket type mapping
@@ -149,20 +149,6 @@ static iree_status_t iree_async_socket_apply_options(
   return iree_ok_status();
 }
 
-// Sets a file descriptor to non-blocking mode.
-static iree_status_t iree_async_socket_set_nonblocking(int fd) {
-  int flags = fcntl(fd, F_GETFL, 0);
-  if (flags < 0) {
-    return iree_make_status(iree_status_code_from_errno(errno),
-                            "fcntl F_GETFL failed");
-  }
-  if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
-    return iree_make_status(iree_status_code_from_errno(errno),
-                            "fcntl F_SETFL O_NONBLOCK failed");
-  }
-  return iree_ok_status();
-}
-
 //===----------------------------------------------------------------------===//
 // Socket struct initialization
 //===----------------------------------------------------------------------===//
@@ -279,8 +265,8 @@ iree_status_t iree_async_io_uring_socket_import(
                             "invalid file descriptor %d", fd);
   }
 
-  // Set non-blocking if not already (cheap to ensure).
-  iree_status_t status = iree_async_socket_set_nonblocking(fd);
+  iree_status_t status = iree_async_posix_prepare_socket_import(
+      fd, iree_async_socket_type_to_socktype(type));
 
   // Allocate the socket struct.
   iree_async_socket_t* socket = NULL;

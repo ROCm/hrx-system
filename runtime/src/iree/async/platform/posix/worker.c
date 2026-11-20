@@ -14,7 +14,8 @@
 #include "iree/async/file.h"
 #include "iree/async/operations/file.h"
 #include "iree/async/operations/net.h"
-#include "iree/async/platform/posix/close.h"
+#include "iree/async/platform/posix/descriptor.h"
+#include "iree/async/platform/posix/file_queue.h"
 #include "iree/async/platform/posix/proactor.h"
 #include "iree/async/util/completion_pool.h"
 #include "iree/async/util/operation_completion.h"
@@ -155,38 +156,6 @@ static iree_status_t iree_async_posix_execute_file_close(
 // File work and completion handoff
 //===----------------------------------------------------------------------===//
 
-void iree_async_posix_file_queue_push(
-    iree_async_proactor_posix_t* proactor,
-    const iree_async_posix_file_batch_t* batch) {
-  iree_async_posix_file_queue_t* queue = &proactor->file_queue;
-  iree_slim_mutex_lock(&queue->mutex);
-  if (queue->tail) {
-    queue->tail->next = batch->head;
-  } else {
-    queue->head = batch->head;
-  }
-  queue->tail = batch->tail;
-  iree_slim_mutex_unlock(&queue->mutex);
-  iree_notification_post(
-      &queue->notification,
-      (int32_t)iree_min(batch->count, proactor->worker_count));
-}
-
-static iree_async_operation_t* iree_async_posix_file_queue_pop(
-    iree_async_posix_file_queue_t* queue) {
-  iree_slim_mutex_lock(&queue->mutex);
-  iree_async_operation_t* operation = queue->head;
-  if (operation) {
-    queue->head = operation->next;
-    if (!queue->head) {
-      queue->tail = NULL;
-    }
-    operation->next = NULL;
-  }
-  iree_slim_mutex_unlock(&queue->mutex);
-  return operation;
-}
-
 static iree_status_t iree_async_posix_execute_file_operation(
     iree_async_proactor_posix_t* proactor, iree_async_operation_t* operation) {
   switch (operation->type) {
@@ -270,22 +239,10 @@ static int iree_async_posix_worker_main(void* user_data) {
   iree_async_proactor_posix_t* proactor = worker->proactor;
   iree_async_posix_file_queue_t* queue = &proactor->file_queue;
   for (;;) {
-    // Take the wait token before checking either condition. A racing enqueue
-    // or shutdown then prevents commit_wait from sleeping through its wake.
-    iree_wait_token_t token =
-        iree_notification_prepare_wait(&queue->notification);
-    if (iree_atomic_load(&proactor->shutdown_requested,
-                         iree_memory_order_acquire)) {
-      iree_notification_cancel_wait(&queue->notification);
+    iree_async_operation_t* operation = iree_async_posix_file_queue_take(queue);
+    if (!operation) {
       break;
     }
-    iree_async_operation_t* operation = iree_async_posix_file_queue_pop(queue);
-    if (!operation) {
-      iree_notification_commit_wait(&queue->notification, token, /*spin_ns=*/0,
-                                    IREE_TIME_INFINITE_FUTURE);
-      continue;
-    }
-    iree_notification_cancel_wait(&queue->notification);
     IREE_TRACE_ZONE_BEGIN_NAMED(z1, "worker_execute_operation");
     const bool cancelled =
         iree_any_bit_set(iree_async_operation_load_internal_flags(operation),

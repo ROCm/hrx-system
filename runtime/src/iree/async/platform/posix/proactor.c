@@ -71,7 +71,9 @@ static bool iree_async_proactor_posix_defer_cancelled_close(
   operation->next = NULL;
   iree_async_posix_file_batch_t batch = {
       .head = operation, .tail = operation, .count = 1};
-  iree_async_posix_file_queue_push(user_data, &batch);
+  iree_async_proactor_posix_t* proactor = user_data;
+  iree_async_posix_file_queue_push(&proactor->file_queue, &batch,
+                                   proactor->worker_count);
   return true;
 }
 
@@ -204,14 +206,9 @@ iree_status_t iree_async_proactor_create_posix_with_backend(
   proactor->capabilities =
       options.allowed_capabilities & supported_capabilities;
 
-  // Initialize atomic shutdown flag.
-  iree_atomic_store(&proactor->shutdown_requested, 0,
-                    iree_memory_order_release);
-
   // Initialize the work and completion queues.
   iree_atomic_slist_initialize(&proactor->pending_queue);
-  iree_slim_mutex_initialize(&proactor->file_queue.mutex);
-  iree_notification_initialize(&proactor->file_queue.notification);
+  iree_async_posix_file_queue_initialize(&proactor->file_queue);
   iree_atomic_slist_initialize(&proactor->completion_queue);
   iree_atomic_slist_initialize(&proactor->pending_semaphore_waits);
   iree_async_semaphore_wait_context_initialize(
@@ -290,12 +287,10 @@ static void iree_async_proactor_posix_destroy(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Signal shutdown to prevent new work from being accepted.
-  iree_atomic_store(&proactor->shutdown_requested, 1,
-                    iree_memory_order_release);
+  iree_async_posix_file_queue_stop(&proactor->file_queue);
 
   // User operations have drained before final release. One broadcast wakes all
   // idle workers, including those still entering their wait during startup.
-  iree_notification_post(&proactor->file_queue.notification, IREE_ALL_WAITERS);
   for (iree_host_size_t i = 0; i < proactor->initialized_workers; ++i) {
     iree_async_posix_worker_deinitialize(&proactor->workers[i]);
   }
@@ -343,8 +338,7 @@ static void iree_async_proactor_posix_destroy(
   iree_async_posix_completion_pool_deinitialize(&proactor->completion_pool);
 
   // Deinitialize notifications and queues.
-  iree_notification_deinitialize(&proactor->file_queue.notification);
-  iree_slim_mutex_deinitialize(&proactor->file_queue.mutex);
+  iree_async_posix_file_queue_deinitialize(&proactor->file_queue);
   iree_atomic_slist_deinitialize(&proactor->pending_semaphore_waits);
   iree_async_semaphore_wait_context_deinitialize(
       &proactor->semaphore_wait_context);
@@ -1936,7 +1930,8 @@ static iree_status_t iree_async_proactor_posix_submit_prepared(
     iree_async_proactor_posix_commit_operation(proactor, operation, &files);
   }
   if (files.head) {
-    iree_async_posix_file_queue_push(proactor, &files);
+    iree_async_posix_file_queue_push(&proactor->file_queue, &files,
+                                     proactor->worker_count);
   }
   if (committed_count > files.count) {
     iree_async_proactor_posix_wake_poll_thread(proactor);
@@ -1951,7 +1946,7 @@ static iree_status_t iree_async_proactor_posix_submit(
   iree_async_proactor_posix_t* proactor =
       iree_async_proactor_posix_cast(base_proactor);
 
-  if (iree_atomic_load(&proactor->shutdown_requested,
+  if (iree_atomic_load(&proactor->file_queue.stopping,
                        iree_memory_order_acquire)) {
     return iree_make_status(IREE_STATUS_ABORTED, "proactor is shutting down");
   }
@@ -3107,7 +3102,7 @@ static iree_status_t iree_async_proactor_posix_poll(
     *out_completed_count = 0;
   }
 
-  if (iree_atomic_load(&proactor->shutdown_requested,
+  if (iree_atomic_load(&proactor->file_queue.stopping,
                        iree_memory_order_acquire)) {
     IREE_RETURN_AND_END_ZONE(
         z0, iree_make_status(IREE_STATUS_ABORTED, "proactor is shutting down"));

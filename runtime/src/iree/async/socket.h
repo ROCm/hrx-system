@@ -250,10 +250,10 @@ IREE_API_EXPORT iree_status_t iree_async_socket_create(
 //
 // Platform preparation:
 //   Import may mutate platform bookkeeping required for asynchronous I/O.
-//   POSIX backends enable nonblocking mode and IOCP associates the socket with
-//   the proactor's completion port. Import does not apply creation options;
-//   the caller remains responsible for all socket option configuration and,
-//   on Windows, creating the socket for overlapped I/O.
+//   POSIX backends verify stream/datagram kind and enable nonblocking mode.
+//   IOCP associates the socket with the proactor's completion port. The caller
+//   configures creation options before import and, on Windows, creates the
+//   socket for overlapped I/O.
 //
 // Flags parameter:
 //   The |flags| parameter declares runtime behavior for the imported socket.

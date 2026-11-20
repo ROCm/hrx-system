@@ -685,6 +685,10 @@ typedef struct iree_async_socket_close_operation_t {
 
   // The socket to close. A successful submission transfers one reference.
   iree_async_socket_t* socket;
+
+  // Backend-private result of a skipped close, held through final socket
+  // retirement.
+  iree_status_t retirement_status;
 } iree_async_socket_close_operation_t;
 
 #ifdef __cplusplus

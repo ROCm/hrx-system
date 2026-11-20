@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include "iree/async/operations/scheduling.h"
+#include "iree/async/platform/io_uring/close.h"
 #include "iree/async/platform/io_uring/notification.h"
 #include "iree/async/platform/io_uring/proactor.h"
 #include "iree/async/util/semaphore_wait.h"
@@ -19,6 +20,11 @@ iree_status_t iree_async_proactor_io_uring_cancel(
   iree_async_proactor_io_uring_t* proactor =
       iree_async_proactor_io_uring_cast(base_proactor);
 
+  if (operation->type == IREE_ASYNC_OPERATION_TYPE_FILE_CLOSE) {
+    iree_async_operation_set_internal_flags(
+        operation, IREE_ASYNC_IO_URING_CLOSE_CANCELLED);
+    return iree_ok_status();
+  }
   if (operation->type == IREE_ASYNC_OPERATION_TYPE_NOTIFICATION_WAIT) {
     iree_async_io_uring_notification_cancel_wait(
         (iree_async_notification_wait_operation_t*)operation);

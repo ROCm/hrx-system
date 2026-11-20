@@ -26,6 +26,8 @@ package(
 iree_runtime_cc_library(
     name = "io_uring",
     srcs = [
+        "close.c",
+        "close.h",
         "event_source.c",
         "event_source.h",
         "notification.c",
@@ -57,6 +59,8 @@ iree_runtime_cc_library(
         "//runtime/src/iree/async:types",
         "//runtime/src/iree/async/platform/linux:signal",
         "//runtime/src/iree/async/platform/linux:socket_options",
+        "//runtime/src/iree/async/platform/posix:descriptor",
+        "//runtime/src/iree/async/platform/posix:file_queue",
         "//runtime/src/iree/async/util:continuation",
         "//runtime/src/iree/async/util:intrusive_list",
         "//runtime/src/iree/async/util:message_pool",
@@ -69,6 +73,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/internal:atomic_slist",
         "//runtime/src/iree/base/internal:memory",
         "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/threading:thread",
     ],
 )
 

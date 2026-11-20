@@ -12,7 +12,6 @@
 #include "iree/async/platform/posix/socket.h"
 
 #include <errno.h>
-#include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
@@ -20,6 +19,7 @@
 #include <unistd.h>
 
 #include "iree/async/platform/posix/compat.h"
+#include "iree/async/platform/posix/descriptor.h"
 #include "iree/async/platform/posix/proactor.h"
 
 #if defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_ANDROID)
@@ -150,19 +150,6 @@ static iree_status_t iree_async_socket_apply_options(
   return iree_ok_status();
 }
 
-static iree_status_t iree_async_socket_set_nonblocking(int fd) {
-  int flags = fcntl(fd, F_GETFL, 0);
-  if (flags < 0) {
-    return iree_make_status(iree_status_code_from_errno(errno),
-                            "fcntl F_GETFL failed");
-  }
-  if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
-    return iree_make_status(iree_status_code_from_errno(errno),
-                            "fcntl F_SETFL O_NONBLOCK failed");
-  }
-  return iree_ok_status();
-}
-
 //===----------------------------------------------------------------------===//
 // Socket struct initialization
 //===----------------------------------------------------------------------===//
@@ -288,7 +275,9 @@ iree_status_t iree_async_posix_socket_import(
                             "invalid file descriptor %d", fd);
   }
 
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_async_socket_set_nonblocking(fd));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_async_posix_prepare_socket_import(
+              fd, iree_async_socket_type_to_socktype(type)));
 
   iree_async_socket_t* socket = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(

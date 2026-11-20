@@ -256,6 +256,11 @@ typedef struct iree_async_file_close_operation_t {
 
   // The file to close. A successful submission transfers one reference.
   iree_async_file_t* file;
+
+  // Backend-private worker result awaiting poll-owned dispatch. The linked
+  // successor stays in base.linked_next until the poll owner consumes this
+  // result.
+  iree_status_t result;
 } iree_async_file_close_operation_t;
 
 #ifdef __cplusplus

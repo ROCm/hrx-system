@@ -33,6 +33,7 @@
 #include "iree/async/operations/scheduling.h"
 #include "iree/async/operations/semaphore.h"
 #include "iree/async/platform/io_uring/buffer_ring.h"
+#include "iree/async/platform/io_uring/close.h"
 #include "iree/async/platform/io_uring/defs.h"
 #include "iree/async/platform/io_uring/notification.h"
 #include "iree/async/platform/io_uring/relay.h"
@@ -159,6 +160,7 @@ iree_status_t iree_async_proactor_create_io_uring(
                                      &proactor->message_pool);
 
   // Initialize our fields.
+  iree_slim_mutex_initialize(&proactor->close_workers_mutex);
   proactor->wake_eventfd = -1;
   proactor->wake_poll_armed = false;
   iree_atomic_store(&proactor->polling.owner_tid, 0, iree_memory_order_relaxed);
@@ -383,25 +385,7 @@ void iree_async_proactor_io_uring_submit_continuation_chain(
         proactor->base.allocator, chain_count * sizeof(iree_async_operation_t*),
         (void**)&chain_array);
     if (!iree_status_is_ok(alloc_status)) {
-      // The failed head receives the allocation error and the unsubmitted tail
-      // is cancelled. Callback-bearing operations use the poll-owned
-      // completion path; suppressed tails are consumed before their storage
-      // may be released.
-      iree_async_operation_t* remaining_chain = chain_head->linked_next;
-      chain_head->linked_next = NULL;
-      if (chain_head->completion_fn) {
-        iree_async_proactor_io_uring_push_software_operation(
-            proactor, chain_head, alloc_status);
-      } else {
-        // A deliberately suppressed tail has no callback to order and may be
-        // released as soon as its predecessor callback begins.
-        iree_async_operation_complete(chain_head, alloc_status,
-                                      IREE_ASYNC_COMPLETION_FLAG_NONE);
-      }
-      if (remaining_chain) {
-        iree_async_proactor_io_uring_cancel_continuation_chain_to_mpsc(
-            proactor, remaining_chain);
-      }
+      iree_async_io_uring_fail_chain(proactor, chain_head, alloc_status);
       return;
     }
   }
@@ -421,20 +405,7 @@ void iree_async_proactor_io_uring_submit_continuation_chain(
       chain_array[i]->linked_next =
           i + 1 < chain_count ? chain_array[i + 1] : NULL;
     }
-    iree_async_operation_t* failed_head = chain_array[0];
-    iree_async_operation_t* remaining_chain = failed_head->linked_next;
-    failed_head->linked_next = NULL;
-    if (failed_head->completion_fn) {
-      iree_async_proactor_io_uring_push_software_operation(
-          proactor, failed_head, submit_status);
-    } else {
-      iree_async_operation_complete(failed_head, submit_status,
-                                    IREE_ASYNC_COMPLETION_FLAG_NONE);
-    }
-    if (remaining_chain) {
-      iree_async_proactor_io_uring_cancel_continuation_chain_to_mpsc(
-          proactor, remaining_chain);
-    }
+    iree_async_io_uring_fail_chain(proactor, chain_head, submit_status);
   }
 
   if (chain_array != stack_array) {
@@ -481,6 +452,15 @@ iree_async_proactor_io_uring_drain_pending_software_operations(
     iree_async_operation_t* operation = (iree_async_operation_t*)entry;
     iree_atomic_slist_entry_t* next = entry->next;
     operation->next = NULL;
+
+    // Close operations retain their linked successors through native
+    // retirement.
+    if (operation->type == IREE_ASYNC_OPERATION_TYPE_FILE_CLOSE ||
+        operation->type == IREE_ASYNC_OPERATION_TYPE_SOCKET_CLOSE) {
+      drained_count += iree_async_io_uring_dispatch_close(proactor, operation);
+      entry = next;
+      continue;
+    }
 
     // Transfer ownership of the pending status out of the queue entry.
     iree_status_t status = operation->pending_status;
@@ -1021,12 +1001,6 @@ static iree_status_t iree_async_proactor_io_uring_populate_result(
       write_op->bytes_written = (iree_host_size_t)cqe->res;
       break;
     }
-    case IREE_ASYNC_OPERATION_TYPE_FILE_CLOSE: {
-      iree_async_file_close_operation_t* close_op =
-          (iree_async_file_close_operation_t*)operation;
-      close_op->file->primitive.value.fd = -1;
-      break;
-    }
     case IREE_ASYNC_OPERATION_TYPE_HANDLE_POLL: {
       iree_async_handle_poll_operation_t* handle_poll =
           (iree_async_handle_poll_operation_t*)operation;
@@ -1076,6 +1050,9 @@ iree_async_proactor_io_uring_process_internal_cqe(
     iree_async_proactor_io_uring_t* proactor, const iree_io_uring_cqe_t* cqe,
     iree_status_t* inout_poll_status) {
   switch (iree_io_uring_internal_tag(cqe->user_data)) {
+    case IREE_IO_URING_TAG_SOCKET_RETIRE:
+      return iree_async_io_uring_complete_socket_retirement(proactor, cqe,
+                                                            inout_poll_status);
     case IREE_IO_URING_TAG_WAKE:
       iree_async_proactor_io_uring_handle_wake_completion(proactor);
       break;
@@ -1264,6 +1241,9 @@ iree_host_size_t iree_async_proactor_io_uring_process_cqe(
     if (iree_status_is_ok(status)) {
       status = iree_async_proactor_io_uring_populate_result(proactor, cqe,
                                                             operation);
+    } else if (operation->type == IREE_ASYNC_OPERATION_TYPE_SOCKET_CLOSE) {
+      iree_async_io_uring_fail_chain(proactor, operation, status);
+      return 0;
     } else if (operation->type == IREE_ASYNC_OPERATION_TYPE_SOCKET_RECV_POOL) {
       iree_async_socket_recv_pool_operation_t* receive =
           (iree_async_socket_recv_pool_operation_t*)operation;
@@ -1322,7 +1302,7 @@ iree_host_size_t iree_async_proactor_io_uring_process_cqe(
   return is_notification_monitor ? 0 : completed_count;
 }
 
-// Submits poll-owned event source and relay operations in SQ-sized batches.
+// Submits poll-owned registrations and socket retirements in SQ-sized batches.
 // Registration only creates logical handles; this is the boundary that makes
 // them kernel-visible while preserving SINGLE_ISSUER ownership.
 iree_status_t iree_async_proactor_io_uring_submit_pending_event_monitors(
@@ -1333,7 +1313,10 @@ iree_status_t iree_async_proactor_io_uring_submit_pending_event_monitors(
         iree_async_io_uring_event_source_submit_pending(proactor);
     bool has_pending_relays =
         iree_async_io_uring_retry_pending_relays(proactor);
-    has_pending = has_pending_event_sources || has_pending_relays;
+    bool has_pending_closes =
+        iree_async_io_uring_submit_socket_retirements(proactor);
+    has_pending =
+        has_pending_event_sources || has_pending_relays || has_pending_closes;
 
     // This also admits SQEs queued before the first poll. Each progress turn
     // frees submission capacity for pending registrations while respecting
@@ -1368,7 +1351,6 @@ static iree_status_t iree_async_proactor_io_uring_poll(
                   &proactor->ring,
                   CPU_ALLOC_SIZE(IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT),
                   proactor->worker_affinity));
-      proactor->worker_affinity = NULL;
     }
     owner_tid = (int32_t)syscall(__NR_gettid);
     iree_atomic_store(&proactor->polling.owner_tid, owner_tid,

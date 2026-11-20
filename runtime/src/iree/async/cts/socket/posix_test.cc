@@ -15,6 +15,7 @@
 #if defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_ANDROID) || \
     defined(IREE_PLATFORM_APPLE) || defined(IREE_PLATFORM_BSD)
 
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
@@ -111,33 +112,39 @@ TEST_P(SocketPosixTest, ImportSocket_InvalidFd) {
   EXPECT_EQ(socket, nullptr);
 }
 
-// Import a closed fd should fail gracefully.
-TEST_P(SocketPosixTest, ImportSocket_ClosedFd) {
-  // Create and immediately close a socket to get a stale fd.
-  int raw_fd = socket(AF_INET, SOCK_STREAM, 0);
-  ASSERT_GE(raw_fd, 0);
-  close(raw_fd);
-
-  // Import should fail (fd is no longer valid).
+// Failure leaves the file descriptor usable with its original flags.
+TEST_P(SocketPosixTest, ImportSocket_RejectsNonSocket) {
+  int fd = open("/dev/null", O_RDONLY);
+  ASSERT_GE(fd, 0);
+  const int flags = fcntl(fd, F_GETFL);
+  ASSERT_GE(flags, 0);
   iree_async_socket_t* socket = nullptr;
-  iree_status_t status = iree_async_socket_import(
-      proactor_, iree_async_primitive_from_fd(raw_fd),
-      IREE_ASYNC_SOCKET_TYPE_TCP, IREE_ASYNC_SOCKET_OPTION_NONE, &socket);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_async_socket_import(proactor_, iree_async_primitive_from_fd(fd),
+                               IREE_ASYNC_SOCKET_TYPE_TCP,
+                               IREE_ASYNC_SOCKET_FLAG_NONE, &socket));
+  EXPECT_EQ(socket, nullptr);
+  EXPECT_EQ(fcntl(fd, F_GETFL), flags);
+  EXPECT_EQ(close(fd), 0);
+}
 
-  // Either INVALID_ARGUMENT (detected bad fd) or the import succeeds but
-  // subsequent operations fail. Either behavior is acceptable.
-  if (iree_status_is_ok(status)) {
-    // Import succeeded - socket should fail on first operation.
-    iree_async_address_t address;
-    IREE_ASSERT_OK(
-        iree_async_address_from_ipv4(iree_string_view_empty(), 0, &address));
-    IREE_EXPECT_NOT_OK(iree_async_socket_bind(socket, &address));
-    iree_async_socket_release(socket);
-  } else {
-    // Import failed as expected.
-    iree_status_ignore(status);
-    EXPECT_EQ(socket, nullptr);
-  }
+// A stream/datagram mismatch is rejected before the caller's socket changes.
+TEST_P(SocketPosixTest, ImportSocket_RejectsMismatchedKind) {
+  int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+  ASSERT_GE(fd, 0);
+  iree_async_socket_t* imported = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_async_socket_import(proactor_, iree_async_primitive_from_fd(fd),
+                               IREE_ASYNC_SOCKET_TYPE_UNIX_STREAM,
+                               IREE_ASYNC_SOCKET_FLAG_NONE, &imported));
+  EXPECT_EQ(imported, nullptr);
+  IREE_ASSERT_OK(
+      iree_async_socket_import(proactor_, iree_async_primitive_from_fd(fd),
+                               IREE_ASYNC_SOCKET_TYPE_UNIX_DGRAM,
+                               IREE_ASYNC_SOCKET_FLAG_NONE, &imported));
+  iree_async_socket_release(imported);
 }
 
 //===----------------------------------------------------------------------===//
