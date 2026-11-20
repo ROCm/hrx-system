@@ -1,6 +1,6 @@
 // A row-major RHS exercises the native transpose load. Distinct products
 // and nonzero accumulators check C and D ownership at both row pitches.
-amdgpu.target<gfx1201> @rdna4_wave64 {subgroup_size = 64}
+amdgpu.target<gfx12-generic> @rdna4_wave64 {subgroup_size = 64}
 
 kernel.def target(@rdna4_wave64) @matrix_accumulation() {
   %unit = index.constant 1 : index
@@ -58,6 +58,7 @@ func.def @row_pitch(%trial: index) -> (index) {
 }
 
 check.scenario public @wave64_matrix_accumulation {
+  check.requires<hal.amdgpu.target> {target = "gfx12-generic"}
   check.trial[2](%trial: index, %entropy: check.entropy) {
     %pitch = check.generate<@row_pitch>(%trial) : (index) -> (index)
     %lhs = check.generate.iota offset(1.0) step(1.0) : tensor<16x16xf16>
