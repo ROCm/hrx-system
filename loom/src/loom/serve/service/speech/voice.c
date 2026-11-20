@@ -20,9 +20,9 @@ iree_status_t loom_serve_speech_voice_request_initialize(
         IREE_STATUS_INVALID_ARGUMENT,
         "voice ID must be nonempty UTF-8 without NUL bytes");
   }
-  loom_serve_audio_source_t source;
+  iree_codec_audio_source_t source;
   IREE_RETURN_IF_ERROR(
-      loom_serve_audio_source_parse(content_type, audio, &source));
+      iree_codec_audio_source_parse(content_type, audio, &source));
   iree_string_builder_initialize(host_allocator, &out_request->id);
   iree_string_builder_initialize(host_allocator, &out_request->storage);
   iree_status_t status =

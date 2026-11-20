@@ -109,9 +109,9 @@ build:loom-sdk --//libamdf/config:families=rdna,cdna,xdna
 build:loom-sdk --//loom/config/arch:enable=aie2p,amdgpu,spirv,vm,x86
 build:loom-sdk --//loom/config/emit:enable=elf,spirv,vm
 build:loom-sdk --//loom/config/execute:enable=iree_hal,iree_vm
-build:loom-sdk --//loom/config/serve:audio_codecs=wav,mp3,flac
-build:loom-sdk --//loom/config/serve:image_input=true
-build:loom-sdk --//loom/config/serve:image_codecs=png,jpeg,gif,webp
+build:loom-sdk --//runtime/config/codec:audio_codecs=wav,mp3,flac
+build:loom-sdk --//loom/config/media:image_input=true
+build:loom-sdk --//runtime/config/codec:image_codecs=png,jpeg,gif,webp
 
 # Restore native CPython symbols without changing project optimization or ASAN.
 build:python-runtime-debug --//build_tools/bazel:python_runtime_debug=true

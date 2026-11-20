@@ -785,7 +785,7 @@ defines these records and retained identity.
 
 On a media-prefix miss, codecs realize packed RGB8/RGBA8 pixels without
 resizing or normalizing them. The projector receives an
-[image request packet](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/media/image_request.h)
+[image request packet](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/service/media/image_request.h)
 containing a plane directory, encoded/display geometry, orientation, source
 metadata, and pixels for every frame in the group.
 Its device program owns preprocessing and projection. Compatible images from

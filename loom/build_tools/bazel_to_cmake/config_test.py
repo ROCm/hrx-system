@@ -210,7 +210,7 @@ loom_generated_file(
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
             targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
-            build_dir="/repo/loom/src/loom/serve/media",
+            build_dir="/repo/loom/src/loom/service/media",
             repo_root="/repo",
             condition_mappings=self.project.condition_mappings,
         )
@@ -219,55 +219,60 @@ loom_generated_file(
             srcs=["image_codecs.c"],
             deps=functions.select(
                 {
-                    "//loom/config/serve:png": ["//third_party:libpng"],
+                    "//loom/config/media:png": ["//runtime/src/iree/codec/image:png"],
                     "//conditions:default": [],
                 }
             ),
         )
-        self.assertIn("if(LOOM_SERVE_IMAGE_CODEC_PNG)", converter.body)
-        self.assertIn("iree::third_party::libpng", converter.body)
+        self.assertIn("if(LOOM_MEDIA_IMAGE_CODEC_PNG)", converter.body)
+        self.assertIn("iree::codec::image::png", converter.body)
 
-    def test_loom_audio_decoder_selection_survives_conversion(self):
+    def test_runtime_audio_decoder_selection_survives_conversion(self):
+        runtime_project = bazel_to_cmake_config.include_project(
+            REPO_ROOT / ".bazel_to_cmake.cfg.py", "runtime/.bazel_to_cmake.cfg.py"
+        )
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
             targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
-            build_dir="/repo/loom/src/loom/serve/media",
+            build_dir="/repo/runtime/src/iree/codec/audio",
             repo_root="/repo",
-            condition_mappings=self.project.condition_mappings,
+            condition_mappings=runtime_project.condition_mappings,
         )
         functions.cc_library(
-            name="audio_decoder",
+            name="decoder",
             srcs=functions.select(
                 {
-                    "//loom/config/serve:audio_decoding": ["audio_decoder.c"],
-                    "//conditions:default": ["audio_decoder_disabled.c"],
+                    "//runtime/config/codec:audio_decoding": ["decoder.c"],
+                    "//conditions:default": ["decoder_disabled.c"],
                 }
             ),
             deps=functions.select(
                 {
-                    "//loom/config/serve:audio_decoding": ["//third_party:miniaudio"],
+                    "//runtime/config/codec:audio_decoding": [
+                        "//third_party:miniaudio"
+                    ],
                     "//conditions:default": [],
                 }
             ),
         )
-        self.assertIn("if(LOOM_SERVE_AUDIO_DECODING)", converter.body)
+        self.assertIn("if(IREE_CODEC_AUDIO_DECODING)", converter.body)
         self.assertIn("iree::third_party::miniaudio", converter.body)
-        self.assertIn('"audio_decoder.c"', converter.body)
-        self.assertIn('"audio_decoder_disabled.c"', converter.body)
+        self.assertIn('"decoder.c"', converter.body)
+        self.assertIn('"decoder_disabled.c"', converter.body)
         for codec in ("wav", "mp3", "flac"):
             converter.body = ""
             functions.cc_library(
                 name="selection",
                 defines=functions.select(
                     {
-                        "//loom/config/serve:" + codec: ["ENABLED=1"],
+                        "//runtime/config/codec:" + codec: ["ENABLED=1"],
                         "//conditions:default": ["ENABLED=0"],
                     }
                 ),
             )
             self.assertIn(
-                "if(LOOM_SERVE_AUDIO_CODEC_" + codec.upper() + ")", converter.body
+                "if(IREE_CODEC_AUDIO_CODEC_" + codec.upper() + ")", converter.body
             )
 
     def test_amdgpu_descriptor_requirements_reach_consumer_profiles(self):

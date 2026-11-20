@@ -42,8 +42,8 @@ loom_cc_library(
         "//loom/src/loom/runtime/execution",
         "//loom/src/loom/runtime/parameter:residency",
         "//loom/src/loom/runtime/storage:memory",
-        "//loom/src/loom/serve/media:audio_source",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/codec/audio:source",
         "//runtime/src/iree/tokenizer",
     ],
 )
@@ -77,10 +77,10 @@ loom_cc_library(
     deps = [
         ":consumer",
         ":generator",
-        "//loom/src/loom/serve/media:audio_source",
         "//loom/src/loom/service/telemetry:record",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:unicode",
+        "//runtime/src/iree/codec/audio:source",
     ],
 )
 
@@ -104,10 +104,10 @@ loom_cc_test(
     deps = [
         ":voice",
         ":voice_http",
-        "//loom/src/loom/serve/media:audio_source",
         "//loom/src/loom/serve/transport/http:multipart",
         "//loom/src/loom/serve/transport/http:request",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/codec/audio:source",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -142,10 +142,10 @@ loom_cc_library(
         "//loom/src/loom/runtime/program:tokenizer_cache",
         "//loom/src/loom/runtime/program:tokenizer_load",
         "//loom/src/loom/runtime/storage:rows",
-        "//loom/src/loom/serve/media:audio_recording",
-        "//loom/src/loom/serve/media:audio_source",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/codec/audio:recording",
+        "//runtime/src/iree/codec/audio:source",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/vm:types",
         "//runtime/src/iree/tokenizer",
@@ -164,7 +164,7 @@ loom_cc_library(
     ],
     hdrs = ["service_test.h"],
     defines = iree_select({
-        "//loom/config/serve:wav": ["LOOM_TEST_AUDIO_WAV=1"],
+        "//runtime/config/codec:wav": ["LOOM_TEST_AUDIO_WAV=1"],
         "//conditions:default": ["LOOM_TEST_AUDIO_WAV=0"],
     }),
     target_compatible_with = select({

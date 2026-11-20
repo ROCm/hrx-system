@@ -80,8 +80,8 @@ jobs:
           python3 dev.py bazel configure \
             --//runtime/config/hal:drivers=task \
             --//loom/config/import:enable=cxx \
-            --//loom/config/serve:image_codecs=png,jpeg,gif,webp \
-            --//loom/config/serve:audio_codecs=wav,mp3,flac
+            --//runtime/config/codec:image_codecs=png,jpeg,gif,webp \
+            --//runtime/config/codec:audio_codecs=wav,mp3,flac
 
       - name: Restore trusted fuzz corpus
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -97,8 +97,8 @@ jobs:
           campaign_targets=(
             --//build_tools/vulkan/config:enabled=false
             --//build_tools/d3d12/config:enabled=false
-            --//loom/config/serve:image_codecs=png,jpeg,gif,webp
-            --//loom/config/serve:audio_codecs=wav,mp3,flac
+            --//runtime/config/codec:image_codecs=png,jpeg,gif,webp
+            --//runtime/config/codec:audio_codecs=wav,mp3,flac
             //...
           )
           python3 dev.py bazel fuzz \

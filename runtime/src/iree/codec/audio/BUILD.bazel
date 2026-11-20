@@ -1,0 +1,162 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_fuzz.bzl", "iree_runtime_cc_fuzz")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+AUDIO_FUZZ_SEEDS = [
+    "//runtime/src/iree/codec/audio/testdata:sample.flac",
+    "//runtime/src/iree/codec/audio/testdata:sample.mp3",
+    "//runtime/src/iree/codec/audio/testdata/fuzz:f32.txt",
+    "//runtime/src/iree/codec/audio/testdata/fuzz:media_type.txt",
+    "//runtime/src/iree/codec/audio/testdata/fuzz:s16.txt",
+    "//runtime/src/iree/codec/audio/testdata/fuzz:wave.txt",
+]
+
+iree_runtime_cc_library(
+    name = "source",
+    srcs = ["source.c"],
+    hdrs = ["source.h"],
+    visibility = ["//visibility:public"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+iree_runtime_cc_test(
+    name = "source_test",
+    srcs = ["source_test.cc"],
+    deps = [
+        ":source",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "resampler",
+    srcs = ["resampler.c"],
+    hdrs = ["resampler.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "resampler_test",
+    srcs = ["resampler_test.cc"],
+    deps = [
+        ":resampler",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "decoder",
+    srcs = select({
+        "//runtime/config/codec:audio_decoding": ["decoder.c"],
+        "//conditions:default": ["decoder_disabled.c"],
+    }),
+    hdrs = ["decoder.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//runtime/src/iree/base",
+    ] + select({
+        "//runtime/config/codec:audio_decoding": ["//third_party:miniaudio"],
+        "//conditions:default": [],
+    }),
+)
+
+iree_runtime_cc_library(
+    name = "recording",
+    srcs = ["recording.c"],
+    hdrs = ["recording.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":decoder",
+        ":source",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_fuzz(
+    name = "recording_fuzz",
+    srcs = ["recording_fuzz.cc"],
+    args = [
+        "-seed_inputs=" + ",".join([
+            "$(rootpath %s)" % seed
+            for seed in AUDIO_FUZZ_SEEDS
+        ]),
+    ],
+    data = AUDIO_FUZZ_SEEDS,
+    defines = select({
+        "//runtime/config/codec:wav": ["IREE_CODEC_FUZZ_AUDIO_WAV=1"],
+        "//conditions:default": ["IREE_CODEC_FUZZ_AUDIO_WAV=0"],
+    }),
+    deps = [
+        ":recording",
+        ":source",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "recording_test",
+    srcs = ["recording_test.cc"],
+    defines = select({
+        "//runtime/config/codec:wav": ["IREE_CODEC_TEST_AUDIO_WAV=1"],
+        "//conditions:default": ["IREE_CODEC_TEST_AUDIO_WAV=0"],
+    }),
+    deps = [
+        ":recording",
+        ":source",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm:test_support",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "decoder_test",
+    srcs = ["decoder_test.cc"],
+    args = ["--audio_fixture=$(rootpath //runtime/src/iree/codec/audio/testdata:sample.flac)"],
+    data = [
+        "//runtime/src/iree/codec/audio/testdata:README.txt",
+        "//runtime/src/iree/codec/audio/testdata:flac.f32",
+        "//runtime/src/iree/codec/audio/testdata:mp3.f32",
+        "//runtime/src/iree/codec/audio/testdata:sample.flac",
+        "//runtime/src/iree/codec/audio/testdata:sample.mp3",
+    ],
+    defines = select({
+        "//runtime/config/codec:wav": ["IREE_CODEC_TEST_AUDIO_WAV=1"],
+        "//conditions:default": ["IREE_CODEC_TEST_AUDIO_WAV=0"],
+    }) + select({
+        "//runtime/config/codec:mp3": ["IREE_CODEC_TEST_AUDIO_MP3=1"],
+        "//conditions:default": ["IREE_CODEC_TEST_AUDIO_MP3=0"],
+    }) + select({
+        "//runtime/config/codec:flac": ["IREE_CODEC_TEST_AUDIO_FLAC=1"],
+        "//conditions:default": ["IREE_CODEC_TEST_AUDIO_FLAC=0"],
+    }),
+    deps = [
+        ":decoder",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm:test_support",
+    ],
+)

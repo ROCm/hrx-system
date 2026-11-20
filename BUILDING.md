@@ -990,49 +990,50 @@ CMake. Foreign frontend integrations can use the separately versioned Python
 [importer construction API](loom/py/loom/importers/README.md) without adding
 their parser or compiler dependencies to an HRX deployment.
 
-### Serving image inputs
+### Image codecs and serving inputs
 
 Loom serving image input is enabled by default on Linux, macOS, and Windows.
 PAM images have a built-in decoder with no third-party dependencies. PNG, JPEG,
-GIF, and WebP have independent providers, all enabled by default. A minimal
+GIF, and WebP have independent runtime codecs, all enabled by default. These
+codecs can be used without Loom or its VM emitter. A minimal
 build can retain image input with only PAM, select optional codecs, or disable
 image input entirely:
 
 ```bash
-iree-bazel-configure -DLOOM_SERVE_IMAGE_CODECS=
-iree-cmake-configure -DLOOM_SERVE_IMAGE_CODECS=
+iree-bazel-configure -DIREE_CODEC_IMAGE_CODECS=
+iree-cmake-configure -DIREE_CODEC_IMAGE_CODECS=
 
-iree-bazel-configure '-DLOOM_SERVE_IMAGE_CODECS=png;jpeg'
-iree-cmake-configure '-DLOOM_SERVE_IMAGE_CODECS=png;jpeg'
+iree-bazel-configure '-DIREE_CODEC_IMAGE_CODECS=png;jpeg'
+iree-cmake-configure '-DIREE_CODEC_IMAGE_CODECS=png;jpeg'
 
-iree-bazel-configure -DLOOM_SERVE_IMAGE_INPUT=OFF
-iree-cmake-configure -DLOOM_SERVE_IMAGE_INPUT=OFF
+iree-bazel-configure -DLOOM_MEDIA_IMAGE_INPUT=OFF
+iree-cmake-configure -DLOOM_MEDIA_IMAGE_INPUT=OFF
 ```
 
-The native Bazel options are `--//loom/config/serve:image_input=false` and
-`--//loom/config/serve:image_codecs=png,jpeg`; an empty codec list retains PAM.
+The native Bazel options are `--//loom/config/media:image_input=false` and
+`--//runtime/config/codec:image_codecs=png,jpeg`; an empty codec list retains PAM.
 Only selected optional providers enter the source-fetch and link graphs.
 Disabled formats return an explicit error; other serving modalities do not
 depend on codec availability. Other operating systems exclude image providers
 by default.
 
-### Serving audio inputs
+### Audio codecs and serving inputs
 
 WAV, MP3, and FLAC transcription inputs are enabled by default on Linux, macOS,
-and Windows. They use the pinned miniaudio decoder; no system audio library is
-required.
+and Windows. The runtime codecs use the pinned miniaudio decoder; no system
+audio library or Loom VM emitter is required.
 
 One codec list selects a subset or removes the dependency entirely:
 
 ```bash
-iree-bazel-configure '-DLOOM_SERVE_AUDIO_CODECS=wav;flac'
-iree-cmake-configure '-DLOOM_SERVE_AUDIO_CODECS=wav;flac'
+iree-bazel-configure '-DIREE_CODEC_AUDIO_CODECS=wav;flac'
+iree-cmake-configure '-DIREE_CODEC_AUDIO_CODECS=wav;flac'
 
-iree-bazel-configure -DLOOM_SERVE_AUDIO_CODECS=
-iree-cmake-configure -DLOOM_SERVE_AUDIO_CODECS=
+iree-bazel-configure -DIREE_CODEC_AUDIO_CODECS=
+iree-cmake-configure -DIREE_CODEC_AUDIO_CODECS=
 ```
 
-The native Bazel spelling is `--//loom/config/serve:audio_codecs=wav,flac`.
+The native Bazel spelling is `--//runtime/config/codec:audio_codecs=wav,flac`.
 An empty list excludes miniaudio from the server's configured dependency graph;
 raw PCM16LE transcription and PCM speech synthesis remain available. Disabled
 encoded formats return an explicit error. This option selects input decoding;

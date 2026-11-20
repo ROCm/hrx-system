@@ -79,17 +79,17 @@ iree_status_t loom_serve_transcription_parse(
   }
   const iree_const_byte_span_t audio =
       iree_make_const_byte_span(values[1].data, values[1].size);
-  loom_serve_audio_source_t source;
+  iree_codec_audio_source_t source;
   IREE_RETURN_IF_ERROR(
-      loom_serve_audio_source_parse(content_type, audio, &source));
+      iree_codec_audio_source_parse(content_type, audio, &source));
   uint64_t normalized_frame_count = 0;
-  if (source.encoding != LOOM_SERVE_AUDIO_ENCODING_CONTAINER) {
+  if (source.encoding != IREE_CODEC_AUDIO_ENCODING_CONTAINER) {
     if (source.channels != format.channels) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "audio/pcm requires channels=%u",
                               format.channels);
     }
-    IREE_RETURN_IF_ERROR(loom_serve_audio_frame_count(
+    IREE_RETURN_IF_ERROR(iree_codec_audio_frame_count(
         source.frame_count, source.sample_rate, format.sample_rate,
         &normalized_frame_count));
   }

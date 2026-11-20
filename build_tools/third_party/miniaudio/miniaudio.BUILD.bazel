@@ -6,7 +6,7 @@
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 
-# Decoding and conversion only. Serving owns IO, workers, and output credit.
+# Decoding and conversion only. Callers own IO, workers, and output credit.
 cc_library(
     name = "decoder",
     srcs = ["miniaudio.c"],
@@ -22,13 +22,13 @@ cc_library(
         "MA_NO_RUNTIME_LINKING",
         "MA_NO_THREADING",
     ] + select({
-        "@hrx//loom/config/serve:wav": [],
+        "@hrx//runtime/config/codec:wav": [],
         "//conditions:default": ["MA_NO_WAV"],
     }) + select({
-        "@hrx//loom/config/serve:mp3": [],
+        "@hrx//runtime/config/codec:mp3": [],
         "//conditions:default": ["MA_NO_MP3"],
     }) + select({
-        "@hrx//loom/config/serve:flac": [],
+        "@hrx//runtime/config/codec:flac": [],
         "//conditions:default": ["MA_NO_FLAC"],
     }),
     includes = ["."],

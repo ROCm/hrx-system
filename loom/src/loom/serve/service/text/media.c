@@ -351,7 +351,7 @@ iree_status_t loom_serve_text_chat_media_identity_initialize(
     return iree_ok_status();
   }
   const iree_host_size_t length =
-      chat->projections.count * sizeof(loom_serve_media_digest_t);
+      chat->projections.count * sizeof(loom_service_media_digest_t);
   iree_vm_buffer_t* storage = NULL;
   IREE_RETURN_IF_ERROR(
       iree_vm_buffer_create(length, 1, host_allocator, &storage));

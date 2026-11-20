@@ -192,37 +192,37 @@ alias(
 alias(
     name = "giflib",
     actual = select({
-        "//loom/config/serve:gif": "@giflib//:giflib",
+        "//runtime/config/codec:gif": "@giflib//:giflib",
         "//conditions:default": ":empty_image_codec",
     }),
-    visibility = [":loom_users"],
+    visibility = [":runtime_users"],
 )
 
 alias(
     name = "libjpeg_turbo",
     actual = select({
-        "//loom/config/serve:jpeg": "@libjpeg_turbo//:jpeg",
+        "//runtime/config/codec:jpeg": "@libjpeg_turbo//:jpeg",
         "//conditions:default": ":empty_image_codec",
     }),
-    visibility = [":loom_users"],
+    visibility = [":runtime_users"],
 )
 
 alias(
     name = "libpng",
     actual = select({
-        "//loom/config/serve:png": "@libpng//:png",
+        "//runtime/config/codec:png": "@libpng//:png",
         "//conditions:default": ":empty_image_codec",
     }),
-    visibility = [":loom_users"],
+    visibility = [":runtime_users"],
 )
 
 alias(
     name = "libwebp",
     actual = select({
-        "//loom/config/serve:webp": "@libwebp//:webpdecoder",
+        "//runtime/config/codec:webp": "@libwebp//:webpdecoder",
         "//conditions:default": ":empty_image_codec",
     }),
-    visibility = [":loom_users"],
+    visibility = [":runtime_users"],
 )
 
 filegroup(name = "empty_image_codec")
@@ -230,10 +230,10 @@ filegroup(name = "empty_image_codec")
 alias(
     name = "miniaudio",
     actual = select({
-        "//loom/config/serve:audio_decoding": "@miniaudio//:decoder",
+        "//runtime/config/codec:audio_decoding": "@miniaudio//:decoder",
         "//conditions:default": ":empty_audio_codec",
     }),
-    visibility = [":loom_users"],
+    visibility = [":runtime_users"],
 )
 
 filegroup(name = "empty_audio_codec")

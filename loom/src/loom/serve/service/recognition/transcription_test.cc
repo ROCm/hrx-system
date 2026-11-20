@@ -149,7 +149,7 @@ TEST_F(TranscriptionTest, FloatingPcmRetainsExplicitEncodingAndDuration) {
   file.content_type = IREE_SV("audio/pcm;rate=24000;channels=1;format=f32le");
   IREE_ASSERT_OK(
       Parse({Field(IREE_SV("model"), IREE_SV("recognition")), file}));
-  EXPECT_EQ(request_.audio.encoding, LOOM_SERVE_AUDIO_ENCODING_F32LE);
+  EXPECT_EQ(request_.audio.encoding, IREE_CODEC_AUDIO_ENCODING_F32LE);
   EXPECT_EQ(request_.audio.frame_count, 4u);
   EXPECT_EQ(request_.normalized_frame_count, 3u);
 }

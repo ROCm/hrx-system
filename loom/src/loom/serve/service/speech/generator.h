@@ -7,11 +7,11 @@
 #ifndef LOOM_SERVE_SERVICE_SPEECH_GENERATOR_H_
 #define LOOM_SERVE_SERVICE_SPEECH_GENERATOR_H_
 
+#include "iree/codec/audio/source.h"
 #include "iree/tokenizer/tokenizer.h"
 #include "loom/runtime/execution/execution.h"
 #include "loom/runtime/parameter/residency.h"
 #include "loom/runtime/storage/memory.h"
-#include "loom/serve/media/audio_source.h"
 #include "loom/serve/service/speech/request.h"
 
 #ifdef __cplusplus
@@ -85,7 +85,7 @@ typedef struct loom_serve_speech_generator_t {
   // the model.
   iree_status_t (*prepare_voice)(void* self, iree_host_size_t row_index,
                                  iree_host_size_t voice_index,
-                                 const loom_serve_audio_source_t* audio,
+                                 const iree_codec_audio_source_t* audio,
                                  void** out_invocation, void** out_voice);
   // Releases CPU voice metadata on the owner after its final capture retires.
   // Device conditioning belongs to the slot and may be replaced by its next

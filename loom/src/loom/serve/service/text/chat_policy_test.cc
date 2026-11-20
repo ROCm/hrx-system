@@ -14,11 +14,11 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/test_allocator.h"
 #include "loom/runtime/program/package.h"
-#include "loom/serve/media/image_codec.h"
 #include "loom/serve/service/text/chat.h"
 #include "loom/serve/service/text/chat_policy_data.h"
 #include "loom/serve/service/text/input.h"
 #include "loom/serve/testing/text_policy.h"
+#include "loom/service/media/image_codecs.h"
 
 namespace {
 
@@ -469,7 +469,7 @@ TEST_F(SourceChatPolicyTest, OrderedImagesReachSourceDefinedInputSpans) {
           ImageMessage("", "image/x-portable-arbitrarymap", kPam, "low", ""),
       4);
   loom_serve_text_chat_t chat = {};
-  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_PAM)) {
+  if (!loom_service_media_image_codec(IREE_CODEC_IMAGE_FORMAT_PAM)) {
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_UNIMPLEMENTED,
         loom_serve_text_chat_initialize(policy, policy->name,
@@ -519,7 +519,7 @@ TEST_F(SourceChatPolicyTest, OrderedImagesReachSourceDefinedInputSpans) {
 }
 
 TEST_F(SourceChatPolicyTest, MediaRequestExtensionsPreserveImageInput) {
-  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_PAM)) {
+  if (!loom_service_media_image_codec(IREE_CODEC_IMAGE_FORMAT_PAM)) {
     GTEST_SKIP() << "image input is disabled in this build";
   }
   const auto* policy = loom_serve_test_text_policy_chat(policy_owner_);
@@ -536,13 +536,13 @@ TEST_F(SourceChatPolicyTest, MediaRequestExtensionsPreserveImageInput) {
   ASSERT_EQ(chat.images.count, 1u);
   EXPECT_EQ(chat.images.values[0].detail,
             LOOM_SERVE_TEXT_CHAT_IMAGE_DETAIL_AUTO);
-  EXPECT_EQ(chat.images.values[0].info.width, 2u);
-  EXPECT_EQ(chat.images.values[0].info.height, 2u);
+  EXPECT_EQ(chat.images.values[0].info.image.width, 2u);
+  EXPECT_EQ(chat.images.values[0].info.image.height, 2u);
   loom_serve_text_chat_deinitialize(&chat);
 }
 
 TEST_F(SourceChatPolicyTest, TimestampedFramesReachSourceAsOneOrderedPart) {
-  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_JPEG)) {
+  if (!loom_service_media_image_codec(IREE_CODEC_IMAGE_FORMAT_JPEG)) {
     GTEST_SKIP() << "image input is disabled in this build";
   }
   const auto* policy = loom_serve_test_text_policy_chat(policy_owner_);
@@ -571,23 +571,23 @@ TEST_F(SourceChatPolicyTest, TimestampedFramesReachSourceAsOneOrderedPart) {
   EXPECT_EQ(iree_unaligned_load_le_u32(metadata + 4), 2u);
   EXPECT_DOUBLE_EQ(iree_unaligned_load_le_f64(metadata + 8), 0.125);
   EXPECT_DOUBLE_EQ(iree_unaligned_load_le_f64(metadata + 24), 1.75);
-  loom_serve_media_image_input_t decoded = {};
-  IREE_ASSERT_OK(loom_serve_media_image_input_initialize(
+  loom_service_media_image_input_t decoded = {};
+  IREE_ASSERT_OK(loom_service_media_image_input_initialize(
       chat.images.values[1].source, &policy->images.limits, host_allocator_,
       &decoded));
-  EXPECT_EQ(decoded.info.format, LOOM_SERVE_MEDIA_IMAGE_FORMAT_JPEG);
-  EXPECT_EQ(decoded.info.width, 2u);
+  EXPECT_EQ(decoded.info.image.format, IREE_CODEC_IMAGE_FORMAT_JPEG);
+  EXPECT_EQ(decoded.info.image.width, 2u);
   std::vector<uint8_t> pixels(decoded.info.pixel_length);
   const auto destination = iree_make_byte_span(pixels.data(), pixels.size());
-  const loom_serve_media_image_input_t* inputs[] = {&decoded};
+  const loom_service_media_image_input_t* inputs[] = {&decoded};
   iree_status_t result = iree_ok_status();
-  IREE_ASSERT_OK(loom_serve_media_image_decode_batch(1, inputs, &destination,
-                                                     host_allocator_, &result));
+  IREE_ASSERT_OK(loom_service_media_image_decode_batch(
+      1, inputs, &destination, host_allocator_, &result));
   IREE_ASSERT_OK(result);
   EXPECT_GE(pixels[0], 250u);
   EXPECT_LE(pixels[1], 5u);
   EXPECT_LE(pixels[2], 5u);
-  loom_serve_media_image_input_deinitialize(&decoded);
+  loom_service_media_image_input_deinitialize(&decoded);
   loom_serve_text_input_t input = {};
   IREE_ASSERT_OK(loom_serve_text_input_prepare(&chat, {}, false, 16, &input,
                                                host_allocator_));
@@ -615,7 +615,7 @@ TEST_F(SourceChatPolicyTest, TimestampedFramesReachSourceAsOneOrderedPart) {
 }
 
 TEST_F(SourceChatPolicyTest, JpegSequencesUseDefaultTimingAndJsonEscapes) {
-  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_JPEG)) {
+  if (!loom_service_media_image_codec(IREE_CODEC_IMAGE_FORMAT_JPEG)) {
     GTEST_SKIP() << "JPEG input is disabled in this build";
   }
   const auto* policy = loom_serve_test_text_policy_chat(policy_owner_);
@@ -643,7 +643,7 @@ TEST_F(SourceChatPolicyTest, JpegSequencesUseDefaultTimingAndJsonEscapes) {
 }
 
 TEST_F(SourceChatPolicyTest, RejectsInvalidVideoTransportAndTiming) {
-  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_JPEG)) {
+  if (!loom_service_media_image_codec(IREE_CODEC_IMAGE_FORMAT_JPEG)) {
     GTEST_SKIP() << "JPEG input is disabled in this build";
   }
   const auto* policy = loom_serve_test_text_policy_chat(policy_owner_);
@@ -694,7 +694,7 @@ TEST_F(SourceChatPolicyTest, RejectsInvalidVideoTransportAndTiming) {
 }
 
 TEST_F(SourceChatPolicyTest, ExplicitAllFramesDoesNotTruncateAtDefaultLimit) {
-  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_JPEG)) {
+  if (!loom_service_media_image_codec(IREE_CODEC_IMAGE_FORMAT_JPEG)) {
     GTEST_SKIP() << "JPEG input is disabled in this build";
   }
   auto policy = *loom_serve_test_text_policy_chat(policy_owner_);
@@ -746,7 +746,7 @@ TEST_F(SourceChatPolicyTest, RetainedHistoryRequiresExactOrderedMedia) {
   loom_serve_text_chat_t different_image = {};
   loom_serve_text_chat_t different_detail = {};
   loom_serve_text_chat_t different_placement = {};
-  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_PAM)) {
+  if (!loom_service_media_image_codec(IREE_CODEC_IMAGE_FORMAT_PAM)) {
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_UNIMPLEMENTED,
         loom_serve_text_chat_initialize(
