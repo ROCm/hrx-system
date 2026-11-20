@@ -167,6 +167,8 @@ loom_corpus_test(
     execution_profiles = [VM_REFERENCE_PROFILE],
     profile_sources = {
         VM_REFERENCE_PROFILE.name: [
+            "control/loop/invariant_reads.loom",
+            "control/loop/memory_effects.loom",
             "control/loop/scalar_state.loom",
             "control/loop/vector_recurrence.loom",
             "function/call/calls.loom",

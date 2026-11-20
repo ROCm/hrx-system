@@ -30,6 +30,21 @@ bool loom_loop_domain_proven_nonempty(loom_value_facts_t lower_bound,
          lower_bound.range_hi < upper_bound.range_lo;
 }
 
+bool loom_loop_domain_proven_at_most_once(loom_value_facts_t lower_bound,
+                                          loom_value_facts_t upper_bound,
+                                          loom_value_facts_t step) {
+  if (!loom_loop_domain_has_positive_step(lower_bound, upper_bound, step)) {
+    return false;
+  }
+  if (lower_bound.range_lo >= upper_bound.range_hi) {
+    return true;
+  }
+  // The nonnegative distance can exceed INT64_MAX, unlike either endpoint.
+  const uint64_t distance =
+      (uint64_t)upper_bound.range_hi - (uint64_t)lower_bound.range_lo;
+  return distance <= (uint64_t)step.range_lo;
+}
+
 bool loom_loop_domain_trip_count(loom_loop_bound_flags_t bound_flags,
                                  uint8_t bitwidth, uint64_t initial_value,
                                  uint64_t bound, uint64_t step,

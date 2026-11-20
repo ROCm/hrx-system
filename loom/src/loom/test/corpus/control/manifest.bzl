@@ -25,6 +25,8 @@ CONTROL_CORPUS = loom_corpus_manifest(
         "loop/carried_lane_liveness.loom",
         "loop/condition.loom",
         "loop/count.loom",
+        "loop/invariant_reads.loom",
+        "loop/memory_effects.loom",
         "loop/predicate_lifetimes.loom",
         "loop/queued_routes.loom",
         "loop/rotation/offsets.loom",

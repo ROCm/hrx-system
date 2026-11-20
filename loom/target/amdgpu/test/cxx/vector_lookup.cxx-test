@@ -39,18 +39,18 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direc
   %108 = s_mov_b32 2
   %109 = s_mov_b32 1
   %110 = v_mov_b32 252645135
+  %112 = s_load_dwordx4 %codebook, %107
   low.br ^_bb1(%107: reg<amdgpu.sgpr>, %106: reg<amdgpu.vgpr>)
 ^_bb1(%packet: reg<amdgpu.sgpr>, %101: reg<amdgpu.vgpr>):
-  %111 = s_cmp_lt_u32 %packet, %108
-  low.cond_br %111, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+  %113 = s_cmp_lt_u32 %packet, %108
+  low.cond_br %113, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
-  %112 = global_load_b32_saddr %101, %input
-  %indices = v_and_b32 %112, %110
-  %115 = s_load_dwordx4 %codebook, %107
-  %116 = slice %115[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %117 = slice %115[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %118 = slice %115[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %119 = slice %115[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %114 = global_load_b32_saddr %101, %input
+  %indices = v_and_b32 %114, %110
+  %116 = slice %112[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %117 = slice %112[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %118 = slice %112[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %119 = slice %112[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
   %120 = v_and_b32_lit %indices, 117901063
   %121 = v_perm_b32 %117, %116, %120
   %122 = v_perm_b32 %119, %118, %120

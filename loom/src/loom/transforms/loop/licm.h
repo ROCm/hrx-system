@@ -23,6 +23,9 @@ const loom_pass_info_t* loom_licm_pass_info(void);
 // pure work and ordinary reads with proven execution and memory legality.
 // Every captured SSA value must be available at the insertion point or defined
 // inside the candidate subtree that moves with it.
+// Invariant reads in possibly empty loops use a preheader guarded by the first
+// iteration's entry condition. The original recurrence and zero-trip results
+// are preserved; condition-loop headers must be effect-free to duplicate.
 //
 // Shared legality analysis is acquired at the first loop, before any mutation,
 // and retained across hoists. Loop-free functions require only traversal.

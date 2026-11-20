@@ -1,0 +1,145 @@
+// RUN: pass licm
+
+// The guard and original loop each own their dependent result type scheme.
+// The read is invariant; the carried view and its extent remain correlated.
+func.def @dependent_results(%input: view<1xi32>, %extent: index, %view: view<[%extent]xi32>, %end: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %initial = scalar.constant 0 : i32
+  %result_view, %result_extent, %result_value = scf.for %i = [%c0 to %end step %c1](%carried_view = %view : view<[%extent]xi32>, %carried_extent = %extent : index, %carry = %initial : i32) -> (view<[%result_extent]xi32>, index, i32) {
+    %loaded = view.load %input[0] : view<1xi32> -> i32
+    scf.yield %carried_view, %carried_extent, %loaded : view<[%carried_extent]xi32>, index, i32
+  }
+  test.use %result_view, %result_extent, %result_value : view<[%result_extent]xi32>, index, i32
+  func.return
+}
+
+// ----
+func.def @dependent_results(%input: view<1xi32>, %extent: index, %view: view<[%extent]xi32>, %end: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %initial = scalar.constant 0 : i32
+  %15 = index.cmp slt, %c0, %end : index
+  %result_view, %result_extent, %result_value = scf.if %15 -> (view<[%result_extent]xi32>, index, i32) {
+    %loaded = view.load %input[0] : view<1xi32> -> i32
+    %result_view, %result_extent, %result_value = scf.for %i = [%c0 to %end step %c1](%carried_view = %view : view<[%extent]xi32>, %carried_extent = %extent : index, %carry = %initial : i32) -> (view<[%result_extent]xi32>, index, i32) {
+      scf.yield %carried_view, %carried_extent, %loaded : view<[%carried_extent]xi32>, index, i32
+    }
+    scf.yield %result_view, %result_extent, %result_value : view<[%result_extent]xi32>, index, i32
+  } else {
+    scf.yield %view, %extent, %initial : view<[%extent]xi32>, index, i32
+  }
+  test.use %result_view, %result_extent, %result_value : view<[%result_extent]xi32>, index, i32
+  func.return
+}
+
+// ====
+
+// A dynamic extent is a real dependency even when it occurs only in a result
+// type. An invariant descriptor read may move; a view of the varying extent
+// cannot accompany it into the preheader.
+func.def @varying_type_capture(%input: view<1xi32>, %storage: buffer, %end: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %initial = scalar.constant 0 : i32
+  %initial_view = buffer.view %storage[%c0] : buffer -> view<[%end]xi32>
+  %result_extent, %result_view, %result_value = scf.for %i = [%c0 to %end step %c1](%extent = %end : index, %view = %initial_view : view<[%end]xi32>, %carry = %initial : i32) -> (index, view<[%result_extent]xi32>, i32) {
+    %loaded = view.load %input[0] : view<1xi32> -> i32
+    %varying = buffer.view %storage[%c0] : buffer -> view<[%i]xi32>
+    scf.yield %i, %varying, %loaded : index, view<[%i]xi32>, i32
+  }
+  test.use %result_extent, %result_view, %result_value : index, view<[%result_extent]xi32>, i32
+  func.return
+}
+
+// ----
+func.def @varying_type_capture(%input: view<1xi32>, %storage: buffer, %end: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %initial = scalar.constant 0 : i32
+  %initial_view = buffer.view %storage[%c0] : buffer -> view<[%end]xi32>
+  %16 = index.cmp slt, %c0, %end : index
+  %result_extent, %result_view, %result_value = scf.if %16 -> (index, view<[%result_extent]xi32>, i32) {
+    %loaded = view.load %input[0] : view<1xi32> -> i32
+    %result_extent, %result_view, %result_value = scf.for %i = [%c0 to %end step %c1](%extent = %end : index, %view = %initial_view : view<[%end]xi32>, %carry = %initial : i32) -> (index, view<[%result_extent]xi32>, i32) {
+      %varying = buffer.view %storage[%c0] : buffer -> view<[%i]xi32>
+      scf.yield %i, %varying, %loaded : index, view<[%i]xi32>, i32
+    }
+    scf.yield %result_extent, %result_view, %result_value : index, view<[%result_extent]xi32>, i32
+  } else {
+    scf.yield %end, %initial_view, %initial : index, view<[%end]xi32>, i32
+  }
+  test.use %result_extent, %result_view, %result_value : index, view<[%result_extent]xi32>, i32
+  func.return
+}
+
+// ====
+
+// Predicate attributes carry dependencies independently of ordinary operands.
+func.def @varying_attribute_capture(%input: view<1xi32>, %value: index, %end: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %initial = scalar.constant 0 : i32
+  %result, %result_value = scf.for %i = [%c0 to %end step %c1](%carry = %value : index, %carry_value = %initial : i32) -> (index, i32) {
+    %loaded = view.load %input[0] : view<1xi32> -> i32
+    %refined = index.assume %value [lt(%value, %i)] : index
+    scf.yield %refined, %loaded : index, i32
+  }
+  test.use %result, %result_value : index, i32
+  func.return
+}
+
+// ----
+func.def @varying_attribute_capture(%input: view<1xi32>, %value: index, %end: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %initial = scalar.constant 0 : i32
+  %13 = index.cmp slt, %c0, %end : index
+  %result, %result_value = scf.if %13 -> (index, i32) {
+    %loaded = view.load %input[0] : view<1xi32> -> i32
+    %result, %result_value = scf.for %i = [%c0 to %end step %c1](%carry = %value : index, %carry_value = %initial : i32) -> (index, i32) {
+      %refined = index.assume %value [lt(%value, %i)] : index
+      scf.yield %refined, %loaded : index, i32
+    }
+    scf.yield %result, %result_value : index, i32
+  } else {
+    scf.yield %value, %initial : index, i32
+  }
+  test.use %result, %result_value : index, i32
+  func.return
+}
+
+// ====
+
+// The condition's forwarded tuple owns the dynamic extent on the empty path.
+func.def @dependent_while_results(%input: view<1xi32>, %extent: index, %view: view<[%extent]xi32>, %condition: i1) {
+  %initial = scalar.constant 0 : i32
+  %false = scalar.constant false : i1
+  %result_view, %result_extent, %result_value = scf.while(%before_view = %view : view<[%before_extent]xi32>, %before_extent = %extent : index, %before_value = %initial : i32, %again = %condition : i1) -> (view<[%result_extent]xi32>, index, i32) {
+    scf.condition %again, %before_view, %before_extent, %before_value : i1, view<[%before_extent]xi32>, index, i32
+  } do(%body_view: view<[%body_extent]xi32>, %body_extent: index, %body_value: i32) {
+    %loaded = view.load %input[0] : view<1xi32> -> i32
+    scf.yield %body_view, %body_extent, %loaded, %false : view<[%body_extent]xi32>, index, i32, i1
+  }
+  test.use %result_view, %result_extent, %result_value : view<[%result_extent]xi32>, index, i32
+  func.return
+}
+
+// ----
+func.def @dependent_while_results(%input: view<1xi32>, %extent: index, %view: view<[%extent]xi32>, %condition: i1) {
+  %initial = scalar.constant 0 : i32
+  %false = scalar.constant false : i1
+  %result_view, %result_extent, %result_value = scf.if %condition -> (view<[%result_extent]xi32>, index, i32) {
+    %loaded = view.load %input[0] : view<1xi32> -> i32
+    %result_view, %result_extent, %result_value = scf.while(%before_view = %view : view<[%before_extent]xi32>, %before_extent = %extent : index, %before_value = %initial : i32, %again = %condition : i1) -> (view<[%result_extent]xi32>, index, i32) {
+      scf.condition %again, %before_view, %before_extent, %before_value : i1, view<[%before_extent]xi32>, index, i32
+    } do(%body_view: view<[%body_extent]xi32>, %body_extent: index, %body_value: i32) {
+      scf.yield %body_view, %body_extent, %loaded, %false : view<[%body_extent]xi32>, index, i32, i1
+    }
+    scf.yield %result_view, %result_extent, %result_value : view<[%result_extent]xi32>, index, i32
+  } else {
+    scf.yield %view, %extent, %initial : view<[%extent]xi32>, index, i32
+  }
+  test.use %result_view, %result_extent, %result_value : view<[%result_extent]xi32>, index, i32
+  func.return
+}

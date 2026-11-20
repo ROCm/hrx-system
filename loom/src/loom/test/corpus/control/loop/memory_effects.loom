@@ -1,0 +1,86 @@
+// A fixed address is not an invariant value when the loop writes that address.
+func.def @changing_descriptor(%count_buffer: buffer, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %descriptor = buffer.view %input[%base] : buffer -> view<1xi32>
+  %result = buffer.view %output[%base] : buffer -> view<1xi32>
+  %count_view = buffer.view %count_buffer[%base] : buffer -> view<1xi32>
+  %count_value = view.load %count_view[0] : view<1xi32> -> i32
+  %count = index.cast %count_value : i32 to index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %seed = scalar.constant 0 : i32
+  %increment = scalar.constant 1 : i32
+  %sum = scf.for %i = [%c0 to %count step %c1](%carry = %seed : i32) -> (i32) {
+    %loaded = view.load %descriptor[0] : view<1xi32> -> i32
+    %next_sum = scalar.addi %carry, %loaded : i32
+    %next_value = scalar.addi %loaded, %increment : i32
+    view.store %next_value, %descriptor[0] : i32, view<1xi32>
+    scf.yield %next_sum : i32
+  }
+  view.store %sum, %result[0] : i32, view<1xi32>
+  func.return
+}
+
+// The header decrements the count even on its final false observation.
+func.def @effectful_condition(%input: buffer, %increments: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %count = buffer.view %input[%base] : buffer -> view<1xi32>
+  %values = buffer.view %increments[%base] : buffer -> view<1xi32>
+  %result = buffer.view %output[%base] : buffer -> view<1xi32>
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %sum = scf.while(%carry = %c0 : i32) -> (i32) {
+    %before = view.load %count[0] : view<1xi32> -> i32
+    %after = scalar.subi %before, %c1 : i32
+    view.store %after, %count[0] : i32, view<1xi32>
+    %more = scalar.cmpi ugt, %before, %c0 : i32
+    scf.condition %more, %carry : i1, i32
+  } do(%carry: i32) {
+    %increment = view.load %values[0] : view<1xi32> -> i32
+    %next = scalar.addi %carry, %increment : i32
+    scf.yield %next : i32
+  }
+  view.store %sum, %result[0] : i32, view<1xi32>
+  func.return
+}
+
+check.scenario @changing_descriptor_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %count = check.generate.fill value(4) : tensor<1xi32>
+    %input = check.generate.fill value(3) : tensor<1xi32>
+    %output = check.generate.fill value(0) : tensor<1xi32>
+    %expected = check.generate.fill value(18) : tensor<1xi32>
+    %last = check.generate.fill value(7) : tensor<1xi32>
+    check.compare<@changing_descriptor>(%count, %input, %output) : (tensor<1xi32>, tensor<1xi32>, tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%expected) : tensor<1xi32>
+      check.expect.bitwise actual(%input) expected(%last) : tensor<1xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @condition_evaluation_count {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(0) : tensor<1xi32>
+    %increments = check.generate.fill value(7) : tensor<1xi32>
+    %output = check.generate.fill value(99) : tensor<1xi32>
+    %expected = check.generate.fill value(0) : tensor<1xi32>
+    %last = check.generate.fill value(-1) : tensor<1xi32>
+    check.compare<@effectful_condition>(%input, %increments, %output) : (tensor<1xi32>, tensor<1xi32>, tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%expected) : tensor<1xi32>
+      check.expect.bitwise actual(%input) expected(%last) : tensor<1xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(3) : tensor<1xi32>
+    %increments = check.generate.fill value(7) : tensor<1xi32>
+    %output = check.generate.fill value(99) : tensor<1xi32>
+    %expected = check.generate.fill value(21) : tensor<1xi32>
+    %last = check.generate.fill value(-1) : tensor<1xi32>
+    check.compare<@effectful_condition>(%input, %increments, %output) : (tensor<1xi32>, tensor<1xi32>, tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%expected) : tensor<1xi32>
+      check.expect.bitwise actual(%input) expected(%last) : tensor<1xi32>
+    }
+  }
+  check.return
+}

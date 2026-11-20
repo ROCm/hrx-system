@@ -65,6 +65,28 @@ TEST(LoopDomainTest, FloatingBoundsProveNeitherDomainState) {
   EXPECT_FALSE(loom_loop_domain_proven_nonempty(lower, floating, step));
 }
 
+TEST(LoopDomainTest, SingleIterationRangesAndLargeDistances) {
+  EXPECT_TRUE(loom_loop_domain_proven_at_most_once(
+      loom_value_facts_exact_i64(0), loom_value_facts_make(0, 1, 1),
+      loom_value_facts_make(1, 4, 1)));
+  EXPECT_TRUE(loom_loop_domain_proven_at_most_once(
+      loom_value_facts_make(-4, -2, 1), loom_value_facts_make(-2, 0, 1),
+      loom_value_facts_make(4, 8, 1)));
+  EXPECT_FALSE(loom_loop_domain_proven_at_most_once(
+      loom_value_facts_make(-4, -2, 1), loom_value_facts_make(-2, 1, 1),
+      loom_value_facts_make(4, 8, 1)));
+  EXPECT_TRUE(loom_loop_domain_proven_at_most_once(
+      loom_value_facts_exact_i64(INT64_MAX),
+      loom_value_facts_exact_i64(INT64_MIN), loom_value_facts_exact_i64(1)));
+  EXPECT_FALSE(loom_loop_domain_proven_at_most_once(
+      loom_value_facts_exact_i64(INT64_MIN),
+      loom_value_facts_exact_i64(INT64_MAX),
+      loom_value_facts_exact_i64(INT64_MAX)));
+  EXPECT_FALSE(loom_loop_domain_proven_at_most_once(
+      loom_value_facts_exact_i64(0), loom_value_facts_exact_i64(1),
+      loom_value_facts_unknown()));
+}
+
 constexpr loom_loop_bound_flags_t kUnsignedExclusive = LOOM_LOOP_BOUND_NONE;
 constexpr loom_loop_bound_flags_t kUnsignedInclusive =
     LOOM_LOOP_BOUND_INCLUSIVE;

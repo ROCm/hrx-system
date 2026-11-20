@@ -1,0 +1,80 @@
+// Repeated descriptor reads can move into a guarded preheader. The address
+// conversion, empty case, and wrapping counter retain their source semantics.
+func.def @descriptor_sum(%begin_buffer: buffer, %end_buffer: buffer, %step_buffer: buffer, %slot_buffer: buffer, %table: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin_view = buffer.view %begin_buffer[%origin] : buffer -> view<1xi32>
+  %end_view = buffer.view %end_buffer[%origin] : buffer -> view<1xi32>
+  %step_view = buffer.view %step_buffer[%origin] : buffer -> view<1xi32>
+  %slot_view = buffer.view %slot_buffer[%origin] : buffer -> view<1xi32>
+  %begin = view.load %begin_view[0] : view<1xi32> -> i32
+  %end = view.load %end_view[0] : view<1xi32> -> i32
+  %step = view.load %step_view[0] : view<1xi32> -> i32
+  %slot = view.load %slot_view[0] : view<1xi32> -> i32
+  %descriptors = buffer.view %table[%origin] : buffer -> view<4xi32>
+  %seed = scalar.constant 11 : i32
+  %last, %sum = scf.while(%before = %begin : i32, %total = %seed : i32) -> (i32, i32) {
+    %more = scalar.cmpi ult, %before, %end : i32
+    scf.condition %more, %before, %total : i1, i32, i32
+  } do(%i: i32, %carry: i32) {
+    %index = index.cast %slot : i32 to index
+    %bounded_index = index.assume %index [range(%index, 0, 1)] : index
+    %c2 = index.constant 2 : index
+    %c1 = index.constant 1 : index
+    %offset = index.mul %bounded_index, %c2 : index
+    %next_offset = index.add %offset, %c1 : index
+    %divisor = view.load %descriptors[%offset] : view<4xi32> -> i32
+    %bias = view.load %descriptors[%next_offset] : view<4xi32> -> i32
+    %remainder = scalar.remui %i, %divisor : i32
+    %biased = scalar.addi %remainder, %bias : i32
+    %next_sum = scalar.addi %carry, %biased : i32
+    %next = scalar.addi %i, %step : i32
+    scf.yield %next, %next_sum : i32, i32
+  }
+  %base = index.constant 0 : offset
+  %result = buffer.view %output[%base] : buffer -> view<1xi32>
+  view.store %sum, %result[0] : i32, view<1xi32>
+  func.return
+}
+
+check.scenario @descriptor_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %begin = check.generate.fill value(0) : tensor<1xi32>
+    %end = check.generate.fill value(19) : tensor<1xi32>
+    %step = check.generate.fill value(3) : tensor<1xi32>
+    %slot = check.generate.fill value(1) : tensor<1xi32>
+    %table = check.generate.fill value(7) : tensor<4xi32>
+    %output = check.generate.fill value(0) : tensor<1xi32>
+    // Residues of 0,3,6,9,12,15,18 modulo seven sum to 21, plus seven biases.
+    %expected = check.generate.fill value(81) : tensor<1xi32>
+    check.compare<@descriptor_sum>(%begin, %end, %step, %slot, %table, %output) : (tensor<1xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>, tensor<4xi32>, tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%expected) : tensor<1xi32>
+      check.expect.bitwise actual(%table) expected(%table) : tensor<4xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %begin = check.generate.fill value(19) : tensor<1xi32>
+    %end = check.generate.fill value(19) : tensor<1xi32>
+    %step = check.generate.fill value(3) : tensor<1xi32>
+    %slot = check.generate.fill value(1) : tensor<1xi32>
+    %table = check.generate.fill value(0) : tensor<4xi32>
+    %output = check.generate.fill value(0) : tensor<1xi32>
+    %expected = check.generate.fill value(11) : tensor<1xi32>
+    check.compare<@descriptor_sum>(%begin, %end, %step, %slot, %table, %output) : (tensor<1xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>, tensor<4xi32>, tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%expected) : tensor<1xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %begin = check.generate.fill value(2) : tensor<1xi32>
+    %end = check.generate.fill value(10) : tensor<1xi32>
+    %step = check.generate.fill value(-1) : tensor<1xi32>
+    %slot = check.generate.fill value(1) : tensor<1xi32>
+    %table = check.generate.fill value(7) : tensor<4xi32>
+    %output = check.generate.fill value(0) : tensor<1xi32>
+    // The unsigned counter visits 2,1,0 and then exits at UINT32_MAX.
+    %expected = check.generate.fill value(35) : tensor<1xi32>
+    check.compare<@descriptor_sum>(%begin, %end, %step, %slot, %table, %output) : (tensor<1xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>, tensor<4xi32>, tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%expected) : tensor<1xi32>
+    }
+  }
+  check.return
+}

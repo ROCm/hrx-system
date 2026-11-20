@@ -22,6 +22,8 @@ _NO_DEVICE_SUBJECTS = []
 
 _ADAPTER_ONLY_SCENARIOS = [
     "control/branch/structured.loom",
+    "control/loop/invariant_reads.loom",
+    "control/loop/memory_effects.loom",
     "control/loop/scalar_state.loom",
     "control/loop/vector_recurrence.loom",
     "control/schedule/address_domains.loom",

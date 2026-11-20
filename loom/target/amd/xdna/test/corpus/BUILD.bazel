@@ -22,6 +22,8 @@ loom_corpus_test(
     profile_sources = {
         XDNA_HARDWARE_PROFILE.name: [
             "control/branch/convergence.loom",
+            "control/loop/invariant_reads.loom",
+            "control/loop/memory_effects.loom",
             "function/rodata.loom",
             "memory/address/origins.loom",
             "memory/address/tiled_channel.loom",
