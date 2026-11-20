@@ -518,8 +518,9 @@ static iree_status_t loom_serve_text_submit_epoch(
 
 static void loom_serve_text_publish_epoch(loom_serve_text_service_t* service) {
   loom_serve_text_telemetry_epoch(&service->telemetry, &service->heartbeat,
-                                  &service->scheduling, &service->epoch,
-                                  service->sessions);
+                                  service->scheduling.schedule_mode,
+                                  service->scheduling.packing_mode,
+                                  &service->epoch, service->sessions);
   loom_serve_text_observe(service, "output");
   for (iree_host_size_t i = 0; i < service->epoch.count; ++i) {
     loom_serve_text_session_t* session =

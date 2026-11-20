@@ -32,15 +32,10 @@ const loom_runtime_telemetry_field_t* FindField(
 void ExpectEpochFields(const loom_service_text_epoch_record_t& expected,
                        iree_host_size_t count,
                        const loom_runtime_telemetry_field_t* fields) {
-  ASSERT_EQ(count, 16u);
-  const auto* slots = FindField(count, fields, "token_slots");
-  ASSERT_NE(slots, nullptr);
-  EXPECT_EQ(slots->kind, expected.token_slots
-                             ? LOOM_RUNTIME_TELEMETRY_FIELD_UINT64
-                             : LOOM_RUNTIME_TELEMETRY_FIELD_NULL);
-  if (expected.token_slots) {
-    EXPECT_EQ(slots->value.uint64_value, expected.token_slots);
-  }
+  const auto* scheduled = FindField(count, fields, "scheduled_tokens");
+  ASSERT_NE(scheduled, nullptr);
+  ASSERT_EQ(scheduled->kind, LOOM_RUNTIME_TELEMETRY_FIELD_UINT64);
+  EXPECT_EQ(scheduled->value.uint64_value, expected.scheduled_tokens);
   const auto* scheduler = FindField(count, fields, "scheduler");
   ASSERT_NE(scheduler, nullptr);
   ASSERT_EQ(scheduler->kind, LOOM_RUNTIME_TELEMETRY_FIELD_STRING);
@@ -99,17 +94,11 @@ TEST_F(SourceTextServiceTest, ActualDraftCountsReachSpansEpochAndHeartbeat) {
   iree_host_size_t positions[] = {10, 20, 30};
   uint32_t limits[] = {5, 0, 9};
   bool prefill[] = {false, true, false};
-  const loom_serve_text_epoch_options_t options = {
-      .draft_depth = 7,
-      .schedule_mode = LOOM_SERVICE_TEXT_SCHEDULE_PACKED,
-      .shapes = shapes_,
-      .shape_count = IREE_ARRAYSIZE(shapes_),
-  };
   const loom_serve_text_epoch_t cohort = {
       .count = IREE_ARRAYSIZE(spans),
-      .shape_index = 1,
       .start = {.serial = 7, .time = iree_time_now()},
       .device_epochs = 2,
+      .continuation_token_count = 8,
       .spans = spans,
       .results = results,
       .positions = positions,
@@ -117,8 +106,9 @@ TEST_F(SourceTextServiceTest, ActualDraftCountsReachSpansEpochAndHeartbeat) {
       .prefill = prefill,
   };
   uint64_t cursor = loom_runtime_telemetry_stream_head(telemetry.stream);
-  loom_serve_text_telemetry_epoch(&telemetry, &heartbeat, &options, &cohort,
-                                  session_table);
+  loom_serve_text_telemetry_epoch(
+      &telemetry, &heartbeat, LOOM_SERVICE_TEXT_SCHEDULE_PACKED,
+      LOOM_SERVICE_TEXT_PACKING_MIXED, &cohort, session_table);
   for (size_t i = 0; i < IREE_ARRAYSIZE(spans); ++i) {
     loom_runtime_telemetry_record_t record;
     ASSERT_EQ(
@@ -137,6 +127,7 @@ TEST_F(SourceTextServiceTest, ActualDraftCountsReachSpansEpochAndHeartbeat) {
   ASSERT_EQ(record.event, &LOOM_SERVICE_TEXT_EPOCH);
   loom_service_text_epoch_record_t epoch;
   std::memcpy(&epoch, record.data.words, sizeof(epoch));
+  EXPECT_EQ(epoch.scheduled_tokens, 23u);
   EXPECT_EQ(epoch.proposed_tokens, 11u);
   EXPECT_EQ(epoch.verifications, 3u);
   EXPECT_EQ(epoch.accepted_draft_inputs, 2u);

@@ -133,9 +133,6 @@ static iree_status_t loom_service_text_epoch_fields(
                                           value.accepted_draft_inputs),
   };
   const loom_runtime_telemetry_field_t fields[] = {
-      value.token_slots ? loom_runtime_telemetry_field_uint64("token_slots",
-                                                              value.token_slots)
-                        : loom_runtime_telemetry_field_null("token_slots"),
       loom_runtime_telemetry_field_uint64("epoch", value.epoch),
       loom_runtime_telemetry_field_string("scheduler",
                                           iree_make_cstring_view(schedule)),
@@ -146,10 +143,8 @@ static iree_status_t loom_service_text_epoch_fields(
                                      ? "separate"
                                      : "mixed")),
       loom_runtime_telemetry_field_uint64("spans", value.spans),
-      loom_runtime_telemetry_field_uint64("shape", value.shape),
-      loom_runtime_telemetry_field_uint64("token_capacity",
-                                          value.token_capacity),
-      loom_runtime_telemetry_field_uint64("span_capacity", value.span_capacity),
+      loom_runtime_telemetry_field_uint64("scheduled_tokens",
+                                          value.scheduled_tokens),
       loom_runtime_telemetry_field_uint64("prefill_tokens",
                                           value.prefill_tokens),
       loom_runtime_telemetry_field_uint64("decode_tokens", value.decode_tokens),

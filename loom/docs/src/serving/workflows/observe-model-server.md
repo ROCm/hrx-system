@@ -405,14 +405,13 @@ does not poll hardware sensors.
 | Is output backpressure retaining rows? | `text_activity.backpressured_rows`, separate from prefill/decode rows. |
 | Are smaller requests bypassing a blocked head? | `admit.queue_rank`, `overtakes` and `overtake_budget`. |
 | Is reuse reducing prompt work? | Response `prompt_tokens_details.cached_tokens` and text-work counters. |
-| Is packing completing more useful work? | Client throughput/latency together with epoch token slots, committed work and draft acceptance. |
+| Is packing completing more useful work? | Client throughput and latency alongside scheduled tokens, consumed tokens, and draft acceptance. |
 
-An `epoch` event covers a completed host-visible cohort including device-fed
-continuation. `token_capacity` describes its first bucket; `token_slots` sums
-the capacities actually issued across the cohort. Drafts rejected by the
-verifier consume slots without producing committed tokens. Dividing continuation
-work by only the first bucket misstates fill. A null capacity observation means
-the selected execution path does not provide that measure.
+An `epoch` event covers a completed cohort, including its device-fed
+continuation. `scheduled_tokens` counts the input positions submitted for
+its spans across both epochs. A verifier can accept fewer positions than were
+scheduled. `prefill_tokens` and `decode_tokens` count the positions actually
+consumed, and `draft` reports the proposals presented and accepted.
 
 ## Measure the user-visible result
 

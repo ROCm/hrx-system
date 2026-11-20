@@ -15,7 +15,7 @@
 
 namespace {
 
-TEST(TextTelemetry, EpochPreservesModeAvailabilityAndActualDraftWork) {
+TEST(TextTelemetry, EpochPreservesSchedulingModeAndActualDraftWork) {
   for (const auto mode :
        {LOOM_SERVICE_TEXT_SCHEDULE_PACKED, LOOM_SERVICE_TEXT_SCHEDULE_ISOLATED,
         LOOM_SERVICE_TEXT_SCHEDULE_MATCHED}) {
@@ -29,9 +29,7 @@ TEST(TextTelemetry, EpochPreservesModeAvailabilityAndActualDraftWork) {
           .spans = 2,
           .schedule_mode = static_cast<uint8_t>(mode),
           .packing_mode = static_cast<uint8_t>(packing),
-          .token_capacity = 8,
-          .token_slots = mode == LOOM_SERVICE_TEXT_SCHEDULE_PACKED ? 16u : 0u,
-          .span_capacity = 2,
+          .scheduled_tokens = 11,
           .prefill_tokens = 6,
           .decode_tokens = 2,
           .output_tokens = 4,
@@ -60,17 +58,11 @@ TEST(TextTelemetry, EpochPreservesModeAvailabilityAndActualDraftWork) {
           {&expected, [](void* self, iree_host_size_t count,
                          const loom_runtime_telemetry_field_t* fields) {
              const auto& expected = *static_cast<Expected*>(self);
-             EXPECT_EQ(count, 16u);
              for (iree_host_size_t i = 0; i < count; ++i) {
                const auto& field = fields[i];
-               if (std::strcmp(field.name, "token_slots") == 0) {
-                 EXPECT_EQ(field.kind,
-                           expected.mode == LOOM_SERVICE_TEXT_SCHEDULE_PACKED
-                               ? LOOM_RUNTIME_TELEMETRY_FIELD_UINT64
-                               : LOOM_RUNTIME_TELEMETRY_FIELD_NULL);
-                 if (field.kind == LOOM_RUNTIME_TELEMETRY_FIELD_UINT64) {
-                   EXPECT_EQ(field.value.uint64_value, 16u);
-                 }
+               if (std::strcmp(field.name, "scheduled_tokens") == 0) {
+                 EXPECT_EQ(field.kind, LOOM_RUNTIME_TELEMETRY_FIELD_UINT64);
+                 EXPECT_EQ(field.value.uint64_value, 11u);
                } else if (std::strcmp(field.name, "scheduler") == 0) {
                  EXPECT_EQ(field.kind, LOOM_RUNTIME_TELEMETRY_FIELD_STRING);
                  EXPECT_TRUE(iree_string_view_equal(

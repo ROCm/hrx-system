@@ -66,6 +66,7 @@ static iree_host_size_t loom_serve_text_epoch_prepare_continuation(
     const loom_serve_packing_plan_t* plan, loom_serve_text_epoch_t* epoch,
     loom_serve_text_continuation_t* out_continuation) {
   *out_continuation = (loom_serve_text_continuation_t){0};
+  epoch->continuation_token_count = 0;
   if (options->continuation_epochs != 2) {
     return plan->next_row;
   }
@@ -119,6 +120,7 @@ static iree_host_size_t loom_serve_text_epoch_prepare_continuation(
       count, ready, options->shape_count, options->shapes, options->chunk_size,
       cursor, scheduled, scratch);
   const iree_host_size_t next_count = next.span_count;
+  epoch->continuation_token_count = next.token_count;
   for (iree_host_size_t i = 0; i < next_count; ++i) {
     const iree_host_size_t first = scheduled[i].row_index;
     const iree_host_size_t row = spans[first].row_index;
@@ -176,7 +178,6 @@ iree_host_size_t loom_serve_text_epoch_prepare(
   epoch->cursor = 0;
   epoch->start.serial = 0;
   epoch->start.time = 0;
-  epoch->token_slots = 0;
   memset(epoch->results, 0, count * sizeof(*epoch->results));
   memset(epoch->output_limits, 0, count * sizeof(*epoch->output_limits));
   loom_serve_text_span_t* spans = epoch->spans;
@@ -227,13 +228,6 @@ iree_host_size_t loom_serve_text_epoch_prepare(
   epoch->input_count = plan->token_count;
   epoch->proposal_count = proposal_count;
   epoch->device_epochs = continuation->span_count ? 2 : 1;
-  if (options->schedule_mode == LOOM_SERVICE_TEXT_SCHEDULE_PACKED) {
-    epoch->token_slots = options->shapes[plan->shape_index].token_capacity;
-    if (continuation->span_count) {
-      epoch->token_slots +=
-          options->shapes[continuation->shape_index].token_capacity;
-    }
-  }
   epoch->continued_prefill_count = continued_prefill_count;
   return next_row;
 }

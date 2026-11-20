@@ -377,7 +377,9 @@ def run_round(client, iteration, observations, *, conversation_count=4, fork_cou
         assert all(span["request"] == completed["request"] for span in spans)
         assert {span["epoch"] for span in spans} == {epoch["epoch"] for epoch in epochs}
         assert all(epoch["device_epochs"] == 1 for epoch in epochs)
-        assert all(epoch["token_slots"] == epoch["token_capacity"] for epoch in epochs)
+        assert {epoch["epoch"]: epoch["scheduled_tokens"] for epoch in epochs} == {
+            span["epoch"]: span["tokens"] for span in spans
+        }
         output = [event for event in history if event["event"] == "first_output"]
         assert len(output) == 1, output
         begin = next(event for event in history if event["event"] == "request_begin")

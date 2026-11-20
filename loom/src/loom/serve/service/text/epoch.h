@@ -84,9 +84,8 @@ typedef struct loom_serve_text_epoch_t {
   iree_host_size_t proposal_count;
   // Number of pre-issued model traversals for packed execution.
   iree_host_size_t device_epochs;
-  // Sum of issued packed bucket capacities, including the continuation. Zero
-  // for isolated/matched stages whose individual capacities are not retained.
-  iree_host_size_t token_slots;
+  // Input tokens scheduled for the device-fed continuation before acceptance.
+  iree_host_size_t continuation_token_count;
   // Known inputs scheduled in the second device epoch.
   iree_host_size_t continued_prefill_count;
   // Total first-epoch input slots, including speculative proposals.

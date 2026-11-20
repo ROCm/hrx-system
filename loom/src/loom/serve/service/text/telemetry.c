@@ -163,11 +163,11 @@ void loom_serve_text_telemetry_session_end(
 void loom_serve_text_telemetry_epoch(
     loom_serve_text_telemetry_t* telemetry,
     loom_serve_text_heartbeat_t* heartbeat,
-    const loom_serve_text_epoch_options_t* options,
+    loom_service_text_schedule_mode_t schedule_mode,
+    loom_service_text_packing_mode_t packing_mode,
     const loom_serve_text_epoch_t* cohort,
     loom_serve_text_session_t* const* sessions) {
   const iree_host_size_t count = cohort->count;
-  const iree_host_size_t shape_index = cohort->shape_index;
   const loom_serve_text_span_t* spans = cohort->spans;
   const loom_serve_text_result_t* results = cohort->results;
   const iree_host_size_t* positions = cohort->positions;
@@ -177,16 +177,17 @@ void loom_serve_text_telemetry_epoch(
   const iree_host_size_t device_epochs = cohort->device_epochs;
   const iree_host_size_t continued_prefill_count =
       cohort->continued_prefill_count;
-  const bool packed =
-      options->schedule_mode == LOOM_SERVICE_TEXT_SCHEDULE_PACKED;
+  const bool packed = schedule_mode == LOOM_SERVICE_TEXT_SCHEDULE_PACKED;
   iree_host_size_t prefill_count = 0, decode_count = 0, output_count = 0;
   iree_host_size_t verification_count = 0, accepted_drafts = 0;
   uint64_t proposed_tokens = 0;
+  uint64_t scheduled_tokens = cohort->continuation_token_count;
   loom_service_text_statistics_t* state = &heartbeat->snapshot;
   const iree_time_t completed = iree_time_now();
   for (iree_host_size_t i = 0; i < count; ++i) {
     loom_serve_text_session_t* session = sessions[spans[i].row_index];
     const bool prefill = cohort->prefill[i];
+    scheduled_tokens += spans[i].token_count;
     const bool select =
         iree_any_bit_set(spans[i].flags, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT);
     prefill_count += prefill ? results[i].known_count : 0;
@@ -240,12 +241,9 @@ void loom_serve_text_telemetry_epoch(
   const loom_service_text_epoch_record_t value = {
       .epoch = epoch,
       .spans = count,
-      .shape = (uint32_t)shape_index,
-      .schedule_mode = options->schedule_mode,
-      .packing_mode = options->packing_mode,
-      .token_capacity = options->shapes[shape_index].token_capacity,
-      .token_slots = cohort->token_slots,
-      .span_capacity = options->shapes[shape_index].span_capacity,
+      .schedule_mode = schedule_mode,
+      .packing_mode = packing_mode,
+      .scheduled_tokens = scheduled_tokens,
       .prefill_tokens = prefill_count,
       .decode_tokens = decode_count,
       .output_tokens = output_count,

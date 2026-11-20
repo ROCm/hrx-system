@@ -67,7 +67,7 @@ TEST(TextEpochTest, KnownInputsAndDecodePreserveRowIdentityAndPhase) {
   EXPECT_EQ(epoch.count, 3);
   EXPECT_EQ(epoch.input_count, 8);
   EXPECT_EQ(epoch.device_epochs, 1);
-  EXPECT_EQ(epoch.token_slots, 16);
+  EXPECT_EQ(epoch.continuation_token_count, 0);
   EXPECT_EQ(epoch.proposal_count, 0);
   EXPECT_EQ(continuation.span_count, 0);
   EXPECT_EQ(epoch.spans[0].row_index, 7);
@@ -133,7 +133,7 @@ TEST(TextEpochTest, ContinuationMixesPromptTailsAndBoundedVerifiers) {
   loom_serve_text_epoch_prepare(&options, rows, 13, &plan, scheduled, &epoch,
                                 &next);
   EXPECT_EQ(epoch.device_epochs, 2);
-  EXPECT_EQ(epoch.token_slots, 32);
+  EXPECT_EQ(epoch.continuation_token_count, 10);
   EXPECT_EQ(epoch.input_count, 8);
   EXPECT_EQ(epoch.proposal_count, 1);
   EXPECT_EQ(epoch.continued_prefill_count, 2);
@@ -198,13 +198,13 @@ TEST(TextEpochTest, NoContinuationReducesCreditToOneVerifier) {
   loom_serve_text_epoch_prepare(&options, rows, 8, &plan, scheduled, &epoch,
                                 &continuation);
   EXPECT_EQ(epoch.device_epochs, 1);
-  EXPECT_EQ(epoch.token_slots, 16);
+  EXPECT_EQ(epoch.continuation_token_count, 0);
   EXPECT_EQ(epoch.output_limits[0], 4);
   EXPECT_EQ(epoch.output_limits[1], 0);
   EXPECT_EQ(continuation.span_count, 0);
 }
 
-TEST(TextEpochTest, ContinuationCapacityTracksItsIndependentlySelectedBucket) {
+TEST(TextEpochTest, ContinuationCountsThePromptRemainderOrVerifierWidth) {
   const loom_serve_packing_shape_t shapes[] = {{4, 1}, {16, 1}};
   const loom_serve_text_epoch_options_t options = {
       .context_capacity = 64,
@@ -232,11 +232,11 @@ TEST(TextEpochTest, ContinuationCapacityTracksItsIndependentlySelectedBucket) {
                                   &next);
     EXPECT_EQ(epoch.device_epochs, 2);
     EXPECT_EQ(next.shape_index, 1 - first);
-    EXPECT_EQ(epoch.token_slots, 20);
+    EXPECT_EQ(epoch.continuation_token_count, first == 0 ? 12u : 4u);
   }
 }
 
-TEST(TextEpochTest, IsolatedStagesDoNotClaimPackedCapacity) {
+TEST(TextEpochTest, IsolatedStagesScheduleOnlyTheFirstInput) {
   const loom_serve_packing_shape_t shape = {16, 4};
   for (auto mode : {LOOM_SERVICE_TEXT_SCHEDULE_ISOLATED,
                     LOOM_SERVICE_TEXT_SCHEDULE_MATCHED}) {
@@ -257,7 +257,8 @@ TEST(TextEpochTest, IsolatedStagesDoNotClaimPackedCapacity) {
     loom_serve_text_epoch_prepare(&options, rows, 1, &plan, scheduled, &epoch,
                                   &next);
     EXPECT_EQ(epoch.device_epochs, 1);
-    EXPECT_EQ(epoch.token_slots, 0);
+    EXPECT_EQ(epoch.input_count, 1);
+    EXPECT_EQ(epoch.continuation_token_count, 0);
   }
 }
 
@@ -325,8 +326,7 @@ TEST(TextEpochTest, CohortCapacityIsIndependentOfResidentIdentity) {
         }
         EXPECT_LE(continued_tokens, shape.token_capacity);
         EXPECT_EQ(epoch.device_epochs, next.span_count ? 2 : 1);
-        EXPECT_EQ(epoch.token_slots,
-                  shape.token_capacity * epoch.device_epochs);
+        EXPECT_EQ(epoch.continuation_token_count, continued_tokens);
       }
     }
   }
