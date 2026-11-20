@@ -61,6 +61,8 @@ class DescriptorEmitForm(Enum):
     AUTO = "auto"
     OP = "op"
     CONST = "const"
+    # The sequence restores the initial value of this carried temporary.
+    RESTORED_CONST = "restored_const"
     COND_BR = "cond_br"
     FIRST_LANE = "first_lane"
     PER_LANE = "per_lane"
@@ -420,6 +422,35 @@ class EmitDescriptorOp:
         if self.accumulator is not None and not self.accumulator:
             raise ValueError("descriptor accumulator field must be non-empty")
 
+    def _validate_restored_const(
+        self, source_op: Op, sequence_carried: Sequence[str]
+    ) -> None:
+        if (
+            len(self.results) != 1
+            or self.operands
+            or self.source_memory is not None
+            or self.descriptor.effects
+            or (self.immediates and not isinstance(self.immediates, Mapping))
+            or (
+                isinstance(self.immediates, Mapping)
+                and any(
+                    not isinstance(value, int) for value in self.immediates.values()
+                )
+            )
+        ):
+            raise ValueError(
+                f"{source_op.name}: restored constants require a pure "
+                "single-result constant with literal immediates"
+            )
+        (seed,) = self.results.values()
+        if (
+            seed.kind is not SourceValueKind.TEMPORARY
+            or seed.field not in sequence_carried
+        ):
+            raise ValueError(
+                f"{source_op.name}: restored constants require a carried temporary"
+            )
+
     def validate(
         self,
         source_op: Op,
@@ -431,7 +462,7 @@ class EmitDescriptorOp:
     ) -> tuple[str, ...]:
         _require_descriptor(descriptor_set, self.descriptor)
         if (
-            self.form == DescriptorEmitForm.CONST
+            self.form in (DescriptorEmitForm.CONST, DescriptorEmitForm.RESTORED_CONST)
             and self.descriptor.op_kind is not DescriptorOpKind.CONST
         ):
             raise ValueError(
@@ -518,6 +549,8 @@ class EmitDescriptorOp:
                 defined_temporaries=defined_temporaries,
             )
         produced_temporaries = []
+        if self.form is DescriptorEmitForm.RESTORED_CONST:
+            self._validate_restored_const(source_op, sequence_carried)
         for descriptor_field, value_ref in result_bindings.items():
             operand = _require_descriptor_operand(
                 self.descriptor, descriptor_field, "descriptor result binding"

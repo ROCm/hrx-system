@@ -66,8 +66,9 @@ typedef struct loom_low_lower_realization_loop_t {
 
 // Pure target arithmetic only: no memory effects, control changes or source
 // value rebinding. Initializers consume only their declared dependencies.
-// Updates consume the current carried value. Builders own emitted IR; recipe
-// data and its inputs retain function-arena lifetime.
+// Updates compute from the current carried value or forward the result of a
+// selected operation that dominates the backedge. Builders own emitted IR;
+// recipe data and its inputs retain function-arena lifetime.
 typedef iree_status_t (*loom_low_lower_realization_emit_fn_t)(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const void* data, loom_value_id_t carried_value,

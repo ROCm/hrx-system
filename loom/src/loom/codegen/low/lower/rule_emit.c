@@ -13,6 +13,7 @@
 #include "loom/codegen/low/builder.h"
 #include "loom/codegen/low/lower/context.h"
 #include "loom/codegen/low/lower/control_plan.h"
+#include "loom/codegen/low/lower/realization.h"
 #include "loom/codegen/low/lower/rule_descriptor.h"
 #include "loom/codegen/low/lower/rule_source_memory.h"
 #include "loom/codegen/low/lower/rule_source_memory_plan.h"
@@ -1175,6 +1176,7 @@ iree_status_t loom_low_lower_rule_set_emit_rule(
                  (uint8_t)(loom_low_lower_rule_source_node_count(rule) + 1));
 
   loom_low_lower_rule_emit_state_t state = {0};
+  loom_low_lower_rule_feedback_t* feedbacks = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_emit_state_initialize(
       context, source_op, source_nodes, source_node_count, rule, &state));
   for (uint16_t i = 0; i < rule->emit_count; ++i) {
@@ -1197,7 +1199,19 @@ iree_status_t loom_low_lower_rule_set_emit_rule(
             source_memory));
         break;
       }
+      case LOOM_LOW_LOWER_EMIT_DESCRIPTOR_RESTORED_CONST:
       case LOOM_LOW_LOWER_EMIT_DESCRIPTOR_CONST: {
+        if (emit->kind == LOOM_LOW_LOWER_EMIT_DESCRIPTOR_RESTORED_CONST) {
+          loom_low_lower_rule_feedback_t* feedback =
+              loom_low_lower_rule_feedback(resolved_emit);
+          if (feedback->realization != NULL) {
+            state.temporaries[feedback->temporary_index] =
+                loom_low_lower_realization_value(feedback->realization);
+            feedback->next = feedbacks;
+            feedbacks = feedback;
+            break;
+          }
+        }
         IREE_RETURN_IF_ERROR(loom_low_lower_rule_emit_descriptor_const(
             context, rule_set, source_op, &state, resolved_emit,
             source_memory != NULL ? &source_memory->access : NULL));
@@ -1257,6 +1271,10 @@ iree_status_t loom_low_lower_rule_set_emit_rule(
     }
   }
   if (rule->emit_count != 0) {
+    for (loom_low_lower_rule_feedback_t* feedback = feedbacks; feedback;
+         feedback = feedback->next) {
+      feedback->outgoing_value = state.temporaries[feedback->temporary_index];
+    }
     return iree_ok_status();
   }
 

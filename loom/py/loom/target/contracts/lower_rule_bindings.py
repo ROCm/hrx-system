@@ -119,6 +119,8 @@ def _lower_emit_kind(
         return LowerEmitKind.DESCRIPTOR_OP
     if emit.form == DescriptorEmitForm.CONST:
         return LowerEmitKind.DESCRIPTOR_CONST
+    if emit.form == DescriptorEmitForm.RESTORED_CONST:
+        return LowerEmitKind.DESCRIPTOR_RESTORED_CONST
     if emit.form == DescriptorEmitForm.COND_BR:
         return LowerEmitKind.DESCRIPTOR_COND_BR
     if emit.form == DescriptorEmitForm.FIRST_LANE:

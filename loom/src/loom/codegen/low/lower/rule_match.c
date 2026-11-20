@@ -15,6 +15,7 @@
 #include "loom/analysis/symbolic_expr_proof.h"
 #include "loom/codegen/low/lower/bindings.h"
 #include "loom/codegen/low/lower/context.h"
+#include "loom/codegen/low/lower/realization.h"
 #include "loom/codegen/low/lower/rule_descriptor.h"
 #include "loom/codegen/low/lower/rule_source_memory.h"
 #include "loom/codegen/low/lower/rule_value.h"
@@ -1441,6 +1442,22 @@ static iree_status_t loom_low_lower_rule_guard_matches(
           loom_low_lower_rule_packed_integer_lanes_from_payload_matches(
               match_context, rule_set, source_op, guard);
       return iree_ok_status();
+    case LOOM_LOW_LOWER_GUARD_VALUE_LOOP_CARRIED: {
+      const loom_low_lower_realization_loop_t* loop =
+          match_context->lowering_context
+              ? loom_low_lower_realization_loop(match_context->lowering_context,
+                                                source_op)
+              : NULL;
+      const loom_value_id_t id = loom_low_lower_rule_source_value(
+          match_context->module, rule_set, source_op,
+          guard->selector.value.value_ref_index);
+      const loom_value_t* value = loom_module_value(match_context->module, id);
+      *out_matches = loop && loop->trip_count > 1 &&
+                     source_op->parent_block == loop->backedge->parent_block &&
+                     loom_value_is_block_arg(value) &&
+                     loom_value_def_block(value) == loop->header;
+      return iree_ok_status();
+    }
     case LOOM_LOW_LOWER_GUARD_VALUE_NO_USES: {
       const loom_value_id_t value_id = loom_low_lower_rule_source_value(
           match_context->module, rule_set, source_op,
@@ -2180,6 +2197,7 @@ void loom_low_lower_rule_match_context_initialize_from_lowering(
               .user_data = context,
           },
       .fact_table = loom_low_lower_context_fact_table(context),
+      .lowering_context = context,
       .view_regions = view_regions,
       .source_memory_state = source_memory_state,
       .symbolic_expr_context =

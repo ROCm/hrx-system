@@ -41,6 +41,7 @@ from loom.target.arch.amd.xdna.aie2p import core_descriptor_specs as descriptor_
 from loom.target.arch.amd.xdna.aie2p.core_descriptor_constraints import (
     descriptor_constraints,
     descriptor_register_outputs,
+    load_fifo_tuple_inputs,
 )
 from loom.target.arch.amd.xdna.aie2p.core_encoding_data import CORE_ENCODING_TABLE
 from loom.target.arch.amd.xdna.aie2p.core_machine_data import CORE_MACHINE_TABLE
@@ -1497,18 +1498,22 @@ def _descriptor(spec: descriptor_specs._DescriptorSpec) -> Descriptor:
         operand = next(
             (operand for operand in form.inputs if operand.name == name), None
         )
+        # The pointer encoding also selects the physical FIFO and position.
+        # An overwritten component is constrained through its produced value.
+        tuple_member = name in load_fifo_tuple_inputs(form) and "ptr" in encoded_fields
         if (
             operand is None
             or operand.kind is MachineOperandKind.IMMEDIATE
             or name in encoded_fields
             or name in spec.implicit_inputs
-            or not any(tie.use == name for tie in form.ties)
+            or not (tuple_member or any(tie.use == name for tie in form.ties))
         ):
             raise ValueError(
                 f"{form.name}: overwritten input {name!r} must be an unencoded "
                 "explicit tied register input"
             )
-        _fixed_operand_storage(spec, operand)
+        if not tuple_member:
+            _fixed_operand_storage(spec, operand)
     if len(set(spec.symbolic_immediates)) != len(spec.symbolic_immediates):
         raise ValueError(f"{form.name}: symbolic immediate names must be unique")
     machine_immediate_names = {

@@ -1275,6 +1275,17 @@ class _LowerRuleSetCompiler:
             self._append_value_fact_guard(source_op, guard)
             return
 
+        if guard.kind == GuardKind.VALUE_LOOP_CARRIED:
+            self._guards.append(
+                LowerGuard(
+                    kind=guard.kind,
+                    value_ref_index=self._append_value_ref(
+                        source_op, _value_ref_for_source_field(source_op, guard.field)
+                    ),
+                )
+            )
+            return
+
         if guard.kind == GuardKind.VALUE_NO_USES:
             self._guards.append(
                 LowerGuard(

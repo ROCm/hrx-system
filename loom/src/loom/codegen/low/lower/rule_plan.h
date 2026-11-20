@@ -22,6 +22,7 @@ extern "C" {
 #endif
 
 typedef struct loom_low_lower_selected_plan_t loom_low_lower_selected_plan_t;
+typedef struct loom_low_lower_realization_t loom_low_lower_realization_t;
 typedef struct loom_low_lower_rule_source_memory_plan_builder_t
     loom_low_lower_rule_source_memory_plan_builder_t;
 
@@ -69,6 +70,27 @@ typedef struct loom_low_lower_resolved_emit_t {
 } loom_low_lower_resolved_emit_t;
 static_assert(sizeof(loom_low_lower_resolved_emit_t) == 2 * sizeof(void*) + 8,
               "resolved emit rows must retain compact operand masks");
+
+// Sparse state belonging to a RESTORED_CONST initializer. The source rule
+// guarantees that the last definition of its pinned temporary equals the seed.
+typedef struct loom_low_lower_rule_feedback_t {
+  // Supplemental loop value, or NULL when this site uses ordinary constants.
+  const loom_low_lower_realization_t* realization;
+  // Next feedback produced by the same execution of the rule.
+  struct loom_low_lower_rule_feedback_t* next;
+  // Low result produced by the last update in the sequence.
+  loom_value_id_t outgoing_value;
+  // Pinned rule-local temporary holding that result.
+  uint16_t temporary_index;
+} loom_low_lower_rule_feedback_t;
+
+// The feedback prefix precedes this initializer's aligned attribute payload.
+static inline loom_low_lower_rule_feedback_t* loom_low_lower_rule_feedback(
+    const loom_low_lower_resolved_emit_t* resolved) {
+  return (loom_low_lower_rule_feedback_t*)((uint8_t*)resolved +
+                                           resolved->data_offset) -
+         1;
+}
 
 // Aligns the following attributes even on hosts with smaller pointers.
 static inline uint32_t loom_low_lower_rule_materializer_data_size(

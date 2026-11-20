@@ -1192,11 +1192,7 @@ iree_status_t loom_low_lower_rule_source_memory_plan_byte_offset(
       selected_source_memory->record;
   const iree_host_size_t identity = memory_record->dynamic_byte_offset_identity;
   const loom_op_t* emission_op =
-      selected_plan->selection.rule.emission_source_node_index
-          ? loom_low_lower_selected_plan_source_nodes(
-                selected_plan)[selected_plan->selection.rule
-                                   .emission_source_node_index]
-          : selected_plan->source_op;
+      loom_low_lower_selected_plan_emission_op(selected_plan);
   const loom_low_lower_source_memory_recurrence_set_t* recurrences =
       memory_record->recurrences;
   if (recurrences != NULL) {

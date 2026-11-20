@@ -1084,19 +1084,6 @@ static iree_status_t loom_low_lower_emit_descriptor_matrix_plan(
   }
 }
 
-static const loom_op_t* loom_low_lower_selected_plan_emission_op(
-    const loom_low_lower_selected_plan_t* selected_plan) {
-  if (selected_plan->selection.rule.emission_source_node_index == 0) {
-    return selected_plan->source_op;
-  }
-  const loom_op_t* const* source_nodes =
-      loom_low_lower_selected_plan_source_nodes(selected_plan);
-  IREE_ASSERT(source_nodes != NULL);
-  IREE_ASSERT_LT(selected_plan->selection.rule.emission_source_node_index,
-                 selected_plan->selection.rule.source_node_count);
-  return source_nodes[selected_plan->selection.rule.emission_source_node_index];
-}
-
 static iree_status_t loom_low_lower_emit_selected_plan(
     loom_low_lower_context_t* context, const loom_op_t* emission_op) {
   IREE_ASSERT_LT(context->lowering->source_plan.selected_plan_emit_index,
