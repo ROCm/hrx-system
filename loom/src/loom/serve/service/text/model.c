@@ -86,8 +86,8 @@ struct loom_serve_text_load_t {
     bool stages_compiling;
     // Control bytecode is unavailable until its independent task retires.
     bool control_compiling;
-    // Immutable command layouts published by the accepted stage set.
-    iree_host_size_t layout_count;
+    // Command stages whose early layouts are still needed for weight binding.
+    iree_host_size_t pending_layouts;
     // Owned callback outcome, consumed by advance.
     iree_status_t status;
     // Nonblocking serialized-owner notification.
@@ -171,12 +171,9 @@ static iree_status_t loom_serve_text_load_prepare(
   const iree_host_size_t stage_count =
       loom_runtime_preparation_stage_count(model->source.preparation);
   for (iree_host_size_t i = 0; i < stage_count; ++i) {
-    if (loom_runtime_preparation_stage(model->source.preparation, i)->kind !=
-        LOOM_RUNTIME_PREPARATION_STAGE_COMMAND) {
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "text stages require command parameter reflection");
-    }
+    load->event.pending_layouts +=
+        loom_runtime_preparation_stage(model->source.preparation, i)->kind ==
+        LOOM_RUNTIME_PREPARATION_STAGE_COMMAND;
   }
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       model->host_allocator, stage_count, sizeof(*model->stages),
@@ -231,8 +228,8 @@ static void loom_serve_text_load_layout(void* user_data, iree_host_size_t index,
                                         const loom_cmd_program_t* program) {
   loom_serve_text_load_t* load = user_data;
   iree_slim_mutex_lock(&load->event.mutex);
-  load->model->stages[index].program = *program;
-  if (++load->event.layout_count == load->model->stage_count) {
+  load->model->stages[index].program = program;
+  if (--load->event.pending_layouts == 0) {
     load->event.wake(load->event.user_data);
   }
   iree_slim_mutex_unlock(&load->event.mutex);
@@ -471,8 +468,7 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
       iree_status_join(load->terminal_status, load->event.status);
   load->terminal_status = iree_ok_status();
   load->event.status = iree_ok_status();
-  const bool layouts_ready =
-      !pending && load->event.layout_count == load->model->stage_count;
+  const bool layouts_ready = !pending && load->event.pending_layouts == 0;
   const bool stages_compiling = load->event.stages_compiling;
   const bool control_compiling = load->event.control_compiling;
   iree_slim_mutex_unlock(&load->event.mutex);

@@ -8,6 +8,8 @@ func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
 
 func.decl import("json") @unescape(%source: buffer, %offset: i64, %length: i64, %target: buffer, %target_offset: i64) -> (i64)
 
+func.decl import("runner") @execute_5(%stage: i32, %b0: ptr<@HalBuffer>, %b1: ptr<@HalBuffer>, %b2: ptr<@HalBuffer>, %b3: ptr<@HalBuffer>, %b4: ptr<@HalBuffer>) -> (i64)
+
 func.decl import("runner") @execute_6(%stage: i32, %b0: ptr<@HalBuffer>, %b1: ptr<@HalBuffer>, %b2: ptr<@HalBuffer>, %b3: ptr<@HalBuffer>, %b4: ptr<@HalBuffer>, %b5: ptr<@HalBuffer>) -> (i64)
 
 func.decl import("runner") @feedback(%slot: i32, %source: ptr<@HalBuffer>, %offset: i64, %length: i64) -> (i64)
@@ -650,7 +652,7 @@ func.def public @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: bu
   } else {
     buffer.copy %inputs[%origin], %tokens[%origin], %input_bytes
   }
-  %transfer_offset = index.constant 8 : offset
+  %transfer_offset = index.constant 16 : offset
   %transfers = buffer.view %control_state[%transfer_offset] : buffer -> view<2x5xi64>
   %zero64 = scalar.constant 0 : i64
   %one64 = scalar.constant 1 : i64
@@ -666,7 +668,7 @@ func.def public @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: bu
   view.store %one64, %transfers[1, 2] : i64, view<2x5xi64>
   view.store %zero64, %transfers[1, 3] : i64, view<2x5xi64>
   view.store %input_length, %transfers[1, 4] : i64, view<2x5xi64>
-  %transfer_begin = scalar.constant 8 : i64
+  %transfer_begin = index.cast %transfer_offset : offset to i64
   %transfer_length = scalar.constant 80 : i64
   func.return %first_count, %control_state, %transfer_begin, %transfer_length : i32, buffer, i64, i64
 }
@@ -723,14 +725,21 @@ func.def public @step(%state: buffer, %initialize: i32, %source_position: i32, %
 
 func.def public @epoch(%control_state: buffer, %token_count: i32, %proposes: i32, %verifies: i32, %span_count: i32, %output_count: i32, %next_span_count: i32, %next_token_count: i32, %continuation_proposes: i32, %first_media_count: i32, %next_media_count: i32, %residual: ptr<@HalBuffer>, %metadata: ptr<@HalBuffer>, %origins: ptr<@HalBuffer>, %state: ptr<@HalBuffer>, %tokens: ptr<@HalBuffer>, %outputs: ptr<@HalBuffer>, %carry: ptr<@HalBuffer>, %committed: ptr<@HalBuffer>, %results: ptr<@HalBuffer>, %draft_cache: ptr<@HalBuffer>, %draft_origins: ptr<@HalBuffer>, %next_results: ptr<@HalBuffer>) -> (i64) {
   %origin = index.constant 0 : offset
-  %view = buffer.view %control_state[%origin] : buffer -> view<2xi32>
-  %text_stage = view.load %view[0] : view<2xi32> -> i32
-  %media_stage = view.load %view[1] : view<2xi32> -> i32
+  %view = buffer.view %control_state[%origin] : buffer -> view<3xi32>
+  %text_stage = view.load %view[0] : view<3xi32> -> i32
+  %media_stage = view.load %view[1] : view<3xi32> -> i32
   %media_count = scalar.addi %first_media_count, %next_media_count : i32
   %c0 = scalar.constant 0 : i32
   %has_media = scalar.cmpi ne, %media_count, %c0 : i32
   %stage = scf.select %has_media, %media_stage, %text_stage : i32
-  %completion = func.call @execute_6(%stage, %residual, %metadata, %origins, %state, %tokens, %outputs) : (i32, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>) -> (i64)
+  %consumed = func.call @execute_6(%stage, %residual, %metadata, %origins, %state, %tokens, %outputs) : (i32, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>) -> (i64)
+  %completion = scf.if %has_media -> (i64) {
+    %select = view.load %view[2] : view<3xi32> -> i32
+    %selected = func.call @execute_5(%select, %residual, %metadata, %origins, %state, %outputs) : (i32, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>) -> (i64)
+    scf.yield %selected : i64
+  } else {
+    scf.yield %consumed : i64
+  }
   %c0_i64 = scalar.constant 0 : i64
   %c4_i64 = scalar.constant 4 : i64
   %count64 = scalar.extui %span_count : i32 to i64
@@ -742,7 +751,7 @@ func.def public @epoch(%control_state: buffer, %token_count: i32, %proposes: i32
 func.decl @fixture_storage(%maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64) -> (buffer, buffer, buffer, buffer, buffer)
 
 func.def public @resize_state(%state: buffer, %rows: i64) -> (buffer, buffer, buffer, buffer, buffer, buffer) {
-  %layout_origin = index.constant 88 : offset
+  %layout_origin = index.constant 96 : offset
   %layout = buffer.view %state[%layout_origin] : buffer -> view<5xi64>
   %maximum = view.load %layout[0] : view<5xi64> -> i64
   %span_capacity = view.load %layout[1] : view<5xi64> -> i64

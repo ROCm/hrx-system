@@ -124,7 +124,7 @@ static void loom_serve_text_variant_compiled(void* user_data,
     job->variant->stages[i].compiled = stages->values[i];
     if (iree_status_is_ok(status)) {
       job->variant->stages[i].program =
-          *loom_runtime_jit_stage_program(stages->values[i]);
+          loom_runtime_jit_stage_program(stages->values[i]);
     }
     stages->values[i] = NULL;
   }

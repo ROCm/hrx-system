@@ -238,6 +238,30 @@ TEST_F(SourceTextServiceTest, FailedNativeVariantsLeaveCurrentModelUsable) {
   EXPECT_EQ(retained.activations, weights.activations);
 }
 
+TEST_F(SourceTextServiceTest, DirectReplacementPreservesControlProgramArity) {
+  // This candidate selects into the residual buffer in place. Its weighted
+  // command agrees with its own kernel, but the resident VM still supplies a
+  // separate output binding when dispatching the selector directly.
+  const auto path = iree::testing::MakeTempFilePath("in_place_select", ".loom");
+  ASSERT_NO_FATAL_FAILURE(EditNativeProvider(
+      directory_ + "/advance.loom", path, "%arena: buffer, %outputs: buffer)",
+      "%arena: buffer)"));
+  ASSERT_NO_FATAL_FAILURE(
+      EditNativeProvider(path, path, "%result = buffer.view %outputs",
+                         "%result = buffer.view %residual"));
+  ASSERT_NO_FATAL_FAILURE(EditNativeProvider(
+      path, path,
+      "%arena, %outputs) : (buffer, buffer, buffer, buffer, buffer)",
+      "%arena) : (buffer, buffer, buffer, buffer)"));
+  const auto provider = iree_make_cstring_view(path.c_str());
+  VariantCompilation candidate(model_, {.count = 1, .values = &provider});
+  candidate.Start(loom_runtime_host_executor(host_));
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, candidate.Await());
+  EXPECT_EQ(
+      loom_serve_text_variant_report(candidate.variant())->diagnostic_count,
+      0u);
+}
+
 TEST_F(SourceTextServiceTest,
        EquivalentCandidateReusesCompilationWithIndependentReportAndState) {
   const auto modified_path =
