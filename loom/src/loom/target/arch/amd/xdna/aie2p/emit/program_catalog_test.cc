@@ -33,7 +33,11 @@ TEST_F(Aie2pProgramCatalogTest, SharesRelocatedStreamsAndPreservesInvocation) {
   const auto* family = loom_xdna_npu2_array_family();
   std::vector<loom_aie2p_execution_tile_t> occupancy(family->column_count *
                                                      family->row_count);
-  occupancy[1].memory_length = 130;
+  auto& shim = occupancy[loom_xdna_array_physical_tile_index(family, {0, 0})];
+  auto& memory = occupancy[loom_xdna_array_physical_tile_index(family, {0, 1})];
+  shim.mm2s_count = shim.descriptor_counts[0] = 1;
+  memory.s2mm_count = memory.descriptor_counts[0] = memory.lock_count = 1;
+  memory.memory_length = 130;
   loom_aie2p_code_transport_t transport = {};
   transport.plan.tiles = occupancy.data();
   transport.plan.routing.family = family;
@@ -87,7 +91,7 @@ TEST_F(Aie2pProgramCatalogTest, SharesRelocatedStreamsAndPreservesInvocation) {
   EXPECT_EQ(catalog.offset, 132u);
   EXPECT_EQ(catalog.memory.column, binding.memory.column);
   EXPECT_EQ(catalog.memory.row, binding.memory.row);
-  EXPECT_EQ(occupancy[1].memory_length, 220u);
+  EXPECT_EQ(memory.memory_length, 220u);
   ASSERT_EQ(catalog.descriptor_count, 3u);
   const auto& first = catalog.descriptors[0].value.register_block_write32;
   const auto& repeated = catalog.descriptors[1].value.register_block_write32;
@@ -162,12 +166,12 @@ TEST_F(Aie2pProgramCatalogTest, SharesRelocatedStreamsAndPreservesInvocation) {
 
   const uint64_t full =
       loom_xdna_array_tile_facts(family, binding.memory)->memory.local_capacity;
-  occupancy[1].memory_length = full;
+  memory.memory_length = full;
   IREE_ASSERT_OK(loom_aie2p_program_catalog_build(
       &transport, &binding, &layout, &linked, &arena, &catalog, &requirement));
   EXPECT_FALSE(iree_string_view_is_empty(requirement));
   EXPECT_EQ(catalog.descriptor_count, 0u);
-  EXPECT_EQ(occupancy[1].memory_length, full);
+  EXPECT_EQ(memory.memory_length, full);
 }
 
 TEST_F(Aie2pProgramCatalogTest, UploadsPlacedCatalogsOnOwnedColumns) {
@@ -183,13 +187,12 @@ TEST_F(Aie2pProgramCatalogTest, UploadsPlacedCatalogsOnOwnedColumns) {
   memory.s2mm_count = memory.descriptor_counts[0] = memory.lock_count = 1;
   memory.memory_length = 1024;
 
-  std::vector<uint8_t> code(12 * 1024);
+  std::vector<uint8_t> code(4 * 1024);
   loom_native_section_t section = {
       .storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
       .access =
           LOOM_NATIVE_SECTION_ACCESS_READ | LOOM_NATIVE_SECTION_ACCESS_EXECUTE,
       .alignment = 16,
-      .contents = iree_make_const_byte_span(code.data(), code.size()),
   };
   loom_native_section_contribution_layout_t contribution = {};
   loom_aie2p_program_layout_group_t groups[2] = {};
@@ -206,13 +209,15 @@ TEST_F(Aie2pProgramCatalogTest, UploadsPlacedCatalogsOnOwnedColumns) {
               .contribution_layout_count = 1,
           },
   };
-  // Two workers share SRAM in column two. Column five has a catalog but no
-  // application-owned shim ingress. Present the workers in reverse placement
-  // order to the installer.
+  // Only the combined catalogs in column two amortize a transfer. Column
+  // five has enough data in a single catalog but no application-owned shim
+  // ingress. Present the workers in reverse placement order to the installer.
   loom_aie2p_program_catalog_t catalogs[3] = {};
   const loom_xdna_tile_coordinate_t workers[] = {{2, 2}, {5, 2}, {2, 3}};
   for (uint16_t i = 0; i < 3; ++i) {
     code[0] = static_cast<uint8_t>(19 + i);
+    section.contents = iree_make_const_byte_span(
+        code.data(), workers[i].column == 2 ? 2 * 1024 : code.size());
     const loom_aie2p_code_transport_binding_t binding = {
         .compute = workers[i],
         .memory = {workers[i].column, 1},

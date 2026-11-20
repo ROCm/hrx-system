@@ -122,6 +122,9 @@ static iree_host_size_t loom_aie2p_catalog_select_columns(
     const loom_aie2p_program_catalog_t* catalogs,
     iree_host_size_t catalog_count, loom_aie2p_catalog_column_t* ranges,
     bool* columns, uint32_t* out_size) {
+  // A single-column transfer at 4 KiB amortizes route setup and retirement
+  // on NPU2. Smaller transfers can cost more than direct firmware writes.
+  const uint32_t minimum_upload_length = 4 * 1024;
   const loom_xdna_array_family_t* family = plan->routing.family;
   memset(ranges, 0, family->column_count * sizeof(*ranges));
   for (iree_host_size_t i = 0; i < catalog_count; ++i) {
@@ -156,7 +159,7 @@ static iree_host_size_t loom_aie2p_catalog_select_columns(
     // These app-owned switches, queue controls, descriptor banks, and lock
     // are initialized after the upload. A sparse pipeline keeps its ownership
     // boundary. Inline writes also avoid arming two DMA engines for short data.
-    columns[column] = range->contents_length >= 8192 &&
+    columns[column] = range->contents_length >= minimum_upload_length &&
                       range->contents_length <= maximum_transfer &&
                       range->contents_length == range->end - range->begin &&
                       sender->mm2s_count && sender->descriptor_counts[0] &&
