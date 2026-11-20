@@ -81,9 +81,15 @@ typedef struct iree_hal_amd_gpu_pm4_retirement_slot_t {
     // Exclusively held through publication, including KERNEL capacity deferral,
     // and final retirement. The action's alignment also aligns this span.
     uint8_t capture[448];
-    // Transfer payload prefix reusable after native access and the host copy.
-    // Transfer captures always use the pool, leaving inline storage available.
-    uint64_t consumed_transfers;
+    // Transfer captures use the pool, leaving inline storage available.
+    struct {
+      // Payload prefix reusable after native access and the host copy.
+      uint64_t consumed_transfers;
+      // KERNEL-only payload generation borrowed by an unaccepted piece.
+      iree_hal_amd_gpu_byte_storage_t* rollback_transfers;
+      // Payload cursor restored if native submission rejects this piece.
+      uint64_t rollback_transfer_bytes;
+    };
     // Replay-only value prefix, returned after the consuming native invocation.
     uint64_t consumed_values;
   };

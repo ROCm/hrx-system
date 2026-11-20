@@ -56,8 +56,8 @@ typedef struct iree_hal_amd_gpu_pm4_kmq_storage_t {
     // Command cursor before preparing the pending piece, including wrap.
     uint64_t words;
     // Exact generation borrowed by the pending piece, or NULL without bytes.
-    // One piece consumes either argument storage or the transfer ring, never
-    // both. Staged shaders keep their ABI beside their transfer payload.
+    // Transfer pieces checkpoint their independent payload cursor in the
+    // existing retirement slot, outside this command/argument cache line.
     struct iree_hal_amd_gpu_byte_storage_t* storage;
     // Borrowed generation's byte cursor before preparing the pending piece.
     uint64_t bytes;
