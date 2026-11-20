@@ -68,6 +68,12 @@ static iree_host_size_t loom_serve_text_epoch_prepare_continuation(
   }
   const iree_host_size_t count = epoch->count;
   const loom_serve_text_span_t* spans = epoch->spans;
+  // A solitary request finishing its prompt can publish the first token
+  // immediately. Later decodes still queue a device-fed continuation.
+  if (count == 1 && !plan->deferred && rows[0].input_count &&
+      iree_any_bit_set(spans[0].flags, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT)) {
+    return plan->next_row;
+  }
   const uint32_t* output_limits = epoch->output_limits;
   loom_serve_text_span_t* next_spans = epoch->planning.spans;
   uint32_t* next_limits = epoch->planning.output_limits;

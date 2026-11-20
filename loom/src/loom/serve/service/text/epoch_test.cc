@@ -201,31 +201,40 @@ TEST(TextEpochTest, NoContinuationReducesCreditToOneVerifier) {
   EXPECT_EQ(continuation.span_count, 0);
 }
 
-TEST(TextEpochTest, ContinuationCountsThePromptRemainderOrVerifierWidth) {
-  const loom_serve_text_epoch_options_t options = {
-      .context_capacity = 64,
-      .chunk_size = 16,
-      .continuation_epochs = 2,
-      .draft_depth = 3,
-      .token_capacity = 16,
-      .span_capacity = 1,
-  };
-  const int32_t tokens[16] = {};
-  const loom_serve_text_epoch_row_t rows[] = {
-      {.input_tokens = tokens, .input_count = 16, .output_count = 9}};
-  for (iree_host_size_t first : {4u, 16u}) {
-    SCOPED_TRACE(first);
-    const loom_serve_packed_span_t scheduled[] = {{0, first}};
-    const loom_serve_packing_plan_t plan = {
-        .span_count = 1,
-        .token_count = first,
-    };
-    Epoch epoch(IREE_ARRAYSIZE(scheduled));
-    loom_serve_text_continuation_t next;
-    loom_serve_text_epoch_prepare(&options, rows, 1, &plan, scheduled, &epoch,
-                                  &next);
-    EXPECT_EQ(epoch.device_epochs, 2);
-    EXPECT_EQ(epoch.continuation_token_count, first == 4 ? 12u : 4u);
+TEST(TextEpochTest, PublishesTheFirstTokenWhenOnlyOneRequestIsReady) {
+  const int32_t tokens[14] = {};
+  const loom_serve_text_epoch_row_t rows[] = {{
+      .input_tokens = tokens,
+      .input_count = IREE_ARRAYSIZE(tokens),
+      .output_count = 9,
+  }};
+  const loom_serve_ready_span_t ready[] = {{IREE_ARRAYSIZE(tokens), 1}, {4, 4}};
+  for (iree_host_size_t residents : {1u, 2u}) {
+    for (iree_host_size_t chunk : {8u, 16u}) {
+      SCOPED_TRACE(residents);
+      SCOPED_TRACE(chunk);
+      const loom_serve_text_epoch_options_t options = {
+          .context_capacity = 64,
+          .chunk_size = chunk,
+          .continuation_epochs = 2,
+          .draft_depth = 3,
+          .token_capacity = 16,
+          .span_capacity = 1,
+      };
+      loom_serve_packed_span_t scheduled[1];
+      const auto plan = loom_serve_pack_spans(
+          residents, ready, options.token_capacity, 1, chunk, 0, scheduled);
+      Epoch epoch(IREE_ARRAYSIZE(scheduled));
+      loom_serve_text_continuation_t next;
+      loom_serve_text_epoch_prepare(&options, rows, residents, &plan, scheduled,
+                                    &epoch, &next);
+      const bool finished = chunk >= IREE_ARRAYSIZE(tokens);
+      const bool publish_now = finished && residents == 1;
+      EXPECT_EQ(epoch.device_epochs, publish_now ? 1 : 2);
+      EXPECT_EQ(epoch.continuation_token_count,
+                publish_now ? 0u : (finished ? 4u : 6u));
+      EXPECT_EQ(next.span_count, publish_now ? 0u : 1u);
+    }
   }
 }
 
@@ -400,7 +409,7 @@ TEST(TextEpochTest, ContinuationLeavesFinalOutputToOrdinaryDecode) {
         loom_serve_text_continuation_t next;
         loom_serve_text_epoch_prepare(&options, rows, 1, &plan, scheduled,
                                       &epoch, &next);
-        const bool continues = credit >= 3;
+        const bool continues = !known && credit >= 3;
         EXPECT_EQ(epoch.device_epochs, continues ? 2 : 1);
         ASSERT_EQ(next.span_count, continues ? 1 : 0);
         EXPECT_EQ(
