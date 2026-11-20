@@ -78,22 +78,27 @@ class CloseTest : public ::testing::TestWithParam<int> {
                         iree_async_operation_type_t type, int fd) {
     watched_fd.store(fd);
     CompletionTracker tracker;
-    iree_async_operation_initialize(operation, type,
-                                    IREE_ASYNC_OPERATION_FLAG_NONE,
-                                    CompletionTracker::Callback, &tracker);
+    iree_async_operation_initialize(
+        operation, type, IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS,
+        CompletionTracker::Callback, &tracker);
     IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, operation));
     while (!tracker.call_count) {
       IREE_ASSERT_OK(iree_async_proactor_poll(
           proactor_, iree_infinite_timeout(), nullptr));
     }
+    // Status symbolization can open files of its own after native retirement.
+    watched_fd.store(-1);
     EXPECT_EQ(tracker.call_count, 1);
+    EXPECT_EQ(tracker.last_flags, IREE_ASYNC_COMPLETION_FLAG_NONE);
     EXPECT_EQ(attempts.load(), 1);
 #if IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS
     EXPECT_THAT(iree::Status::ToString(tracker.last_status),
                 ::testing::HasSubstr(strerror(close_error)));
 #endif  // IREE_STATUS_FEATURE_ANNOTATIONS
-    IREE_EXPECT_STATUS_IS(iree_status_code_from_errno(close_error),
-                          tracker.ConsumeStatus());
+    const iree_status_code_t expected_code =
+        close_error == ECANCELED ? IREE_STATUS_ABORTED
+                                 : iree_status_code_from_errno(close_error);
+    IREE_EXPECT_STATUS_IS(expected_code, tracker.ConsumeStatus());
   }
 
   // Owns the submitting, worker, and polling paths under test.
@@ -126,6 +131,7 @@ constexpr int kInterruptedClose = EINPROGRESS;
 constexpr int kInterruptedClose = EINTR;
 #endif  // POSIX_CLOSE_RESTART
 INSTANTIATE_TEST_SUITE_P(NativeErrors, CloseTest,
-                         ::testing::Values(EIO, ENOSPC, kInterruptedClose));
+                         ::testing::Values(EIO, ENOSPC, kInterruptedClose,
+                                           ECANCELED));
 
 }  // namespace
