@@ -501,6 +501,30 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "program_broadcast",
+    srcs = ["program_broadcast.c"],
+    hdrs = ["program_broadcast.h"],
+    deps = [
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/pipeline:execution_plan",
+        "//loom/src/loom/util:adaptive_sort",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "program_broadcast_test",
+    srcs = ["program_broadcast_test.cc"],
+    deps = [
+        ":program_broadcast",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "program_catalog",
     srcs = [
         "catalog_upload.c",
