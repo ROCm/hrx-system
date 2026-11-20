@@ -205,3 +205,89 @@ low.func.def target<test.low.core>(@target) abi(object_function) @inner_stride_d
 ^_bb3:
   return
 }
+
+// ====
+// RUN: pass scf-to-cfg,source-to-low,low-dce
+
+x86.target<avx2> @target
+
+// The native scaled load consumes the product directly.
+// Neither form materializes a byte-offset operand; both must still consider
+// the retained product for a carried recurrence.
+func.def target(@target) @direct_index(%input: buffer, %output: buffer, %stride: index) where [range(%stride, 4, 8), multiple_of(%stride, 4)] {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<128xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<4xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  scf.for %ordinal = [%begin to %end step %step] {
+    %distance = index.mul %ordinal, %stride : index
+    %value = vector.load %source[%distance] : view<128xi32> -> vector<4xi32>
+    vector.store %value, %destination[0] : vector<4xi32>, view<4xi32>
+  }
+  func.return
+}
+
+// ----
+x86.target<avx2> @target
+
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @direct_index(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %stride: reg<x86.gpr64>) where [range(%stride, 4, 8), multiple_of(%stride, 4)] asm {
+  %21 = mov.imm64 0
+  %begin = mov.imm64 0
+  low.br ^_bb1(%begin: reg<x86.gpr64>, %21: reg<x86.gpr64>)
+^_bb1(%ordinal: reg<x86.gpr64>, %distance: reg<x86.gpr64>):
+  low.op.cond_br<x86.scalar.cmp.branch.imm.gpr64>(%ordinal) {imm32 = 8, predicate = 12}, ^_bb2, ^_bb3 : (reg<x86.gpr64>)
+^_bb2:
+  %value = vmovdqu32.load.indexed.xmm %input, %distance {disp32 = 0, scale = 4}
+  vmovdqu32.store.xmm %value, %output {disp32 = 0}
+  %24 = lea.disp %ordinal {disp32 = 1}
+  %25 = add.gpr64 %distance, %stride
+  low.br ^_bb1(%24: reg<x86.gpr64>, %25: reg<x86.gpr64>)
+^_bb3:
+  return
+}
+
+// ====
+// RUN: pass scf-to-cfg,source-to-low,low-dce
+
+x86.target<avx2> @target
+
+// A preserved source index combines an invariant base with the product.
+// Neither form materializes a byte-offset operand; both must still consider
+// the retained product for a carried recurrence.
+func.def target(@target) @preserved_index(%input: buffer, %output: buffer, %stride: index, %base: index) where [range(%stride, 4, 8), multiple_of(%stride, 4), range(%base, 0, 8), multiple_of(%base, 4)] {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<128xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<4xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  scf.for %ordinal = [%begin to %end step %step] {
+    %distance = index.mul %ordinal, %stride : index
+    %position = index.add %base, %distance : index
+    %value = vector.load %source[%position] : view<128xi32> -> vector<4xi32>
+    vector.store %value, %destination[0] : vector<4xi32>, view<4xi32>
+  }
+  func.return
+}
+
+// ----
+x86.target<avx2> @target
+
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @preserved_index(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %stride: reg<x86.gpr64>, %base: reg<x86.gpr64>) where [range(%stride, 4, 8), multiple_of(%stride, 4), range(%base, 0, 8), multiple_of(%base, 4)] asm {
+  %24 = mov.imm64 0
+  %begin = mov.imm64 0
+  low.br ^_bb1(%begin: reg<x86.gpr64>, %24: reg<x86.gpr64>)
+^_bb1(%ordinal: reg<x86.gpr64>, %distance: reg<x86.gpr64>):
+  low.op.cond_br<x86.scalar.cmp.branch.imm.gpr64>(%ordinal) {imm32 = 8, predicate = 12}, ^_bb2, ^_bb3 : (reg<x86.gpr64>)
+^_bb2:
+  %position = lea %base, %distance
+  %value = vmovdqu32.load.indexed.xmm %input, %position {disp32 = 0, scale = 4}
+  vmovdqu32.store.xmm %value, %output {disp32 = 0}
+  %28 = lea.disp %ordinal {disp32 = 1}
+  %29 = add.gpr64 %distance, %stride
+  low.br ^_bb1(%28: reg<x86.gpr64>, %29: reg<x86.gpr64>)
+^_bb3:
+  return
+}

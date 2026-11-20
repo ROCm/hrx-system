@@ -63,6 +63,15 @@ void loom_low_lower_rule_source_memory_plan_record_producer(
     loom_low_lower_rule_source_memory_plan_builder_t* builder,
     loom_low_lower_selected_plan_t* selected_plan);
 
+// Retains authored-producer recipes using a selected memory row's arithmetic
+// capabilities, including rows that consume an index without a byte-offset
+// materialization. Producer plans are already indexed in source order.
+iree_status_t loom_low_lower_rule_source_memory_plan_recurrences(
+    loom_low_lower_context_t* context,
+    loom_low_lower_rule_source_memory_plan_builder_t* builder,
+    const loom_low_lower_selected_plan_t* selected_plan,
+    const loom_low_lower_source_memory_t* source_memory);
+
 // Offers the policy's carrier-consistent recipe retained for each exact
 // producer after every selected memory rule has been finalized.
 iree_status_t loom_low_lower_rule_source_memory_plan_offer_recurrences(

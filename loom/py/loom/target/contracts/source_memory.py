@@ -122,6 +122,8 @@ class SourceMemoryByteOffsetMaterializer:
     materialization instead of using the ordinary arithmetic constant. An
     ``increment`` descriptor lets shared loop planning advance a carried byte
     offset by a constant without rebuilding its canonical terms.
+    The same arithmetic also supports carried authored index products in their
+    original units, including when a memory instruction consumes them directly.
 
     Increment-capable materializers using the same physical carrier must agree
     on their constant, add, and increment recipe within a composed target

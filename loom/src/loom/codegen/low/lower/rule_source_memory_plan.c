@@ -1109,6 +1109,30 @@ loom_low_lower_rule_source_memory_consider_recurrence(
   return iree_ok_status();
 }
 
+iree_status_t loom_low_lower_rule_source_memory_plan_recurrences(
+    loom_low_lower_context_t* context,
+    loom_low_lower_rule_source_memory_plan_builder_t* builder,
+    const loom_low_lower_selected_plan_t* selected_plan,
+    const loom_low_lower_source_memory_t* source_memory) {
+  const loom_low_lower_selected_source_memory_t* selected_source_memory =
+      loom_low_lower_selected_plan_source_memory(selected_plan);
+  const loom_low_lower_source_memory_recurrence_set_t* recurrences =
+      selected_source_memory->record->recurrences;
+  if (recurrences == NULL || recurrences->producer_count == 0) {
+    return iree_ok_status();
+  }
+  const loom_low_lower_rule_set_t* rule_set =
+      loom_low_lower_selected_plan_rule_set(selected_plan);
+  const loom_low_lower_source_memory_byte_offset_materializer_t* materializer =
+      loom_low_lower_rule_set_source_memory_byte_offset_materializer(
+          rule_set, source_memory);
+  for (uint8_t i = 0; i < recurrences->producer_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_consider_recurrence(
+        context, builder, rule_set, materializer, &recurrences->producers[i]));
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_low_lower_rule_source_memory_plan_offer_recurrences(
     loom_low_lower_context_t* context,
     loom_low_lower_rule_source_memory_plan_builder_t* builder) {
@@ -1197,14 +1221,6 @@ iree_status_t loom_low_lower_rule_source_memory_plan_byte_offset(
       loom_low_lower_selected_plan_emission_op(selected_plan);
   const loom_low_lower_source_memory_recurrence_set_t* recurrences =
       memory_record->recurrences;
-  if (recurrences != NULL) {
-    for (uint8_t i = 0; i < recurrences->producer_count; ++i) {
-      IREE_RETURN_IF_ERROR(
-          loom_low_lower_rule_source_memory_consider_recurrence(
-              context, builder, rule_set, materializer,
-              &recurrences->producers[i]));
-    }
-  }
   const loom_block_t* block = emission_op->parent_block;
   uint32_t hash = loom_structural_hash_initialize();
   hash = loom_structural_hash_mix_u64(hash, identity);

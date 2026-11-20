@@ -656,6 +656,8 @@ static_assert(sizeof(loom_low_lower_source_memory_integer_conversion_t) == 24,
 // Defines canonical byte-offset arithmetic in the constant descriptor's
 // integer carrier. Source terms use the same conversions whether consumed
 // directly by a target descriptor or composed with the arithmetic descriptors.
+// The same descriptors implement carried authored index products in their
+// original units, independently of the memory instruction's addressing mode.
 // Source-memory matching proves any narrowing below the target's complete
 // address carrier; full-carrier arithmetic permits native overflow.
 typedef struct loom_low_lower_source_memory_byte_offset_materializer_t {
