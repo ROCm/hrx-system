@@ -33,3 +33,44 @@ kernel.def export("prepare_dispatch_info") @prepare_dispatch_info() {
   view.store %items_z, %grid[2] : i32, view<3xi32>
   kernel.return
 }
+
+// Each row of the private table names a byte offset, first XYZ axis, and
+// number of consecutive counts. Copy exactly those DWORDs. Native kernargs
+// can have gaps or byte-aligned fields; the public source is exactly 12 bytes.
+kernel.def export("copy_dispatch_counts") @copy_dispatch_counts() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%counts: buffer, %arguments: buffer, %table_byte: i32, %range_count: i32) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %stride = index.constant 4 : offset
+  %groups = buffer.view %counts[%origin] : buffer -> view<3xi32>
+  %table_origin = index.cast %table_byte : i32 to offset
+  %ranges = index.cast %range_count : i32 to index
+  %table = buffer.view %arguments[%table_origin] : buffer -> view<[%ranges]xi32>
+  %low = scalar.constant 65535 : i32
+  %sixteen = scalar.constant 16 : i32
+  %axes = scalar.constant 3 : i32
+  %eighteen = scalar.constant 18 : i32
+  scf.for %row = [%zero to %ranges step %one] {
+    %entry = view.load %table[%row] : view<[%ranges]xi32> -> i32
+    %destination_word = scalar.andi %entry, %low : i32
+    %destination = index.cast %destination_word : i32 to offset
+    %span = scalar.shrui %entry, %sixteen : i32
+    %first_word = scalar.andi %span, %axes : i32
+    %first = index.cast %first_word : i32 to index
+    %length_word = scalar.shrui %entry, %eighteen : i32
+    %length = index.cast %length_word : i32 to index
+    scf.for %i = [%zero to %length step %one] {
+      %source_axis = index.add %first, %i : index
+      %axis = index.assume %source_axis [range(%source_axis, 0, 2)] : index
+      %value = view.load %groups[%axis] : view<3xi32> -> i32
+      %delta = index.scale %i, %stride : index, offset -> offset
+      %byte = index.add %destination, %delta : offset
+      %field = buffer.view %arguments[%byte] : buffer -> view<1xi32, align(1)>
+      view.store %value, %field[0] : i32, view<1xi32, align(1)>
+    }
+  }
+  kernel.return
+}

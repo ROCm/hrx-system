@@ -8,11 +8,10 @@
 
 #include "iree/hal/driver/amd/gpu/queue/pm4/commands.h"
 
-// The relocation-free program in dispatch_info.loom uses two pointer kernargs,
-// no scratch or LDS, one workitem, and exactly three output DWORDs. These ISA
-// variants keep runtime-only builds independent of a compiler toolchain.
-// dispatch_program_test recompiles that source for all supported families and
-// compares its instruction bytes and complete resource/argument ABI here.
+// The relocation-free programs in dispatch_info.loom write the public grid
+// in the representation requested by the consumer: workitems in a dispatch
+// packet and workgroups in native argument fields. Runtime-only builds use
+// the stored ISA; dispatch_program_test checks both ABIs on every family.
 static const uint32_t iree_hal_amd_gpu_pm4_dispatch_program_gfx11[] = {
     0xf4080100u, 0xf8000000u, 0x7e000280u, 0xbf89fc07u, 0xdc520006u,
     0x01060000u, 0xdc4a0004u, 0x02060000u, 0xf4000002u, 0xf8000000u,
@@ -48,27 +47,84 @@ static const uint32_t iree_hal_amd_gpu_pm4_dispatch_program_gfx125[] = {
     0xbfc10000u, 0xbfb00000u,
 };
 
-iree_status_t iree_hal_amd_gpu_pm4_dispatch_program_query(
-    iree_hal_amd_gpu_gfxip_version_t gfxip,
+static const uint32_t iree_hal_amd_gpu_pm4_count_program_gfx11[] = {
+    0xf4040080u, 0xf8000010u, 0xf4080100u, 0xf8000000u, 0xbe810080u,
+    0xbf89fc07u, 0xbe800001u, 0xbf040300u, 0xbf870009u, 0xbfa10029u,
+    0x7e000280u, 0x84888200u, 0x80080802u, 0x82090980u, 0xbe8a0006u,
+    0x8008080au, 0xbe8a0007u, 0x8209090au, 0xbc7c0000u, 0xdc520000u,
+    0x00080000u, 0xbf8903f7u, 0x32020090u, 0x360400ffu, 0x0000ffffu,
+    0x32000092u, 0xbf870003u, 0x36020283u, 0xbe880001u, 0xd441000au,
+    0x02020008u, 0xbe8c017eu, 0xbf870001u, 0x8b8a0c0au, 0xbfa1000eu,
+    0x7e060208u, 0xbf870131u, 0x4a080701u, 0xd6460003u, 0x04090503u,
+    0x80088108u, 0x30080882u, 0xbc7c0000u, 0xdc520000u, 0x04040004u,
+    0xbf8903f7u, 0xdc6a0000u, 0x00060403u, 0xbfa0ffecu, 0x80008100u,
+    0xbfa0ffd4u, 0xbc7c0000u, 0xbfb00000u,
+};
+
+static const uint32_t iree_hal_amd_gpu_pm4_count_program_gfx12[] = {
+    0xf4002080u, 0xf8000010u, 0xf4004100u, 0xf8000000u, 0xbe810080u,
+    0xbfc70000u, 0xbe800001u, 0xbf040300u, 0xbf870009u, 0xbfa1002fu,
+    0x7e000280u, 0x84888200u, 0xbf88fffeu, 0x80080802u, 0x82090980u,
+    0xbe8a0006u, 0xbf88fffeu, 0x8008080au, 0xbe8a0007u, 0x8209090au,
+    0xbfc10000u, 0xee050008u, 0x00000000u, 0x00000000u, 0xbfc00000u,
+    0x32020090u, 0x360400ffu, 0x0000ffffu, 0x32000092u, 0xbf870003u,
+    0x36020283u, 0xbe880001u, 0xbf88fffeu, 0xd441000au, 0x02020008u,
+    0xbe8c017eu, 0xbf870001u, 0x8b8a0c0au, 0xbfa10010u, 0x7e060208u,
+    0xbf870131u, 0x4a080701u, 0xd6460003u, 0x04090503u, 0x80088108u,
+    0x30080882u, 0xbfc10000u, 0xee050004u, 0x00000004u, 0x00000004u,
+    0xbfc00000u, 0xee068006u, 0x02000000u, 0x00000003u, 0xbfa0ffe9u,
+    0x80008100u, 0xbfa0ffceu, 0xbfc10000u, 0xbfb00000u,
+};
+
+static const uint32_t iree_hal_amd_gpu_pm4_count_program_gfx125[] = {
+    0xee174000u, 0x00040000u, 0x00000000u, 0x7e000000u, 0xb9800641u,
+    0x00000001u, 0xf4002080u, 0xf8000010u, 0xf4004100u, 0xf8000000u,
+    0xbe890080u, 0xbfc70000u, 0xbe880009u, 0xbf040308u, 0xbf870009u,
+    0xbfa1002cu, 0x7e000280u, 0x848a8208u, 0x800a0a02u, 0x820b0b80u,
+    0xbe8c0006u, 0x800a0a0cu, 0xbe8c0007u, 0x820b0b0cu, 0xbfc10000u,
+    0xee05000au, 0x00000001u, 0x00000000u, 0xbfc00000u, 0x32040290u,
+    0x360602ffu, 0x0000ffffu, 0x32020292u, 0xbf870003u, 0x36040483u,
+    0xbe8c0009u, 0xd441000eu, 0x0202020cu, 0xbe90017eu, 0xbf870001u,
+    0x8b8e100eu, 0xbfa10010u, 0x7e08020cu, 0xbf870131u, 0x4a0a0902u,
+    0xd6460004u, 0x040d0504u, 0x800c810cu, 0x300a0a82u, 0xbfc10000u,
+    0xee050004u, 0x00000006u, 0x00000005u, 0xbfc00000u, 0xee068006u,
+    0x03000000u, 0x00000004u, 0xbfa0ffeau, 0x80088108u, 0xbfa0ffd1u,
+    0xbfc10000u, 0xbfb00000u,
+};
+
+static iree_status_t iree_hal_amd_gpu_pm4_geometry_program_query(
+    iree_hal_amd_gpu_gfxip_version_t gfxip, bool counts,
     iree_hal_amd_gpu_pm4_dispatch_program_t* out_program) {
   iree_hal_amd_gpu_pm4_dispatch_program_t program = {
       .kernel = {.compute_pgm_rsrc2 = 4, .code_properties = 0x408},
   };
   if (gfxip.major == 11 &&
       (gfxip.minor == 0 || gfxip.minor == 5 || gfxip.minor == 7)) {
-    program.code = iree_make_const_byte_span(
-        iree_hal_amd_gpu_pm4_dispatch_program_gfx11,
-        sizeof(iree_hal_amd_gpu_pm4_dispatch_program_gfx11));
+    program.code =
+        counts ? iree_make_const_byte_span(
+                     iree_hal_amd_gpu_pm4_count_program_gfx11,
+                     sizeof(iree_hal_amd_gpu_pm4_count_program_gfx11))
+               : iree_make_const_byte_span(
+                     iree_hal_amd_gpu_pm4_dispatch_program_gfx11,
+                     sizeof(iree_hal_amd_gpu_pm4_dispatch_program_gfx11));
     program.kernel.compute_pgm_rsrc1 = 0xe0af0000u;
   } else if (gfxip.major == 12 && gfxip.minor == 0) {
-    program.code = iree_make_const_byte_span(
-        iree_hal_amd_gpu_pm4_dispatch_program_gfx12,
-        sizeof(iree_hal_amd_gpu_pm4_dispatch_program_gfx12));
+    program.code =
+        counts ? iree_make_const_byte_span(
+                     iree_hal_amd_gpu_pm4_count_program_gfx12,
+                     sizeof(iree_hal_amd_gpu_pm4_count_program_gfx12))
+               : iree_make_const_byte_span(
+                     iree_hal_amd_gpu_pm4_dispatch_program_gfx12,
+                     sizeof(iree_hal_amd_gpu_pm4_dispatch_program_gfx12));
     program.kernel.compute_pgm_rsrc1 = 0xe00f0000u;
   } else if (gfxip.major == 12 && gfxip.minor == 5) {
-    program.code = iree_make_const_byte_span(
-        iree_hal_amd_gpu_pm4_dispatch_program_gfx125,
-        sizeof(iree_hal_amd_gpu_pm4_dispatch_program_gfx125));
+    program.code =
+        counts ? iree_make_const_byte_span(
+                     iree_hal_amd_gpu_pm4_count_program_gfx125,
+                     sizeof(iree_hal_amd_gpu_pm4_count_program_gfx125))
+               : iree_make_const_byte_span(
+                     iree_hal_amd_gpu_pm4_dispatch_program_gfx125,
+                     sizeof(iree_hal_amd_gpu_pm4_dispatch_program_gfx125));
     program.kernel.compute_pgm_rsrc1 = 0xc00f0000u;
   } else {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
@@ -78,6 +134,18 @@ iree_status_t iree_hal_amd_gpu_pm4_dispatch_program_query(
   }
   *out_program = program;
   return iree_ok_status();
+}
+
+iree_status_t iree_hal_amd_gpu_pm4_dispatch_program_query(
+    iree_hal_amd_gpu_gfxip_version_t gfxip,
+    iree_hal_amd_gpu_pm4_dispatch_program_t* out_program) {
+  return iree_hal_amd_gpu_pm4_geometry_program_query(gfxip, false, out_program);
+}
+
+iree_status_t iree_hal_amd_gpu_pm4_count_program_query(
+    iree_hal_amd_gpu_gfxip_version_t gfxip,
+    iree_hal_amd_gpu_pm4_dispatch_program_t* out_program) {
+  return iree_hal_amd_gpu_pm4_geometry_program_query(gfxip, true, out_program);
 }
 
 iree_hal_amd_gpu_pm4_dispatch_storage_t iree_hal_amd_gpu_pm4_dispatch_storage(
@@ -93,6 +161,14 @@ iree_hal_amd_gpu_pm4_dispatch_storage_t iree_hal_amd_gpu_pm4_dispatch_storage(
     storage.prepare_offset = (storage.length + 7u) & ~7u;
     storage.length = storage.prepare_offset + 16u;
   }
+  if (!indirect && iree_hal_dispatch_uses_indirect_parameters(flags) &&
+      function->base.kernarg->indirect_copy_count) {
+    storage.alignment = iree_max(storage.alignment, 8u);
+    storage.count_offset = (storage.length + 7u) & ~7u;
+    storage.length = storage.count_offset +
+                     sizeof(iree_hal_amd_gpu_pm4_count_arguments_t) +
+                     4u * function->base.kernarg->indirect_copy_count;
+  }
   return storage;
 }
 
@@ -103,8 +179,6 @@ iree_status_t iree_hal_amd_gpu_pm4_dispatch_prepare(
     iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
     iree_host_size_t binding_count, iree_hal_dispatch_flags_t flags,
     iree_hal_amd_gpu_pm4_dispatch_t* out_dispatch) {
-  const bool indirect_parameters =
-      iree_hal_dispatch_uses_indirect_parameters(flags);
   const iree_hal_amd_gpu_metadata_kernel_t* metadata = function->base.metadata;
   uint16_t launch_requirements =
       function->launch.requirements &
@@ -147,24 +221,6 @@ iree_status_t iree_hal_amd_gpu_pm4_dispatch_prepare(
                             "PM4 workgroup clusters require native queue "
                             "admission and cluster launch state");
   }
-  if (indirect_parameters) {
-    const uint16_t copy_count =
-        iree_hal_dispatch_uses_indirect_arguments(flags)
-            ? 0
-            : function->base.kernarg->indirect_copy_count;
-    const uint32_t launch_words = function->launch.user_data_count
-                                      ? 24 + function->launch.user_data_count
-                                      : 22;
-    if (launch_words +
-            (function->packet ? IREE_HAL_AMD_GPU_PM4_DISPATCH_PREPARE_WORDS
-                              : 0u) +
-            iree_hal_amd_gpu_pm4_dispatch_indirect_word_count(copy_count) >
-        IREE_HAL_AMD_GPU_PM4_DISPATCH_MAX_WORDS) {
-      return iree_make_status(
-          IREE_STATUS_RESOURCE_EXHAUSTED,
-          "indirect argument copies exceed the native launch window");
-    }
-  }
   iree_hal_amd_gpu_pm4_dispatch_t dispatch = {.scratch_wave_byte_length =
                                                   scratch_wave_byte_length};
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_dispatch_prepare(
@@ -179,19 +235,36 @@ void iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
     const iree_hal_amd_gpu_pm4_function_t* function,
     const iree_hal_amd_gpu_pm4_dispatch_t* dispatch,
     iree_const_byte_span_t constants, const uint64_t* binding_addresses,
-    iree_hal_dispatch_flags_t flags, void* target) {
+    iree_hal_dispatch_flags_t flags,
+    const iree_hal_amd_gpu_pm4_dispatch_storage_t* storage, void* target) {
   iree_hal_amd_gpu_dispatch_emplace_arguments(&function->base,
                                               &dispatch->geometry, constants,
                                               binding_addresses, flags, target);
-  if (function->packet && iree_hal_dispatch_uses_indirect_parameters(flags)) {
-    const iree_hal_amd_gpu_pm4_dispatch_storage_t storage =
-        iree_hal_amd_gpu_pm4_dispatch_storage(function, flags);
+  if (iree_hal_dispatch_uses_indirect_parameters(flags)) {
     const uint32_t kernarg_length =
         iree_hal_dispatch_uses_indirect_arguments(flags)
             ? 0
             : function->base.kernarg->byte_length;
-    memset((uint8_t*)target + kernarg_length, 0,
-           storage.length - kernarg_length);
+    if (storage->length > kernarg_length) {
+      memset((uint8_t*)target + kernarg_length, 0,
+             storage->length - kernarg_length);
+    }
+    if (storage->count_offset) {
+      const iree_hal_amd_gpu_kernarg_layout_t* layout = function->base.kernarg;
+      iree_hal_amd_gpu_pm4_count_arguments_t* arguments =
+          (void*)((uint8_t*)target + storage->count_offset);
+      arguments->table_offset = storage->count_offset + sizeof(*arguments);
+      arguments->range_count = layout->indirect_copy_count;
+      uint32_t* entries = (uint32_t*)(arguments + 1);
+      const iree_hal_amd_gpu_kernarg_copy_t* ranges =
+          iree_hal_amd_gpu_kernarg_layout_indirect_copies(layout);
+      for (uint16_t i = 0; i < layout->indirect_copy_count; ++i) {
+        // The source is the three public DWORDs; destinations are native bytes.
+        entries[i] = ranges[i].target_offset |
+                     ((uint32_t)(ranges[i].source_offset / 4u) << 16) |
+                     ((uint32_t)(ranges[i].length / 4u) << 18);
+      }
+    }
   }
 }
 
@@ -223,9 +296,9 @@ void iree_hal_amd_gpu_pm4_dispatch_emplace_packet(
   }
 }
 
-uint32_t* iree_hal_amd_gpu_pm4_dispatch_emit_prepare(
+static uint32_t* iree_hal_amd_gpu_pm4_dispatch_emit_writer(
     uint32_t* words, const iree_hal_amd_gpu_pm4_launch_t* prepare,
-    uint64_t argument_address, uint32_t cache_control) {
+    uint64_t argument_address) {
   const uint32_t one[3] = {1, 1, 1};
   const uint32_t zero[3] = {0};
   const iree_hal_amd_gpu_pm4_launch_inputs_t inputs = {
@@ -233,27 +306,22 @@ uint32_t* iree_hal_amd_gpu_pm4_dispatch_emit_prepare(
   };
   words =
       iree_hal_amd_gpu_pm4_launch_emit(words, prepare, one, zero, 0, &inputs);
-  words = iree_hal_amd_gpu_pm4_emit_dispatch_direct(
-      words, one, prepare->dispatch_initiator);
-  words = iree_hal_amd_gpu_pm4_emit_compute_flush(words);
-  return iree_hal_amd_gpu_pm4_emit_acquire(words, cache_control);
+  return iree_hal_amd_gpu_pm4_emit_dispatch_direct(words, one,
+                                                   prepare->dispatch_initiator);
 }
 
-uint32_t* iree_hal_amd_gpu_pm4_dispatch_emit_indirect(
-    uint32_t* words, const iree_hal_amd_gpu_kernarg_layout_t* layout,
-    uint16_t copy_count, uint64_t parameters_address, uint64_t argument_address,
-    uint32_t cache_control, uint32_t initiator) {
-  const iree_hal_amd_gpu_kernarg_copy_t* copies =
-      iree_hal_amd_gpu_kernarg_layout_indirect_copies(layout);
-  for (uint16_t i = 0; i < copy_count; ++i) {
-    words = iree_hal_amd_gpu_pm4_emit_dma_copy(
-        words, parameters_address + copies[i].source_offset,
-        argument_address + copies[i].target_offset, copies[i].length);
+uint32_t* iree_hal_amd_gpu_pm4_dispatch_emit_prepare(
+    uint32_t* words, const iree_hal_amd_gpu_pm4_launch_t* packet,
+    uint64_t packet_arguments, const iree_hal_amd_gpu_pm4_launch_t* counts,
+    uint64_t count_arguments, uint32_t cache_control) {
+  if (packet) {
+    words = iree_hal_amd_gpu_pm4_dispatch_emit_writer(words, packet,
+                                                      packet_arguments);
   }
-  if (copy_count) {
-    words = iree_hal_amd_gpu_pm4_emit_dma_flush(words);
-    words = iree_hal_amd_gpu_pm4_emit_acquire(words, cache_control);
+  if (counts) {
+    words = iree_hal_amd_gpu_pm4_dispatch_emit_writer(words, counts,
+                                                      count_arguments);
   }
-  return iree_hal_amd_gpu_pm4_emit_dispatch_indirect(words, parameters_address,
-                                                     initiator);
+  words = iree_hal_amd_gpu_pm4_emit_compute_flush(words);
+  return iree_hal_amd_gpu_pm4_emit_acquire(words, cache_control);
 }

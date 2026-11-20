@@ -184,7 +184,7 @@ TEST_F(DispatchTest, PreparationArgumentsExcludeShaderPackets) {
     iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
         &function_, &dispatch_,
         iree_make_const_byte_span(constants.data(), constants.size()), nullptr,
-        flags, bytes.data());
+        flags, &storage, bytes.data());
     if (!external) {
       EXPECT_EQ(memcmp(bytes.data(), constants.data(), constants.size()), 0);
     }
@@ -222,10 +222,14 @@ TEST_F(DispatchTest, PreparationProgramEmitsCompleteOrderedLaunch) {
     EXPECT_EQ(launch.requirements, 0u);
     EXPECT_EQ(launch.user_data_count, 2u);
     EXPECT_EQ(launch.user_data.kernarg_pointer, 0u);
-    std::array<uint32_t, IREE_HAL_AMD_GPU_PM4_DISPATCH_PREPARE_WORDS + 2> words;
+    std::array<uint32_t, IREE_HAL_AMD_GPU_PM4_DISPATCH_PREPARE_LAUNCH_WORDS +
+                             IREE_HAL_AMD_GPU_PM4_DISPATCH_PREPARE_JOIN_WORDS +
+                             2>
+        words;
     words.fill(0xCAFEBABE);
     auto* end = iree_hal_amd_gpu_pm4_dispatch_emit_prepare(
-        words.data() + 1, &launch, UINT64_C(0x56789ABCDEF0), 0x103E0);
+        words.data() + 1, &launch, UINT64_C(0x56789ABCDEF0), nullptr, 0,
+        0x103E0);
     const uint32_t resource1 = gfxip.major == 11  ? 0xE0AF0000
                                : gfxip.minor == 0 ? 0xE00F0000
                                                   : 0xC00F0000;
@@ -242,7 +246,7 @@ TEST_F(DispatchTest, PreparationProgramEmitsCompleteOrderedLaunch) {
         UINT32_MAX, 0xFF,       0,          0,          0xA,
         0x103E0};
     EXPECT_EQ(end - words.data() - 1,
-              IREE_HAL_AMD_GPU_PM4_DISPATCH_PREPARE_WORDS);
+              iree_hal_amd_gpu_pm4_dispatch_prepare_word_count(true, false));
     EXPECT_EQ(std::vector<uint32_t>(words.data() + 1, end), expected);
     EXPECT_EQ(words.front(), 0xCAFEBABEu);
     EXPECT_EQ(words.back(), 0xCAFEBABEu);
@@ -268,53 +272,50 @@ TEST_F(DispatchTest, IndirectGeometryIgnoresHostCountsAndRejectsExactItems) {
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
         Prepare(config, flags | IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT));
-    layout_.indirect_copy_count = 32;
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
-                          Prepare(config, flags));
-    layout_.indirect_copy_count = 0;
   }
 }
 
-TEST_F(DispatchTest,
-       IndirectPacketsCopyOnlyAdmittedCountBytesAndJoinVisibility) {
+TEST_F(DispatchTest, IndirectCountsDescribeOnlyNativeDestinationFields) {
   std::array<iree_hal_amd_gpu_metadata_argument_t, 3> arguments = {};
-  for (uint32_t i = 0; i < 3; ++i) {
+  const uint32_t offsets[] = {4, 12, 16};
+  for (uint32_t i = 0; i < arguments.size(); ++i) {
     arguments[i].kind = static_cast<iree_hal_amd_gpu_metadata_argument_kind_t>(
         IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_X + i);
-    arguments[i].offset = 16 + i * 4;
+    arguments[i].offset = offsets[i];
     arguments[i].size = 4;
   }
-  metadata_.has_argument_metadata = true;
   metadata_.arguments = arguments.data();
+  metadata_.has_argument_metadata = true;
   metadata_.argument_count = arguments.size();
-  metadata_.kernarg_segment_size = 32;
-  metadata_.kernarg_segment_alignment = 8;
+  metadata_.kernarg_segment_size = 20;
+  metadata_.kernarg_segment_alignment = 4;
   iree_hal_amd_gpu_kernarg_layout_t* layout = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_kernarg_layout_allocate(
       &metadata_, iree_allocator_system(), &layout));
-  ASSERT_EQ(layout->indirect_copy_count, 1u);
-  std::array<uint32_t, 28> words;
+  function_.base.kernarg = layout;
+  const auto flags = IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS;
+  const auto storage = iree_hal_amd_gpu_pm4_dispatch_storage(&function_, flags);
+  EXPECT_EQ(storage.count_offset, 24u);
+  EXPECT_EQ(storage.length, 56u);
+  alignas(8) std::array<uint32_t, 15> words;
   words.fill(0xCAFEBABE);
-  auto* end = iree_hal_amd_gpu_pm4_dispatch_emit_indirect(
-      words.data() + 1, layout, layout->indirect_copy_count, 0x1234FFFFFFF4,
-      0x567800001000, 0x103E0, 0x8001);
-  EXPECT_EQ(end - words.data() - 1,
-            iree_hal_amd_gpu_pm4_dispatch_indirect_word_count(1));
-  const std::vector<uint32_t> expected = {
-      0xC0055000, 0x60300000, 0xFFFFFFF4, 0x1234, 0x1010, 0x5678, 12,
-      0xC0055000, 0,          0,          0,      0,      0,      0,
-      0xC0065800, 0,          UINT32_MAX, 0xFF,   0,      0,      0xA,
-      0x103E0,    0xC0021602, 0xFFFFFFF4, 0x1234, 0x8001};
-  EXPECT_EQ(std::vector<uint32_t>(words.begin() + 1, words.end() - 1),
-            expected);
-  EXPECT_EQ(words.front(), 0xCAFEBABEu);
-  EXPECT_EQ(words.back(), 0xCAFEBABEu);
-  // Caller-owned native arguments receive no writes or inferred geometry.
-  end = iree_hal_amd_gpu_pm4_dispatch_emit_indirect(
-      words.data(), layout, 0, 0x123400000010, 0, 0, 0x8001);
-  EXPECT_EQ(end - words.data(), 4);
-  EXPECT_EQ((std::array<uint32_t, 4>{words[0], words[1], words[2], words[3]}),
-            (std::array<uint32_t, 4>{0xC0021602, 0x10, 0x1234, 0x8001}));
+  iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
+      &function_, &dispatch_, iree_const_byte_span_empty(), nullptr, flags,
+      &storage, words.data());
+  // X is a separate field; Y and Z share the next interval after a gap.
+  EXPECT_EQ(words[10], 48u);
+  EXPECT_EQ(words[11], 2u);
+  EXPECT_EQ(words[12], (1u << 18) | 4u);
+  EXPECT_EQ(words[13], (2u << 18) | (1u << 16) | 12u);
+  EXPECT_EQ(words[14], 0xCAFEBABEu);
+  for (auto external : {IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_ARGUMENTS,
+                        IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_ARGUMENTS}) {
+    EXPECT_EQ(
+        iree_hal_amd_gpu_pm4_dispatch_storage(&function_, flags | external)
+            .length,
+        0u);
+  }
+  EXPECT_EQ(iree_hal_amd_gpu_pm4_dispatch_storage(&function_, 0).length, 20u);
   iree_hal_amd_gpu_kernarg_layout_free(layout);
 }
 

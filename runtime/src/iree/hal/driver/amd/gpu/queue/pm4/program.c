@@ -8,6 +8,7 @@
 
 #include "iree/base/internal/memory_copy.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/commands.h"
+#include "iree/hal/driver/amd/gpu/queue/pm4/dispatch.h"
 #include "iree/hal/driver/amd/status.h"
 
 iree_status_t iree_hal_amd_gpu_pm4_program_pool_initialize(
@@ -26,18 +27,23 @@ iree_status_t iree_hal_amd_gpu_pm4_program_pool_initialize(
   iree_hal_amd_gpu_gfxip_version_t gfxip = {
       context->target_info.gfx_ip.major, context->target_info.gfx_ip.minor,
       context->target_info.gfx_ip.stepping};
-  iree_const_byte_span_t code[2 + IREE_HAL_AMD_GPU_CONTROL_PROGRAM_COUNT];
+  iree_const_byte_span_t code[3 + IREE_HAL_AMD_GPU_CONTROL_PROGRAM_COUNT];
   iree_hal_amd_gpu_image_kernel_t kernels[IREE_ARRAYSIZE(code)];
   IREE_RETURN_IF_ERROR(
       iree_hal_amd_gpu_fixup_program_query(gfxip, &code[0], &kernels[0]));
   IREE_RETURN_IF_ERROR(
       iree_hal_amd_gpu_blit_program_query(gfxip, &code[1], &kernels[1]));
+  iree_hal_amd_gpu_pm4_dispatch_program_t counts;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amd_gpu_pm4_count_program_query(gfxip, &counts));
+  code[2] = counts.code;
+  kernels[2] = counts.kernel;
   iree_status_t status = iree_ok_status();
   for (uint32_t i = 0;
        i < IREE_HAL_AMD_GPU_CONTROL_PROGRAM_COUNT && iree_status_is_ok(status);
        ++i) {
-    status = iree_hal_amd_gpu_control_program_query(gfxip, i, &code[2 + i],
-                                                    &kernels[2 + i]);
+    status = iree_hal_amd_gpu_control_program_query(gfxip, i, &code[3 + i],
+                                                    &kernels[3 + i]);
   }
   IREE_RETURN_IF_ERROR(status);
   uint64_t byte_length =
@@ -57,15 +63,17 @@ iree_status_t iree_hal_amd_gpu_pm4_program_pool_initialize(
   const amdf_queue_format_features_t format_features =
       context->families[native_family_ordinal].format_features;
   memset(contents.data, 0, byte_length);
+  iree_hal_amd_gpu_pm4_launch_t* fixed[] = {&out_pool->fixup, &out_pool->blit,
+                                            &out_pool->counts};
   uint64_t offset = 0;
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(code) && iree_status_is_ok(status);
        ++i) {
     memcpy(contents.data + offset, code[i].data, code[i].data_length);
     kernels[i].entry_offset = offset;
-    iree_hal_amd_gpu_pm4_launch_t* launch = i == 0 ? &out_pool->fixup
-                                            : i == 1
-                                                ? &out_pool->blit
-                                                : &out_pool->control[i - 2];
+    iree_hal_amd_gpu_pm4_launch_t* launch =
+        i < IREE_ARRAYSIZE(fixed)
+            ? fixed[i]
+            : &out_pool->control[i - IREE_ARRAYSIZE(fixed)];
     status = iree_hal_amd_gpu_pm4_launch_initialize(
         gfxip, format_features, &kernels[i], address, launch);
     offset += iree_align_uint64(code[i].data_length, 256);

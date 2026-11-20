@@ -259,6 +259,7 @@ iree_runtime_cc_library(
     deps = [
         ":barrier",
         ":commands",
+        ":dispatch",
         ":launch",
         "//libamdf:headers",
         "//runtime/src/iree/base",

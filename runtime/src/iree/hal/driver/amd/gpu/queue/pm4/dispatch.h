@@ -70,13 +70,31 @@ static_assert(sizeof(iree_hal_amd_gpu_pm4_dispatch_packet_t) == 64,
 // shader-readable dispatch packet has separate retirement or invocation
 // storage.
 typedef struct iree_hal_amd_gpu_pm4_dispatch_storage_t {
-  // Native kernargs and optional two-pointer preparation arguments.
+  // Native kernargs, optional preparation arguments, and their count-copy
+  // table.
   uint32_t length;
   // Power-of-two alignment of the complete allocation.
   uint32_t alignment;
   // Helper argument offset; unused without indirect packet preparation.
   uint32_t prepare_offset;
+  // Private packing program arguments, or zero when it has no writes.
+  uint32_t count_offset;
 } iree_hal_amd_gpu_pm4_dispatch_storage_t;
+
+// Native arguments for the resident count program. The private copy ranges
+// follow this record in the same allocation as their destination kernargs.
+typedef struct iree_hal_amd_gpu_pm4_count_arguments_t {
+  // Source of the three device-produced workgroup counts.
+  uint64_t counts;
+  // Invocation-private native kernarg address.
+  uint64_t target;
+  // Byte displacement of the packed ranges relative to target.
+  uint32_t table_offset;
+  // Number of ranges copied by one workgroup.
+  uint32_t range_count;
+} iree_hal_amd_gpu_pm4_count_arguments_t;
+static_assert(sizeof(iree_hal_amd_gpu_pm4_count_arguments_t) == 24,
+              "count kernargs match the resident program");
 
 // Queries bounded argument storage for an admitted function/argument mode.
 iree_hal_amd_gpu_pm4_dispatch_storage_t iree_hal_amd_gpu_pm4_dispatch_storage(
@@ -110,17 +128,27 @@ typedef struct iree_hal_amd_gpu_pm4_dispatch_t {
 // bounded publication window alongside its dependencies and retirement tail.
 enum {
   IREE_HAL_AMD_GPU_PM4_DISPATCH_MAX_WORDS = 160,
-  // Preparation launch, direct dispatch, completion join, and cache acquire.
-  IREE_HAL_AMD_GPU_PM4_DISPATCH_PREPARE_WORDS = 26 + 5 + 2 + 8,
+  // Each geometry writer has two user SGPRs and one direct workgroup.
+  IREE_HAL_AMD_GPU_PM4_DISPATCH_PREPARE_LAUNCH_WORDS = 26 + 5,
+  // All geometry writers precede one shared compute join and cache acquire.
+  IREE_HAL_AMD_GPU_PM4_DISPATCH_PREPARE_JOIN_WORDS = 2 + 8,
   // Instruction extent, including alignment and speculative fetch padding.
   IREE_HAL_AMD_GPU_PM4_DISPATCH_PROGRAM_LENGTH = 512,
 };
 
-// Copies and their visibility boundary precede one four-DWORD MEC dispatch.
-static inline uint32_t iree_hal_amd_gpu_pm4_dispatch_indirect_word_count(
-    uint16_t copy_count) {
-  return copy_count ? (uint32_t)copy_count * 7 + 7 + 8 + 4 : 4;
+static inline uint32_t iree_hal_amd_gpu_pm4_dispatch_prepare_word_count(
+    bool packet, bool counts) {
+  const uint32_t writers = (uint32_t)packet + (uint32_t)counts;
+  return writers
+             ? writers * IREE_HAL_AMD_GPU_PM4_DISPATCH_PREPARE_LAUNCH_WORDS +
+                   IREE_HAL_AMD_GPU_PM4_DISPATCH_PREPARE_JOIN_WORDS
+             : 0;
 }
+
+// Selects the resident program that writes the requested native block counts.
+iree_status_t iree_hal_amd_gpu_pm4_count_program_query(
+    iree_hal_amd_gpu_gfxip_version_t gfxip,
+    iree_hal_amd_gpu_pm4_dispatch_program_t* out_program);
 
 // Admits public launch geometry and argument representation against a prepared
 // executable. Does not access buffers, capture caller storage, or resolve
@@ -145,7 +173,8 @@ void iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
     const iree_hal_amd_gpu_pm4_function_t* function,
     const iree_hal_amd_gpu_pm4_dispatch_t* dispatch,
     iree_const_byte_span_t constants, const uint64_t* binding_addresses,
-    iree_hal_dispatch_flags_t flags, void* target);
+    iree_hal_dispatch_flags_t flags,
+    const iree_hal_amd_gpu_pm4_dispatch_storage_t* storage, void* target);
 
 // Initializes the immutable packet fields. Device preparation fills indirect
 // grid counts; publication binds the invocation's actual kernarg address. The
@@ -157,23 +186,12 @@ void iree_hal_amd_gpu_pm4_dispatch_emplace_packet(
     iree_hal_dispatch_flags_t flags,
     iree_hal_amd_gpu_pm4_dispatch_packet_t* target);
 
-// Emits 41 DWORDs preparing one indirect packet and joining its writes before
-// the consumer's launch state is bound. The two-pointer argument block is owned
-// independently of its destination packet through native retirement.
+// Emits each selected geometry writer, then joins their independent writes
+// before the consuming launch is bound. At least one program is selected.
 uint32_t* iree_hal_amd_gpu_pm4_dispatch_emit_prepare(
-    uint32_t* words, const iree_hal_amd_gpu_pm4_launch_t* prepare,
-    uint64_t argument_address, uint32_t cache_control);
-
-// Emits admitted device-time geometry. copy_count is zero for caller-owned
-// indirect native arguments; otherwise it is layout->indirect_copy_count.
-// Exact count bytes are copied into private kernargs, joined, and made visible
-// using the prepared CP-to-shader cache control before the indirect launch.
-// Zero base addresses produce relocation templates containing relative offsets.
-// The input tuple remains stable through all CP and shader uses.
-uint32_t* iree_hal_amd_gpu_pm4_dispatch_emit_indirect(
-    uint32_t* words, const iree_hal_amd_gpu_kernarg_layout_t* layout,
-    uint16_t copy_count, uint64_t parameters_address, uint64_t argument_address,
-    uint32_t cache_control, uint32_t initiator);
+    uint32_t* words, const iree_hal_amd_gpu_pm4_launch_t* packet,
+    uint64_t packet_arguments, const iree_hal_amd_gpu_pm4_launch_t* counts,
+    uint64_t count_arguments, uint32_t cache_control);
 
 #ifdef __cplusplus
 }  // extern "C"

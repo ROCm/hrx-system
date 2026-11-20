@@ -35,6 +35,8 @@ typedef struct iree_hal_amd_gpu_pm4_program_pool_t {
   iree_hal_amd_gpu_pm4_launch_t fixup;
   // Prepared dynamic-extent copy/fill kernel.
   iree_hal_amd_gpu_pm4_launch_t blit;
+  // Exact device-count copies into this invocation's native argument segment.
+  iree_hal_amd_gpu_pm4_launch_t counts;
   // Scalar atomic launches indexed by instruction scope and integer width.
   iree_hal_amd_gpu_pm4_launch_t control[IREE_HAL_AMD_GPU_CONTROL_PROGRAM_COUNT];
   // KERNEL submission enters IB1 and needs an explicit exit continuation.

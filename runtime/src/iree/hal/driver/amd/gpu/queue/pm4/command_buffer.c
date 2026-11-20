@@ -933,8 +933,10 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
     IREE_RETURN_IF_ERROR(
         iree_hal_resource_set_insert(buffer->resources, 1, &executable));
   }
+  const iree_hal_amd_gpu_pm4_dispatch_storage_t storage =
+      iree_hal_amd_gpu_pm4_dispatch_storage(function, flags);
   const bool prepare_packet = function->packet && indirect_parameters;
-  if (prepare_packet) {
+  if (prepare_packet || storage.count_offset) {
     buffer->pending_barrier.acquire_cache_control |=
         buffer->profile.command_processor_bypasses_l2 ? buffer->profile.acquire
                                                       : buffer->profile.shader;
@@ -973,8 +975,6 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
                                                       : buffer->profile.shader;
   }
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_flush_barrier(buffer));
-  const iree_hal_amd_gpu_pm4_dispatch_storage_t storage =
-      iree_hal_amd_gpu_pm4_dispatch_storage(function, flags);
   uint32_t argument_offset = 0;
   void* arguments = NULL;
   if (storage.length) {
@@ -982,7 +982,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
         &buffer->recording.storage, storage.length, storage.alignment,
         &argument_offset, &arguments));
     iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
-        function, &dispatch, constants, NULL, flags, arguments);
+        function, &dispatch, constants, NULL, flags, &storage, arguments);
     if ((flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE) &&
         (function->base.kernarg->requirements &
          IREE_HAL_AMD_GPU_KERNARG_REQUIREMENT_GRID_SYNC)) {
@@ -1003,22 +1003,17 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
                                                  packet);
   }
   const uint32_t prepare_words =
-      prepare_packet ? IREE_HAL_AMD_GPU_PM4_DISPATCH_PREPARE_WORDS : 0;
+      iree_hal_amd_gpu_pm4_dispatch_prepare_word_count(
+          prepare_packet, storage.count_offset != 0);
   const uint32_t launch_words = function->launch.user_data_count
                                     ? 24 + function->launch.user_data_count
                                     : 22;
-  const uint16_t copy_count = indirect_parameters && !indirect
-                                  ? function->base.kernarg->indirect_copy_count
-                                  : 0;
-  if (prepare_packet || copy_count) {
+  if (prepare_words) {
     // The body rewrites private geometry/arguments. Even fixed address repairs
     // cannot remove the join protecting a prior invocation's shader readers.
     buffer->program->invariant_fixups = false;
   }
-  const uint32_t dispatch_words =
-      indirect_parameters
-          ? iree_hal_amd_gpu_pm4_dispatch_indirect_word_count(copy_count)
-          : 5;
+  const uint32_t dispatch_words = indirect_parameters ? 4 : 5;
   const uint32_t profile_words = buffer->program->profile ? 8 : 0;
   const uint32_t word_count =
       prepare_words + launch_words + dispatch_words + 2 * profile_words;
@@ -1027,9 +1022,11 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_recording_commands(
       &buffer->recording, word_count, &command_offset, &words));
   uint32_t* cursor = words;
-  if (prepare_packet) {
+  if (prepare_words) {
     cursor = iree_hal_amd_gpu_pm4_dispatch_emit_prepare(
-        cursor, function->packet->prepare, 0, buffer->profile.shader);
+        cursor, prepare_packet ? function->packet->prepare : NULL, 0,
+        storage.count_offset ? &buffer->pool->counts : NULL, 0,
+        buffer->profile.shader);
   }
   const uint32_t launch_offset = command_offset + prepare_words * 4;
   const iree_hal_amd_gpu_pm4_launch_inputs_t inputs = {
@@ -1048,11 +1045,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
     cursor = iree_hal_amd_gpu_pm4_emit_clock(cursor, 0, true);
   }
   if (indirect_parameters) {
-    iree_hal_amd_gpu_pm4_dispatch_emit_indirect(
-        cursor, function->base.kernarg, copy_count, 0, 0,
-        buffer->profile.command_processor_bypasses_l2 ? buffer->profile.acquire
-                                                      : buffer->profile.shader,
-        initiator);
+    iree_hal_amd_gpu_pm4_emit_dispatch_indirect(cursor, 0, initiator);
   } else {
     iree_hal_amd_gpu_pm4_emit_dispatch_direct(
         cursor, dispatch.geometry.workgroup_count, initiator);
@@ -1149,26 +1142,22 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
         buffer, false, command_offset + (word_count - profile_words - 3) * 4,
         parameters, config.workgroup_count_ref.offset, false));
-    iree_status_t status = iree_ok_status();
-    for (uint16_t i = 0; i < copy_count && iree_status_is_ok(status); ++i) {
-      uint32_t* copy = cursor + i * 7;
-      const uint32_t offset =
+    if (storage.count_offset) {
+      const uint32_t count_offset = argument_offset + storage.count_offset;
+      const uint32_t count_launch_offset =
           command_offset +
-          (prepare_words + launch_words + profile_words + i * 7) * 4;
-      status = iree_hal_amd_gpu_pm4_command_pointer(
-          buffer, false, offset + 8, parameters,
-          config.workgroup_count_ref.offset +
-              iree_unaligned_load_le_u64(copy + 2),
-          false);
-      if (iree_status_is_ok(status)) {
-        status = iree_hal_amd_gpu_pm4_command_pointer(
-            buffer, false, offset + 16, IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE,
-            argument_offset + iree_unaligned_load_le_u64(copy + 4), true);
-      }
-    }
-    IREE_RETURN_IF_ERROR(status);
-    if (copy_count) {
-      buffer->pending_dma = false;
+          (prepare_packet
+               ? IREE_HAL_AMD_GPU_PM4_DISPATCH_PREPARE_LAUNCH_WORDS * 4
+               : 0);
+      IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
+          buffer, true, count_offset, parameters,
+          config.workgroup_count_ref.offset, false));
+      IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
+          buffer, true, count_offset + 8, IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE,
+          argument_offset, true));
+      IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
+          buffer, false, count_launch_offset + 24 * 4,
+          IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE, count_offset, true));
     }
     if (prepare_packet) {
       const uint32_t prepare_offset = argument_offset + storage.prepare_offset;
