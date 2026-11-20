@@ -418,6 +418,16 @@ count still needs per-tile measurements on the completed request.
    The report gives the tile, loaded group, and address for checking the native
    image. A request-dependent call count appears as `unknown`. Obtain its
    visits from the request geometry or a matched device capture.
+
+   If two loops perform the same matrix operations and move the same bytes,
+   count packets before the first MAC, from the first through the last MAC,
+   and after the last MAC. In one eight-trip projection, moving packed reads
+   between load ports cut the first interval from 35 to 30 packets per trip
+   and the middle interval from 83 to 79. The last nine packets stayed the
+   same. That accounts for all 72 packets saved per call. In the disassembly,
+   distinguish loads tied to a port, such as accumulator loads on A, from
+   packed loads that can issue on either A or B. Two ports that are free on
+   the current cycle can have very different demand over the whole loop.
 5. **Trace a wait to its owner.** A core stalled acquiring a record identifies
    the consumer. Locate the matching publication, the producer or DMA that
    performs it, and the event preventing that producer from progressing. A
