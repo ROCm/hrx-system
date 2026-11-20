@@ -1015,20 +1015,6 @@ uint16_t* loom_aie2p_native_descriptor_bank(loom_aie2p_native_tile_t* tile,
                                             uint8_t engine, uint16_t* out_base,
                                             uint16_t* out_count);
 
-typedef struct loom_aie2p_native_queue_status_t {
-  // Absolute native register address of the selected DMA channel status.
-  uint64_t address;
-  // Pending queue, running task, and stalled-task bits that must all clear.
-  uint32_t pending_mask;
-} loom_aie2p_native_queue_status_t;
-
-// Shares the complete retirement condition between configuration and resident
-// workers. Payload arrival alone does not cover trailing descriptor updates.
-loom_aie2p_native_queue_status_t loom_aie2p_native_queue_status(
-    const loom_aie2p_native_context_t* context,
-    const loom_aie2p_native_tile_t* tile, uint16_t engine,
-    loom_xdna_dma_direction_t direction);
-
 // Selects startup tasks and, when required, a retained reader continuation.
 // progress_channel is NULL for queues without an equal-ordinal channel proof,
 // including queues whose admission belongs to an ordered distribution phase.

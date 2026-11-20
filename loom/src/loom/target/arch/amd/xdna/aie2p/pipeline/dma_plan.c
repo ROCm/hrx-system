@@ -200,6 +200,62 @@ const loom_aie2p_native_memory_layout_t loom_aie2p_sram_memory = {
         },
 };
 
+loom_aie2p_native_queue_status_t loom_aie2p_native_queue_status(
+    const loom_xdna_array_family_t* family,
+    loom_xdna_tile_coordinate_t coordinate,
+    const loom_aie2p_native_memory_layout_t* layout, uint16_t engine,
+    loom_xdna_dma_direction_t direction) {
+  const loom_xdna_register_field_id_t* fields =
+      layout ? layout->directions[direction - 1].status : NULL;
+  static const loom_xdna_register_field_id_t shim_status[2][6] = {
+      {LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_STATUS_TASK_QUEUE_SIZE,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_STATUS_CHANNEL_RUNNING,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_STATUS_STALLED_LOCK_ACQUIRE,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_STATUS_STALLED_LOCK_RELEASE,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_STATUS_STALLED_STREAM_BACKPRESSURE,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_STATUS_STALLED_COMPLETION_TOKEN},
+      {LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_STATUS_TASK_QUEUE_SIZE,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_STATUS_CHANNEL_RUNNING,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_STATUS_STALLED_LOCK_ACQUIRE,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_STATUS_STALLED_LOCK_RELEASE,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_STATUS_STALLED_STREAM_STARVATION,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_STATUS_STALLED_TOKEN_OR_COUNT_FIFO},
+  };
+  if (!fields) {
+    fields = shim_status[direction - 1];
+  }
+  uint32_t mask = loom_xdna_register_field_encode(fields[0], 7);
+  for (iree_host_size_t i = 1; i < 6; ++i) {
+    mask |= loom_xdna_register_field_encode(fields[i], 1);
+  }
+  return (loom_aie2p_native_queue_status_t){
+      .address = loom_xdna_register_field_address(family, fields[0], coordinate,
+                                                  &engine),
+      .pending_mask = mask,
+  };
+}
+
+void loom_aie2p_native_encode_linear_descriptor(
+    const loom_xdna_dma_facts_t* dma, loom_xdna_tile_kind_t kind,
+    uint32_t byte_length, uint32_t words[8]) {
+  words[0] = byte_length / dma->transfer_length_granularity -
+             dma->transfer_length_offset;
+  if (kind == LOOM_XDNA_TILE_KIND_SHIM_NOC) {
+    words[4] = loom_xdna_register_field_encode(
+        LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD4_BURST_LENGTH, 3);
+    words[5] = loom_xdna_register_field_encode(
+        LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD5_AXI_CACHE, 2);
+    words[7] = loom_xdna_register_field_encode(
+        LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD7_VALID_BD, 1);
+  } else if (kind == LOOM_XDNA_TILE_KIND_MEMORY) {
+    words[7] = loom_xdna_register_field_encode(
+        LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_DMA_BD_WORD7_VALID_BD, 1);
+  } else {
+    words[5] = loom_xdna_register_field_encode(
+        LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_BD_WORD5_VALID_BD, 1);
+  }
+}
+
 bool loom_aie2p_native_encode_descriptor(
     const loom_xdna_array_family_t* family,
     const loom_storage_geometry_t* geometry, const loom_xdna_dma_facts_t* dma,
@@ -211,15 +267,9 @@ bool loom_aie2p_native_encode_descriptor(
           record_count, dma, &layout, reason)) {
     return false;
   }
-  words[0] = layout.transfer_byte_length / dma->transfer_length_granularity -
-             dma->transfer_length_offset;
+  loom_aie2p_native_encode_linear_descriptor(
+      dma, kind, layout.transfer_byte_length, words);
   if (kind == LOOM_XDNA_TILE_KIND_SHIM_NOC) {
-    words[4] = loom_xdna_register_field_encode(
-        LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD4_BURST_LENGTH, 3);
-    words[5] = loom_xdna_register_field_encode(
-        LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD5_AXI_CACHE, 2);
-    words[7] = loom_xdna_register_field_encode(
-        LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD7_VALID_BD, 1);
     const loom_xdna_register_field_id_t step[] = {
         LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD3_D0_STEP_SIZE,
         LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD4_D1_STEP_SIZE,
@@ -236,8 +286,6 @@ bool loom_aie2p_native_encode_descriptor(
       }
     }
   } else if (kind == LOOM_XDNA_TILE_KIND_MEMORY) {
-    words[7] = loom_xdna_register_field_encode(
-        LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_DMA_BD_WORD7_VALID_BD, 1);
     const loom_xdna_register_field_id_t step[] = {
         LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_DMA_BD_WORD2_D0_STEP_SIZE,
         LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_DMA_BD_WORD3_D1_STEP_SIZE,
@@ -256,8 +304,6 @@ bool loom_aie2p_native_encode_descriptor(
       }
     }
   } else {
-    words[5] = loom_xdna_register_field_encode(
-        LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_BD_WORD5_VALID_BD, 1);
     const loom_xdna_register_field_id_t step[] = {
         LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_BD_WORD2_D0_STEP_SIZE,
         LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_BD_WORD2_D1_STEP_SIZE,

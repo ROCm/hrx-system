@@ -14,11 +14,22 @@
 
 namespace {
 
-TEST(Aie2pProgramCatalogTest, SharesRelocatedStreamsAndPreservesInvocation) {
+class Aie2pProgramCatalogTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    iree_arena_block_pool_initialize(4096, iree_allocator_system(), &pool);
+    iree_arena_initialize(&pool, &arena);
+  }
+  void TearDown() override {
+    iree_arena_deinitialize(&arena);
+    iree_arena_block_pool_deinitialize(&pool);
+  }
+
   iree_arena_block_pool_t pool;
-  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &pool);
   iree_arena_allocator_t arena;
-  iree_arena_initialize(&pool, &arena);
+};
+
+TEST_F(Aie2pProgramCatalogTest, SharesRelocatedStreamsAndPreservesInvocation) {
   const auto* family = loom_xdna_npu2_array_family();
   std::vector<loom_aie2p_execution_tile_t> occupancy(family->column_count *
                                                      family->row_count);
@@ -132,7 +143,7 @@ TEST(Aie2pProgramCatalogTest, SharesRelocatedStreamsAndPreservesInvocation) {
       .control_records = &invoke,
       .control_record_count = 1,
   };
-  IREE_ASSERT_OK(loom_aie2p_program_catalog_install(&transport, &catalog, 1,
+  IREE_ASSERT_OK(loom_aie2p_program_catalog_install(&transport, &catalog, 1, 1,
                                                     &arena, &program));
   EXPECT_EQ(program.array_record_count, 7u);
   EXPECT_EQ(program.array_records[0].value.register_write32.value, 2u);
@@ -147,6 +158,7 @@ TEST(Aie2pProgramCatalogTest, SharesRelocatedStreamsAndPreservesInvocation) {
   EXPECT_EQ(program.array_records[6].value.register_write32.value, 0u);
   EXPECT_EQ(program.control_records, &invoke);
   EXPECT_EQ(program.control_record_count, 1u);
+  EXPECT_EQ(program.upload, nullptr);
 
   const uint64_t full =
       loom_xdna_array_tile_facts(family, binding.memory)->memory.local_capacity;
@@ -156,8 +168,124 @@ TEST(Aie2pProgramCatalogTest, SharesRelocatedStreamsAndPreservesInvocation) {
   EXPECT_FALSE(iree_string_view_is_empty(requirement));
   EXPECT_EQ(catalog.descriptor_count, 0u);
   EXPECT_EQ(occupancy[1].memory_length, full);
-  iree_arena_deinitialize(&arena);
-  iree_arena_block_pool_deinitialize(&pool);
+}
+
+TEST_F(Aie2pProgramCatalogTest, UploadsPlacedCatalogsOnOwnedColumns) {
+  const auto* family = loom_xdna_npu2_array_family();
+  std::vector<loom_aie2p_execution_tile_t> occupancy(family->column_count *
+                                                     family->row_count);
+  loom_aie2p_code_transport_t transport = {};
+  transport.plan.tiles = occupancy.data();
+  transport.plan.routing.family = family;
+  auto& shim = occupancy[loom_xdna_array_physical_tile_index(family, {2, 0})];
+  auto& memory = occupancy[loom_xdna_array_physical_tile_index(family, {2, 1})];
+  shim.mm2s_count = shim.descriptor_counts[0] = 1;
+  memory.s2mm_count = memory.descriptor_counts[0] = memory.lock_count = 1;
+  memory.memory_length = 1024;
+
+  std::vector<uint8_t> code(12 * 1024);
+  loom_native_section_t section = {
+      .storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
+      .access =
+          LOOM_NATIVE_SECTION_ACCESS_READ | LOOM_NATIVE_SECTION_ACCESS_EXECUTE,
+      .alignment = 16,
+      .contents = iree_make_const_byte_span(code.data(), code.size()),
+  };
+  loom_native_section_contribution_layout_t contribution = {};
+  loom_aie2p_program_layout_group_t groups[2] = {};
+  const loom_aie2p_program_layout_t layout = {
+      .groups = groups,
+      .group_count = 2,
+  };
+  const loom_aie2p_linked_tile_t linked = {
+      .assembly =
+          {
+              .sections = &section,
+              .section_count = 1,
+              .contribution_layouts = &contribution,
+              .contribution_layout_count = 1,
+          },
+  };
+  // Two workers share SRAM in column two. Column five has a catalog but no
+  // application-owned shim ingress. Present the workers in reverse placement
+  // order to the installer.
+  loom_aie2p_program_catalog_t catalogs[3] = {};
+  const loom_xdna_tile_coordinate_t workers[] = {{2, 2}, {5, 2}, {2, 3}};
+  for (uint16_t i = 0; i < 3; ++i) {
+    code[0] = static_cast<uint8_t>(19 + i);
+    const loom_aie2p_code_transport_binding_t binding = {
+        .compute = workers[i],
+        .memory = {workers[i].column, 1},
+        .engine = static_cast<uint16_t>(workers[i].row - 2),
+        .first_descriptor = static_cast<uint16_t>(24 + i),
+        .descriptor_count = 1,
+        .code_packet = static_cast<uint8_t>(3 + i),
+        .reply_packet = static_cast<uint8_t>(23 + i),
+    };
+    iree_string_view_t requirement;
+    IREE_ASSERT_OK(loom_aie2p_program_catalog_build(
+        &transport, &binding, &layout, &linked, &arena, &catalogs[2 - i],
+        &requirement));
+    ASSERT_TRUE(iree_string_view_is_empty(requirement));
+  }
+  const loom_aie2p_program_record_t initial[] = {
+      {
+          .type = LOOM_AIE2P_PROGRAM_RECORD_REGISTER_WRITE32,
+          .value = {.register_write32 = {0x232000, 2}},
+      },
+      {
+          .type = LOOM_AIE2P_PROGRAM_RECORD_REGISTER_WRITE32,
+          .value = {.register_write32 = {0x1c000, 0}},
+      },
+  };
+  loom_aie2p_array_program_t program = {
+      .array_records = initial,
+      .array_record_count = 2,
+  };
+  IREE_ASSERT_OK(loom_aie2p_program_catalog_install(&transport, catalogs, 3, 1,
+                                                    &arena, &program));
+  ASSERT_NE(program.upload, nullptr);
+  const auto& upload = *program.upload;
+  ASSERT_EQ(upload.patch_count, 1u);
+  const auto& patch = upload.patches[0];
+  ASSERT_LT(patch.record_index, upload.record_count);
+  const auto& descriptor = upload.records[patch.record_index];
+  ASSERT_EQ(descriptor.type, LOOM_AIE2P_PROGRAM_RECORD_REGISTER_BLOCK_WRITE32);
+  EXPECT_EQ(
+      descriptor.value.register_block_write32.address >> family->column_shift,
+      2u);
+  EXPECT_EQ(descriptor.value.register_block_write32.words[0],
+            patch.byte_length / 4);
+  ASSERT_EQ(patch.source_offset, 0u);
+  ASSERT_EQ(
+      patch.byte_length,
+      (catalogs[2].contents.word_count + catalogs[0].contents.word_count) * 4);
+  ASSERT_EQ(upload.contents.data_length, patch.byte_length);
+  for (size_t i : {2u, 0u}) {
+    const auto& catalog = catalogs[i];
+    const uint8_t* data =
+        upload.contents.data + catalog.offset - catalogs[2].offset;
+    for (size_t word = 0; word < catalog.contents.word_count; ++word) {
+      ASSERT_EQ(iree_unaligned_load_le_u32(data + 4 * word),
+                catalog.contents.words[word]);
+    }
+  }
+  EXPECT_EQ(upload.records[0].value.register_write32.address,
+            initial[0].value.register_write32.address);
+  size_t inline_count = 0;
+  for (size_t i = 0; i < upload.record_count; ++i) {
+    const auto& record = upload.records[i];
+    if (record.type != LOOM_AIE2P_PROGRAM_RECORD_REGISTER_BLOCK_WRITE32) {
+      continue;
+    }
+    for (const auto& catalog : catalogs) {
+      if (record.value.register_block_write32.words == catalog.contents.words) {
+        EXPECT_EQ(catalog.memory.column, 5u);
+        ++inline_count;
+      }
+    }
+  }
+  EXPECT_EQ(inline_count, 1u);
 }
 
 }  // namespace

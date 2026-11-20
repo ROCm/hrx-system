@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/target/arch/amd/xdna/aie2p/emit/catalog_upload.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/control_packet.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
 #include "loom/util/adaptive_sort.h"
@@ -199,27 +200,44 @@ iree_status_t loom_aie2p_program_catalog_build(
   return iree_ok_status();
 }
 
-iree_status_t loom_aie2p_program_catalog_install(
+static iree_status_t loom_aie2p_program_catalog_records(
     const loom_aie2p_code_transport_t* transport,
     const loom_aie2p_program_catalog_t* catalogs,
-    iree_host_size_t catalog_count, iree_arena_allocator_t* arena,
-    loom_aie2p_array_program_t* program) {
-  iree_host_size_t count = program->array_record_count;
+    iree_host_size_t catalog_count, const loom_aie2p_array_program_t* program,
+    iree_host_size_t first_record, const loom_aie2p_catalog_upload_t* upload,
+    iree_arena_allocator_t* arena,
+    const loom_aie2p_program_record_t** out_records,
+    iree_host_size_t* out_count) {
+  iree_host_size_t count =
+      program->array_record_count + (upload ? upload->program.record_count : 0);
   for (const loom_aie2p_native_switch_t* state = transport->plan.switches;
        state; state = state->next) {
     count += LOOM_AIE2P_NATIVE_SWITCH_BANK_COUNT;
   }
   for (iree_host_size_t i = 0; i < catalog_count; ++i) {
     if (catalogs[i].descriptor_count) {
-      count += catalogs[i].descriptor_count + 3;
+      count += catalogs[i].descriptor_count + 2 +
+               (!upload || !upload->columns[catalogs[i].memory.column]);
     }
   }
   loom_aie2p_program_record_t* records = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, count, sizeof(*records),
                                                  (void**)&records));
-  memcpy(records, program->array_records,
-         program->array_record_count * sizeof(*records));
-  iree_host_size_t position = program->array_record_count;
+  iree_host_size_t position = first_record;
+  if (first_record) {
+    memcpy(records, program->array_records, first_record * sizeof(*records));
+  }
+  if (upload) {
+    memcpy(records + position, upload->program.records,
+           upload->program.record_count * sizeof(*records));
+    position += upload->program.record_count;
+  }
+  const iree_host_size_t rest = program->array_record_count - first_record;
+  if (rest) {
+    memcpy(records + position, program->array_records + first_record,
+           rest * sizeof(*records));
+    position += rest;
+  }
   for (const loom_aie2p_native_switch_t* state = transport->plan.switches;
        state; state = state->next) {
     for (unsigned i = 0; i < LOOM_AIE2P_NATIVE_SWITCH_BANK_COUNT; ++i) {
@@ -240,16 +258,38 @@ iree_status_t loom_aie2p_program_catalog_install(
     memcpy(records + position, catalog->descriptors,
            catalog->descriptor_count * sizeof(*records));
     position += catalog->descriptor_count;
-    records[position++] = (loom_aie2p_program_record_t){
-        .type = LOOM_AIE2P_PROGRAM_RECORD_REGISTER_BLOCK_WRITE32,
-        .value.register_block_write32 = catalog->contents,
-    };
+    if (!upload || !upload->columns[catalog->memory.column]) {
+      records[position++] = (loom_aie2p_program_record_t){
+          .type = LOOM_AIE2P_PROGRAM_RECORD_REGISTER_BLOCK_WRITE32,
+          .value.register_block_write32 = catalog->contents,
+      };
+    }
     records[position++] = (loom_aie2p_program_record_t){
         .type = LOOM_AIE2P_PROGRAM_RECORD_REGISTER_WRITE32,
         .value.register_write32 = {catalog->reset.address, 0},
     };
   }
-  program->array_records = records;
-  program->array_record_count = count;
+  *out_records = records;
+  *out_count = count;
+  return iree_ok_status();
+}
+
+iree_status_t loom_aie2p_program_catalog_install(
+    const loom_aie2p_code_transport_t* transport,
+    const loom_aie2p_program_catalog_t* catalogs,
+    iree_host_size_t catalog_count, iree_host_size_t first_record,
+    iree_arena_allocator_t* arena, loom_aie2p_array_program_t* program) {
+  loom_aie2p_catalog_upload_t* upload = NULL;
+  IREE_RETURN_IF_ERROR(loom_aie2p_catalog_upload_build(
+      &transport->plan, catalogs, catalog_count, first_record, arena, &upload));
+  if (upload) {
+    IREE_RETURN_IF_ERROR(loom_aie2p_program_catalog_records(
+        transport, catalogs, catalog_count, program, first_record, upload,
+        arena, &upload->program.records, &upload->program.record_count));
+    program->upload = &upload->program;
+  }
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_catalog_records(
+      transport, catalogs, catalog_count, program, program->array_record_count,
+      NULL, arena, &program->array_records, &program->array_record_count));
   return iree_ok_status();
 }

@@ -76,6 +76,11 @@ loom_xdna_register_field_info_t loom_xdna_register_field_info(
 loom_xdna_register_dimension_info_t loom_xdna_register_field_dimension(
     loom_xdna_register_field_id_t field_id, iree_host_size_t ordinal);
 
+// Selects the shim DMA mux (MM2S) or demux (S2MM) field for a south port.
+// Returns INVALID for south lanes without a DMA connection in this direction.
+loom_xdna_register_field_id_t loom_xdna_shim_dma_mux_field(
+    loom_xdna_dma_direction_t direction, uint8_t south_channel);
+
 // Encodes an admitted raw semantic value into positioned 32-bit register bits.
 // The generated field identifier and value's signed or unsigned domain are
 // established by their producing compiler stage. This packs bits without

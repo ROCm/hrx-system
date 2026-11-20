@@ -255,7 +255,8 @@ iree_status_t loom_aie2p_native_queue_retire(
     uint16_t engine, loom_xdna_dma_direction_t direction, uint8_t packet,
     uint8_t reply) {
   const loom_aie2p_native_queue_status_t status =
-      loom_aie2p_native_queue_status(context, tile, engine, direction);
+      loom_aie2p_native_queue_status(context->family, tile->coordinate,
+                                     tile->memory_layout, engine, direction);
   const uint64_t origin =
       (uint64_t)tile->coordinate.column << context->family->column_shift |
       (uint64_t)tile->coordinate.row << context->family->row_shift;

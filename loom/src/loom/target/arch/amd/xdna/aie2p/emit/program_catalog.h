@@ -46,12 +46,13 @@ iree_status_t loom_aie2p_program_catalog_build(
 
 // Completes a compiler-generated pipeline's initialization while its cores
 // remain reset. All code-delivery paths have passed joint switch admission.
-// Invocation records and their runtime relocation indices remain unchanged.
+// first_record is the initial record boundary after all tile programs have
+// been loaded and before application routes or DMA resources are configured.
 iree_status_t loom_aie2p_program_catalog_install(
     const loom_aie2p_code_transport_t* transport,
     const loom_aie2p_program_catalog_t* catalogs,
-    iree_host_size_t catalog_count, iree_arena_allocator_t* arena,
-    loom_aie2p_array_program_t* program);
+    iree_host_size_t catalog_count, iree_host_size_t first_record,
+    iree_arena_allocator_t* arena, loom_aie2p_array_program_t* program);
 
 #ifdef __cplusplus
 }  // extern "C"

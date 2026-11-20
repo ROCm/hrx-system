@@ -93,6 +93,9 @@ struct loom_aie2p_configuration_plan_t {
   loom_aie2p_array_program_t* program;
   // Resident program loads in initialization order.
   loom_aie2p_configuration_load_t* loads;
+  // Initialization boundary after the final worker load, before pipeline
+  // routes.
+  iree_host_size_t after_program_loads;
   // Original physical data reservations shared by all oversized pipeline
   // workers.
   const loom_aie2p_execution_plan_t* replacement_scope;
@@ -726,6 +729,7 @@ static iree_status_t loom_aie2p_configuration_phase_emit(
         record.type = LOOM_AIE2P_PROGRAM_RECORD_TILE_PROGRAM_LOAD;
         record.value.tile_program_load.tile_program_index =
             (uint32_t)emitter->entry->tile_count++;
+        emitter->after_program_loads = record_count + 1;
         break;
       }
       case AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_DATA_RESERVE: {
@@ -1264,8 +1268,8 @@ static iree_status_t loom_aie2p_configuration_place_workers(
                                               requirement, provisional);
     }
     IREE_RETURN_IF_ERROR(loom_aie2p_program_catalog_install(
-        &transport, catalogs, plan->entry->tile_count, request->scratch_arena,
-        plan->program));
+        &transport, catalogs, plan->entry->tile_count,
+        plan->after_program_loads, request->scratch_arena, plan->program));
   }
   plan->entry->tiles = tiles;
   if (plan->report) {
