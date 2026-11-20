@@ -84,6 +84,23 @@ loom_xdna_register_dimension_info_t loom_xdna_register_field_dimension(
   };
 }
 
+loom_xdna_register_field_id_t loom_xdna_shim_dma_mux_field(
+    loom_xdna_dma_direction_t direction, uint8_t south_channel) {
+  static const loom_xdna_register_field_id_t fields[2][8] = {
+      {0, 0, LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_MUX_CONFIG_SOUTH2,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_MUX_CONFIG_SOUTH3, 0, 0,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_MUX_CONFIG_SOUTH6,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_MUX_CONFIG_SOUTH7},
+      {0, 0, LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DEMUX_CONFIG_SOUTH2,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DEMUX_CONFIG_SOUTH3,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DEMUX_CONFIG_SOUTH4,
+       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DEMUX_CONFIG_SOUTH5, 0, 0},
+  };
+  return south_channel < IREE_ARRAYSIZE(fields[0])
+             ? fields[direction - 1][south_channel]
+             : LOOM_XDNA_REGISTER_FIELD_INVALID;
+}
+
 uint32_t loom_xdna_register_field_encode(loom_xdna_register_field_id_t field_id,
                                          int64_t value) {
   const loom_xdna_register_field_t* field = &kLoomXdnaRegisterFields[field_id];

@@ -502,12 +502,18 @@ loom_cc_library(
 
 loom_cc_library(
     name = "program_catalog",
-    srcs = ["program_catalog.c"],
+    srcs = [
+        "catalog_upload.c",
+        "catalog_upload.h",
+        "program_catalog.c",
+    ],
     hdrs = ["program_catalog.h"],
     deps = [
         ":program",
         ":program_layout",
         ":tile_link",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/array:plan",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/pipeline:dma_plan",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/pipeline:execution_plan",
         "//loom/src/loom/target/arch/amd/xdna/array:registers",
         "//loom/src/loom/util:adaptive_sort",
@@ -615,6 +621,8 @@ loom_cc_test(
         "//loom/src/loom/target/arch/amd/xdna/device:profile",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal/driver/amd/xdna/image",
+        "//runtime/src/iree/hal/driver/amd/xdna/image/aie2p:npu2",
         "//runtime/src/iree/io:stream",
         "//runtime/src/iree/schemas:xdna_executable",
         "//runtime/src/iree/testing:gtest",

@@ -239,22 +239,6 @@ static iree_status_t loom_aie2p_native_config_routes(
       }
     }
   }
-  static const loom_xdna_register_field_id_t mux_fields[8] = {
-      0,
-      0,
-      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_MUX_CONFIG_SOUTH2,
-      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_MUX_CONFIG_SOUTH3,
-      0,
-      0,
-      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_MUX_CONFIG_SOUTH6,
-      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_MUX_CONFIG_SOUTH7};
-  static const loom_xdna_register_field_id_t demux_fields[6] = {
-      0,
-      0,
-      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DEMUX_CONFIG_SOUTH2,
-      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DEMUX_CONFIG_SOUTH3,
-      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DEMUX_CONFIG_SOUTH4,
-      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DEMUX_CONFIG_SOUTH5};
   for (iree_host_size_t i = 0; i < plan->routing.route_count; ++i) {
     const loom_aie2p_array_route_plan_t* edge = &plan->routing.routes[i];
     if (edge->switch_kind != LOOM_AIE2P_ARRAY_SWITCH_KIND_SHIM_MUX) {
@@ -262,8 +246,12 @@ static iree_status_t loom_aie2p_native_config_routes(
     }
     const loom_xdna_register_field_id_t field =
         edge->source_port == LOOM_XDNA_STREAM_PORT_DMA
-            ? mux_fields[edge->destination_channel]
-            : demux_fields[edge->source_channel];
+            ? loom_xdna_shim_dma_mux_field(
+                  LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM,
+                  edge->destination_channel)
+            : loom_xdna_shim_dma_mux_field(
+                  LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY,
+                  edge->source_channel);
     IREE_RETURN_IF_ERROR(loom_aie2p_native_config_register(
         config, edge->coordinate, field, NULL, 1,
         AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_WRITE_MASK32));
@@ -750,7 +738,8 @@ static iree_status_t loom_aie2p_native_config_wait_queue(
     const loom_aie2p_native_tile_t* tile, uint16_t engine,
     loom_xdna_dma_direction_t direction) {
   const loom_aie2p_native_queue_status_t status =
-      loom_aie2p_native_queue_status(config->context, tile, engine, direction);
+      loom_aie2p_native_queue_status(config->context->family, tile->coordinate,
+                                     tile->memory_layout, engine, direction);
   const uint64_t values[] = {status.address, status.pending_mask, 0};
   return loom_aie2p_native_config_op(
       config, AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_WAIT_MASK32,

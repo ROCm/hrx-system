@@ -118,6 +118,7 @@ loom_cc_library(
     name = "dma_plan",
     srcs = ["dma_plan.c"],
     hdrs = ["dma_plan.h"],
+    visibility = ["//loom/src/loom/target/arch/amd/xdna/aie2p:implementation"],
     deps = [
         "//loom/src/loom/analysis:storage_geometry",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/array:plan",

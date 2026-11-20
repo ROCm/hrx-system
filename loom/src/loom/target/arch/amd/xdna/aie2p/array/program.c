@@ -511,48 +511,18 @@ static iree_status_t loom_aie2p_program_build_completion_route(
   return iree_ok_status();
 }
 
-static loom_xdna_register_field_id_t loom_aie2p_program_shim_mux_field(
-    uint8_t south_channel) {
-  switch (south_channel) {
-    case 2:
-      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_MUX_CONFIG_SOUTH2;
-    case 3:
-      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_MUX_CONFIG_SOUTH3;
-    case 6:
-      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_MUX_CONFIG_SOUTH6;
-    case 7:
-      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_MUX_CONFIG_SOUTH7;
-    default:
-      return LOOM_XDNA_REGISTER_FIELD_INVALID;
-  }
-}
-
-static loom_xdna_register_field_id_t loom_aie2p_program_shim_demux_field(
-    uint8_t south_channel) {
-  switch (south_channel) {
-    case 2:
-      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DEMUX_CONFIG_SOUTH2;
-    case 3:
-      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DEMUX_CONFIG_SOUTH3;
-    case 4:
-      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DEMUX_CONFIG_SOUTH4;
-    case 5:
-      return LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DEMUX_CONFIG_SOUTH5;
-    default:
-      return LOOM_XDNA_REGISTER_FIELD_INVALID;
-  }
-}
-
 static iree_status_t loom_aie2p_program_accumulate_shim_mux_route(
     loom_aie2p_array_program_builder_t* builder,
     const loom_aie2p_array_route_plan_t* route) {
   loom_xdna_register_field_id_t field_id = LOOM_XDNA_REGISTER_FIELD_INVALID;
   if (route->source_port == LOOM_XDNA_STREAM_PORT_DMA &&
       route->destination_port == LOOM_XDNA_STREAM_PORT_NORTH) {
-    field_id = loom_aie2p_program_shim_mux_field(route->destination_channel);
+    field_id = loom_xdna_shim_dma_mux_field(
+        LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM, route->destination_channel);
   } else if (route->source_port == LOOM_XDNA_STREAM_PORT_NORTH &&
              route->destination_port == LOOM_XDNA_STREAM_PORT_DMA) {
-    field_id = loom_aie2p_program_shim_demux_field(route->source_channel);
+    field_id = loom_xdna_shim_dma_mux_field(
+        LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY, route->source_channel);
   }
   if (field_id == LOOM_XDNA_REGISTER_FIELD_INVALID) {
     return iree_make_status(

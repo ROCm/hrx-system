@@ -13,9 +13,9 @@ quadratic gate, not a complete FFN or an optimized matrix multiplication.
 
 The current native realization requires explicit singleton worker selections,
 specialized storage sizes, and channel protocols supported by the target.
-Each worker image must fit its tile's instruction budget. GPU and CPU strands
-need their own execution and progress mechanisms; selecting a different target
-does not yet turn this example into a GPU or CPU executable.
+Each worker's resident instructions must fit its tile's instruction budget.
+GPU and CPU strands need execution and progress mechanisms specific to those
+targets.
 
 ## Compile a complete program
 
@@ -312,13 +312,23 @@ operation, a host callback between records, or a separate executable category.
 | Tile image | Linked instructions and data admitted against one tile's physical budgets. |
 | Exported entry | The named invocation ABI in the containing ELF. |
 
-The `.xdna` ELF can contain multiple exports and code contributions. A tile
-program is not the ELF itself. Sharing immutable code does not merge invocation
-storage or channel identities. This lowering emits resident images that fit
-the instruction budget; it does not yet insert in-invocation image replacement.
-That requires a target realization which preserves live storage and ownership
-while transferring instruction residency. Splitting a large program into
-functions alone does not remove the 16 KiB tile instruction limit.
+The `.xdna` ELF can contain multiple exports and tile programs. The 16 KiB
+instruction limit applies to the code live on **one compute tile at one time**.
+The projection above fits in one load. For a larger worker the compiler can
+pack code from mutually exclusive pipeline scopes into the same instruction
+addresses. The instructions that issue the loads stay resident. When a scope
+needs a new group, the worker requests it from the adjacent SRAM tile and
+waits for completion before entering it. Live channel records keep their
+storage throughout the exchange.
+
+The establishing command fills the SRAM code catalogs before activation.
+For large contiguous catalogs it can upload one range per column in
+parallel while the compute cores are held in reset. The application then
+takes over the same DMA engines and switches. The executable carries the
+source ranges in an immutable `.xdna.data` section. Its size in
+`readelf -SW model.xdna` includes the alignment padding between DMA sources.
+On NPU2, columns with less than 4 KiB of catalog data use direct firmware
+writes because establishing and retiring a DMA circuit also takes time.
 
 ### Resume compilation from text or bytecode
 
@@ -484,6 +494,12 @@ Attribution to core issue or stalls additionally needs per-tile event windows
 from a collector that exposes those events on the target. A shim timer alone
 leaves both quantities unknown.
 
+Count each establishment in the complete request. For example, a 28-layer
+chain that re-establishes its attention entry at each layer pays for its
+initial tile instructions and SRAM code catalog 28 times. Measure setup
+before activation separately from the worker loop and compare with a
+continuation of the same entry.
+
 For a phase dominated by vector work, the following accounting also exposes
 three distinct costs. For each implementation measure elapsed cycles
 summed over its participating tiles (`T`), cycles in the union of selected
@@ -557,7 +573,4 @@ contract from retaining it between submissions.
 
 This is the boundary a complete pipeline launcher must own: materialize
 transient allocations, bind the caller's I/O, submit work, and track completion.
-The XDNA HAL implements those steps for finite buffer-bound pipelines. General
-heterogeneous launch lowering, GPU participation/progress, and code-image
-replacement each need a consuming realization before they become executable
-capabilities of the source model.
+The XDNA HAL implements those steps for finite buffer-bound pipelines.

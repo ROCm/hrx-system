@@ -101,6 +101,27 @@ typedef struct loom_aie2p_native_memory_layout_t {
 extern const loom_aie2p_native_memory_layout_t loom_aie2p_compute_memory;
 extern const loom_aie2p_native_memory_layout_t loom_aie2p_sram_memory;
 
+typedef struct loom_aie2p_native_queue_status_t {
+  // Absolute native register address of the selected DMA channel status.
+  uint64_t address;
+  // Pending queue, running task, and stalled-task bits that must all clear.
+  uint32_t pending_mask;
+} loom_aie2p_native_queue_status_t;
+
+// Shares the complete retirement condition between configuration and resident
+// workers. Payload arrival alone does not cover trailing descriptor updates.
+loom_aie2p_native_queue_status_t loom_aie2p_native_queue_status(
+    const loom_xdna_array_family_t* family,
+    loom_xdna_tile_coordinate_t coordinate,
+    const loom_aie2p_native_memory_layout_t* layout, uint16_t engine,
+    loom_xdna_dma_direction_t direction);
+
+// Initializes a linear DMA descriptor's length, validity, and shim bus policy.
+// The caller supplies zeroed words and an already admitted byte range.
+void loom_aie2p_native_encode_linear_descriptor(
+    const loom_xdna_dma_facts_t* dma, loom_xdna_tile_kind_t kind,
+    uint32_t byte_length, uint32_t words[8]);
+
 // Immutable descriptor images and startup tasks for one DMA endpoint.
 typedef struct loom_aie2p_native_dma_sequence_t {
   // First descriptor in the contiguous allocation owned by this sequence.
