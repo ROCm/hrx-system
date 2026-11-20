@@ -6,8 +6,10 @@
 
 """Exercise the public executable and operator flow without a GPU or weights."""
 
+import http.client
 import json
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -23,6 +25,52 @@ FORMAT = Path(sys.argv.pop(1)).resolve()
 
 
 class ServerTest(unittest.TestCase):
+    def test_embeddings_upload_waits_for_continue(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            log = Path(temporary) / "server.log"
+            with running_server(
+                [
+                    str(SERVER),
+                    "--device=task",
+                    "--pool_backing=fixed",
+                    "--workers=1",
+                    "--listen=127.0.0.1:0",
+                    f"--model={PACKAGE}",
+                ],
+                log,
+            ) as (process, bound_address):
+                self.assertIsNotNone(bound_address, log.read_text())
+                address = urlsplit(f"http://{bound_address}")
+                body = json.dumps(
+                    {"model": "vectors", "input": ["a", "bbb"], "dimensions": 2}
+                ).encode()
+                with socket.create_connection((address.hostname, address.port)) as peer:
+                    peer.sendall(
+                        (
+                            "POST /v1/embeddings HTTP/1.1\r\n"
+                            f"Host: {bound_address}\r\n"
+                            "Content-Type: application/json\r\n"
+                            f"Content-Length: {len(body)}\r\n"
+                            "Expect: 100-continue\r\n\r\n"
+                        ).encode()
+                    )
+                    with peer.makefile("rb") as interim:
+                        self.assertEqual(
+                            interim.readline().split(maxsplit=2)[:2],
+                            [b"HTTP/1.1", b"100"],
+                        )
+                        http.client.parse_headers(interim)
+                    peer.sendall(body)
+                    with http.client.HTTPResponse(peer) as response:
+                        response.begin()
+                        self.assertEqual(response.status, 200)
+                        result = json.load(response)
+                self.assertEqual(
+                    [item["embedding"] for item in result["data"]], [[1, 1], [6, 3]]
+                )
+                self.assertEqual(result["usage"]["total_tokens"], 4)
+            self.assertEqual(process.returncode, 0, log.read_text())
+
     def test_profiling_policy_is_validated_before_opening_a_device(self):
         result = subprocess.run(
             [

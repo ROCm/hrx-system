@@ -128,7 +128,7 @@ iree_status_t ParseRequest(
   const loom_serve_http_request_t* request = nullptr;
   for (iree_const_byte_span_t chunk : chunks) {
     IREE_RETURN_IF_ERROR(
-        loom_serve_http_request_parser_feed(parser, chunk, &request));
+        loom_serve_http_request_parser_feed(parser, chunk, &request, nullptr));
   }
   IREE_RETURN_IF_ERROR(
       loom_serve_http_request_parser_finalize(parser, &request));
@@ -288,7 +288,7 @@ TEST(HttpRequestTest, ParsesCapturedOpenAiGetAndLooksUpHeaders) {
   HttpRequestParserPtr parser_owner(parser);
   const loom_serve_http_request_t* request = nullptr;
   IREE_ASSERT_OK(loom_serve_http_request_parser_feed(
-      parser, StringSpan(wire_request), &request));
+      parser, StringSpan(wire_request), &request, nullptr));
   ASSERT_NE(request, nullptr);
   EXPECT_TRUE(iree_string_view_equal(request->method, IREE_SV("GET")));
   EXPECT_TRUE(iree_string_view_equal(request->target, IREE_SV("/v1/models")));
@@ -318,6 +318,70 @@ TEST(HttpRequestTest, TrimsHeaderWhitespace) {
   EXPECT_EQ(snapshot.headers[1].second, "value with spaces");
 }
 
+TEST(HttpRequestTest, RequestsContinueOnlyWhenHeadersArriveAheadOfTheBody) {
+  const std::pair<std::string, std::string> encodings[] = {
+      {"Content-Length: 5", "hello"},
+      {"Transfer-Encoding: chunked", "5\r\nhello\r\n0\r\n\r\n"},
+  };
+  for (const auto& [framing, body] : encodings) {
+    SCOPED_TRACE(framing);
+    const std::string headers =
+        "POST / HTTP/1.1\r\nHost: local\r\nExpect: 100-CoNtInUe\r\n" + framing +
+        "\r\n\r\n";
+    const std::string wire = headers + body;
+    for (size_t split = 0; split < wire.size(); ++split) {
+      SCOPED_TRACE(split);
+      loom_serve_http_request_parser_t* parser = nullptr;
+      IREE_ASSERT_OK(loom_serve_http_request_parser_allocate(
+          DefaultLimits(), iree_allocator_system(), &parser));
+      HttpRequestParserPtr parser_owner(parser);
+      const loom_serve_http_request_t* request = nullptr;
+      bool send_continue = false;
+      IREE_ASSERT_OK(loom_serve_http_request_parser_feed(
+          parser, iree_make_const_byte_span(wire.data(), split), &request,
+          &send_continue));
+      EXPECT_EQ(send_continue, split == headers.size());
+      EXPECT_EQ(request, nullptr);
+      IREE_ASSERT_OK(loom_serve_http_request_parser_feed(
+          parser,
+          iree_make_const_byte_span(wire.data() + split, wire.size() - split),
+          &request, &send_continue));
+      EXPECT_FALSE(send_continue);
+      ASSERT_NE(request, nullptr);
+      EXPECT_EQ(CopyString(request->body), "hello");
+    }
+  }
+}
+
+TEST(HttpRequestTest, SkipsContinueForEmptyAndOversizedBodies) {
+  for (bool oversized : {false, true}) {
+    SCOPED_TRACE(oversized);
+    const auto limits = DefaultLimits();
+    const std::string headers =
+        "POST / HTTP/1.1\r\nHost: local\r\nExpect: 100-continue\r\n"
+        "Content-Length: " +
+        std::to_string(oversized ? limits.body_byte_capacity + 1 : 0) +
+        "\r\n\r\n";
+    loom_serve_http_request_parser_t* parser = nullptr;
+    IREE_ASSERT_OK(loom_serve_http_request_parser_allocate(
+        limits, iree_allocator_system(), &parser));
+    HttpRequestParserPtr parser_owner(parser);
+    const loom_serve_http_request_t* request = nullptr;
+    bool send_continue = true;
+    iree_status_t status = loom_serve_http_request_parser_feed(
+        parser, StringSpan(headers), &request, &send_continue);
+    EXPECT_FALSE(send_continue);
+    if (oversized) {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+      EXPECT_EQ(request, nullptr);
+    } else {
+      IREE_EXPECT_OK(status);
+      ASSERT_NE(request, nullptr);
+      EXPECT_EQ(request->body.size, 0u);
+    }
+  }
+}
+
 TEST(HttpRequestTest, RejectsAmbiguousOrUnsupportedFraming) {
   const std::vector<std::string> invalid_requests = {
       "GET / HTTP/1.0\r\nHost: local\r\n\r\n",
@@ -340,7 +404,7 @@ TEST(HttpRequestTest, RejectsAmbiguousOrUnsupportedFraming) {
       "Transfer-Encoding: chunked\r\n\r\n",
       "POST / HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n"
       "Content-Length: 0\r\n\r\n",
-      "POST / HTTP/1.1\r\nHost: local\r\nExpect: 100-continue\r\n"
+      "POST / HTTP/1.1\r\nHost: local\r\nExpect: unknown\r\n"
       "Content-Length: 0\r\n\r\n",
       "POST / HTTP/1.1\r\nHost: local\r\nContent-Encoding: gzip\r\n"
       "Content-Length: 0\r\n\r\n",
@@ -431,7 +495,7 @@ TEST(HttpRequestTest, ChunkedRequestRequiresTerminalTrailerDelimiter) {
     const loom_serve_http_request_t* request = nullptr;
     IREE_ASSERT_OK(loom_serve_http_request_parser_feed(
         parser, iree_make_const_byte_span(wire_request.data(), length),
-        &request));
+        &request, nullptr));
     EXPECT_EQ(request, nullptr);
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_DATA_LOSS,
@@ -519,11 +583,12 @@ TEST(HttpRequestTest, TerminalStatesRejectAdditionalInput) {
   HttpRequestParserPtr parser_owner(parser);
   const loom_serve_http_request_t* request = nullptr;
   IREE_ASSERT_OK(loom_serve_http_request_parser_feed(
-      parser, StringSpan(valid_request), &request));
+      parser, StringSpan(valid_request), &request, nullptr));
   ASSERT_NE(request, nullptr);
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
-                        loom_serve_http_request_parser_feed(
-                            parser, iree_const_byte_span_empty(), &request));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      loom_serve_http_request_parser_feed(parser, iree_const_byte_span_empty(),
+                                          &request, nullptr));
 
   loom_serve_http_request_parser_t* failed_parser = nullptr;
   IREE_ASSERT_OK(loom_serve_http_request_parser_allocate(
@@ -533,7 +598,7 @@ TEST(HttpRequestTest, TerminalStatesRejectAdditionalInput) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       loom_serve_http_request_parser_feed(
-          failed_parser, StringSpan(invalid_request), &request));
+          failed_parser, StringSpan(invalid_request), &request, nullptr));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
       loom_serve_http_request_parser_finalize(failed_parser, &request));

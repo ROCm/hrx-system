@@ -62,11 +62,13 @@ void loom_serve_http_request_parser_free(
 //
 // |out_request| is NULL until the complete framed request is present. Once
 // returned, it and all nested views are borrowed until parser destruction.
+// When supplied, |out_send_continue| is true only for the feed that accepts
+// Expect: 100-continue headers while the peer still owes the entire body.
 // Trailing bytes are rejected because this parser owns one request per
 // connection.
 iree_status_t loom_serve_http_request_parser_feed(
     loom_serve_http_request_parser_t* parser, iree_const_byte_span_t chunk,
-    const loom_serve_http_request_t** out_request);
+    const loom_serve_http_request_t** out_request, bool* out_send_continue);
 
 // Completes an EOF boundary or diagnoses a truncated request.
 //
