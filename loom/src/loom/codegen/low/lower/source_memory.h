@@ -20,17 +20,17 @@ typedef struct loom_low_lower_source_memory_byte_offset_materializer_t
 typedef struct loom_low_lower_source_memory_builder_t
     loom_low_lower_source_memory_builder_t;
 
-// Exact authored byte-term producer admitting induction strength reduction.
+// Exact authored address-expression producer admitting strength reduction.
 // Source observation owns the proof; selected target rules consume these facts
 // without inspecting symbolic expressions or source producers again.
 typedef struct loom_low_lower_source_memory_recurrence_t {
-  // Source SSA result materializing the complete byte term.
+  // Source SSA result replaced by the recurrence, in its original units.
   loom_value_id_t producer_value_id;
-  // Directly available byte increment, or INVALID when only a constant exists.
+  // Directly available increment, or INVALID when only a constant exists.
   // Exact source values remain available as a fallback when a target immediate
   // cannot encode |constant_stride|.
   loom_value_id_t stride_value_id;
-  // Exact nonzero byte increment, or zero when the source value is dynamic.
+  // Exact nonzero increment, or zero when the source value is dynamic.
   int64_t constant_stride;
 } loom_low_lower_source_memory_recurrence_t;
 

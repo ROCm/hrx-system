@@ -875,6 +875,7 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
         _const_i32_rule(index.index_constant, _OFFSET),
         _binary_rule(index.index_add, TEST_LOW_ADD_I32_DESCRIPTOR, _INDEX),
         _binary_rule(index.index_add, TEST_LOW_ADD_I32_DESCRIPTOR, _OFFSET),
+        _binary_rule(index.index_mul, TEST_LOW_MUL_I32_DESCRIPTOR, _INDEX),
         _compare_rule(
             index.index_cmp,
             TEST_LOW_CMP_SLT_I32_DESCRIPTOR,

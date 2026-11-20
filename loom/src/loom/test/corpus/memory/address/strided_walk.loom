@@ -111,3 +111,101 @@ check.scenario @strided_address_walk_values {
   }
   check.return
 }
+
+// One logical product feeds flat and runtime-pitched addresses plus an ordinary
+// integer result. Byte addressing must not change the producer's element units.
+func.def @strided_product_walk(%metadata: buffer, %input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %parameters = buffer.view %metadata[%origin] : buffer -> view<2xi32>
+  %raw_stride = view.load %parameters[0] : view<2xi32> -> i32
+  %raw_width = view.load %parameters[1] : view<2xi32> -> i32
+  %bounded_stride = scalar.assume %raw_stride [range(%raw_stride, -2, 2)] : i32
+  %bounded_width = scalar.assume %raw_width [range(%raw_width, 4, 8)] : i32
+  %stride = index.cast %bounded_stride : i32 to index
+  %width = index.cast %bounded_width : i32 to index
+  %flat = buffer.view %input[%origin] : buffer -> view<64xi32>
+  %pitched = buffer.view %input[%origin] : buffer -> view<512xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<3xi32>
+  %begin = index.constant 0 : index
+  %count = index.constant 8 : index
+  %step = index.constant 1 : index
+  %base = index.constant 16 : index
+  %initial_sum = scalar.constant 0 : i32
+  %flat_sum, %pitched_sum, %distance_sum = scf.for %ordinal = [%begin to %count step %step](%flat_total = %initial_sum : i32, %pitched_total = %initial_sum : i32, %distance_total = %initial_sum : i32) -> (i32, i32, i32) {
+    %flat_distance = index.mul %ordinal, %stride : index
+    %pitched_distance = index.mul %stride, %ordinal : index
+    %flat_position = index.add %base, %flat_distance : index
+    %pitched_position = index.add %base, %pitched_distance : index
+    %flat_value = view.load %flat[%flat_position] : view<64xi32> -> i32
+    %physical_position = index.mul %pitched_position, %width : index
+    %pitched_value = view.load %pitched[%physical_position] : view<512xi32> -> i32
+    %distance = index.cast %flat_distance : index to i32
+    %next_flat = scalar.addi %flat_total, %flat_value : i32
+    %next_pitched = scalar.addi %pitched_total, %pitched_value : i32
+    %next_distance = scalar.addi %distance_total, %distance : i32
+    scf.yield %next_flat, %next_pitched, %next_distance : i32, i32, i32
+  }
+  view.store %flat_sum, %destination[0] : i32, view<3xi32>
+  view.store %pitched_sum, %destination[1] : i32, view<3xi32>
+  view.store %distance_sum, %destination[2] : i32, view<3xi32>
+  func.return
+}
+
+// With input[n] = 17 + 3*n and ordinals 0..7, sum(ordinals) = 28.
+// Compute the closed-form sums without any address product or loop recurrence.
+func.def @strided_product_walk_oracle(%metadata: buffer, %input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %parameters = buffer.view %metadata[%origin] : buffer -> view<2xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<3xi32>
+  %stride = view.load %parameters[0] : view<2xi32> -> i32
+  %width = view.load %parameters[1] : view<2xi32> -> i32
+  %ordinal_sum = scalar.constant 28 : i32
+  %input_step = scalar.constant 3 : i32
+  %base_sum = scalar.constant 128 : i32
+  %input_bias_sum = scalar.constant 136 : i32
+  %flat_base_sum = scalar.constant 520 : i32
+  %distance_sum = scalar.muli %stride, %ordinal_sum : i32
+  %scaled_distance = scalar.muli %distance_sum, %input_step : i32
+  %flat_sum = scalar.addi %flat_base_sum, %scaled_distance : i32
+  %position_sum = scalar.addi %base_sum, %distance_sum : i32
+  %pitched_positions = scalar.muli %position_sum, %width : i32
+  %pitched_values = scalar.muli %pitched_positions, %input_step : i32
+  %pitched_sum = scalar.addi %pitched_values, %input_bias_sum : i32
+  view.store %flat_sum, %destination[0] : i32, view<3xi32>
+  view.store %pitched_sum, %destination[1] : i32, view<3xi32>
+  view.store %distance_sum, %destination[2] : i32, view<3xi32>
+  func.return
+}
+
+func.def @strided_product_walk_inputs(%metadata: buffer, %trial: index) {
+  %stride_count = index.constant 5 : index
+  %stride_bias = index.constant 2 : index
+  %width_base = index.constant 4 : index
+  %width_delta = index.div %trial, %stride_count : index
+  %width = index.add %width_delta, %width_base : index
+  %residue = index.rem %trial, %stride_count : index
+  %stride = index.sub %residue, %stride_bias : index
+  %stride_word = index.cast %stride : index to i32
+  %width_word = index.cast %width : index to i32
+  %origin = index.constant 0 : offset
+  %parameters = buffer.view %metadata[%origin] : buffer -> view<2xi32>
+  view.store %stride_word, %parameters[0] : i32, view<2xi32>
+  view.store %width_word, %parameters[1] : i32, view<2xi32>
+  func.return
+}
+
+check.scenario @strided_product_walk_values {
+  check.trial[25](%trial: index, %entropy: check.entropy) {
+    %metadata = check.generate.fill value(0) : tensor<2xi32>
+    check.generate<@strided_product_walk_inputs>(%metadata, %trial) : (tensor<2xi32>, index) -> ()
+    %input = check.generate.iota offset(17) step(3) : tensor<512xi32>
+    %storage = check.generate.fill value(-99) : tensor<5xi32>
+    %output = check.tensor.view %storage offset(4) : tensor<5xi32> -> tensor<3xi32>
+    check.compare<@strided_product_walk, @strided_product_walk_oracle>(%metadata, %input, %output) : (tensor<2xi32>, tensor<512xi32>, tensor<3xi32>) -> () {
+      check.expect.bitwise actual(%metadata) expected(%metadata) : tensor<2xi32>
+      check.expect.bitwise actual(%input) expected(%input) : tensor<512xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<5xi32>
+    }
+  }
+  check.return
+}

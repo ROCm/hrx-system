@@ -1,0 +1,207 @@
+// RUN: pass scf-to-cfg,source-to-low,low-dce
+
+test.target<low_core> @target
+
+// The two authored products advance in elements. Their address consumers have
+// different byte scales, but both products can share one carried element index.
+func.def target(@target) @shared_element_product(%input: buffer, %output: buffer, %stride: index) where [range(%stride, 4, 8), multiple_of(%stride, 4)] {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<128xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<128x4xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  scf.for %ordinal = [%begin to %end step %step] {
+    %source_position = index.mul %ordinal, %stride : index
+    %destination_position = index.mul %stride, %ordinal : index
+    %value = vector.load %source[%source_position] : view<128xi32> -> vector<4xi32>
+    vector.store %value, %destination[%destination_position, 0] : vector<4xi32>, view<128x4xi32>
+  }
+  func.return
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) abi(object_function) @shared_element_product(%stride: reg<test.i32>) where [range(%stride, 4, 8), multiple_of(%stride, 4)] asm {
+  %source = resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
+  %destination = resource<native_pointer> {index = 1, source_type = buffer} : reg<test.ptr>
+  %22 = test.const.i32 0
+  %begin = test.const.i32 0
+  %end = test.const.i32 8
+  %step = test.const.i32 1
+  low.br ^_bb1(%begin: reg<test.i32>, %22: reg<test.i32>)
+^_bb1(%ordinal: reg<test.i32>, %source_position: reg<test.i32>):
+  %26 = test.cmp.slt.i32 %ordinal, %end
+  low.cond_br %26, ^_bb2, ^_bb3 : reg<test.i32>
+^_bb2:
+  %27 = test.const.i32 4
+  %28 = test.mul.i32 %source_position, %27
+  %value = test.load.index.v4i32 %source, %28
+  %30 = test.const.i32 16
+  %31 = test.mul.i32 %source_position, %30
+  test.store.index.v4i32 %destination, %31, %value
+  %32 = test.add.i32 %ordinal, %step
+  %33 = test.add.i32 %source_position, %stride
+  low.br ^_bb1(%32: reg<test.i32>, %33: reg<test.i32>)
+^_bb3:
+  return
+}
+
+// ====
+// RUN: pass scf-to-cfg,source-to-low,low-dce
+
+test.target<low_core> @target
+
+// Repeating the induction in both factors is quadratic, not a constant-stride
+// producer. Its multiplication must remain even when two accesses reuse it.
+func.def target(@target) @varying_product(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<128x4xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<128x4xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  scf.for %ordinal = [%begin to %end step %step] {
+    %source_position = index.mul %ordinal, %ordinal : index
+    %destination_position = index.mul %ordinal, %ordinal : index
+    %value = vector.load %source[%source_position, 0] : view<128x4xi32> -> vector<4xi32>
+    vector.store %value, %destination[%destination_position, 0] : vector<4xi32>, view<128x4xi32>
+  }
+  func.return
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) abi(object_function) @varying_product() asm {
+  %source = resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
+  %destination = resource<native_pointer> {index = 1, source_type = buffer} : reg<test.ptr>
+  %begin = test.const.i32 0
+  %end = test.const.i32 8
+  %step = test.const.i32 1
+  low.br ^_bb1(%begin: reg<test.i32>)
+^_bb1(%ordinal: reg<test.i32>):
+  %22 = test.cmp.slt.i32 %ordinal, %end
+  low.cond_br %22, ^_bb2, ^_bb3 : reg<test.i32>
+^_bb2:
+  %source_position = test.mul.i32 %ordinal, %ordinal
+  %destination_position = test.mul.i32 %ordinal, %ordinal
+  %25 = test.const.i32 16
+  %26 = test.mul.i32 %source_position, %25
+  %value = test.load.index.v4i32 %source, %26
+  %28 = test.const.i32 16
+  %29 = test.mul.i32 %destination_position, %28
+  test.store.index.v4i32 %destination, %29, %value
+  %30 = test.add.i32 %ordinal, %step
+  low.br ^_bb1(%30: reg<test.i32>)
+^_bb3:
+  return
+}
+
+// ====
+// RUN: pass scf-to-cfg,source-to-low,low-dce
+
+test.target<low_core> @target
+
+// A runtime row pitch belongs to the address consumer, independently of the
+// element product's runtime increment. It must not enter the shared recurrence.
+func.def target(@target) @runtime_pitched_product(%input: buffer, %output: buffer, %stride: index, %width: index) where [range(%stride, 4, 8), multiple_of(%stride, 4), range(%width, 4, 8)] {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<128xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<128x[%width]xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  scf.for %ordinal = [%begin to %end step %step] {
+    %source_position = index.mul %ordinal, %stride : index
+    %destination_position = index.mul %stride, %ordinal : index
+    %value = vector.load %source[%source_position] : view<128xi32> -> vector<4xi32>
+    vector.store %value, %destination[%destination_position, 0] : vector<4xi32>, view<128x[%width]xi32>
+  }
+  func.return
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) abi(object_function) @runtime_pitched_product(%stride: reg<test.i32>, %width: reg<test.i32>) where [range(%stride, 4, 8), multiple_of(%stride, 4), range(%width, 4, 8)] asm {
+  %source = resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
+  %destination = resource<native_pointer> {index = 1, source_type = buffer} : reg<test.ptr>
+  %24 = test.const.i32 0
+  %begin = test.const.i32 0
+  %end = test.const.i32 8
+  %step = test.const.i32 1
+  low.br ^_bb1(%begin: reg<test.i32>, %24: reg<test.i32>)
+^_bb1(%ordinal: reg<test.i32>, %source_position: reg<test.i32>):
+  %28 = test.cmp.slt.i32 %ordinal, %end
+  low.cond_br %28, ^_bb2, ^_bb3 : reg<test.i32>
+^_bb2:
+  %29 = test.const.i32 4
+  %30 = test.mul.i32 %source_position, %29
+  %value = test.load.index.v4i32 %source, %30
+  %32 = test.mul.i32 %source_position, %width
+  %33 = test.const.i32 4
+  %34 = test.mul.i32 %32, %33
+  test.store.index.v4i32 %destination, %34, %value
+  %35 = test.add.i32 %ordinal, %step
+  %36 = test.add.i32 %source_position, %stride
+  low.br ^_bb1(%35: reg<test.i32>, %36: reg<test.i32>)
+^_bb3:
+  return
+}
+
+// ====
+// RUN: pass scf-to-cfg,source-to-low,low-dce
+
+test.target<low_core> @target
+
+// This factor is computed inside the loop. The source recurrence owner cannot
+// initialize from it at entry; ordinary producer lowering remains responsible.
+func.def target(@target) @inner_stride_definition(%input: buffer, %output: buffer, %stride: index) where [range(%stride, 4, 8), multiple_of(%stride, 4)] {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<128xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<128x4xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %pitch_bias = index.constant 4 : index
+  scf.for %ordinal = [%begin to %end step %step] {
+    %pitch = index.add %stride, %pitch_bias : index
+    %source_position = index.mul %ordinal, %pitch : index
+    %destination_position = index.mul %pitch, %ordinal : index
+    %value = vector.load %source[%source_position] : view<128xi32> -> vector<4xi32>
+    vector.store %value, %destination[%destination_position, 0] : vector<4xi32>, view<128x4xi32>
+  }
+  func.return
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) abi(object_function) @inner_stride_definition(%stride: reg<test.i32>) where [range(%stride, 4, 8), multiple_of(%stride, 4)] asm {
+  %source = resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
+  %destination = resource<native_pointer> {index = 1, source_type = buffer} : reg<test.ptr>
+  %begin = test.const.i32 0
+  %end = test.const.i32 8
+  %step = test.const.i32 1
+  %pitch_bias = test.const.i32 4
+  low.br ^_bb1(%begin: reg<test.i32>)
+^_bb1(%ordinal: reg<test.i32>):
+  %27 = test.cmp.slt.i32 %ordinal, %end
+  low.cond_br %27, ^_bb2, ^_bb3 : reg<test.i32>
+^_bb2:
+  %pitch = test.add.i32 %stride, %pitch_bias
+  %source_position = test.mul.i32 %ordinal, %pitch
+  %destination_position = test.mul.i32 %pitch, %ordinal
+  %31 = test.const.i32 4
+  %32 = test.mul.i32 %source_position, %31
+  %value = test.load.index.v4i32 %source, %32
+  %34 = test.const.i32 16
+  %35 = test.mul.i32 %destination_position, %34
+  test.store.index.v4i32 %destination, %35, %value
+  %36 = test.add.i32 %ordinal, %step
+  low.br ^_bb1(%36: reg<test.i32>)
+^_bb3:
+  return
+}
