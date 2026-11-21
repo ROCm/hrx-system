@@ -26,7 +26,8 @@ struct VirtualBufferBatch {
     }
     bool retired = true;
     if (accepted) {
-      auto status = hrx_semaphore_wait(completion, accepted, UINT64_MAX);
+      auto status = hrx_semaphore_wait(completion, accepted, UINT64_MAX,
+                                       HRX_WAIT_FLAG_NONE);
       retired = hrx_status_is_ok(status);
       IREE_EXPECT_OK(hrx_status_to_iree(status));
     }
@@ -107,7 +108,8 @@ class CpuVirtualBufferTest : public ::testing::Test {
     IREE_RETURN_IF_ERROR(hrx_status_to_iree(
         hrx_queue_alloca(hrx_device_get_queue(device_, 0, 0), nullptr, &signals,
                          pool_, 1, &request, out_buffer)));
-    return hrx_status_to_iree(hrx_semaphore_wait(ready, value, UINT64_MAX));
+    return hrx_status_to_iree(
+        hrx_semaphore_wait(ready, value, UINT64_MAX, HRX_WAIT_FLAG_NONE));
   }
 
   // Shared execution services retained through the group's lifetime.
@@ -231,8 +233,8 @@ TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
         hrx_status_to_iree(hrx_semaphore_query(completion, &observed)));
     EXPECT_EQ(0u, observed);
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_semaphore_signal(gate, gate_value)));
-    IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_semaphore_wait(completion, completed, UINT64_MAX)));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_semaphore_wait(
+        completion, completed, UINT64_MAX, HRX_WAIT_FLAG_NONE)));
 
     auto first = (reservations.front());
     auto last = (reservations.back());
@@ -256,8 +258,8 @@ TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
                               &signal_list, first, unit, sizeof(pattern),
                               &pattern, sizeof(pattern), nullptr),
         completed));
-    IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_semaphore_wait(completion, completed, UINT64_MAX)));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_semaphore_wait(
+        completion, completed, UINT64_MAX, HRX_WAIT_FLAG_NONE)));
     uint32_t result = 0;
     IREE_ASSERT_OK(hrx_status_to_iree(
         hrx_synchronous_d2h_linear(hrx_device_get_queue(device_, 0, 0), last,
@@ -313,8 +315,8 @@ TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
         hrx_queue_map(hrx_device_get_queue(device_, 0, 0), &wait_list,
                       &signal_list, 1, &replacement, HRX_QUEUE_MAP_FLAG_NONE),
         completed));
-    IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_semaphore_wait(completion, completed, UINT64_MAX)));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_semaphore_wait(
+        completion, completed, UINT64_MAX, HRX_WAIT_FLAG_NONE)));
     IREE_ASSERT_OK(hrx_status_to_iree(
         hrx_synchronous_d2h_linear(hrx_device_get_queue(device_, 0, 0), first,
                                    unit, &result, sizeof(result))));
@@ -345,8 +347,8 @@ TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
         hrx_queue_map(hrx_device_get_queue(device_, 0, 0), &wait_list,
                       &signal_list, 0, nullptr, HRX_QUEUE_MAP_FLAG_NONE),
         completed));
-    IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_semaphore_wait(completion, completed, UINT64_MAX)));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_semaphore_wait(
+        completion, completed, UINT64_MAX, HRX_WAIT_FLAG_NONE)));
     auto retained = hrx::runtime::buffer_ptr::borrow(first);
     for (auto& reservation : reservations) {
       hrx_buffer_release(reservation);
@@ -362,8 +364,8 @@ TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
         batch.Record(hrx_queue_dealloca(hrx_device_get_queue(device_, 0, 0),
                                         &wait_list, &signal_list, 1, &source),
                      completed));
-    IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_semaphore_wait(completion, completed, UINT64_MAX)));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_semaphore_wait(
+        completion, completed, UINT64_MAX, HRX_WAIT_FLAG_NONE)));
   }
 }
 

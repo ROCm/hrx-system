@@ -184,14 +184,17 @@ hrx_status_t hrx_event_query(hrx_event_t event, bool* complete) {
   return hrx_ok_status();
 }
 
-hrx_status_t hrx_event_synchronize(hrx_event_t event) {
+hrx_status_t hrx_event_synchronize(hrx_event_t event, hrx_wait_flags_t flags) {
   if (!event) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "event is NULL");
   }
+  if (flags & ~(HRX_WAIT_FLAG_YIELD | HRX_WAIT_FLAG_ACTIVE)) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "invalid wait flags");
+  }
   iree_status_t status = iree_ok_status();
   if (event->signal_value > 0) {
-    status = hrx_status_to_iree(
-        hrx_semaphore_wait(event->semaphore, event->signal_value, UINT64_MAX));
+    status = hrx_status_to_iree(hrx_semaphore_wait(
+        event->semaphore, event->signal_value, UINT64_MAX, flags));
   }
   hrx_device_t device =
       event->semaphore ? event->semaphore->device : event->device;

@@ -296,8 +296,13 @@ HRX_API void hrx_semaphore_release(hrx_semaphore_t semaphore);
 HRX_API hrx_status_t hrx_semaphore_query(hrx_semaphore_t semaphore,
                                          uint64_t* value);
 
+// Waits for |value| with the explicit host observation policy |flags|.
+// |timeout_ns| is relative: 0 polls and UINT64_MAX waits indefinitely.
+// NONE uses blocking notifications; ACTIVE may use the calling CPU until
+// completion or timeout. Device-worker policy is unaffected.
 HRX_API hrx_status_t hrx_semaphore_wait(hrx_semaphore_t semaphore,
-                                        uint64_t value, uint64_t timeout_ns);
+                                        uint64_t value, uint64_t timeout_ns,
+                                        hrx_wait_flags_t flags);
 
 HRX_API hrx_status_t hrx_semaphore_signal(hrx_semaphore_t semaphore,
                                           uint64_t value);
@@ -326,15 +331,19 @@ HRX_API void hrx_stream_release(hrx_stream_t stream);
 // Borrows the stream's immutable queue, or returns NULL for a NULL stream.
 HRX_API hrx_queue_t hrx_stream_get_queue(hrx_stream_t stream);
 
-// Flushes pending work and waits for the stream to complete.
+// Flushes pending work and waits for the stream to complete using |flags|.
+// The observation policy applies only to this host wait.
 // When HRX_PROFILE_FILE is enabled, also drains completed device profile
 // records to the capture file. This does not wait for unrelated streams.
-HRX_API hrx_status_t hrx_stream_synchronize(hrx_stream_t stream);
+HRX_API hrx_status_t hrx_stream_synchronize(hrx_stream_t stream,
+                                            hrx_wait_flags_t flags);
 
 // Waits for the stream's current timeline position without flushing pending
-// work. Use hrx_stream_synchronize() to flush and then wait.
+// work. Use hrx_stream_synchronize() to flush and then wait. |flags| selects
+// the observation policy for this host wait, independently of device workers.
 // Also drains completed profile records when HRX_PROFILE_FILE is enabled.
-HRX_API hrx_status_t hrx_stream_wait(hrx_stream_t stream);
+HRX_API hrx_status_t hrx_stream_wait(hrx_stream_t stream,
+                                     hrx_wait_flags_t flags);
 
 HRX_API hrx_status_t hrx_stream_query(hrx_stream_t stream, bool* complete);
 
@@ -709,7 +718,11 @@ HRX_API hrx_status_t hrx_fence_extend(hrx_fence_t into_fence,
 
 HRX_API hrx_status_t hrx_fence_signal(hrx_fence_t fence);
 
-HRX_API hrx_status_t hrx_fence_wait(hrx_fence_t fence, uint64_t timeout_ns);
+// Waits for every point in |fence| with host observation policy |flags|.
+// |timeout_ns| is relative: 0 polls and UINT64_MAX waits indefinitely.
+// One timeout covers the entire fence, including points on different devices.
+HRX_API hrx_status_t hrx_fence_wait(hrx_fence_t fence, uint64_t timeout_ns,
+                                    hrx_wait_flags_t flags);
 
 //===----------------------------------------------------------------------===//
 // Buffer views
@@ -780,7 +793,6 @@ HRX_API hrx_status_t hrx_queue_map(
 
 typedef enum hrx_event_flags_t {
   HRX_EVENT_FLAG_NONE = 0,
-  HRX_EVENT_FLAG_BLOCKING_SYNC = 1 << 0,
   HRX_EVENT_FLAG_DISABLE_TIMING = 1 << 1,
   HRX_EVENT_FLAG_INTERPROCESS = 1 << 2,
 } hrx_event_flags_t;
@@ -804,9 +816,11 @@ HRX_API void hrx_event_release(hrx_event_t event);
 // timing for synchronization-only events on such queues.
 HRX_API hrx_status_t hrx_event_record(hrx_event_t event, hrx_stream_t stream);
 HRX_API hrx_status_t hrx_event_query(hrx_event_t event, bool* complete);
-// Waits for the recorded event and drains completed device profile records when
-// HRX_PROFILE_FILE is enabled, without waiting for unrelated streams.
-HRX_API hrx_status_t hrx_event_synchronize(hrx_event_t event);
+// Waits for the recorded event using host observation policy |flags| and drains
+// completed device profile records when HRX_PROFILE_FILE is enabled, without
+// waiting for unrelated streams. Unrecorded events are already complete.
+HRX_API hrx_status_t hrx_event_synchronize(hrx_event_t event,
+                                           hrx_wait_flags_t flags);
 // Measures the signed interval between completed queue timestamps. Both events
 // must have timing enabled and be recorded in the same queue family. Reversing
 // their execution order yields a negative interval. The result uses the clock's

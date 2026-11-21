@@ -219,7 +219,7 @@ class HrxRuntime {
         Check(hrx_stream_query(stream_, &complete));
       } while (!complete);
     }
-    Check(hrx_stream_wait(stream_));
+    Check(hrx_stream_wait(stream_, HRX_WAIT_FLAG_NONE));
   }
   void Verify(const Workload& workload) {
     std::vector<uint32_t> actual(workload.count);

@@ -47,8 +47,8 @@ class MemPoolTest : public ::testing::Test {
     }
     for (size_t i = 0; i < 2; ++i) {
       if (tails_[i]) {
-        EXPECT_TRUE(
-            Check(hrx_semaphore_wait(timelines_[i], tails_[i], UINT64_MAX)));
+        EXPECT_TRUE(Check(hrx_semaphore_wait(timelines_[i], tails_[i],
+                                             UINT64_MAX, HRX_WAIT_FLAG_NONE)));
       }
     }
     for (auto buffer : buffers_) {
@@ -166,7 +166,8 @@ TEST_F(MemPoolTest, DeferredBatchesCarryDataAcrossDevices) {
     tails_[1] = next;
   }
   ASSERT_TRUE(Check(hrx_semaphore_signal(gate_, 1)));
-  ASSERT_TRUE(Check(hrx_semaphore_wait(timelines_[1], tails_[1], UINT64_MAX)));
+  ASSERT_TRUE(Check(hrx_semaphore_wait(timelines_[1], tails_[1], UINT64_MAX,
+                                       HRX_WAIT_FLAG_NONE)));
   for (size_t i = 0; i < count; ++i) {
     void* data = nullptr;
     ASSERT_TRUE(
@@ -198,7 +199,8 @@ TEST_F(MemPoolTest, SiblingsReuseBackingAndTrimIndependently) {
   const hrx_pool_reservation_request_t request = {256, 16};
   ASSERT_TRUE(
       Check(Allocate(0, pools_[1], nullptr, 1, &request, &buffers_[0])));
-  ASSERT_TRUE(Check(hrx_semaphore_wait(timelines_[0], tails_[0], UINT64_MAX)));
+  ASSERT_TRUE(Check(hrx_semaphore_wait(timelines_[0], tails_[0], UINT64_MAX,
+                                       HRX_WAIT_FLAG_NONE)));
   hrx_memory_scope_t scope;
   ASSERT_TRUE(Check(hrx_device_query_queue_family_memory_scope(
       devices_[0], 0, HRX_MEMORY_SITE_PROGRAM, &scope)));
@@ -214,7 +216,8 @@ TEST_F(MemPoolTest, SiblingsReuseBackingAndTrimIndependently) {
   ASSERT_TRUE(
       Check(Allocate(1, pools_[2], &released, 1, &request, &buffers_[1])));
   ASSERT_TRUE(Check(hrx_semaphore_signal(gate_, 1)));
-  ASSERT_TRUE(Check(hrx_semaphore_wait(timelines_[1], tails_[1], UINT64_MAX)));
+  ASSERT_TRUE(Check(hrx_semaphore_wait(timelines_[1], tails_[1], UINT64_MAX,
+                                       HRX_WAIT_FLAG_NONE)));
   uint64_t second_address = 0;
   ASSERT_TRUE(Check(hrx_buffer_query_address(
       buffers_[1], scope, HRX_BUFFER_INTERFACE_HOST, &second_address)));
@@ -233,7 +236,8 @@ TEST_F(MemPoolTest, SiblingsReuseBackingAndTrimIndependently) {
   ASSERT_TRUE(Check(hrx_buffer_unmap(buffers_[1])));
   const hrx_semaphore_list_t allocated = {&timelines_[1], &tails_[1], 1};
   ASSERT_TRUE(Check(Free(0, &allocated, 1, &buffers_[1])));
-  ASSERT_TRUE(Check(hrx_semaphore_wait(timelines_[0], tails_[0], UINT64_MAX)));
+  ASSERT_TRUE(Check(hrx_semaphore_wait(timelines_[0], tails_[0], UINT64_MAX,
+                                       HRX_WAIT_FLAG_NONE)));
   hrx_mem_pool_trim(pools_[0], 0, HRX_POOL_TRIM_FLAG_ALL);
   hrx_mem_pool_query_stats(source, &stats);
   EXPECT_EQ(stats.reservation_count, 0u);
@@ -251,8 +255,8 @@ TEST_F(MemPoolTest, FinitePoolsKeepBackingThroughEverySuballocatorPair) {
     const hrx_semaphore_list_t prior = {&timelines_[0], &tails_[0], 1};
     ASSERT_TRUE(Check(Allocate(0, source, &prior, 1, &backing_request,
                                backing.for_output())));
-    ASSERT_TRUE(
-        Check(hrx_semaphore_wait(timelines_[0], tails_[0], UINT64_MAX)));
+    ASSERT_TRUE(Check(hrx_semaphore_wait(timelines_[0], tails_[0], UINT64_MAX,
+                                         HRX_WAIT_FLAG_NONE)));
     hrx::runtime::mem_pool_ptr finite, child;
     const hrx_tlsf_pool_options_t finite_tlsf = {};
     const hrx_fixed_block_pool_options_t finite_blocks = {.block_size = 8192};
@@ -285,8 +289,8 @@ TEST_F(MemPoolTest, FinitePoolsKeepBackingThroughEverySuballocatorPair) {
     const hrx_pool_reservation_request_t request = {256, 16};
     ASSERT_TRUE(
         Check(Allocate(0, child, &prior, 1, &request, buffer.for_output())));
-    ASSERT_TRUE(
-        Check(hrx_semaphore_wait(timelines_[0], tails_[0], UINT64_MAX)));
+    ASSERT_TRUE(Check(hrx_semaphore_wait(timelines_[0], tails_[0], UINT64_MAX,
+                                         HRX_WAIT_FLAG_NONE)));
     void* data = nullptr;
     ASSERT_TRUE(Check(hrx_buffer_map(buffer, HRX_MAP_WRITE, 0, 256, &data)));
     static_cast<uint32_t*>(data)[63] = kinds;
@@ -294,8 +298,8 @@ TEST_F(MemPoolTest, FinitePoolsKeepBackingThroughEverySuballocatorPair) {
     const hrx_semaphore_list_t allocated = {&timelines_[0], &tails_[0], 1};
     hrx_buffer_t root = buffer;
     ASSERT_TRUE(Check(Free(0, &allocated, 1, &root)));
-    ASSERT_TRUE(
-        Check(hrx_semaphore_wait(timelines_[0], tails_[0], UINT64_MAX)));
+    ASSERT_TRUE(Check(hrx_semaphore_wait(timelines_[0], tails_[0], UINT64_MAX,
+                                         HRX_WAIT_FLAG_NONE)));
     buffer.reset();
     child.reset();
     hrx_pool_stats_t stats;

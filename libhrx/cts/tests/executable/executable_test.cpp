@@ -81,12 +81,14 @@ class GraphVisibilityTest : public HrxTestFixture {
                            hrx().semaphore_signal(gate_, 1));
     }
     if (other_stream_) {
-      ReportHrxTestFailure("Other stream graph completion",
-                           hrx().stream_synchronize(other_stream_));
+      ReportHrxTestFailure(
+          "Other stream graph completion",
+          hrx().stream_synchronize(other_stream_, HRX_WAIT_FLAG_NONE));
     }
     if (stream_) {
-      ReportHrxTestFailure("Graph completion",
-                           hrx().stream_synchronize(stream_));
+      ReportHrxTestFailure(
+          "Graph completion",
+          hrx().stream_synchronize(stream_, HRX_WAIT_FLAG_NONE));
     }
     hrx().graph_exec_release(exec_);
     hrx().graph_release(graph_);
@@ -309,7 +311,7 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch") {
   REQUIRE_OK(hrx().stream_dispatch(
       stream, executable, store_ordinal, &store_config, &expected,
       sizeof(expected), bindings, std::size(bindings), HRX_DISPATCH_FLAG_NONE));
-  REQUIRE_OK(hrx().stream_synchronize(stream));
+  REQUIRE_OK(hrx().stream_synchronize(stream, HRX_WAIT_FLAG_NONE));
 
   uint32_t actual = 0;
   REQUIRE_OK(hrx().synchronous_d2h_linear(transfer_queue_, output, 0, &actual,
@@ -341,7 +343,8 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch") {
       queue, nullptr, &signals, executable, store_ordinal, &store_config,
       &direct_expected, sizeof(direct_expected), bindings, std::size(bindings),
       &barriers, HRX_DISPATCH_FLAG_NONE));
-  REQUIRE_OK(hrx().semaphore_wait(completion, completion_value, UINT64_MAX));
+  REQUIRE_OK(hrx().semaphore_wait(completion, completion_value, UINT64_MAX,
+                                  HRX_WAIT_FLAG_NONE));
   REQUIRE_OK(hrx().synchronous_d2h_linear(transfer_queue_, output, 0, &actual,
                                           sizeof(actual)));
   REQUIRE(actual == direct_expected);
@@ -362,8 +365,8 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch") {
     hrx().status_ignore(status);
     if (code == HRX_STATUS_OK) {
       // Retire unexpectedly accepted work before reporting the failure.
-      REQUIRE_OK(
-          hrx().semaphore_wait(completion, completion_value, UINT64_MAX));
+      REQUIRE_OK(hrx().semaphore_wait(completion, completion_value, UINT64_MAX,
+                                      HRX_WAIT_FLAG_NONE));
     }
     CHECK(code == HRX_STATUS_INVALID_ARGUMENT);
     uint64_t current_value = 0;
@@ -392,7 +395,7 @@ TEST_CASE_METHOD(GraphVisibilityTest,
     std::fill_n(words_, kWordCount, sentinel);
     words_[input_word] = input;
     REQUIRE_OK(hrx().graph_exec_launch(exec_, stream_));
-    REQUIRE_OK(hrx().stream_synchronize(stream_));
+    REQUIRE_OK(hrx().stream_synchronize(stream_, HRX_WAIT_FLAG_NONE));
     for (size_t i = 0; i < kWordCount; ++i) {
       CAPTURE(i);
       const uint32_t expected = i == input_word    ? input
@@ -419,7 +422,7 @@ TEST_CASE_METHOD(GraphVisibilityTest,
       REQUIRE_OK(hrx().graph_exec_launch(exec_, stream_));
       expected = expected * 3 + 7;
     }
-    REQUIRE_OK(hrx().stream_synchronize(stream_));
+    REQUIRE_OK(hrx().stream_synchronize(stream_, HRX_WAIT_FLAG_NONE));
     REQUIRE(words_[0] == expected);
     for (size_t i = 1; i < kWordCount; ++i) {
       CAPTURE(i);
@@ -479,7 +482,7 @@ TEST_CASE_METHOD(GraphVisibilityTest,
     const uint32_t sentinel = 0x12345678u + replay;
     std::fill_n(words_, kWordCount, sentinel);
     REQUIRE_OK(hrx().graph_exec_launch(exec_, stream_));
-    REQUIRE_OK(hrx().stream_synchronize(stream_));
+    REQUIRE_OK(hrx().stream_synchronize(stream_, HRX_WAIT_FLAG_NONE));
     for (size_t i = 0; i < kWordCount; ++i) {
       CAPTURE(replay, i);
       const uint32_t expected = i == 0 || i == 64 ? kInput
@@ -518,7 +521,8 @@ TEST_CASE_METHOD(GraphVisibilityTest,
   }
   // The last launch includes every branch of every earlier replay, even when
   // those replays came from another stream. No intermediate host wait is used.
-  REQUIRE_OK(hrx().stream_synchronize(cross_stream ? other_stream_ : stream_));
+  REQUIRE_OK(hrx().stream_synchronize(cross_stream ? other_stream_ : stream_,
+                                      HRX_WAIT_FLAG_NONE));
   for (size_t i = 0; i < kWordCount; ++i) {
     CAPTURE(width, cross_stream, i);
     REQUIRE(words_[i] == expected[i]);
@@ -560,7 +564,7 @@ TEST_CASE_METHOD(GraphVisibilityTest,
   REQUIRE_OK(hrx().semaphore_signal(gate_, 1));
   hrx().semaphore_release(gate_);
   gate_ = nullptr;
-  REQUIRE_OK(hrx().stream_synchronize(consumer));
+  REQUIRE_OK(hrx().stream_synchronize(consumer, HRX_WAIT_FLAG_NONE));
   CHECK(words_[64] == 13 * 3 + 7);
   CHECK(words_[128] == (13 * 3 + 7) * 3 + 7);
 }
@@ -594,7 +598,7 @@ TEST_CASE_METHOD(GraphVisibilityTest,
     std::fill_n(words_, kWordCount, sentinel);
     words_[0] = input;
     REQUIRE_OK(hrx().graph_exec_launch(exec_, stream_));
-    REQUIRE_OK(hrx().stream_synchronize(stream_));
+    REQUIRE_OK(hrx().stream_synchronize(stream_, HRX_WAIT_FLAG_NONE));
     const uint32_t produced = input * 3 + 7;
     const uint32_t consumed = produced + 11;
     REQUIRE(callback_.observed == produced);
@@ -684,7 +688,7 @@ TEST_CASE_METHOD(HrxTestFixture,
       const uint32_t sentinel = 0x12345678u + replay;
       std::fill_n(words, kWordCount, sentinel);
       REQUIRE_OK(hrx().graph_exec_launch(exec, stream));
-      REQUIRE_OK(hrx().stream_synchronize(stream));
+      REQUIRE_OK(hrx().stream_synchronize(stream, HRX_WAIT_FLAG_NONE));
       // Read before any transfer or graph teardown can publish cached writes.
       for (size_t i = 0; i < kWordCount; ++i) {
         CAPTURE(i);

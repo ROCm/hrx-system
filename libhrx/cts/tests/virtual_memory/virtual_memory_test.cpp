@@ -21,8 +21,8 @@ class VirtualMemoryResources {
   ~VirtualMemoryResources() {
     bool retired = true;
     if (completion_value) {
-      hrx_status_t status =
-          hrx().semaphore_wait(completion, completion_value, UINT64_MAX);
+      hrx_status_t status = hrx().semaphore_wait(
+          completion, completion_value, UINT64_MAX, HRX_WAIT_FLAG_NONE);
       retired = hrx_status_is_ok(status);
       ReportHrxTestFailure("retire virtual memory work", status);
     }
@@ -132,7 +132,8 @@ class VirtualMemoryResources {
     REQUIRE_OK(hrx().queue_alloca(queue, nullptr, &signals, pools[index], 1,
                                   &request, &sources[index]));
     completion_value = next_value;
-    REQUIRE_OK(hrx().semaphore_wait(completion, completion_value, UINT64_MAX));
+    REQUIRE_OK(hrx().semaphore_wait(completion, completion_value, UINT64_MAX,
+                                    HRX_WAIT_FLAG_NONE));
   }
 
   void Map(size_t count, const hrx_memory_mapping_t* mappings) {
@@ -141,7 +142,8 @@ class VirtualMemoryResources {
     REQUIRE_OK(hrx().queue_map(queue, nullptr, &signals, count, mappings,
                                HRX_QUEUE_MAP_FLAG_NONE));
     completion_value = next_value;
-    REQUIRE_OK(hrx().semaphore_wait(completion, completion_value, UINT64_MAX));
+    REQUIRE_OK(hrx().semaphore_wait(completion, completion_value, UINT64_MAX,
+                                    HRX_WAIT_FLAG_NONE));
   }
 
   // Borrowed device and its sealed owner retained by the process fixture.
@@ -419,7 +421,8 @@ TEST_CASE_METHOD(HrxTestFixture,
       resources.reservation, 0, sizeof(expected), nullptr));
   resources.completion_value = copy_value;
   REQUIRE_OK(hrx().semaphore_wait(resources.completion,
-                                  resources.completion_value, UINT64_MAX));
+                                  resources.completion_value, UINT64_MAX,
+                                  HRX_WAIT_FLAG_NONE));
   std::array<uint32_t, 4> observed = {};
   REQUIRE_OK(hrx().synchronous_d2h_linear(transfer_queue_,
                                           resources.reservation, 0,

@@ -65,9 +65,12 @@ hrx_status_t hrx_semaphore_query(hrx_semaphore_t semaphore, uint64_t* value) {
 }
 
 hrx_status_t hrx_semaphore_wait(hrx_semaphore_t semaphore, uint64_t value,
-                                uint64_t timeout_ns) {
+                                uint64_t timeout_ns, hrx_wait_flags_t flags) {
   if (!semaphore) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "semaphore is NULL");
+  }
+  if (flags & ~(HRX_WAIT_FLAG_YIELD | HRX_WAIT_FLAG_ACTIVE)) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "invalid wait flags");
   }
   iree_timeout_t timeout;
   if (timeout_ns == UINT64_MAX) {
@@ -79,8 +82,7 @@ hrx_status_t hrx_semaphore_wait(hrx_semaphore_t semaphore, uint64_t value,
   }
 
   iree_status_t status =
-      iree_hal_semaphore_wait(semaphore->hal_semaphore, value, timeout,
-                              /*flags=*/0);
+      iree_hal_semaphore_wait(semaphore->hal_semaphore, value, timeout, flags);
   return hrx_status_from_iree(status);
 }
 

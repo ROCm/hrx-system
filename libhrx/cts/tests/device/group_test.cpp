@@ -18,7 +18,8 @@ struct GroupResources {
       if (tails[i]) {
         ReportHrxTestFailure(
             "group timeline cleanup",
-            hrx().semaphore_wait(semaphores[i], tails[i], UINT64_MAX));
+            hrx().semaphore_wait(semaphores[i], tails[i], UINT64_MAX,
+                                 HRX_WAIT_FLAG_NONE));
       }
     }
     for (auto buffer : buffers) {
@@ -249,8 +250,8 @@ TEST_CASE("Explicit group pools share backing across queue timelines",
                                        &producer_signal, buffers[1], 0,
                                        buffers[2], 0, kLength, nullptr));
     resources.tails[0] = consumed;
-    REQUIRE_OK(
-        hrx().semaphore_wait(resources.semaphores[0], consumed, UINT64_MAX));
+    REQUIRE_OK(hrx().semaphore_wait(resources.semaphores[0], consumed,
+                                    UINT64_MAX, HRX_WAIT_FLAG_NONE));
 
     uint64_t address = 0;
     REQUIRE_OK(hrx().buffer_query_address(buffers[0], host_scope,
@@ -318,8 +319,8 @@ TEST_CASE("Explicit group pools share backing across queue timelines",
                                        &upload_signal, buffers[0], 64,
                                        buffers[2], 128, 256, nullptr));
     resources.tails[1] = uploaded;
-    REQUIRE_OK(
-        hrx().semaphore_wait(resources.semaphores[1], uploaded, UINT64_MAX));
+    REQUIRE_OK(hrx().semaphore_wait(resources.semaphores[1], uploaded,
+                                    UINT64_MAX, HRX_WAIT_FLAG_NONE));
     const hrx_buffer_mapping_transition_t download_mapping = {
         .buffer = buffers[2],
         .length = 256,
@@ -342,7 +343,7 @@ TEST_CASE("Explicit group pools share backing across queue timelines",
     // The next sibling allocation consumes this frontier without a host join.
   }
   REQUIRE_OK(hrx().semaphore_wait(resources.semaphores[0], resources.tails[0],
-                                  UINT64_MAX));
+                                  UINT64_MAX, HRX_WAIT_FLAG_NONE));
   hrx().mem_pool_trim(resources.pools[1], 0, HRX_POOL_TRIM_FLAG_ALL);
   hrx_pool_stats_t stats;
   hrx().mem_pool_query_stats(resources.pools[1], &stats);

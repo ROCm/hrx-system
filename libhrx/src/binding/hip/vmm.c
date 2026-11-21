@@ -647,7 +647,8 @@ static hipError_t iree_hip_vmm_update_mappings(
                     HRX_QUEUE_MAP_FLAG_NONE));
   if (result == hipSuccess) {
     result = iree_hip_vmm_from_hrx_status(
-        hrx_semaphore_wait(reservation->mapping_completion, value, UINT64_MAX));
+        hrx_semaphore_wait(reservation->mapping_completion, value, UINT64_MAX,
+                           HRX_WAIT_FLAG_NONE));
     if (result != hipSuccess) {
       // Accepted native failure can leave a prefix installed. Existing ledger
       // references remain authoritative until checked full removal succeeds.

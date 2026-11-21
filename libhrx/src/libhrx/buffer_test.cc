@@ -59,7 +59,8 @@ TEST_F(CpuBufferTest,
   const uint8_t pattern = 0x5A;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer_linear(
       stream_, buffer, 0, 64, &pattern, sizeof(pattern))));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
 
   uint64_t device_pointer = 0;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_query_address(
@@ -291,7 +292,8 @@ TEST_F(CpuBufferTest, PreparedBackingAliasesRemainOrdinaryStreamBuffers) {
       const uint8_t pattern = 0x5A;
       IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer_linear(
           stream_, backing, 0, size, &pattern, sizeof(pattern))));
-      IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+      IREE_ASSERT_OK(hrx_status_to_iree(
+          hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
 
       const iree_hal_pool_family_access_t family = {
           .family = iree_hal_queue_family(stream_->hal_queue),
@@ -343,7 +345,8 @@ TEST_F(CpuBufferTest, PreparedBackingAliasesRemainOrdinaryStreamBuffers) {
       const uint8_t update = 0xA7;
       IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer_linear(
           stream_, alias, 16, 64, &update, sizeof(update))));
-      IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+      IREE_ASSERT_OK(hrx_status_to_iree(
+          hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
       std::vector<uint8_t> output(size);
       IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h_linear(
           hrx_device_get_queue(device_, 0, 0), backing, 0, output.data(),
@@ -396,7 +399,8 @@ TEST_F(CpuBufferTest, MappingPermissionsAndDiscardProduceExpectedStreamOutput) {
   const uint8_t pattern = 0x5A;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer_linear(
       stream_, buffer, 0, 64, &pattern, sizeof(pattern))));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
 
   void* pointer = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(

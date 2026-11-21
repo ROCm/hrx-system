@@ -80,7 +80,8 @@ TEST_F(EventTest, EmptyRecordDoesNotAdvanceTheStream) {
   bool complete = false;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_query(event_.get(), &complete)));
   EXPECT_TRUE(complete);
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(event_.get())));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_event_synchronize(event_.get(), HRX_WAIT_FLAG_NONE)));
 
   hrx_timeline_point_t before;
   IREE_ASSERT_OK(hrx_status_to_iree(
@@ -110,7 +111,8 @@ TEST_F(EventTest, ReRecordCannotReuseACompletedValueFromAnotherStream) {
     IREE_ASSERT_OK(
         hrx_status_to_iree(hrx_event_record(event_.get(), first_.get())));
   }
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(event_.get())));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_event_synchronize(event_.get(), HRX_WAIT_FLAG_NONE)));
 
   hrx::runtime::semaphore_ptr gate;
   IREE_ASSERT_OK(
@@ -129,7 +131,8 @@ TEST_F(EventTest, ReRecordCannotReuseACompletedValueFromAnotherStream) {
         hrx_status_to_iree(hrx_event_query(event_.get(), &complete)));
     EXPECT_FALSE(complete);
   }
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(event_.get())));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_event_synchronize(event_.get(), HRX_WAIT_FLAG_NONE)));
   std::array<uint32_t, 16> output = {};
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h_linear(
       hrx_stream_get_queue(second_.get()), buffer.get(), 0, output.data(),
@@ -173,7 +176,8 @@ TEST_F(EventTest, ReplacementDoesNotOrderProducersOrChangeAnEnqueuedWait) {
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer_linear(
         second_.get(), buffer.get(), sizeof(first_pattern),
         sizeof(second_pattern), &second_pattern, sizeof(second_pattern))));
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(second_.get())));
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_stream_synchronize(second_.get(), HRX_WAIT_FLAG_NONE)));
     hrx_timeline_point_t before;
     IREE_ASSERT_OK(hrx_status_to_iree(
         hrx_stream_get_timeline_position(second_.get(), &before)));
@@ -196,7 +200,8 @@ TEST_F(EventTest, ReplacementDoesNotOrderProducersOrChangeAnEnqueuedWait) {
         hrx_status_to_iree(hrx_stream_query(consumer.get(), &complete)));
     EXPECT_FALSE(complete);
   }
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(consumer.get())));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_stream_synchronize(consumer.get(), HRX_WAIT_FLAG_NONE)));
   std::array<uint32_t, 2> output = {};
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h_linear(
       hrx_stream_get_queue(second_.get()), buffer.get(), 0, output.data(),
@@ -216,7 +221,8 @@ TEST_F(EventTest, RejectedRecordPreservesTheAcceptedEventAndStreamPositions) {
       sizeof(pattern))));
   IREE_ASSERT_OK(
       hrx_status_to_iree(hrx_event_record(event_.get(), first_.get())));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(event_.get())));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_event_synchronize(event_.get(), HRX_WAIT_FLAG_NONE)));
   hrx_timeline_point_t before;
   IREE_ASSERT_OK(hrx_status_to_iree(
       hrx_stream_get_timeline_position(second_.get(), &before)));
@@ -271,7 +277,8 @@ TEST_F(EventTest, RejectedRecordPreservesTheAcceptedEventAndStreamPositions) {
       sizeof(pattern))));
   IREE_ASSERT_OK(
       hrx_status_to_iree(hrx_event_record(event_.get(), second_.get())));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(event_.get())));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_event_synchronize(event_.get(), HRX_WAIT_FLAG_NONE)));
 }
 
 TEST_F(EventTest, CompletedEventSurvivesItsRecordingStream) {
@@ -291,7 +298,8 @@ TEST_F(EventTest, CompletedEventSurvivesItsRecordingStream) {
   EXPECT_TRUE(complete);
   IREE_ASSERT_OK(
       hrx_status_to_iree(hrx_event_record(event_.get(), second_.get())));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(event_.get())));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_event_synchronize(event_.get(), HRX_WAIT_FLAG_NONE)));
 }
 
 TEST_F(EventTest, TimingFollowsExecutionOrderInsteadOfRecordingOrder) {
@@ -308,14 +316,16 @@ TEST_F(EventTest, TimingFollowsExecutionOrderInsteadOfRecordingOrder) {
         hrx_status_to_iree(hrx_event_record(start.get(), first_.get())));
     IREE_ASSERT_OK(
         hrx_status_to_iree(hrx_event_record(stop.get(), second_.get())));
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(stop.get())));
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_event_synchronize(stop.get(), HRX_WAIT_FLAG_NONE)));
     float milliseconds = 123.0f;
     IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
                           hrx_status_to_iree(hrx_event_elapsed_time(
                               start.get(), stop.get(), &milliseconds)));
     EXPECT_EQ(milliseconds, 123.0f);
   }
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(start.get())));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_event_synchronize(start.get(), HRX_WAIT_FLAG_NONE)));
   float milliseconds = 0.0f;
   IREE_ASSERT_OK(hrx_status_to_iree(
       hrx_event_elapsed_time(start.get(), stop.get(), &milliseconds)));
@@ -343,12 +353,14 @@ TEST_F(EventTest, PendingOldTimestampCannotOverwriteAReplacement) {
         hrx_status_to_iree(hrx_event_record(event.get(), second_.get())));
     IREE_ASSERT_OK(
         hrx_status_to_iree(hrx_event_record(stop.get(), second_.get())));
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(stop.get())));
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_event_synchronize(stop.get(), HRX_WAIT_FLAG_NONE)));
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_elapsed_time(
         event.get(), stop.get(), &replacement_interval)));
     EXPECT_GE(replacement_interval, 0.0f);
   }
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(first_.get())));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_stream_synchronize(first_.get(), HRX_WAIT_FLAG_NONE)));
   float retired_interval = 0.0f;
   IREE_ASSERT_OK(hrx_status_to_iree(
       hrx_event_elapsed_time(event.get(), stop.get(), &retired_interval)));
@@ -362,7 +374,8 @@ TEST_F(EventTest, RejectedTimestampPreservesTheAcceptedPointAndTick) {
       hrx_status_to_iree(hrx_event_record(event.get(), first_.get())));
   IREE_ASSERT_OK(
       hrx_status_to_iree(hrx_event_record(stop.get(), first_.get())));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(stop.get())));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_event_synchronize(stop.get(), HRX_WAIT_FLAG_NONE)));
   float previous_interval = 0.0f;
   IREE_ASSERT_OK(hrx_status_to_iree(
       hrx_event_elapsed_time(event.get(), stop.get(), &previous_interval)));
@@ -408,7 +421,8 @@ TEST_F(EventTest, RejectedTimestampPreservesTheAcceptedPointAndTick) {
   EXPECT_EQ(current_interval, previous_interval);
   IREE_ASSERT_OK(
       hrx_status_to_iree(hrx_event_record(event.get(), second_.get())));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(event.get())));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_event_synchronize(event.get(), HRX_WAIT_FLAG_NONE)));
 }
 
 TEST_F(EventTest, UntimedAndUnrecordedEventsHaveNoElapsedTime) {
@@ -423,7 +437,8 @@ TEST_F(EventTest, UntimedAndUnrecordedEventsHaveNoElapsedTime) {
       hrx_status_to_iree(hrx_event_record(event_.get(), first_.get())));
   IREE_ASSERT_OK(
       hrx_status_to_iree(hrx_event_record(stop.get(), first_.get())));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(stop.get())));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_event_synchronize(stop.get(), HRX_WAIT_FLAG_NONE)));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         hrx_status_to_iree(hrx_event_elapsed_time(
                             event_.get(), stop.get(), &milliseconds)));
@@ -444,7 +459,8 @@ TEST(EventLifecycleTest, UnrecordedEventRetainsItsCreationDevice) {
                             HRX_EVENT_FLAG_DISABLE_TIMING, event.for_output());
   hrx_device_group_release(group);
   IREE_ASSERT_OK(hrx_status_to_iree(status));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(event.get())));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_event_synchronize(event.get(), HRX_WAIT_FLAG_NONE)));
 }
 
 TEST(EventLifecycleTest, TimedEventsRetainTheRecordingDeviceAndItsClock) {

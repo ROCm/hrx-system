@@ -260,7 +260,10 @@ class Environment {
     }
   }
 
-  void Wait() { Check(hrx_semaphore_wait(completion_, tail_, UINT64_MAX)); }
+  void Wait() {
+    Check(
+        hrx_semaphore_wait(completion_, tail_, UINT64_MAX, HRX_WAIT_FLAG_NONE));
+  }
   void Verify() {
     void* data = nullptr;
     Check(hrx_buffer_map(output_, HRX_MAP_READ, 0, 4096, &data));
@@ -311,7 +314,7 @@ class Environment {
     Check(hrx_stream_create(queue_, 0, stream.for_output()));
     Check(hrx_stream_copy_h2d_linear(stream, source.data(), device_buffer, 0,
                                      length));
-    Check(hrx_stream_synchronize(stream));
+    Check(hrx_stream_synchronize(stream, HRX_WAIT_FLAG_NONE));
     const auto enqueue = [&] {
       if constexpr (Dispatch) {
         const hrx_buffer_ref_t binding = {output_, 0, sizeof(expected_)};
@@ -339,7 +342,7 @@ class Environment {
       Check(hrx_stream_flush(stream));
     };
     const auto complete = [&] {
-      Check(hrx_stream_synchronize(stream));
+      Check(hrx_stream_synchronize(stream, HRX_WAIT_FLAG_NONE));
       if constexpr (Path == ReadbackPath::kMapped) {
         std::memcpy(target.data(), mapped, length);
       }
@@ -401,7 +404,7 @@ class Environment {
       Check(hrx_stream_fill_buffer_linear(streams[i], output_, 0,
                                           sizeof(expected_), &expected_,
                                           sizeof(expected_)));
-      Check(hrx_stream_synchronize(streams[i]));
+      Check(hrx_stream_synchronize(streams[i], HRX_WAIT_FLAG_NONE));
       Check(hrx_stream_get_timeline_position(streams[i], &points[i]));
     }
     Check(hrx_event_record(event, streams[0]));
@@ -444,7 +447,7 @@ class Environment {
       Check(hrx_stream_create(queue_, 0, stream.for_output()));
       Check(hrx_stream_fill_buffer_linear(stream, output_, 0, sizeof(expected_),
                                           &expected_, sizeof(expected_)));
-      Check(hrx_stream_synchronize(stream));
+      Check(hrx_stream_synchronize(stream, HRX_WAIT_FLAG_NONE));
     }
     const size_t batch = state.range(0);
     size_t producer = 0;
@@ -466,7 +469,7 @@ class Environment {
     for (size_t i = 0; i < batch; ++i) {
       record();
     }
-    Check(hrx_event_synchronize(event));
+    Check(hrx_event_synchronize(event, HRX_WAIT_FLAG_NONE));
     for (size_t i = 0; i < kStreamCount; ++i) {
       Check(hrx_stream_get_timeline_position(streams[i], &points[i]));
     }
@@ -477,14 +480,14 @@ class Environment {
       if constexpr (!Complete) {
         state.PauseTiming();
       }
-      Check(hrx_event_synchronize(event));
+      Check(hrx_event_synchronize(event, HRX_WAIT_FLAG_NONE));
       if constexpr (!Complete) {
         state.ResumeTiming();
       }
     }
     uint64_t advances = 0;
     for (size_t i = 0; i < kStreamCount; ++i) {
-      Check(hrx_stream_synchronize(streams[i]));
+      Check(hrx_stream_synchronize(streams[i], HRX_WAIT_FLAG_NONE));
       hrx_timeline_point_t after;
       Check(hrx_stream_get_timeline_position(streams[i], &after));
       advances += after.value - points[i].value;

@@ -84,7 +84,8 @@ static int run_device_smoke_test(hrx_device_t device, const char* label) {
   if (result == 0 && report_status_error(hrx_stream_flush(stream))) {
     result = 1;
   }
-  if (result == 0 && report_status_error(hrx_stream_synchronize(stream))) {
+  if (result == 0 &&
+      report_status_error(hrx_stream_synchronize(stream, HRX_WAIT_FLAG_NONE))) {
     result = 1;
   }
   if (result == 0) {
@@ -106,7 +107,8 @@ static int run_device_smoke_test(hrx_device_t device, const char* label) {
   if (result == 0 && report_status_error(hrx_stream_flush(stream))) {
     result = 1;
   }
-  if (result == 0 && report_status_error(hrx_stream_synchronize(stream))) {
+  if (result == 0 &&
+      report_status_error(hrx_stream_synchronize(stream, HRX_WAIT_FLAG_NONE))) {
     result = 1;
   }
   if (result == 0) {

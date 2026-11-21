@@ -21,7 +21,8 @@ struct QueueTransferResources {
     if (completion_value) {
       ReportHrxTestFailure(
           "queue transfer completion",
-          hrx().semaphore_wait(completion, completion_value, UINT64_MAX));
+          hrx().semaphore_wait(completion, completion_value, UINT64_MAX,
+                               HRX_WAIT_FLAG_NONE));
     }
     hrx().buffer_release(target);
     hrx().buffer_release(source);
@@ -177,8 +178,8 @@ TEST_CASE_METHOD(HrxTestFixture,
   REQUIRE_OK(
       hrx().queue_barrier(resources.queue, &waits, &signals, &empty_barriers));
   resources.completion_value = signal_value;
-  REQUIRE_OK(
-      hrx().semaphore_wait(resources.completion, signal_value, UINT64_MAX));
+  REQUIRE_OK(hrx().semaphore_wait(resources.completion, signal_value,
+                                  UINT64_MAX, HRX_WAIT_FLAG_NONE));
   std::vector<uint32_t> result(kWordCount);
   REQUIRE_OK(hrx().synchronous_d2h_linear(resources.queue, resources.target, 0,
                                           result.data(), kByteLength));
@@ -241,8 +242,8 @@ TEST_CASE_METHOD(HrxTestFixture,
                               nullptr));
   resources.completion_value = signal_value;
   copy = {};
-  REQUIRE_OK(
-      hrx().semaphore_wait(resources.completion, signal_value, UINT64_MAX));
+  REQUIRE_OK(hrx().semaphore_wait(resources.completion, signal_value,
+                                  UINT64_MAX, HRX_WAIT_FLAG_NONE));
   REQUIRE_OK(hrx().synchronous_d2h_linear(transfer_queue_, resources.target, 0,
                                           observed.data(), observed.size()));
   auto expected = padding;
@@ -273,7 +274,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Queue host call", "[queue_ops][host_call]") {
   REQUIRE_OK(hrx().queue_host_call(
       FindProvisionedQueue(device_, HRX_QUEUE_ROLE_HOST_CALL), nullptr,
       &signal_list, hostCallIncrement, &callback_count));
-  REQUIRE_OK(hrx().semaphore_wait(done, 1, UINT64_MAX));
+  REQUIRE_OK(hrx().semaphore_wait(done, 1, UINT64_MAX, HRX_WAIT_FLAG_NONE));
   REQUIRE(callback_count == 1);
 
   hrx().semaphore_release(done);
@@ -308,7 +309,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Queue fill signals completion semaphore",
   REQUIRE_OK(hrx().queue_fill_linear(transfer_queue_, nullptr, &signal_list,
                                      buf, 0, kWordCount * sizeof(uint32_t),
                                      &kPattern, sizeof(kPattern), nullptr));
-  REQUIRE_OK(hrx().semaphore_wait(done, 1, UINT64_MAX));
+  REQUIRE_OK(hrx().semaphore_wait(done, 1, UINT64_MAX, HRX_WAIT_FLAG_NONE));
 
   std::vector<uint32_t> readback(kWordCount);
   REQUIRE_OK(hrx().synchronous_d2h_linear(transfer_queue_, buf, 0,
@@ -357,7 +358,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Queue copy signals completion semaphore",
 
   REQUIRE_OK(hrx().queue_copy_linear(transfer_queue_, nullptr, &signal_list,
                                      src, 0, dst, 0, kByteCount, nullptr));
-  REQUIRE_OK(hrx().semaphore_wait(done, 1, UINT64_MAX));
+  REQUIRE_OK(hrx().semaphore_wait(done, 1, UINT64_MAX, HRX_WAIT_FLAG_NONE));
 
   std::vector<uint8_t> readback(kByteCount);
   REQUIRE_OK(hrx().synchronous_d2h_linear(transfer_queue_, dst, 0,

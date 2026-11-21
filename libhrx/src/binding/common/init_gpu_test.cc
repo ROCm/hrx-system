@@ -172,8 +172,8 @@ TEST_F(StreamingInitializationTest, FailureAndTeardownPreserveNativeRuntime) {
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_queue_fill_linear(
       hrx_device_get_queue(native_device, 0, 0), nullptr, &signals, buffer, 0,
       256, &pattern, sizeof(pattern), nullptr)));
-  IREE_ASSERT_OK(
-      hrx_status_to_iree(hrx_semaphore_wait(semaphore, value, UINT64_MAX)));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_semaphore_wait(semaphore, value, UINT64_MAX, HRX_WAIT_FLAG_NONE)));
   void* data = nullptr;
   IREE_ASSERT_OK(
       hrx_status_to_iree(hrx_buffer_map(buffer, HRX_MAP_READ, 0, 256, &data)));
