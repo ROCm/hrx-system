@@ -16,6 +16,117 @@ namespace {
 using EventPtr =
     hrx::runtime::hrx_ptr<hrx_event_t, hrx_event_retain, hrx_event_release>;
 
+// HAL dependency recording the public HRX host-wait boundary. It performs no
+// native submission; HRX owns policy forwarding and status conversion.
+struct WaitSemaphore {
+  WaitSemaphore() {
+    static const iree_hal_semaphore_vtable_t vtable = {
+        .wait = [](iree_hal_semaphore_t* base, uint64_t value,
+                   iree_timeout_t timeout,
+                   iree_async_wait_flags_t flags) -> iree_status_t {
+          auto* self = reinterpret_cast<WaitSemaphore*>(base);
+          ++self->calls;
+          self->value = value;
+          self->timeout = timeout;
+          self->flags = flags;
+          return iree_status_from_code(self->result);
+        },
+    };
+    iree_hal_resource_initialize(&vtable, &resource);
+  }
+  iree_hal_semaphore_t* get() {
+    return reinterpret_cast<iree_hal_semaphore_t*>(this);
+  }
+
+  // Borrowed backend resource, alive for the complete host call.
+  iree_hal_resource_t resource;
+  // Number of waits forwarded to this dependency.
+  uint32_t calls = 0;
+  // Last requested completion point.
+  uint64_t value = 0;
+  // Last requested timeout, before any backend-specific deadline conversion.
+  iree_timeout_t timeout = {};
+  // Last requested caller policy, independent of device-worker policy.
+  iree_async_wait_flags_t flags = IREE_ASYNC_WAIT_FLAG_NONE;
+  // Backend result returned unchanged through HRX's status representation.
+  iree_status_code_t result = IREE_STATUS_OK;
+};
+
+TEST(HostWaitTest, ForwardsPolicyTimeoutAndFailure) {
+  WaitSemaphore backend;
+  hrx_device_s device = {};
+  hrx_queue_s queue = {.device = &device};
+  hrx_semaphore_s semaphore = {
+      .hal_semaphore = backend.get(),
+      .device = &device,
+  };
+  hrx_stream_s stream = {
+      .queue = &queue,
+      .semaphore = &semaphore,
+      .timepoint = 17,
+  };
+  hrx_event_s event = {.semaphore = &semaphore, .signal_value = 17};
+  for (hrx_wait_flags_t flags :
+       {HRX_WAIT_FLAG_NONE, HRX_WAIT_FLAG_YIELD, HRX_WAIT_FLAG_ACTIVE,
+        HRX_WAIT_FLAG_YIELD | HRX_WAIT_FLAG_ACTIVE}) {
+    SCOPED_TRACE(flags);
+    for (iree_status_code_t result : {IREE_STATUS_OK, IREE_STATUS_ABORTED}) {
+      backend.result = result;
+      for (uint64_t timeout_ns : {uint64_t{0}, uint64_t{1000}, UINT64_MAX}) {
+        IREE_EXPECT_STATUS_IS(result, hrx_status_to_iree(hrx_semaphore_wait(
+                                          &semaphore, 17, timeout_ns, flags)));
+        EXPECT_EQ(backend.value, 17u);
+        EXPECT_EQ(backend.flags, flags);
+        if (timeout_ns == UINT64_MAX) {
+          EXPECT_TRUE(iree_timeout_is_infinite(backend.timeout));
+        } else if (timeout_ns == 0) {
+          EXPECT_TRUE(iree_timeout_is_immediate(backend.timeout));
+        } else {
+          EXPECT_EQ(backend.timeout.type, IREE_TIMEOUT_RELATIVE);
+          EXPECT_EQ(backend.timeout.nanos, 1000);
+        }
+      }
+      IREE_EXPECT_STATUS_IS(
+          result, hrx_status_to_iree(hrx_stream_wait(&stream, flags)));
+      EXPECT_EQ(backend.flags, flags);
+      EXPECT_EQ(backend.value, 17u);
+      EXPECT_TRUE(iree_timeout_is_infinite(backend.timeout));
+      IREE_EXPECT_STATUS_IS(
+          result, hrx_status_to_iree(hrx_stream_synchronize(&stream, flags)));
+      EXPECT_EQ(backend.flags, flags);
+      IREE_EXPECT_STATUS_IS(
+          result, hrx_status_to_iree(hrx_event_synchronize(&event, flags)));
+      EXPECT_EQ(backend.flags, flags);
+    }
+  }
+  EXPECT_EQ(backend.calls, 48u);
+}
+
+TEST(HostWaitTest, InvalidPolicyDoesNotSubmitOrWait) {
+  WaitSemaphore backend;
+  hrx_semaphore_s semaphore = {.hal_semaphore = backend.get()};
+  hrx_stream_s stream = {.pending_full_barrier = true};
+  hrx_event_s event = {};
+  hrx_fence_s fence = {};
+  constexpr hrx_wait_flags_t invalid = 1u << 31;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      hrx_status_to_iree(hrx_semaphore_wait(&semaphore, 1, 0, invalid)));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      hrx_status_to_iree(hrx_stream_synchronize(&stream, invalid)));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        hrx_status_to_iree(hrx_stream_wait(&stream, invalid)));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      hrx_status_to_iree(hrx_event_synchronize(&event, invalid)));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        hrx_status_to_iree(hrx_fence_wait(&fence, 0, invalid)));
+  EXPECT_TRUE(stream.pending_full_barrier);
+  EXPECT_EQ(stream.timepoint, 0u);
+  EXPECT_EQ(backend.calls, 0u);
+}
+
 class StreamTest : public ::testing::Test {
  protected:
   // Owns the task device and its runtime through fixture cleanup.
@@ -160,7 +271,10 @@ TEST_F(StreamTest, FullBarrierStaysPendingUntilFlushOrFinalRelease) {
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_barrier(stream.get(), nullptr)));
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_barrier(stream.get(), nullptr)));
   EXPECT_EQ(stream.get()->pending_cb, nullptr);
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_wait(stream.get())));
+  for (hrx_wait_flags_t flags :
+       {HRX_WAIT_FLAG_NONE, HRX_WAIT_FLAG_YIELD, HRX_WAIT_FLAG_ACTIVE}) {
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_wait(stream.get(), flags)));
+  }
   IREE_ASSERT_OK(hrx_status_to_iree(
       hrx_stream_get_timeline_position(stream.get(), &point)));
   EXPECT_EQ(point.value, 0u);
@@ -246,7 +360,8 @@ TEST_F(StreamTest, GraphReplayUsesAnotherQueueInTheRecordingFamily) {
       hrx_graph_exec_launch(executable.get(), stream.get())));
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_copy_d2h_linear(
       stream.get(), buffer.get(), 0, output.data(), sizeof(output))));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream.get())));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_stream_synchronize(stream.get(), HRX_WAIT_FLAG_NONE)));
   for (uint32_t value : output) {
     EXPECT_EQ(value, fill.pattern);
   }

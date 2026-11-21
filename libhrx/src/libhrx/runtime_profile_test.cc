@@ -78,10 +78,12 @@ TEST(RuntimeProfileTest, StreamSynchronizationReturnsProfileOutputFailure) {
   hrx_queue_s queue = {.device = &device};
   hrx_stream_s stream = {.queue = &queue};
   output.fail = true;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
-                        hrx_status_to_iree(hrx_stream_synchronize(&stream)));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DATA_LOSS,
+      hrx_status_to_iree(hrx_stream_synchronize(&stream, HRX_WAIT_FLAG_NONE)));
   output.fail = false;
-  IREE_EXPECT_OK(hrx_status_to_iree(hrx_stream_synchronize(&stream)));
+  IREE_EXPECT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(&stream, HRX_WAIT_FLAG_NONE)));
   EXPECT_EQ(output.calls, 2);
   iree_slim_mutex_deinitialize(&group.profile_mutex);
 }

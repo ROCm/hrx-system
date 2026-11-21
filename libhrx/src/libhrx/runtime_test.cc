@@ -59,7 +59,8 @@ TEST(RuntimeTest, DiscoveryOwnsMetadataWithoutActivatingExecutionServices) {
   const hrx_semaphore_list_t signals = {&signal, &value, 1};
   ASSERT_TRUE(Check(hrx_queue_barrier(hrx_device_get_queue(device, 0, 0),
                                       nullptr, &signals, nullptr)));
-  ASSERT_TRUE(Check(hrx_semaphore_wait(completed, value, UINT64_MAX)));
+  ASSERT_TRUE(Check(
+      hrx_semaphore_wait(completed, value, UINT64_MAX, HRX_WAIT_FLAG_NONE)));
 }
 
 TEST(RuntimeTest, DiscoveryRejectsInvalidInputsWithoutReturningMetadata) {

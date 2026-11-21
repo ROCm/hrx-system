@@ -60,7 +60,8 @@ class StreamingProfileGpuTest : public testing::Test {
 
   void TearDown() override {
     if (stream_) {
-      IREE_EXPECT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+      IREE_EXPECT_OK(hrx_status_to_iree(
+          hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
     }
     hrx_buffer_release(buffer_);
     hrx_event_release(event_);
@@ -157,15 +158,18 @@ TEST_F(StreamingProfileGpuTest, SynchronizationDrainsLongRunningQueueCapture) {
         stream_, buffer_, 0, 64, &pattern, sizeof(pattern))));
     switch ((i / 1000) % 3) {
       case 0:
-        IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+        IREE_ASSERT_OK(hrx_status_to_iree(
+            hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
         break;
       case 1:
         IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_flush(stream_)));
-        IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_wait(stream_)));
+        IREE_ASSERT_OK(
+            hrx_status_to_iree(hrx_stream_wait(stream_, HRX_WAIT_FLAG_NONE)));
         break;
       case 2:
         IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_record(event_, stream_)));
-        IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(event_)));
+        IREE_ASSERT_OK(hrx_status_to_iree(
+            hrx_event_synchronize(event_, HRX_WAIT_FLAG_NONE)));
         break;
     }
     ++executions_;

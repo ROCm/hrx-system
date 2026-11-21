@@ -61,7 +61,8 @@ TEST(DeviceGroupTest, RetainedDeviceKeepsGroupAndServicesUsable) {
   ASSERT_TRUE(Check(hrx_queue_fill_linear(hrx_device_get_queue(second, 0, 0),
                                           nullptr, &signals, buffer, 0, 256,
                                           &pattern, sizeof(pattern), nullptr)));
-  ASSERT_TRUE(Check(hrx_semaphore_wait(semaphore, value, UINT64_MAX)));
+  ASSERT_TRUE(Check(
+      hrx_semaphore_wait(semaphore, value, UINT64_MAX, HRX_WAIT_FLAG_NONE)));
   second.reset();
   first.reset();
 
@@ -98,7 +99,8 @@ TEST(DeviceGroupTest, FailedConstructionPreservesExistingGroup) {
                                          0, semaphore.for_output())));
   ASSERT_TRUE(semaphore);
   ASSERT_TRUE(Check(hrx_semaphore_signal(semaphore, 17)));
-  ASSERT_TRUE(Check(hrx_semaphore_wait(semaphore, 17, UINT64_MAX)));
+  ASSERT_TRUE(
+      Check(hrx_semaphore_wait(semaphore, 17, UINT64_MAX, HRX_WAIT_FLAG_NONE)));
 }
 
 TEST(DeviceGroupTest, RejectsInvalidInputsBeforeActivation) {
@@ -237,7 +239,8 @@ TEST(DeviceGroupTest, SharedReservationHasPerDeviceAddressesAndGraphAccess) {
   ASSERT_TRUE(
       Check(hrx_queue_map(hrx_device_get_queue(devices[0], 0, 0), &allocated,
                           &signal, 1, &mapping, HRX_QUEUE_MAP_FLAG_NONE)));
-  ASSERT_TRUE(Check(hrx_semaphore_wait(ready, value, UINT64_MAX)));
+  ASSERT_TRUE(
+      Check(hrx_semaphore_wait(ready, value, UINT64_MAX, HRX_WAIT_FLAG_NONE)));
   ready.reset();
   hrx_memory_scope_t program_scopes[2];
   for (size_t i = 0; i < 2; ++i) {
@@ -282,7 +285,7 @@ TEST(DeviceGroupTest, SharedReservationHasPerDeviceAddressesAndGraphAccess) {
   hrx::runtime::stream_ptr stream;
   ASSERT_TRUE(Check(hrx_stream_create(queue, 0, stream.for_output())));
   ASSERT_TRUE(Check(hrx_graph_exec_launch(executable, stream)));
-  ASSERT_TRUE(Check(hrx_stream_synchronize(stream)));
+  ASSERT_TRUE(Check(hrx_stream_synchronize(stream, HRX_WAIT_FLAG_NONE)));
   uint32_t output[64] = {};
   ASSERT_TRUE(
       Check(hrx_synchronous_d2h_linear(hrx_device_get_queue(devices[0], 0, 0),
@@ -327,7 +330,8 @@ TEST_F(DeviceGroupLifetimeTest, ViewKeepsAllocationAndServicesAlive) {
   ASSERT_TRUE(Check(hrx_queue_fill_linear(
       hrx_device_get_queue(device_, 0, 0), nullptr, &signals, borrowed_buffer,
       0, 256, &pattern, sizeof(pattern), nullptr)));
-  ASSERT_TRUE(Check(hrx_semaphore_wait(done, value, UINT64_MAX)));
+  ASSERT_TRUE(
+      Check(hrx_semaphore_wait(done, value, UINT64_MAX, HRX_WAIT_FLAG_NONE)));
   done.reset();
 
   void* data = nullptr;
@@ -381,11 +385,21 @@ TEST_F(DeviceGroupLifetimeTest, ExtendedFenceRetainsDistinctGroups) {
 
   ASSERT_TRUE(Check(hrx_semaphore_signal(borrowed_first, 3)));
   ASSERT_TRUE(Check(hrx_semaphore_signal(borrowed_second, 5)));
-  hrx_status_t status = hrx_fence_wait(retained, 0);
-  EXPECT_EQ(hrx_status_code(status), HRX_STATUS_DEADLINE_EXCEEDED);
-  hrx_status_ignore(status);
+  for (hrx_wait_flags_t flags :
+       {HRX_WAIT_FLAG_NONE, HRX_WAIT_FLAG_YIELD, HRX_WAIT_FLAG_ACTIVE,
+        HRX_WAIT_FLAG_YIELD | HRX_WAIT_FLAG_ACTIVE}) {
+    for (uint64_t timeout_ns : {uint64_t{0}, uint64_t{1}}) {
+      hrx_status_t status = hrx_fence_wait(retained, timeout_ns, flags);
+      EXPECT_EQ(hrx_status_code(status), HRX_STATUS_DEADLINE_EXCEEDED);
+      hrx_status_ignore(status);
+    }
+  }
   ASSERT_TRUE(Check(hrx_semaphore_signal(borrowed_first, 4)));
-  ASSERT_TRUE(Check(hrx_fence_wait(retained, 0)));
+  for (hrx_wait_flags_t flags :
+       {HRX_WAIT_FLAG_NONE, HRX_WAIT_FLAG_YIELD, HRX_WAIT_FLAG_ACTIVE,
+        HRX_WAIT_FLAG_YIELD | HRX_WAIT_FLAG_ACTIVE}) {
+    ASSERT_TRUE(Check(hrx_fence_wait(retained, 0, flags)));
+  }
 }
 
 TEST_F(DeviceGroupLifetimeTest, PartialFenceExtensionKeepsInsertedOwners) {
@@ -419,7 +433,7 @@ TEST_F(DeviceGroupLifetimeTest, PartialFenceExtensionKeepsInsertedOwners) {
   uint64_t value = 0;
   ASSERT_TRUE(Check(hrx_semaphore_query(borrowed, &value)));
   EXPECT_EQ(value, 8u);
-  ASSERT_TRUE(Check(hrx_fence_wait(target, 0)));
+  ASSERT_TRUE(Check(hrx_fence_wait(target, 0, HRX_WAIT_FLAG_NONE)));
 }
 
 TEST_F(DeviceGroupLifetimeTest, SingleTimepointFenceRetainsTimeline) {
@@ -432,7 +446,7 @@ TEST_F(DeviceGroupLifetimeTest, SingleTimepointFenceRetainsTimeline) {
   timeline.reset();
   ReleaseConstructionOwners();
   ASSERT_TRUE(Check(hrx_fence_signal(fence)));
-  ASSERT_TRUE(Check(hrx_fence_wait(fence, 0)));
+  ASSERT_TRUE(Check(hrx_fence_wait(fence, 0, HRX_WAIT_FLAG_NONE)));
 }
 
 TEST_F(DeviceGroupLifetimeTest, GraphKeepsRecordingAndExecutionOwnersAlive) {
@@ -476,7 +490,7 @@ TEST_F(DeviceGroupLifetimeTest, GraphKeepsRecordingAndExecutionOwnersAlive) {
                                       stream.for_output())));
   ASSERT_TRUE(stream);
   ASSERT_TRUE(Check(hrx_graph_exec_launch(executable, stream)));
-  ASSERT_TRUE(Check(hrx_stream_synchronize(stream)));
+  ASSERT_TRUE(Check(hrx_stream_synchronize(stream, HRX_WAIT_FLAG_NONE)));
   stream.reset();
   for (uint32_t value : values) {
     EXPECT_EQ(value, 0xA5A5A5A5u);

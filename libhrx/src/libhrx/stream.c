@@ -156,9 +156,10 @@ void hrx_stream_release(hrx_stream_t stream) {
       status = hrx_status_to_iree(hrx_stream_flush(stream));
     }
     if (stream->timepoint > 0) {
-      status = iree_status_join(
-          status, hrx_status_to_iree(hrx_semaphore_wait(
-                      stream->semaphore, stream->timepoint, UINT64_MAX)));
+      status =
+          iree_status_join(status, hrx_status_to_iree(hrx_semaphore_wait(
+                                       stream->semaphore, stream->timepoint,
+                                       UINT64_MAX, HRX_WAIT_FLAG_NONE)));
     }
     hrx_device_report_failure(stream->queue->device, status);
     hrx_queue_release(stream->queue);
@@ -259,11 +260,16 @@ hrx_status_t hrx_stream_flush(hrx_stream_t stream) {
                                   stream, /*terminal=*/NULL)));
 }
 
-hrx_status_t hrx_stream_synchronize(hrx_stream_t stream) {
+hrx_status_t hrx_stream_synchronize(hrx_stream_t stream,
+                                    hrx_wait_flags_t flags) {
   HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_synchronize");
   if (!stream) {
     HRX_RETURN_AND_END_ZONE(
         z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "stream is NULL"));
+  }
+  if (flags & ~(HRX_WAIT_FLAG_YIELD | HRX_WAIT_FLAG_ACTIVE)) {
+    HRX_RETURN_AND_END_ZONE(
+        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "invalid wait flags"));
   }
 
   // Flush any pending work first.
@@ -272,20 +278,24 @@ hrx_status_t hrx_stream_synchronize(hrx_stream_t stream) {
     HRX_RETURN_AND_END_ZONE(z0, status);
   }
 
-  HRX_RETURN_AND_END_ZONE(z0, hrx_stream_wait(stream));
+  HRX_RETURN_AND_END_ZONE(z0, hrx_stream_wait(stream, flags));
 }
 
-hrx_status_t hrx_stream_wait(hrx_stream_t stream) {
+hrx_status_t hrx_stream_wait(hrx_stream_t stream, hrx_wait_flags_t flags) {
   HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_wait");
   if (!stream) {
     HRX_RETURN_AND_END_ZONE(
         z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "stream is NULL"));
   }
+  if (flags & ~(HRX_WAIT_FLAG_YIELD | HRX_WAIT_FLAG_ACTIVE)) {
+    HRX_RETURN_AND_END_ZONE(
+        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "invalid wait flags"));
+  }
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, stream->timepoint);
   iree_status_t status = iree_ok_status();
   if (stream->timepoint != 0) {
-    status = hrx_status_to_iree(
-        hrx_semaphore_wait(stream->semaphore, stream->timepoint, UINT64_MAX));
+    status = hrx_status_to_iree(hrx_semaphore_wait(
+        stream->semaphore, stream->timepoint, UINT64_MAX, flags));
   }
   status = iree_status_join(status,
                             hrx_runtime_profile_flush(stream->queue->device));

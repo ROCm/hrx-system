@@ -130,9 +130,13 @@ hrx_status_t hrx_fence_signal(hrx_fence_t fence) {
   return hrx_status_from_iree(iree_hal_fence_signal(fence->hal_fence));
 }
 
-hrx_status_t hrx_fence_wait(hrx_fence_t fence, uint64_t timeout_ns) {
+hrx_status_t hrx_fence_wait(hrx_fence_t fence, uint64_t timeout_ns,
+                            hrx_wait_flags_t flags) {
   if (!fence) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "fence is NULL");
+  }
+  if (flags & ~(HRX_WAIT_FLAG_YIELD | HRX_WAIT_FLAG_ACTIVE)) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "invalid wait flags");
   }
 
   iree_timeout_t timeout = iree_make_timeout_ns(timeout_ns);
@@ -143,5 +147,5 @@ hrx_status_t hrx_fence_wait(hrx_fence_t fence, uint64_t timeout_ns) {
   }
 
   return hrx_status_from_iree(
-      iree_hal_fence_wait(fence->hal_fence, timeout, 0));
+      iree_hal_fence_wait(fence->hal_fence, timeout, flags));
 }

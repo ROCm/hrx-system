@@ -231,7 +231,7 @@ class HrxRuntime {
     Check(api_.graph_exec_launch(executable_, stream_));
     ++launch_count_;
   }
-  void Wait() { Check(api_.stream_synchronize(stream_)); }
+  void Wait() { Check(api_.stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)); }
 
   void Verify() {
     const size_t checkpoints =

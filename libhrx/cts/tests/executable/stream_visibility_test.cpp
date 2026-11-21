@@ -19,7 +19,14 @@
 
 namespace {
 
-enum class Observation { kWait, kQuery, kEvent };
+enum class Observation {
+  kWait,
+  kSynchronize,
+  kSemaphore,
+  kFence,
+  kQuery,
+  kEvent
+};
 
 class StreamVisibilityTest : public HrxTestFixture {
  protected:
@@ -80,8 +87,9 @@ class StreamVisibilityTest : public HrxTestFixture {
     // disappear.
     for (hrx_stream_t stream : streams_) {
       if (stream) {
-        ReportHrxTestFailure("stream visibility completion",
-                             hrx().stream_synchronize(stream));
+        ReportHrxTestFailure(
+            "stream visibility completion",
+            hrx().stream_synchronize(stream, HRX_WAIT_FLAG_NONE));
         hrx().stream_release(stream);
       }
     }
@@ -123,12 +131,35 @@ class StreamVisibilityTest : public HrxTestFixture {
     expected_ = next;
   }
 
-  void Observe(hrx_stream_t stream, Observation observation) {
-    REQUIRE_OK(hrx().stream_flush(stream));
+  void Observe(hrx_stream_t stream, Observation observation,
+               hrx_wait_flags_t flags = HRX_WAIT_FLAG_NONE) {
+    if (observation != Observation::kSynchronize) {
+      REQUIRE_OK(hrx().stream_flush(stream));
+    }
     switch (observation) {
       case Observation::kWait:
-        REQUIRE_OK(hrx().stream_wait(stream));
+        REQUIRE_OK(hrx().stream_wait(stream, flags));
         break;
+      case Observation::kSynchronize:
+        REQUIRE_OK(hrx().stream_synchronize(stream, flags));
+        break;
+      case Observation::kSemaphore: {
+        hrx_timeline_point_t point;
+        REQUIRE_OK(hrx().stream_get_timeline_position(stream, &point));
+        REQUIRE_OK(hrx().semaphore_wait(point.semaphore, point.value,
+                                        UINT64_MAX, flags));
+        break;
+      }
+      case Observation::kFence: {
+        hrx_timeline_point_t point;
+        REQUIRE_OK(hrx().stream_get_timeline_position(stream, &point));
+        hrx_fence_t fence = nullptr;
+        REQUIRE_OK(hrx().fence_create_at(point.semaphore, point.value, &fence));
+        const hrx_status_t status = hrx().fence_wait(fence, UINT64_MAX, flags);
+        hrx().fence_release(fence);
+        REQUIRE_OK(status);
+        break;
+      }
       case Observation::kQuery: {
         bool complete = false;
         while (!complete) {
@@ -138,7 +169,7 @@ class StreamVisibilityTest : public HrxTestFixture {
       }
       case Observation::kEvent:
         REQUIRE_OK(hrx().event_record(event_, stream));
-        REQUIRE_OK(hrx().event_synchronize(event_));
+        REQUIRE_OK(hrx().event_synchronize(event_, flags));
         break;
     }
     // No transfer or extra queue operation may repair the host visibility.
@@ -185,8 +216,13 @@ class StreamVisibilityTest : public HrxTestFixture {
 TEST_CASE_METHOD(StreamVisibilityTest,
                  "Stream boundaries publish mapped dispatch payloads",
                  "[stream][visibility]") {
-  const auto observation =
-      GENERATE(Observation::kWait, Observation::kQuery, Observation::kEvent);
+  const auto observation = GENERATE(
+      Observation::kWait, Observation::kSynchronize, Observation::kSemaphore,
+      Observation::kFence, Observation::kQuery, Observation::kEvent);
+  const hrx_wait_flags_t flags =
+      GENERATE(HRX_WAIT_FLAG_NONE, HRX_WAIT_FLAG_YIELD, HRX_WAIT_FLAG_ACTIVE,
+               HRX_WAIT_FLAG_YIELD | HRX_WAIT_FLAG_ACTIVE);
+  CAPTURE(observation, flags);
   const bool explicit_barrier = GENERATE(false, true);
   Initialize();
   for (uint32_t epoch = 1; epoch <= 3; ++epoch) {
@@ -198,7 +234,7 @@ TEST_CASE_METHOD(StreamVisibilityTest,
     }
     Dispatch(streams_[0], 2, 1, 3);
     Dispatch(streams_[0], 1, 2, 4);
-    Observe(streams_[0], observation);
+    Observe(streams_[0], observation, flags);
   }
 }
 

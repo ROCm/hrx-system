@@ -146,7 +146,8 @@ class GraphOrderingTest : public ::testing::Test {
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer_linear(
         streams_[0], buffer_, 0, sizeof(uint32_t) * kWordCount, &zero,
         sizeof(zero))));
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(streams_[0])));
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_stream_synchronize(streams_[0], HRX_WAIT_FLAG_NONE)));
     IREE_ASSERT_OK(
         hrx_status_to_iree(hrx_semaphore_create(device_, 0, &gate_)));
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_create(device_, 0, &graph_)));
@@ -170,7 +171,8 @@ class GraphOrderingTest : public ::testing::Test {
     for (auto stream : streams_) {
       stream->hal_queue = queue_.target;
       if (queue_.reject_at == SIZE_MAX) {
-        IREE_EXPECT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream)));
+        IREE_EXPECT_OK(hrx_status_to_iree(
+            hrx_stream_synchronize(stream, HRX_WAIT_FLAG_NONE)));
       }
     }
     queue_.submissions.clear();
@@ -264,7 +266,8 @@ TEST_F(GraphOrderingTest, EveryRootWaitsForIncomingStreamWork) {
   }
   SubmitReverse();
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_semaphore_signal(gate_, 1)));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(streams_[0])));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_stream_synchronize(streams_[0], HRX_WAIT_FLAG_NONE)));
   VerifyContents(17);
 }
 
@@ -292,7 +295,8 @@ TEST_F(GraphOrderingTest, CompletionJoinsEveryTerminalWorkstream) {
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_query(streams_[0], &complete)));
   EXPECT_FALSE(complete);
   IREE_ASSERT_OK(queue_.Submit(0));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(streams_[0])));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_stream_synchronize(streams_[0], HRX_WAIT_FLAG_NONE)));
   VerifyContents(17);
 }
 
@@ -303,7 +307,8 @@ TEST_F(GraphOrderingTest, SingleExitNeedsNoExtraQueueOperation) {
   ASSERT_EQ(queue_.submissions.size(), 1u);
   EXPECT_NE(queue_.submissions[0]->command_buffer, nullptr);
   SubmitReverse();
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(streams_[0])));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_stream_synchronize(streams_[0], HRX_WAIT_FLAG_NONE)));
   VerifyContents(1);
 }
 
@@ -361,7 +366,8 @@ TEST_F(GraphOrderingTest, EmptyReplacementPreservesAcceptedCrossStreamWork) {
 
   SubmitReverse();
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_semaphore_signal(gate_, 1)));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(streams_[1])));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_stream_synchronize(streams_[1], HRX_WAIT_FLAG_NONE)));
   VerifyContents(17);
 }
 
@@ -392,7 +398,8 @@ TEST_F(GraphOrderingTest, ReplacementChangesTopologyWithoutResettingOrdering) {
   hrx_graph_exec_release(exec_);
   exec_ = nullptr;
   SubmitReverse();
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(streams_[1])));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_stream_synchronize(streams_[1], HRX_WAIT_FLAG_NONE)));
   VerifyContents(64);
 }
 
@@ -412,7 +419,8 @@ TEST_F(GraphOrderingTest, QueuedReplaysReserveDistinctGenerations) {
     }
   }
   SubmitReverse();
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(streams_[0])));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_stream_synchronize(streams_[0], HRX_WAIT_FLAG_NONE)));
   VerifyContents(64);
 }
 
@@ -430,7 +438,8 @@ TEST_F(GraphOrderingTest, CrossStreamReplayWaitsForPreviousLaunch) {
     EXPECT_EQ(waits.payload_values[0], previous_completion);
   }
   SubmitReverse();
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(streams_[1])));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_stream_synchronize(streams_[1], HRX_WAIT_FLAG_NONE)));
   VerifyContents(17);
 }
 
@@ -454,7 +463,8 @@ TEST_F(GraphOrderingTest, CrossStreamReplayPreservesBothEntryDependencies) {
   }
   SubmitReverse();
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_semaphore_signal(gate_, 1)));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(streams_[1])));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_stream_synchronize(streams_[1], HRX_WAIT_FLAG_NONE)));
   VerifyContents(17);
 }
 
@@ -479,7 +489,8 @@ TEST_F(GraphOrderingTest, IntermediatePartitionJoinsAllPredecessors) {
               queue_.submissions[i]->signals.semaphores[0]);
   }
   SubmitReverse();
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(streams_[0])));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_stream_synchronize(streams_[0], HRX_WAIT_FLAG_NONE)));
   VerifyContents(17);
 }
 
@@ -505,7 +516,8 @@ TEST_F(GraphOrderingTest, ConcurrentStreamsReserveOrderedLaunches) {
   }
   SubmitReverse();
   for (auto stream : streams_) {
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream)));
+    IREE_ASSERT_OK(
+        hrx_status_to_iree(hrx_stream_synchronize(stream, HRX_WAIT_FLAG_NONE)));
   }
   VerifyContents(17);
 }
@@ -518,9 +530,9 @@ TEST_F(GraphOrderingTest, RejectedSuffixFailsReservedCompletion) {
       IREE_STATUS_RESOURCE_EXHAUSTED,
       hrx_status_to_iree(hrx_graph_exec_launch(exec_, streams_[0])));
   ASSERT_EQ(queue_.submissions.size(), 1u);
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_RESOURCE_EXHAUSTED,
-      hrx_status_to_iree(hrx_stream_synchronize(streams_[0])));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        hrx_status_to_iree(hrx_stream_synchronize(
+                            streams_[0], HRX_WAIT_FLAG_NONE)));
   uint64_t value = 0;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -543,7 +555,8 @@ TEST_P(GraphStreamWaitTest, CompletedExternalWaitPreservesPendingStreamWork) {
         streams_[1], buffer_, 0, sizeof(initial), &initial, sizeof(initial))));
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_record(event_, streams_[1])));
     IREE_ASSERT_OK(queue_.Submit(0));
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_event_synchronize(event_)));
+    IREE_ASSERT_OK(
+        hrx_status_to_iree(hrx_event_synchronize(event_, HRX_WAIT_FLAG_NONE)));
   } else {
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_semaphore_signal(gate_, 1)));
   }
@@ -583,7 +596,8 @@ TEST_P(GraphStreamWaitTest, CompletedExternalWaitPreservesPendingStreamWork) {
   Instantiate();
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, streams_[0])));
   SubmitReverse();
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(streams_[0])));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_stream_synchronize(streams_[0], HRX_WAIT_FLAG_NONE)));
   uint32_t contents[2] = {};
   IREE_ASSERT_OK(hrx_status_to_iree(
       hrx_synchronous_d2h_linear(hrx_device_get_queue(device_, 0, 0), buffer_,
@@ -607,7 +621,8 @@ TEST_F(GraphOrderingTest, SelfTimelineWaitCoalescesWithPendingStreamWork) {
   EXPECT_EQ(waits.semaphores[0], streams_[0]->semaphore->hal_semaphore);
   EXPECT_EQ(waits.payload_values[0], streams_[0]->timepoint - 1);
   SubmitReverse();
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(streams_[0])));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_stream_synchronize(streams_[0], HRX_WAIT_FLAG_NONE)));
   VerifyContents(1);
 }
 

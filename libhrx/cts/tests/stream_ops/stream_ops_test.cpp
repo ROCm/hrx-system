@@ -19,7 +19,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Stream fill buffer", "[stream_ops][fill]") {
   REQUIRE_OK(hrx().stream_fill_buffer_linear(stream, buf, 0, 1024, &pattern,
                                              sizeof(pattern)));
   REQUIRE_OK(hrx().stream_flush(stream));
-  REQUIRE_OK(hrx().stream_synchronize(stream));
+  REQUIRE_OK(hrx().stream_synchronize(stream, HRX_WAIT_FLAG_NONE));
 
   // Verify.
   void* ptr = nullptr;
@@ -48,7 +48,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Stream wait observes flushed work",
   REQUIRE_OK(hrx().stream_fill_buffer_linear(stream, buf, 0, 1024, &pattern,
                                              sizeof(pattern)));
   REQUIRE_OK(hrx().stream_flush(stream));
-  REQUIRE_OK(hrx().stream_wait(stream));
+  REQUIRE_OK(hrx().stream_wait(stream, HRX_WAIT_FLAG_NONE));
 
   void* ptr = nullptr;
   REQUIRE_OK(hrx().buffer_map(buf, HRX_MAP_READ, 0, 1024, &ptr));
@@ -83,7 +83,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Stream copy buffer", "[stream_ops][copy]") {
   // Copy src -> dst.
   REQUIRE_OK(hrx().stream_copy_buffer_linear(stream, src, 0, dst, 0, 512));
   REQUIRE_OK(hrx().stream_flush(stream));
-  REQUIRE_OK(hrx().stream_synchronize(stream));
+  REQUIRE_OK(hrx().stream_synchronize(stream, HRX_WAIT_FLAG_NONE));
 
   // Verify.
   void* ptr = nullptr;
@@ -113,7 +113,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Stream update buffer", "[stream_ops][copy]") {
   memset(host_data, 0x77, sizeof(host_data));
   REQUIRE_OK(hrx().stream_update_buffer_linear(stream, host_data, 64, buf, 0));
   REQUIRE_OK(hrx().stream_flush(stream));
-  REQUIRE_OK(hrx().stream_synchronize(stream));
+  REQUIRE_OK(hrx().stream_synchronize(stream, HRX_WAIT_FLAG_NONE));
 
   // Verify.
   void* ptr = nullptr;
@@ -156,7 +156,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Stream execution barrier",
   REQUIRE_OK(hrx().stream_barrier(stream, &barrier));
   REQUIRE_OK(hrx().stream_copy_buffer_linear(stream, buf, 0, buf, 32, 32));
   REQUIRE_OK(hrx().stream_flush(stream));
-  REQUIRE_OK(hrx().stream_synchronize(stream));
+  REQUIRE_OK(hrx().stream_synchronize(stream, HRX_WAIT_FLAG_NONE));
 
   void* ptr = nullptr;
   REQUIRE_OK(hrx().buffer_map(buf, HRX_MAP_READ, 0, 64, &ptr));

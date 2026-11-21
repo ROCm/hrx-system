@@ -175,7 +175,8 @@ class CommandRecordingTest : public ::testing::Test {
     IREE_ASSERT_OK(hrx_status_to_iree(
         hrx_buffer_allocate(stream_, 128, HRX_MEMORY_TYPE_DEVICE_LOCAL,
                             HRX_BUFFER_USAGE_DEFAULT, target_.for_output())));
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
     IREE_ASSERT_OK(iree_hal_command_buffer_create(
         iree_hal_queue_family(queue_->hal_queue),
         IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT, IREE_HAL_COMMAND_CATEGORY_ANY, 0,
@@ -198,8 +199,8 @@ class CommandRecordingTest : public ::testing::Test {
         queue_->hal_queue, iree_hal_semaphore_list_empty(), signals,
         command_buffer_, iree_hal_buffer_binding_table_empty(),
         IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
-    IREE_ASSERT_OK(
-        hrx_status_to_iree(hrx_semaphore_wait(completion_, value, UINT64_MAX)));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_semaphore_wait(
+        completion_, value, UINT64_MAX, HRX_WAIT_FLAG_NONE)));
   }
 
   // Owns the device and all convenience allocation sources until teardown.

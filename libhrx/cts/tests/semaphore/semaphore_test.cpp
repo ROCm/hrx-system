@@ -36,7 +36,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Semaphore wait after signal",
   REQUIRE_OK(hrx().semaphore_create(device_, 0, &sem));
 
   REQUIRE_OK(hrx().semaphore_signal(sem, 1));
-  REQUIRE_OK(hrx().semaphore_wait(sem, 1, UINT64_MAX));
+  REQUIRE_OK(hrx().semaphore_wait(sem, 1, UINT64_MAX, HRX_WAIT_FLAG_NONE));
 
   hrx().semaphore_release(sem);
 }
@@ -47,7 +47,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Semaphore poll returns immediately",
   REQUIRE_OK(hrx().semaphore_create(device_, 5, &sem));
 
   // Wait with timeout=0 (poll) for already-reached value.
-  REQUIRE_OK(hrx().semaphore_wait(sem, 5, 0));
+  REQUIRE_OK(hrx().semaphore_wait(sem, 5, 0, HRX_WAIT_FLAG_NONE));
 
   hrx().semaphore_release(sem);
 }

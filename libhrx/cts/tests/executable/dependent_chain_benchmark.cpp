@@ -21,8 +21,12 @@ IREE_FLAG(string, chain_runtime, "hrx", "Runtime: hrx or hip.");
 IREE_FLAG(string, chain_device, "amdgpu://0", "Exact HRX device URI.");
 IREE_FLAG(string, chain_hip_library, "", "Exact HIP implementation DSO.");
 IREE_FLAG(int32_t, chain_hip_device, 0, "HIP device ordinal.");
-IREE_FLAG(bool, chain_active_wait, true,
-          "Poll the public stream query API before waiting for completion.");
+IREE_FLAG(string, chain_host_wait_mode, "query",
+          "Caller completion policy: blocking, yield, active, or query. "
+          "Query polls the public stream query API before joining completion.");
+IREE_FLAG(string, chain_completion_wait_mode, "active",
+          "HRX device-worker policy: blocking, yield, or active. "
+          "Independent of the caller; unused by HIP.");
 
 namespace {
 
@@ -33,6 +37,21 @@ void Require(bool condition, const char* message) {
     std::fprintf(stderr, "%s\n", message);
     std::abort();
   }
+}
+
+hrx_wait_flags_t WaitFlags(const char* value) {
+  const std::string mode = value;
+  if (mode == "blocking") {
+    return HRX_WAIT_FLAG_NONE;
+  }
+  if (mode == "yield") {
+    return HRX_WAIT_FLAG_YIELD;
+  }
+  if (mode == "active") {
+    return HRX_WAIT_FLAG_ACTIVE;
+  }
+  Require(false, "wait policy must be blocking, yield, or active");
+  return HRX_WAIT_FLAG_NONE;
 }
 
 void Check(hrx_status_t status) {
@@ -119,8 +138,7 @@ class HrxRuntime {
     Check(hrx_runtime_create(nullptr, hrx_host_allocator_system(), &runtime));
     const hrx_device_create_params_t params = {
         .uri = FLAG_chain_device,
-        .completion_wait_flags =
-            FLAG_chain_active_wait ? HRX_WAIT_FLAG_ACTIVE : HRX_WAIT_FLAG_NONE,
+        .completion_wait_flags = WaitFlags(FLAG_chain_completion_wait_mode),
     };
     const auto status = hrx_device_group_create(runtime, 1, &params, &group_);
     hrx_runtime_release(runtime);
@@ -150,7 +168,8 @@ class HrxRuntime {
     Check(hrx_executable_export_info(module_, ordinal_, &info));
     Require(info.binding_count == 2 && info.constant_byte_length == 8,
             "unexpected dependent-chain kernel ABI");
-    label_ = std::string("HRX ") + architecture + " " + FLAG_chain_device;
+    label_ = std::string("HRX ") + architecture + " " + FLAG_chain_device +
+             " worker_wait=" + FLAG_chain_completion_wait_mode;
   }
 
   ~HrxRuntime() {
@@ -213,13 +232,13 @@ class HrxRuntime {
   }
 
   void Wait() {
-    if (FLAG_chain_active_wait) {
+    if (query_wait_) {
       bool complete = false;
       do {
         Check(hrx_stream_query(stream_, &complete));
       } while (!complete);
     }
-    Check(hrx_stream_wait(stream_));
+    Check(hrx_stream_wait(stream_, wait_flags_));
   }
   void Verify(const Workload& workload) {
     std::vector<uint32_t> actual(workload.count);
@@ -249,6 +268,12 @@ class HrxRuntime {
     return {{{buffers_[workload.source(step)], 0, workload.bytes()},
              {buffers_[workload.target(step)], 0, workload.bytes()}}};
   }
+  // Whether the caller polls the public timeline before joining completion.
+  const bool query_wait_ = std::string(FLAG_chain_host_wait_mode) == "query";
+  // Per-call wait policy resolved before any timed operation or device
+  // creation.
+  const hrx_wait_flags_t wait_flags_ =
+      query_wait_ ? HRX_WAIT_FLAG_NONE : WaitFlags(FLAG_chain_host_wait_mode);
   // Explicit runtime owner retained for the process-wide benchmark fixture.
   hrx_device_group_t group_ = nullptr;
   // Borrowed group device used to allocate the resident working set.
@@ -274,14 +299,21 @@ class HrxRuntime {
 class HipRuntime {
  public:
   HipRuntime() {
+    const auto wait_flags = query_wait_ ? HRX_WAIT_FLAG_ACTIVE
+                                        : WaitFlags(FLAG_chain_host_wait_mode);
+    unsigned int device_flags = hipDeviceScheduleBlockingSync;
+    if (wait_flags == HRX_WAIT_FLAG_ACTIVE) {
+      device_flags = hipDeviceScheduleSpin;
+    } else if (wait_flags == HRX_WAIT_FLAG_YIELD) {
+      device_flags = hipDeviceScheduleYield;
+    }
     Require(FLAG_chain_hip_library[0], "--chain_hip_library is required");
     library_.load(FLAG_chain_hip_library);
     Check(Resolve<decltype(&hipInit)>("hipInit")(0));
     Check(Resolve<decltype(&hipSetDevice)>("hipSetDevice")(
         FLAG_chain_hip_device));
     Check(Resolve<decltype(&hipSetDeviceFlags)>("hipSetDeviceFlags")(
-        FLAG_chain_active_wait ? hipDeviceScheduleSpin
-                               : hipDeviceScheduleBlockingSync));
+        device_flags));
     hipDeviceProp_t properties = {};
     Check(Resolve<decltype(&hipGetDevicePropertiesR0600)>(
         "hipGetDevicePropertiesR0600")(&properties, FLAG_chain_hip_device));
@@ -338,7 +370,7 @@ class HipRuntime {
     }
   }
   void Wait() {
-    if (FLAG_chain_active_wait) {
+    if (query_wait_) {
       hipError_t status;
       do {
         status = query_(stream_);
@@ -385,13 +417,15 @@ class HipRuntime {
                       arguments, nullptr));
     }
   }
+  // Whether the caller polls before the runtime's own synchronization call.
+  const bool query_wait_ = std::string(FLAG_chain_host_wait_mode) == "query";
   // Exact selected implementation; no ambient HIP symbol resolution.
   HrxDynamicLibrary library_;
   // Same Loom code object as the HRX measurement.
   hipModule_t module_ = nullptr;
   // Reflected dependent-chain export.
   hipFunction_t function_ = nullptr;
-  // Ordered nonblocking stream with active completion observation.
+  // Ordered nonblocking stream using the selected HIP scheduling policy.
   hipStream_t stream_ = nullptr;
   // Immutable input followed by two alternating device-local outputs.
   std::array<void*, 3> buffers_ = {};
@@ -403,7 +437,7 @@ class HipRuntime {
   decltype(&hipModuleLaunchKernel) dispatch_ = nullptr;
   // Resolved completion entry point.
   decltype(&hipStreamSynchronize) wait_ = nullptr;
-  // Resolved public completion query used by the active-wait rows.
+  // Resolved public completion query used only by query-polling rows.
   decltype(&hipStreamQuery) query_ = nullptr;
   // Resolved graph replay entry point.
   decltype(&hipGraphLaunch) replay_ = nullptr;
@@ -427,10 +461,8 @@ void Run(benchmark::State& state) {
     runtime.Wait();
   }
   runtime.Verify(workload);
-  state.SetLabel(
-      runtime.label() +
-      (FLAG_chain_active_wait ? " host_wait=query" : " host_wait=blocking") +
-      " memory=device-local");
+  state.SetLabel(runtime.label() + " host_wait=" + FLAG_chain_host_wait_mode +
+                 " memory=device-local");
   for (auto _ : state) {
     runtime.Launch(workload, Mode);
     if constexpr (!IncludeCompletion) {

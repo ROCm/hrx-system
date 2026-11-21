@@ -248,7 +248,8 @@ class GraphKernelTest : public GraphExecSemaphoreTest,
 
   void TearDown() override {
     if (stream_) {
-      IREE_EXPECT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+      IREE_EXPECT_OK(hrx_status_to_iree(
+          hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
     }
     hrx_graph_exec_release(exec_);
     hrx_graph_release(graph_);
@@ -316,7 +317,8 @@ TEST_P(GraphKernelTest, ConstantsWithoutBindingsUseNormalArguments) {
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_dispatch(
       stream_, attrs.executable, attrs.export_ordinal, &attrs.config,
       attrs.constants, attrs.constants_size, nullptr, 0, attrs.flags)));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
   EXPECT_EQ(result_, arguments_.value);
 
   result_ = 0;
@@ -328,7 +330,8 @@ TEST_P(GraphKernelTest, ConstantsWithoutBindingsUseNormalArguments) {
   IREE_ASSERT_OK(hrx_status_to_iree(
       hrx_graph_instantiate(graph_, hrx_stream_get_queue(stream_), 0, &exec_)));
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
   EXPECT_EQ(result_, expected);
 }
 
@@ -378,7 +381,8 @@ TEST_P(GraphKernelTest, ReorderedBranchesJoinAcrossHostAndDeviceOperations) {
   for (int replay = 0; replay < 3; ++replay) {
     pipeline_results_.fill(0xDEADBEEFu);
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
     EXPECT_EQ(pipeline_results_, (std::array<uint32_t, 5>{3, 20, 32, 52, 53}));
   }
 }
@@ -408,7 +412,8 @@ TEST_P(GraphKernelTest, ForeignDependencyRejectsReplacement) {
         hrx_status_to_iree(hrx_graph_exec_update(exec_, invalid)));
     result_ = 0;
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
     EXPECT_EQ(result_, arguments_.value);
   }
 }
@@ -454,7 +459,8 @@ TEST_P(GraphKernelTest, MissingArgumentStorageLeavesTheGraphUsable) {
   EXPECT_EQ(node_count, 0u);
   InstantiateOriginal();
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
   EXPECT_EQ(result_, arguments_.value);
 }
 
@@ -483,7 +489,8 @@ TEST_P(GraphKernelTest, UnrepresentableArgumentStorageLeavesTheGraphUsable) {
   EXPECT_EQ(node_count, 0u);
   InstantiateOriginal();
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
   EXPECT_EQ(result_, arguments_.value);
 }
 
@@ -511,7 +518,8 @@ TEST_P(GraphKernelTest, ReplacementPreservesPendingArgumentsAndResources) {
   EXPECT_EQ(replacement_result, 0u);
 
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_semaphore_signal(gate, 1)));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
   EXPECT_EQ(result_, arguments_.value);
   EXPECT_EQ(replacement_result, 31u);
 }
@@ -525,7 +533,8 @@ TEST_P(GraphKernelTest,
           HRX_MEMORY_TYPE_DEVICE_VISIBLE,
       HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_PERSISTENT,
       buffer.for_output())));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
   void* mapping = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_map(
       buffer, HRX_MAP_READ | HRX_MAP_WRITE, 0, sizeof(uint32_t), &mapping)));
@@ -566,7 +575,8 @@ TEST_P(GraphKernelTest,
   EXPECT_EQ(result_, 0u);
   EXPECT_EQ(replacement_result, 0u);
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_semaphore_signal(gate, 1)));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
   EXPECT_EQ(result_, arguments_.value);
   EXPECT_EQ(replacement_result, 42u);
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_unmap(buffer)));
@@ -585,14 +595,16 @@ TEST_P(GraphKernelTest, LaunchCompletesWhileReplacementAllocationIsPaused) {
   });
   gate.entered.acquire();
   IREE_EXPECT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
-  IREE_EXPECT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_EXPECT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
   EXPECT_EQ(result_, arguments_.value);
   gate.resume.release();
   editor.join();
   IREE_ASSERT_OK(hrx_status_to_iree(update_status));
 
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
   EXPECT_EQ(result_, 31u);
 }
 
@@ -616,7 +628,8 @@ TEST_P(GraphKernelTest, LaterEditCannotBeOverwrittenByPausedPreparation) {
   });
   second_entered.acquire();
   IREE_EXPECT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
-  IREE_EXPECT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_EXPECT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
   EXPECT_EQ(result_, arguments_.value);
   gate.resume.release();
   first_editor.join();
@@ -625,7 +638,8 @@ TEST_P(GraphKernelTest, LaterEditCannotBeOverwrittenByPausedPreparation) {
   IREE_ASSERT_OK(hrx_status_to_iree(second_status));
 
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
   EXPECT_EQ(result_, 47u);
 }
 
@@ -661,13 +675,15 @@ TEST_P(GraphKernelTest, AllocationFailureKeepsTheInstalledRecording) {
                           hrx_status_to_iree(status));
     result_ = 0;
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
-    IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
     EXPECT_EQ(result_, arguments_.value);
   }
   EXPECT_GT(failure_index, 0u);
   RecordProperty("rejected_allocation_count", static_cast<int>(failure_index));
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
   EXPECT_EQ(result_, 31u);
 }
 
@@ -718,7 +734,8 @@ TEST_P(GraphKernelTest, InvalidTopologyKeepsTheInstalledRecording) {
       IREE_STATUS_INVALID_ARGUMENT,
       hrx_status_to_iree(hrx_graph_exec_update(exec_, cycle)));
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
   EXPECT_EQ(result_, arguments_.value);
 }
 
@@ -735,7 +752,8 @@ TEST_P(GraphKernelTest, UnsupportedRecordingKeepsTheInstalledRecording) {
       IREE_STATUS_UNIMPLEMENTED,
       hrx_status_to_iree(hrx_graph_exec_update(exec_, replacement)));
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
   EXPECT_EQ(result_, arguments_.value);
 }
 

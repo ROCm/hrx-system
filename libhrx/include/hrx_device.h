@@ -260,11 +260,18 @@ HRX_API hrx_status_t hrx_runtime_query_available_devices(
     hrx_host_allocator_t host_allocator, size_t* out_count,
     hrx_device_info_t** out_infos);
 
-// Completion observation policy for device-owned workers. Explicit host waits
-// retain their own behavior. Backends choose the observation mechanism.
+// Completion observation policy for an explicit host wait or device-owned
+// workers. These policies are independent: a host wait does not change the
+// device's workers, and device creation does not override explicit host waits.
+// Backends choose the observation mechanism and may use native notifications.
+// Completion, memory visibility, failure, and timeout semantics are unchanged.
 typedef uint32_t hrx_wait_flags_t;
+// Uses blocking notifications without optional active observation.
 #define HRX_WAIT_FLAG_NONE 0u
+// Permits bounded active observation before blocking.
 #define HRX_WAIT_FLAG_YIELD (1u << 0)
+// Permits sustained active observation while waiting, prioritizing latency
+// over CPU use. Takes precedence over YIELD when both are specified.
 #define HRX_WAIT_FLAG_ACTIVE (1u << 1)
 
 typedef struct hrx_device_create_params_t {

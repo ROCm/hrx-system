@@ -25,7 +25,8 @@ struct HeterogeneousResources {
       if (tails[i]) {
         ReportHrxTestFailure(
             "heterogeneous timeline cleanup",
-            hrx().semaphore_wait(semaphores[i], tails[i], UINT64_MAX));
+            hrx().semaphore_wait(semaphores[i], tails[i], UINT64_MAX,
+                                 HRX_WAIT_FLAG_NONE));
       }
     }
     for (auto buffer : buffers) {
@@ -331,8 +332,8 @@ TEST_CASE("CPU NPU GPU work shares storage and explicit queue dependencies",
       REQUIRE_OK(hrx().semaphore_signal(resources.gate, gate_value));
       resources.gate_released = true;
     }
-    REQUIRE_OK(
-        hrx().semaphore_wait(resources.semaphores[0], cpu_value, UINT64_MAX));
+    REQUIRE_OK(hrx().semaphore_wait(resources.semaphores[0], cpu_value,
+                                    UINT64_MAX, HRX_WAIT_FLAG_NONE));
 
     uint64_t address = 0;
     REQUIRE_OK(hrx().buffer_query_address(buffers[0], scopes[0],
@@ -382,7 +383,7 @@ TEST_CASE("CPU NPU GPU work shares storage and explicit queue dependencies",
     resources.tails[2] = npu_value;
   }
   REQUIRE_OK(hrx().semaphore_wait(resources.semaphores[2], resources.tails[2],
-                                  UINT64_MAX));
+                                  UINT64_MAX, HRX_WAIT_FLAG_NONE));
   hrx().mem_pool_trim(resources.pools[1], 0, HRX_POOL_TRIM_FLAG_ALL);
   hrx_pool_stats_t stats;
   hrx().mem_pool_query_stats(resources.pools[0], &stats);

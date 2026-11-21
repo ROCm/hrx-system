@@ -99,7 +99,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Events time completed queue work",
         resources.stream, resources.buffer, 0, sizeof(output), &pattern,
         sizeof(pattern)));
     REQUIRE_OK(hrx().event_record(resources.stop, resources.stream));
-    REQUIRE_OK(hrx().event_synchronize(resources.stop));
+    REQUIRE_OK(hrx().event_synchronize(resources.stop, HRX_WAIT_FLAG_NONE));
     float milliseconds = -1.0f;
     REQUIRE_OK(hrx().event_elapsed_time(resources.start, resources.stop,
                                         &milliseconds));
@@ -195,7 +195,8 @@ TEST_CASE_METHOD(HrxTestFixture,
       REQUIRE_OK(hrx().stream_copy_d2h_linear(resources.stream,
                                               resources.target, 0,
                                               output.data(), sizeof(output)));
-      REQUIRE_OK(hrx().stream_synchronize(resources.stream));
+      REQUIRE_OK(
+          hrx().stream_synchronize(resources.stream, HRX_WAIT_FLAG_NONE));
       for (size_t i = 0; i < output.size(); ++i) {
         REQUIRE(output[i] == (i >= 16 && i < 24 ? fill.pattern : input[i]));
       }
@@ -262,7 +263,7 @@ TEST_CASE_METHOD(HrxTestFixture,
   REQUIRE(after.value == before.value);
   REQUIRE_OK(hrx().stream_copy_d2h_linear(resources.stream, resources.target, 0,
                                           output.data(), sizeof(output)));
-  REQUIRE_OK(hrx().stream_synchronize(resources.stream));
+  REQUIRE_OK(hrx().stream_synchronize(resources.stream, HRX_WAIT_FLAG_NONE));
   for (uint32_t value : output) {
     REQUIRE(value == pattern);
   }
@@ -289,14 +290,14 @@ TEST_CASE_METHOD(HrxTestFixture, "Stream flush with no work", "[stream]") {
 TEST_CASE_METHOD(HrxTestFixture, "Stream sync with no work", "[stream]") {
   hrx_stream_t stream = nullptr;
   REQUIRE_OK(hrx().stream_create(transfer_queue_, 0, &stream));
-  REQUIRE_OK(hrx().stream_synchronize(stream));
+  REQUIRE_OK(hrx().stream_synchronize(stream, HRX_WAIT_FLAG_NONE));
   hrx().stream_release(stream);
 }
 
 TEST_CASE_METHOD(HrxTestFixture, "Stream wait with no work", "[stream]") {
   hrx_stream_t stream = nullptr;
   REQUIRE_OK(hrx().stream_create(transfer_queue_, 0, &stream));
-  REQUIRE_OK(hrx().stream_wait(stream));
+  REQUIRE_OK(hrx().stream_wait(stream, HRX_WAIT_FLAG_NONE));
   hrx().stream_release(stream);
 }
 

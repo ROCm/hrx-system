@@ -97,7 +97,8 @@ TEST_F(GraphBufferTest, RecordsAndInstantiatesHandleBasedCopyAndFill) {
   source_ = nullptr;
   IREE_ASSERT_OK(
       hrx_status_to_iree(hrx_graph_exec_launch(executable, stream_)));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
   hrx_graph_exec_release(executable);
   hrx_graph_release(graph);
 }
@@ -118,8 +119,8 @@ TEST_F(GraphBufferTest, RetainedGraphDoesNotExtendExplicitAllocationEpoch) {
   hrx_queue_t queue = hrx_stream_get_queue(stream_);
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_queue_alloca(
       queue, nullptr, &point, pool, 1, &request, buffer.for_output())));
-  IREE_ASSERT_OK(
-      hrx_status_to_iree(hrx_semaphore_wait(timeline, value, UINT64_MAX)));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_semaphore_wait(timeline, value, UINT64_MAX, HRX_WAIT_FLAG_NONE)));
 
   hrx::runtime::hrx_ptr<hrx_graph_t, hrx_graph_retain, hrx_graph_release> graph;
   IREE_ASSERT_OK(
@@ -144,7 +145,8 @@ TEST_F(GraphBufferTest, RetainedGraphDoesNotExtendExplicitAllocationEpoch) {
       hrx_graph_instantiate(graph, queue, 0, executable.for_output())));
   IREE_ASSERT_OK(
       hrx_status_to_iree(hrx_graph_exec_launch(executable, stream_)));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
 
   uint8_t contents[64] = {};
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h_linear(
@@ -156,8 +158,8 @@ TEST_F(GraphBufferTest, RetainedGraphDoesNotExtendExplicitAllocationEpoch) {
   value = 2;
   IREE_ASSERT_OK(
       hrx_status_to_iree(hrx_queue_dealloca(queue, nullptr, &point, 1, &root)));
-  IREE_ASSERT_OK(
-      hrx_status_to_iree(hrx_semaphore_wait(timeline, value, UINT64_MAX)));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_semaphore_wait(timeline, value, UINT64_MAX, HRX_WAIT_FLAG_NONE)));
   buffer.reset();
 
   // The graph still holds the old native handle, but its allocation epoch has
@@ -168,8 +170,8 @@ TEST_F(GraphBufferTest, RetainedGraphDoesNotExtendExplicitAllocationEpoch) {
   value = 3;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_queue_alloca(
       queue, nullptr, &point, pool, 1, &request, buffer.for_output())));
-  IREE_ASSERT_OK(
-      hrx_status_to_iree(hrx_semaphore_wait(timeline, value, UINT64_MAX)));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_semaphore_wait(timeline, value, UINT64_MAX, HRX_WAIT_FLAG_NONE)));
   executable.reset();
   graph.reset();
   hrx_mem_pool_query_stats(pool, &stats);
@@ -217,7 +219,8 @@ TEST_F(GraphBufferTest, DependentFillThenCopyProducesExpectedContents) {
       graph, hrx_stream_get_queue(stream_), 0, &executable)));
   IREE_ASSERT_OK(
       hrx_status_to_iree(hrx_graph_exec_launch(executable, stream_)));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
 
   uint8_t contents[64] = {};
   IREE_ASSERT_OK(hrx_status_to_iree(
@@ -256,7 +259,8 @@ TEST_F(GraphBufferTest, LaunchFlushesPendingStreamWorkBeforeGraphCommands) {
       graph, hrx_stream_get_queue(stream_), 0, &executable)));
   IREE_ASSERT_OK(
       hrx_status_to_iree(hrx_graph_exec_launch(executable, stream_)));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
 
   uint8_t contents[64] = {};
   IREE_ASSERT_OK(hrx_status_to_iree(
@@ -310,7 +314,8 @@ TEST_F(GraphBufferTest, AddedDependencyOrdersFillBeforeCopy) {
       graph, hrx_stream_get_queue(stream_), 0, &executable)));
   IREE_ASSERT_OK(
       hrx_status_to_iree(hrx_graph_exec_launch(executable, stream_)));
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
 
   uint8_t contents[64] = {};
   IREE_ASSERT_OK(hrx_status_to_iree(
@@ -382,7 +387,8 @@ TEST_F(GraphBufferTest, RectangularGraphCapturesGeometryAndPreservesPadding) {
           stream_, expected.data(), expected.size(), destination_, 0)));
       IREE_ASSERT_OK(
           hrx_status_to_iree(hrx_graph_exec_launch(executable, stream_)));
-      IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+      IREE_ASSERT_OK(hrx_status_to_iree(
+          hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
       IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h_linear(
           hrx_stream_get_queue(stream_), destination_, 0, observed.data(),
           observed.size())));
@@ -450,7 +456,8 @@ TEST_F(GraphBufferTest, EmptyGeometryPreservesDependencyEdges) {
   IREE_ASSERT_OK(
       hrx_status_to_iree(hrx_graph_exec_launch(executable, stream_)));
   std::array<uint8_t, 64> observed;
-  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
   IREE_ASSERT_OK(hrx_status_to_iree(
       hrx_synchronous_d2h_linear(hrx_stream_get_queue(stream_), destination_, 0,
                                  observed.data(), observed.size())));
@@ -551,8 +558,9 @@ TEST_F(GraphBufferTest, HostCallbackFailureReachesStreamCompletion) {
       graph, hrx_stream_get_queue(stream_), 0, &executable)));
   IREE_ASSERT_OK(
       hrx_status_to_iree(hrx_graph_exec_launch(executable, stream_)));
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
-                        hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_ABORTED,
+      hrx_status_to_iree(hrx_stream_synchronize(stream_, HRX_WAIT_FLAG_NONE)));
   hrx_graph_exec_release(executable);
   hrx_graph_release(graph);
 }

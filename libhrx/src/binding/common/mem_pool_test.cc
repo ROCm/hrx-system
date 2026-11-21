@@ -212,8 +212,8 @@ TEST_F(CpuPoolTest, FiniteDescendantsPreserveCompatibilityAllocationCharge) {
   IREE_ASSERT_OK(
       HRX_CALL(hrx_queue_alloca(queue, nullptr, &allocation_signal, child, 1,
                                 &request, buffer.for_output())));
-  IREE_ASSERT_OK(
-      HRX_CALL(hrx_semaphore_wait(completion, allocated, UINT64_MAX)));
+  IREE_ASSERT_OK(HRX_CALL(hrx_semaphore_wait(completion, allocated, UINT64_MAX,
+                                             HRX_WAIT_FLAG_NONE)));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                         iree_hal_streaming_mem_pool_allocate_buffer(
                             compatibility_pool, 1, &denied));
@@ -223,8 +223,8 @@ TEST_F(CpuPoolTest, FiniteDescendantsPreserveCompatibilityAllocationCharge) {
   hrx_buffer_t root = buffer;
   IREE_ASSERT_OK(HRX_CALL(hrx_queue_dealloca(queue, &allocation_signal,
                                              &release_signal, 1, &root)));
-  IREE_ASSERT_OK(
-      HRX_CALL(hrx_semaphore_wait(completion, released, UINT64_MAX)));
+  IREE_ASSERT_OK(HRX_CALL(hrx_semaphore_wait(completion, released, UINT64_MAX,
+                                             HRX_WAIT_FLAG_NONE)));
   buffer.reset();
   child.reset();
   IREE_ASSERT_OK(iree_hal_streaming_mem_pool_allocate_buffer(

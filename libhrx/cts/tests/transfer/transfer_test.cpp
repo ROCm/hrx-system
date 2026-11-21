@@ -13,8 +13,9 @@ namespace {
 struct StreamTransferResources {
   ~StreamTransferResources() {
     if (stream) {
-      ReportHrxTestFailure("stream transfer completion",
-                           hrx().stream_synchronize(stream));
+      ReportHrxTestFailure(
+          "stream transfer completion",
+          hrx().stream_synchronize(stream, HRX_WAIT_FLAG_NONE));
       hrx().stream_release(stream);
     }
     if (target_buffer) {
@@ -150,7 +151,7 @@ TEST_CASE_METHOD(HrxTestFixture,
   REQUIRE_OK(hrx().stream_copy_d2h_linear(resources.stream,
                                           resources.target_buffer, 0,
                                           target.data(), target.size()));
-  REQUIRE_OK(hrx().stream_synchronize(resources.stream));
+  REQUIRE_OK(hrx().stream_synchronize(resources.stream, HRX_WAIT_FLAG_NONE));
   REQUIRE(target == source);
 }
 
@@ -256,11 +257,12 @@ TEST_CASE_METHOD(
                                        resources.target_buffer, 7,
                                        target.data() + 2, &download));
     } else {
-      REQUIRE_OK(hrx().stream_synchronize(resources.stream));
+      REQUIRE_OK(
+          hrx().stream_synchronize(resources.stream, HRX_WAIT_FLAG_NONE));
       REQUIRE_OK(hrx().synchronous_d2h(transfer_queue_, resources.target_buffer,
                                        7, target.data() + 2, &download));
     }
-    REQUIRE_OK(hrx().stream_synchronize(resources.stream));
+    REQUIRE_OK(hrx().stream_synchronize(resources.stream, HRX_WAIT_FLAG_NONE));
     auto expected_host = padding;
     auto expected_device = padding;
     for (size_t z = 0; z < 2; ++z) {
@@ -320,7 +322,7 @@ TEST_CASE_METHOD(HrxTestFixture,
   REQUIRE_OK(hrx().stream_copy_d2h_linear(resources.stream,
                                           resources.target_buffer, 0,
                                           observed.data(), observed.size()));
-  REQUIRE_OK(hrx().stream_synchronize(resources.stream));
+  REQUIRE_OK(hrx().stream_synchronize(resources.stream, HRX_WAIT_FLAG_NONE));
   REQUIRE(observed == expected);
 
   const hrx_fill_region_t fill = {
@@ -346,7 +348,7 @@ TEST_CASE_METHOD(HrxTestFixture,
     REQUIRE_OK(hrx().stream_copy_d2h_linear(resources.stream,
                                             resources.target_buffer, 0,
                                             observed.data(), observed.size()));
-    REQUIRE_OK(hrx().stream_synchronize(resources.stream));
+    REQUIRE_OK(hrx().stream_synchronize(resources.stream, HRX_WAIT_FLAG_NONE));
     REQUIRE(observed == expected);
   }
 }
