@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from loom.model import ManifestError, ModelCard
+from loom.model.manifest import parse_json
 
 
 def _document():
@@ -359,6 +360,10 @@ def test_options_preserve_types_but_require_declared_names():
         ModelCard(document)
 
 
+def test_json_consumes_only_the_initial_byte_order_mark():
+    assert parse_json('\ufeff{"name":"a\ufeffb"}') == {"name": "a\ufeffb"}
+
+
 @pytest.mark.parametrize(
     "source",
     [
@@ -368,11 +373,13 @@ def test_options_preserve_types_but_require_declared_names():
         '{"schema_version":1,}',
         '{/* comment */"schema_version":1}',
         '{"value":1e400}',
+        "\ufeff\ufeff{}",
+        " \ufeff{}",
     ],
 )
 def test_rejects_nonportable_json(source):
     with pytest.raises(ManifestError):
-        ModelCard.parse(source)
+        parse_json(source)
 
 
 @pytest.mark.parametrize(

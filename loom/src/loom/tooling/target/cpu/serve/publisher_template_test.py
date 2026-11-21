@@ -6,6 +6,7 @@
 
 """Runs the copied author's scripts, including an HF publication-to-CPU check."""
 
+import codecs
 import json
 import os
 import subprocess
@@ -57,6 +58,10 @@ def main():
             json.dumps(json.loads(original_catalog) | {"x-owner": "publisher"}),
             encoding="utf-8",
         )
+        # Windows PowerShell 5.1 writes a byte order mark for UTF-8 documents.
+        for path in (catalog, card, lock):
+            path.write_bytes(codecs.BOM_UTF8 + path.read_bytes())
+        original_lock = lock.read_bytes()
         original_catalog = catalog.read_bytes()
 
         def contents():
