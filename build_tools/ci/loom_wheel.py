@@ -48,7 +48,14 @@ def build_wheel(
     bazel: str,
     options: list[str],
 ) -> release.Wheel:
-    flags = ["--config=loom-sdk", *PROFILE_FLAGS[profile], *options]
+    package_root = root / "loom/packaging/python"
+    identity = release.read_identity(package_root / "version.json")
+    flags = [
+        "--config=loom-sdk",
+        *PROFILE_FLAGS[profile],
+        *options,
+        *identity.server_stamp(release.checkout_commit(root), profile),
+    ]
     if platform_name == release.LINUX_X86_64_PLATFORM and profile in {
         "release",
         "tracy",
@@ -93,11 +100,10 @@ def build_wheel(
     expected = {label[2:].split(":")[0] for label in targets}
     if set(outputs) != expected:
         raise ValueError(f"Expected SDK inputs {expected}, found {set(outputs)}")
-    package = root / "loom" / "packaging" / "python"
     wheel = release.inspect_wheel(
         root / outputs["loom/packaging/python"]["files"][0],
-        release.read_identity(package / "version.json"),
-        (package / "PYPI_README.md").read_text(encoding="utf-8"),
+        identity,
+        (package_root / "PYPI_README.md").read_text(encoding="utf-8"),
     )
     if wheel.profile != profile:
         raise ValueError(f"Requested {profile} wheel, built {wheel.profile}")
@@ -153,6 +159,7 @@ def test_wheel(root: Path, inputs: Path, output: Path, elf_inspector: str) -> No
             str(package / "version.json"),
             str(package / "PYPI_README.md"),
             "task,amdgpu,rdna,cdna,xdna,vulkan",
+            release.checkout_commit(root),
         ],
         cwd=root,
         env=environment,

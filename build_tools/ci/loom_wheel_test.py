@@ -28,6 +28,9 @@ class LoomWheelTest(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+        self.enterContext(
+            patch.object(release, "checkout_commit", return_value="a" * 40)
+        )
         self.output = self.root / "export"
         self.bazel_log = self.root / "bazel_calls.jsonl"
         package = self.root / "loom" / "packaging" / "python"

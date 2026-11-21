@@ -66,17 +66,6 @@ def _check_commit(commit: str) -> None:
         raise ValueError("Commit must be a lowercase 40-character Git identity")
 
 
-def _git_head(root: Path) -> str:
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=root,
-        check=True,
-        text=True,
-        stdout=subprocess.PIPE,
-    )
-    return result.stdout.strip()
-
-
 def _declared_server_output(
     root: Path,
     bazel: str,
@@ -179,7 +168,7 @@ def build_server(
     options: list[str],
 ) -> Path:
     _check_commit(commit)
-    head = _git_head(root)
+    head = release.checkout_commit(root)
     if head != commit:
         raise ValueError(f"Requested commit {commit} does not match checkout {head}")
     platform = PLATFORMS[platform_name]
@@ -188,8 +177,7 @@ def build_server(
         "--config=loom-sdk",
         "--config=opt",
         *options,
-        "--stamp",
-        f"--embed_label={identity.version}@{commit}",
+        *identity.server_stamp(commit),
         "--//loom/config:shared_tools=false",
         *platform.bazel_options,
     ]
