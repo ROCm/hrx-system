@@ -280,9 +280,10 @@ def qualify_server(
         candidate = Path(temporary) / filename
         release.write_standalone_archive(binary, candidate)
         digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
-        output.mkdir(parents=True, exist_ok=False)
+        output.mkdir(parents=True, exist_ok=True)
         destination = output / filename
-        shutil.copyfile(candidate, destination)
+        with candidate.open("rb") as source, destination.open("xb") as target:
+            shutil.copyfileobj(source, target)
     archive = ServerArchive(destination, platform_name, digest, binary.stat().st_size)
     print(
         f"{archive.digest}  {archive.path} "

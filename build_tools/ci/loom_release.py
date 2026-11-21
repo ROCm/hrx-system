@@ -28,6 +28,7 @@ from loom.packaging.python import release
 
 GITHUB_RELEASE_BODY_MAXIMUM = 125_000
 GITHUB_ASSET_PAGE_SIZE = 100
+GITHUB_RELEASE_PAGE_SIZE = 100
 GITHUB_PULL_REQUEST_PAGE_SIZE = 100
 _CATALOG_TAG = re.compile(r"github:([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@([^\s]+)")
 _PULL_REQUEST_RELEASE_NOTES = re.compile(
@@ -362,6 +363,34 @@ def _release_state(
     return release_id, draft, actual_body
 
 
+def _github_release_for_tag(api: str, tag: str, token: str) -> object | None:
+    """Finds a public release or authenticated draft for one exact tag."""
+    encoded_tag = urllib.parse.quote(tag, safe="")
+    try:
+        return github_api.get_json(f"{api}/releases/tags/{encoded_tag}", token)
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise
+
+    matches = []
+    page = 1
+    while True:
+        records = github_api.get_json(
+            f"{api}/releases?per_page={GITHUB_RELEASE_PAGE_SIZE}&page={page}", token
+        )
+        if not isinstance(records, list) or any(
+            not isinstance(record, dict) for record in records
+        ):
+            raise ValueError("GitHub returned an invalid release inventory")
+        matches.extend(record for record in records if record.get("tag_name") == tag)
+        if len(records) < GITHUB_RELEASE_PAGE_SIZE:
+            break
+        page += 1
+    if len(matches) > 1:
+        raise ValueError(f"Multiple GitHub releases use tag {tag}")
+    return matches[0] if matches else None
+
+
 def _missing_release_assets(
     api: str,
     release_id: int,
@@ -422,14 +451,7 @@ def publish_github(
     title = f"Loom {tag}"
     api = f"https://api.github.com/repos/{repository}"
     token = os.environ.get("GH_TOKEN", "")
-    try:
-        existing = github_api.get_json(
-            f"{api}/releases/tags/{urllib.parse.quote(tag, safe='')}", token
-        )
-    except urllib.error.HTTPError as error:
-        if error.code != 404:
-            raise
-        existing = None
+    existing = _github_release_for_tag(api, tag, token)
 
     assets = {
         artifact.path.name: (artifact.path, artifact.digest) for artifact in artifacts
@@ -475,9 +497,9 @@ def publish_github(
             body,
             *options,
         )
-        existing = github_api.get_json(
-            f"{api}/releases/tags/{urllib.parse.quote(tag, safe='')}", token
-        )
+        existing = _github_release_for_tag(api, tag, token)
+        if existing is None:
+            raise ValueError("GitHub did not return the newly created draft")
     release_id, draft, _ = _release_state(
         existing, tag=tag, title=title, body=body, prerelease=prerelease
     )
@@ -488,7 +510,15 @@ def publish_github(
         _gh("release", "upload", tag, *missing, "--repo", repository)
         if _missing_release_assets(api, release_id, token, assets):
             raise ValueError("GitHub release asset upload did not complete")
-    _gh("release", "edit", tag, "--repo", repository, "--draft=false")
+    _gh(
+        "api",
+        "--method",
+        "PATCH",
+        f"repos/{repository}/releases/{release_id}",
+        "-F",
+        "draft=false",
+        "--silent",
+    )
     published = github_api.get_json(
         f"{api}/releases/tags/{urllib.parse.quote(tag, safe='')}", token
     )

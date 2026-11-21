@@ -1,5 +1,4 @@
-Prepares Loom SDK {{VERSION}} from one reviewed source revision and catalog
-association. The marked section below becomes the public GitHub release notes.
+Prepares the stable Loom SDK {{VERSION}} from one reviewed source revision and catalog association. The marked section below becomes the complete public GitHub release notes.
 
 ## Release notes
 

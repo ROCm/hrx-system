@@ -379,8 +379,12 @@ class LoomReleaseTest(unittest.TestCase):
                         urllib.error.HTTPError(
                             "https://api.github.com", 404, "Not Found", {}, None
                         ),
+                        [],
                         [self.release_pull_request()],
-                        self.existing_release(draft=True),
+                        urllib.error.HTTPError(
+                            "https://api.github.com", 404, "Not Found", {}, None
+                        ),
+                        [self.existing_release(draft=True)],
                         self.records(self.assets),
                         self.existing_release(),
                     ],
@@ -437,12 +441,13 @@ class LoomReleaseTest(unittest.TestCase):
                     run.call_args_list[1].args[0],
                     [
                         "gh",
-                        "release",
-                        "edit",
-                        self.tag,
-                        "--repo",
-                        "fixture/sdk",
-                        "--draft=false",
+                        "api",
+                        "--method",
+                        "PATCH",
+                        "repos/fixture/sdk/releases/123",
+                        "-F",
+                        "draft=false",
+                        "--silent",
                     ],
                 )
 
@@ -484,7 +489,7 @@ class LoomReleaseTest(unittest.TestCase):
             [str(path) for name, path in self.assets.items() if name not in present],
         )
         self.assertNotIn("--clobber", upload)
-        self.assertEqual(run.call_args_list[1].args[0][2], "edit")
+        self.assertEqual(run.call_args_list[1].args[0][2], "--method")
 
     def test_conflicting_digest_prevents_all_uploads(self):
         present = {self.wheels[0].path.name, self.standalones[0].path.name}
@@ -547,7 +552,10 @@ class LoomReleaseTest(unittest.TestCase):
                 github_api,
                 "get_json",
                 side_effect=[
-                    self.existing_release(draft=True),
+                    urllib.error.HTTPError(
+                        "https://api.github.com", 404, "Not Found", {}, None
+                    ),
+                    [self.existing_release(draft=True)],
                     [self.release_pull_request()],
                     self.records(self.assets),
                     self.existing_release(),
@@ -557,7 +565,26 @@ class LoomReleaseTest(unittest.TestCase):
         ):
             self.publish()
         self.assertEqual(run.call_count, 1)
-        self.assertEqual(run.call_args.args[0][2], "edit")
+        self.assertEqual(run.call_args.args[0][1:4], ["api", "--method", "PATCH"])
+
+    def test_duplicate_drafts_stop_before_commands(self):
+        duplicate = self.existing_release(draft=True) | {"id": 124}
+        with (
+            patch.object(
+                github_api,
+                "get_json",
+                side_effect=[
+                    urllib.error.HTTPError(
+                        "https://api.github.com", 404, "Not Found", {}, None
+                    ),
+                    [self.existing_release(draft=True), duplicate],
+                ],
+            ),
+            patch("subprocess.run") as run,
+            self.assertRaisesRegex(ValueError, "Multiple GitHub releases"),
+        ):
+            self.publish()
+        run.assert_not_called()
 
     def test_draft_retry_rejects_release_notes_edited_after_snapshot(self):
         with (
@@ -624,7 +651,7 @@ class LoomReleaseTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "mutable"):
                 self.publish()
         self.assertEqual(run.call_count, 1)
-        self.assertEqual(run.call_args.args[0][2], "edit")
+        self.assertEqual(run.call_args.args[0][1:4], ["api", "--method", "PATCH"])
 
     def test_asset_inventory_is_complete_and_rejects_invalid_records(self):
         name = self.wheels[0].path.name
@@ -787,6 +814,7 @@ class LoomReleaseTest(unittest.TestCase):
                     urllib.error.HTTPError(
                         "https://api.github.com", 404, "Not Found", {}, None
                     ),
+                    [],
                     [self.release_pull_request(body="No marked release notes")],
                 ],
             ) as github,
