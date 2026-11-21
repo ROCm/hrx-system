@@ -111,7 +111,7 @@ jobs:
         if: inputs.profile == 'Release'
         run: |
           /usr/bin/python3 -m build_tools.ci.amdf_info_archive \
-            --wheel wheel-artifact/*.whl --output=amdf-info-artifact
+            --wheel wheel-artifact/*.whl --output=standalone-artifact
       - name: Build documentation C examples
         if: inputs.profile == 'Release' && steps.scope.outputs.loom_docs == 'true'
         run: |
@@ -153,7 +153,7 @@ jobs:
             --linkopt=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13
           /usr/bin/python3 -m build_tools.ci.loom_server qualify \
             --platform=manylinux_2_39_x86_64 --commit="$GITHUB_SHA" \
-            --inputs=build/loom-sdk/server/linux --output=server-artifact
+            --inputs=build/loom-sdk/server/linux --output=standalone-artifact
       - name: Cross-build Windows SDK
         run: |
           /usr/bin/python3 -m build_tools.ci.loom_wheel build \
@@ -221,9 +221,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: loom-standalone-archive-linux-${{ inputs.profile }}
-          path: |
-            server-artifact/*.zip
-            amdf-info-artifact/*.zip
+          path: standalone-artifact/*.zip
           if-no-files-found: error
           compression-level: 0
           retention-days: 14

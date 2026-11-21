@@ -177,6 +177,11 @@ class LoomServerTest(unittest.TestCase):
                 inputs = self.server_inputs(platform)
                 first = self.root / f"first-{platform}"
                 second = self.root / f"second-{platform}"
+                first.mkdir()
+                companion = first / release.standalone_archive_name(
+                    self.identity, "amdf-info", platform
+                )
+                companion.write_bytes(b"qualified companion archive")
                 with (
                     mock.patch.object(
                         loom_server, "_native_platform", return_value=platform
@@ -192,8 +197,13 @@ class LoomServerTest(unittest.TestCase):
                     two = loom_server.qualify_server(
                         self.root, inputs, second, platform, self.commit
                     )
+                    with self.assertRaises(FileExistsError):
+                        loom_server.qualify_server(
+                            self.root, inputs, first, platform, self.commit
+                        )
                 self.assertEqual(one.path.read_bytes(), two.path.read_bytes())
                 self.assertEqual(one.digest, two.digest)
+                self.assertEqual(companion.read_bytes(), b"qualified companion archive")
                 command = run.call_args_list[0].args[0]
                 self.assertEqual(Path(command[1]).name, "loom_server_qualify.py")
                 self.assertEqual(command[-2:], ["1.2.3", self.commit])
