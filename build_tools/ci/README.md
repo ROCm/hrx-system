@@ -212,9 +212,12 @@ python build_tools/devtools/ci.py iree-bazel-cpu-asan \
 ```
 
 Each phase has its own directory so repeated runs of a test with different
-filters or settings remain distinguishable. `--bazel-profile-dir` similarly
-captures one Bazel execution profile per phase. The workflows upload these
-artifacts; the test logs and phase exit status identify the failing operation.
+filters or settings remain distinguishable. With `--bazel-failure-results-dir`
+the final test phase leaves its logs in Bazel's output tree until a CI phase
+fails. Earlier test phases snapshot their logs before the next one can overwrite
+them. Native hardware jobs retain successful results as well as failures with
+`--bazel-test-results-dir`. The independent `--bazel-profile-dir` option
+captures one Bazel execution profile per phase.
 
 Repository hygiene and commit checks are documented in the
 [Lefthook guide](../lefthook/README.md).

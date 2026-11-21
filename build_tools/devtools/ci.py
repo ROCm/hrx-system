@@ -1779,7 +1779,7 @@ def add_bazel_test_results(steps: list[CiStep], output_dir: Path) -> list[CiStep
             )
         )
     if not event_owners:
-        raise ValueError("--bazel-test-results-dir requires a Bazel test phase")
+        raise ValueError("Bazel test result capture requires a Bazel test phase")
     return captured_steps
 
 
@@ -1790,9 +1790,10 @@ def bazel_profile_dir(args: argparse.Namespace) -> Path | None:
 
 
 def bazel_test_results_dir(args: argparse.Namespace) -> Path | None:
-    if args.bazel_test_results_dir is None:
+    directory = args.bazel_test_results_dir or args.bazel_failure_results_dir
+    if directory is None:
         return None
-    return args.bazel_test_results_dir.expanduser().resolve()
+    return directory.expanduser().resolve()
 
 
 def steps_from_args(args: argparse.Namespace) -> list[CiStep]:
@@ -1802,7 +1803,7 @@ def steps_from_args(args: argparse.Namespace) -> list[CiStep]:
         raise ValueError("--bazel-profile-dir is only supported for Bazel CI commands")
     if test_results_dir is not None and args.command not in BAZEL_COMMANDS:
         raise ValueError(
-            "--bazel-test-results-dir is only supported for Bazel CI commands"
+            "Bazel test result capture is only supported for Bazel CI commands"
         )
     steps = _steps_from_args(args)
     if args.keep_going:
@@ -1890,7 +1891,26 @@ def publish_bazel_profile(step: CiStep) -> None:
             stream.write("\n")
 
 
-def run_step(step: CiStep, verbose: bool) -> StepResult:
+def stage_test_results(capture: bazel_test_results.BazelTestResultsCapture) -> bool:
+    started = time.monotonic()
+    try:
+        staged = bazel_test_results.stage(capture.build_event_path, capture.output_dir)
+    except (bazel_test_results.BazelTestResultsError, OSError) as error:
+        print(f"[fail] Stage Bazel test results: {error}", file=sys.stderr)
+        return False
+    print(
+        f"[artifact] Staged {staged.output_count} current Bazel test "
+        f"outputs in {time.monotonic() - started:.1f}s "
+        f"(BEP observation of {staged.observation_byte_length} bytes "
+        f"in {staged.observation_seconds * 1000:.1f} ms)",
+        flush=True,
+    )
+    return True
+
+
+def run_step(
+    step: CiStep, verbose: bool, *, defer_successful_results: bool = False
+) -> StepResult:
     print(f"[run] {step.name}", flush=True)
     if verbose or github_actions_enabled():
         print("  " + step.command_line(), flush=True)
@@ -1938,22 +1958,9 @@ def run_step(step: CiStep, verbose: bool) -> StepResult:
             print(f"[fail] Summarize Bazel profile: {error}", file=sys.stderr)
             if returncode == 0:
                 returncode = 1
-    if step.test_results is not None:
-        try:
-            staged = bazel_test_results.stage(
-                step.test_results.build_event_path,
-                step.test_results.output_dir,
-            )
-            print(
-                f"[artifact] Staged {staged.output_count} current Bazel test "
-                f"outputs and a {staged.observation_byte_length}-byte BEP "
-                f"observation in {staged.observation_seconds * 1000:.1f} ms",
-                flush=True,
-            )
-        except bazel_test_results.BazelTestResultsError as error:
-            print(f"[fail] Stage Bazel test results: {error}", file=sys.stderr)
-            if returncode == 0:
-                returncode = 1
+    if step.test_results is not None and (returncode or not defer_successful_results):
+        if not stage_test_results(step.test_results):
+            returncode = returncode or 1
     elapsed_seconds = time.monotonic() - start_time
     result = StepResult(step, returncode)
     if result.ok:
@@ -1973,6 +1980,7 @@ def run_steps(
     dry_run: bool,
     keep_going: bool,
     verbose: bool,
+    failure_results_only: bool = False,
 ) -> int:
     if dry_run:
         for step in steps:
@@ -1981,10 +1989,26 @@ def run_steps(
 
     print("== IREE CI ==", flush=True)
     failures = []
+    # Another test phase can overwrite the same test.log and test.xml.
+    # Only the last test phase can leave its results in place until a failure.
+    last_test = (
+        next((step for step in reversed(steps) if step.test_results is not None), None)
+        if failure_results_only
+        else None
+    )
+    pending_results = None
     for step in steps:
         print_group_start(step.name)
         try:
-            result = run_step(step, verbose=verbose)
+            defer_results = step is last_test and not failures
+            result = run_step(
+                step, verbose=verbose, defer_successful_results=defer_results
+            )
+            if result.ok and defer_results:
+                pending_results = step.test_results
+            elif not result.ok and pending_results is not None:
+                stage_test_results(pending_results)
+                pending_results = None
         finally:
             print_group_end()
         if not result.ok:
@@ -2065,13 +2089,22 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
             "to this directory. Only supported for Bazel CI commands."
         ),
     )
-    parser.add_argument(
+    results = parser.add_mutually_exclusive_group()
+    results.add_argument(
         "--bazel-test-results-dir",
         type=Path,
         help=(
             "Stage test.log and test.xml outputs named by the current Bazel "
             "invocation into this fresh directory. Only supported for Bazel "
             "CI commands."
+        ),
+    )
+    results.add_argument(
+        "--bazel-failure-results-dir",
+        type=Path,
+        help=(
+            "Preserve Bazel test results for failed CI runs. Earlier test "
+            "phases are staged before a later test can overwrite them."
         ),
     )
     targets = parser.add_mutually_exclusive_group()
@@ -2105,6 +2138,7 @@ def main(argv: list[str] | None = None) -> int:
         dry_run=args.dry_run,
         keep_going=args.keep_going,
         verbose=args.verbose,
+        failure_results_only=args.bazel_failure_results_dir is not None,
     )
 
 
