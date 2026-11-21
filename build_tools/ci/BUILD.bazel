@@ -98,6 +98,22 @@ py_test(
     ],
 )
 
+py_library(
+    name = "loom_release_recovery",
+    srcs = ["loom_release_recovery.py"],
+    deps = [":github_api"],
+)
+
+py_test(
+    name = "loom_release_recovery_test",
+    size = "small",
+    srcs = ["loom_release_recovery_test.py"],
+    deps = [
+        ":loom_release_recovery",
+        "//loom/packaging/python:release_lib",
+    ],
+)
+
 py_test(
     name = "github_api_test",
     size = "small",
@@ -344,6 +360,7 @@ test_suite(
         ":github_actions_watch_test",
         ":github_api_test",
         ":loom_binary_size_test",
+        ":loom_release_recovery_test",
         ":loom_release_test",
         ":loom_server_test",
         ":loom_wheel_test",

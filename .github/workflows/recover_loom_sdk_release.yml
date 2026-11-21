@@ -1,0 +1,102 @@
+# Copyright 2026 The IREE Authors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+name: Loom / SDK / Recover candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Prerelease tag to publish
+        required: true
+        type: string
+      source_run_id:
+        description: Failed tagged release workflow run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recover-loom-sdk-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Recover / Verify and publish
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: write
+      pull-requests: read
+    steps:
+      - name: Check out reviewed recovery tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Check out the exact release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          path: release-source
+          persist-credentials: false
+      - name: Verify the failed tagged source run
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          release_channel=$(
+            cd release-source
+            python3 loom/packaging/python/release.py check-tag "$RELEASE_TAG"
+          )
+          if [[ "$release_channel" != prerelease ]]; then
+            echo 'Only prerelease publication can use candidate recovery.' >&2
+            exit 1
+          fi
+          revision=$(git -C release-source rev-parse HEAD)
+          python3 -m build_tools.ci.loom_release_recovery verify-run \
+            --repository="$GITHUB_REPOSITORY" --run-id="$SOURCE_RUN_ID" \
+            --revision="$revision" --tag="$RELEASE_TAG"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+      - name: Download qualified SDK wheels
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: loom-sdk-wheel-*
+          merge-multiple: true
+          path: recovery-inputs/wheels
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
+      - name: Download qualified standalone executables
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: loom-standalone-archive-*
+          merge-multiple: true
+          path: recovery-inputs/standalones
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
+      - name: Stage the exact recovered artifact set
+        run: |
+          python3 -m build_tools.ci.loom_release_recovery stage \
+            --inputs=recovery-inputs --output=release-source/release-assets
+      - name: Verify release identities and record exact bytes
+        working-directory: release-source
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          python3 loom/packaging/python/release.py bundle \
+            release-assets --tag="$RELEASE_TAG"
+      - name: Publish the verified GitHub release
+        working-directory: release-source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          SOURCE_REVISION: ${{ steps.source.outputs.revision }}
+        run: |
+          python3 -m build_tools.ci.loom_release github \
+            --tag="$RELEASE_TAG" --revision="$SOURCE_REVISION"

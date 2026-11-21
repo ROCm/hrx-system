@@ -67,14 +67,14 @@ jobs:
         run: |
           python -m build_tools.ci.loom_server qualify `
             --platform=win_amd64 --commit="$env:GITHUB_SHA" `
-            --inputs=server-inputs --output=server-artifact
+            --inputs=server-inputs --output=standalone-artifact
           exit $LASTEXITCODE
       - name: Qualify standalone Windows amdf-info from the SDK
         if: inputs.profile == 'Release'
         shell: pwsh
         run: |
           python -m build_tools.ci.amdf_info_archive `
-            --wheel (Get-Item wheel-artifact/*.whl).FullName --output=amdf-info-artifact
+            --wheel (Get-Item wheel-artifact/*.whl).FullName --output=standalone-artifact
           exit $LASTEXITCODE
       - name: Upload qualified Windows wheel
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -90,9 +90,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: loom-standalone-archive-windows-${{ inputs.profile }}
-          path: |
-            server-artifact/*.zip
-            amdf-info-artifact/*.zip
+          path: standalone-artifact/*.zip
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
