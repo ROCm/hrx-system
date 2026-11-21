@@ -485,20 +485,15 @@ iree_host_size_t loom_serve_http_variants_claims(
 
 bool loom_serve_http_variants_handles(
     const loom_serve_http_request_t* request) {
-  if (!iree_string_view_starts_with(request->target,
-                                    IREE_SV("/v1/models/variants"))) {
-    return false;
-  }
-  const iree_string_view_t target = loom_serve_http_request_path(request);
-  if (iree_string_view_equal(target, IREE_SV("/v1/models/variants"))) {
+  const iree_string_view_t path = request->path;
+  if (iree_string_view_equal(path, IREE_SV("/v1/models/variants"))) {
     iree_string_view_t model;
     return !iree_string_view_equal(request->method, IREE_SV("GET")) ||
            loom_serve_http_request_lookup_header(
                request, IREE_SV("X-Loom-Model"), &model);
   }
-  return iree_string_view_equal(target,
-                                IREE_SV("/v1/models/variants/select")) ||
-         iree_string_view_equal(target, IREE_SV("/v1/models/variants/remove"));
+  return iree_string_view_equal(path, IREE_SV("/v1/models/variants/select")) ||
+         iree_string_view_equal(path, IREE_SV("/v1/models/variants/remove"));
 }
 
 iree_status_t loom_serve_http_variants_accept(
@@ -506,9 +501,9 @@ iree_status_t loom_serve_http_variants_accept(
     loom_serve_http_connection_t* connection,
     const loom_serve_http_request_t* request, bool allow_wait,
     iree_string_builder_t* scratch) {
-  const iree_string_view_t target = loom_serve_http_request_path(request);
+  const iree_string_view_t path = request->path;
   const bool inventory =
-      iree_string_view_equal(target, IREE_SV("/v1/models/variants"));
+      iree_string_view_equal(path, IREE_SV("/v1/models/variants"));
   if (inventory && iree_string_view_equal(request->method, IREE_SV("GET"))) {
     return loom_serve_http_variant_inventory(variants, connection, request,
                                              scratch);
@@ -520,7 +515,7 @@ iree_status_t loom_serve_http_variants_accept(
   }
   const loom_serve_http_variant_action_t action =
       inventory ? LOOM_SERVE_HTTP_VARIANT_STAGE
-      : iree_string_view_equal(target, IREE_SV("/v1/models/variants/select"))
+      : iree_string_view_equal(path, IREE_SV("/v1/models/variants/select"))
           ? LOOM_SERVE_HTTP_VARIANT_SELECT
           : LOOM_SERVE_HTTP_VARIANT_REMOVE;
   loom_serve_http_variant_input_t input = {.host_allocator =

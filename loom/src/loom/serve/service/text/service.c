@@ -219,9 +219,8 @@ static iree_status_t loom_serve_text_enqueue(
     loom_serve_http_connection_t* connection,
     const loom_serve_http_request_t* request,
     loom_serve_text_receipt_t receipt) {
-  iree_string_view_t checkpoint_name = request->target;
-  if (iree_string_view_consume_prefix(&checkpoint_name,
-                                      IREE_SV("/v1/checkpoints/"))) {
+  if (iree_string_view_starts_with(request->path,
+                                   IREE_SV("/v1/checkpoints/"))) {
     if (service->control.consumer.self) {
       return loom_serve_text_http_reject(
           &service->telemetry, connection, receipt, 503, "Service Unavailable",
@@ -244,15 +243,15 @@ static iree_status_t loom_serve_text_enqueue(
     return iree_ok_status();
   }
   const bool input_count = iree_string_view_equal(
-      request->target, IREE_SV("/v1/chat/completions/input_tokens"));
+      request->path, IREE_SV("/v1/chat/completions/input_tokens"));
   const bool encodes =
       service->scheduling.model_mode == LOOM_SERVE_TEXT_MODE_ENCODE;
   const bool sequence_endpoint =
-      iree_string_view_equal(request->target, IREE_SV("/v1/sequences"));
+      iree_string_view_equal(request->path, IREE_SV("/v1/sequences"));
   if (!iree_string_view_equal(request->method, IREE_SV("POST")) ||
       (encodes ? !sequence_endpoint
                : (!input_count &&
-                  !iree_string_view_equal(request->target,
+                  !iree_string_view_equal(request->path,
                                           IREE_SV("/v1/chat/completions"))))) {
     return loom_serve_text_http_reject(
         &service->telemetry, connection, receipt, 404, "Not Found",
@@ -299,6 +298,7 @@ static iree_status_t loom_serve_text_enqueue(
     }
     name = iree_make_cstring_view(sequence.handle);
   }
+  iree_string_view_t checkpoint_name;
   if (loom_serve_http_request_lookup_header(
           request, IREE_SV("X-Loom-Checkpoint"), &checkpoint_name) &&
       !checkpoint_name.size) {

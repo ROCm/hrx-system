@@ -319,7 +319,7 @@ TEST_P(HttpRouterTest, DashboardAssetsUseTheExistingCarrierAndRelativePaths) {
   for (const auto& [path, type, name] :
        {std::tuple{"/dashboard/", "text/html", "index.html"},
         std::tuple{"/dashboard/index.html", "text/html", "index.html"},
-        std::tuple{"/dashboard/style.css", "text/css", "style.css"},
+        std::tuple{"/dashboard/style.css?v=2", "text/css", "style.css"},
         std::tuple{"/dashboard/app.js", "text/javascript", "app.js"}}) {
     SCOPED_TRACE(path);
     const auto response = Read(Send("GET", path));

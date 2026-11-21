@@ -13,6 +13,8 @@ iree_status_t loom_serve_text_checkpoint_http_parse(
     const loom_serve_http_request_t* request,
     loom_serve_text_checkpoint_request_t* out_request) {
   *out_request = (loom_serve_text_checkpoint_request_t){0};
+  // Pinning and suspension select different operations by path. Validate the
+  // complete target so a misspelled suspension such as "?suspend" fails.
   iree_string_view_t name = request->target;
   const bool checkpoint =
       iree_string_view_consume_prefix(&name, IREE_SV("/v1/checkpoints/"));

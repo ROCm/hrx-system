@@ -438,7 +438,7 @@ static iree_status_t loom_serve_transcription_accept(
         IREE_SV("transcription is stopping"));
   }
   if (!iree_string_view_equal(request->method, IREE_SV("POST")) ||
-      !iree_string_view_equal(request->target,
+      !iree_string_view_equal(request->path,
                               IREE_SV("/v1/audio/transcriptions"))) {
     return loom_serve_transcription_reject(
         service, &pending, "404 Not Found", iree_ok_status(),

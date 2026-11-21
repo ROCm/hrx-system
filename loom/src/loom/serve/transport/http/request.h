@@ -34,8 +34,10 @@ typedef struct loom_serve_http_request_limits_t {
 typedef struct loom_serve_http_request_t {
   // Case-sensitive HTTP method token.
   iree_string_view_t method;
-  // Origin-form request target beginning with '/'.
+  // Complete origin-form request target, including any query string.
   iree_string_view_t target;
+  // Encoded path beginning with '/', up to the first literal '?' in target.
+  iree_string_view_t path;
   // Case-preserving unique headers in wire order.
   iree_string_pair_list_t headers;
   // Body after Content-Length or chunked framing, empty without either.
@@ -77,10 +79,6 @@ iree_status_t loom_serve_http_request_parser_feed(
 iree_status_t loom_serve_http_request_parser_finalize(
     loom_serve_http_request_parser_t* parser,
     const loom_serve_http_request_t** out_request);
-
-// Returns the encoded path of an origin-form target, excluding its query.
-iree_string_view_t loom_serve_http_request_path(
-    const loom_serve_http_request_t* request);
 
 // Looks up one completed header name using ASCII case-insensitive comparison.
 // Returns false when absent and leaves |out_value| empty.

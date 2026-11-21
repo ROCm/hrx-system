@@ -12,26 +12,26 @@
 #include "loom/serve/server/http/response.h"
 
 static const iree_file_toc_t* loom_serve_dashboard_lookup(
-    iree_string_view_t target) {
-  if (!iree_string_view_consume_prefix(&target, IREE_SV("/dashboard/"))) {
+    iree_string_view_t path) {
+  if (!iree_string_view_consume_prefix(&path, IREE_SV("/dashboard/"))) {
     return NULL;
   }
-  if (!target.size) {
-    target = IREE_SV("index.html");
+  if (!path.size) {
+    path = IREE_SV("index.html");
   }
   const iree_file_toc_t* files = loom_serve_dashboard_files_create();
   for (iree_host_size_t i = 0; i < loom_serve_dashboard_files_size(); ++i) {
-    if (iree_string_view_equal(target, iree_make_cstring_view(files[i].name))) {
+    if (iree_string_view_equal(path, iree_make_cstring_view(files[i].name))) {
       return &files[i];
     }
   }
   return NULL;
 }
 
-bool loom_serve_dashboard_handles(iree_string_view_t target) {
-  return iree_string_view_equal(target, IREE_SV("/")) ||
-         iree_string_view_equal(target, IREE_SV("/dashboard")) ||
-         loom_serve_dashboard_lookup(target) != NULL;
+bool loom_serve_dashboard_handles(iree_string_view_t path) {
+  return iree_string_view_equal(path, IREE_SV("/")) ||
+         iree_string_view_equal(path, IREE_SV("/dashboard")) ||
+         loom_serve_dashboard_lookup(path) != NULL;
 }
 
 // Only a positive RFC 9110 qvalue permits the compressed representation.
@@ -111,9 +111,9 @@ static iree_status_t loom_serve_dashboard_write(void* self,
 void loom_serve_dashboard_send(loom_serve_http_server_t* server,
                                loom_serve_http_connection_t* connection,
                                const loom_serve_http_request_t* request) {
-  const iree_string_view_t target = request->target;
-  if (iree_string_view_equal(target, IREE_SV("/")) ||
-      iree_string_view_equal(target, IREE_SV("/dashboard"))) {
+  const iree_string_view_t path = request->path;
+  if (iree_string_view_equal(path, IREE_SV("/")) ||
+      iree_string_view_equal(path, IREE_SV("/dashboard"))) {
     loom_serve_http_response_send(
         server, connection,
         IREE_SV("HTTP/1.1 302 Found\r\nLocation: ./dashboard/\r\n"
@@ -128,11 +128,11 @@ void loom_serve_dashboard_send(loom_serve_http_server_t* server,
                 "Connection: close\r\n\r\n"));
     return;
   }
-  const iree_file_toc_t* file = loom_serve_dashboard_lookup(target);
+  const iree_file_toc_t* file = loom_serve_dashboard_lookup(path);
   const char* content_type = "text/html; charset=utf-8";
-  if (iree_string_view_equal(target, IREE_SV("/dashboard/style.css"))) {
+  if (iree_string_view_equal(path, IREE_SV("/dashboard/style.css"))) {
     content_type = "text/css; charset=utf-8";
-  } else if (iree_string_view_equal(target, IREE_SV("/dashboard/app.js"))) {
+  } else if (iree_string_view_equal(path, IREE_SV("/dashboard/app.js"))) {
     content_type = "text/javascript; charset=utf-8";
   }
   char header[512];

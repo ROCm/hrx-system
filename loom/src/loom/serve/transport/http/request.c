@@ -410,6 +410,8 @@ static iree_status_t loom_serve_http_complete_request(
       .body = iree_make_string_view(storage.data + parser->header_length,
                                     storage.size - parser->header_length),
   };
+  iree_string_view_split(parser->request.target, '?', &parser->request.path,
+                         NULL);
   iree_string_view_t content_type;
   if (loom_serve_http_request_lookup_header(
           &parser->request, IREE_SV("Content-Type"), &content_type)) {
@@ -814,13 +816,6 @@ iree_status_t loom_serve_http_request_parser_finalize(
                           missing_headers
                               ? "HTTP connection ended inside the headers"
                               : "HTTP connection ended inside the body");
-}
-
-iree_string_view_t loom_serve_http_request_path(
-    const loom_serve_http_request_t* request) {
-  iree_string_view_t path;
-  iree_string_view_split(request->target, '?', &path, NULL);
-  return path;
 }
 
 bool loom_serve_http_request_lookup_header(

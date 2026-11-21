@@ -1089,16 +1089,16 @@ static iree_status_t loom_serve_speech_accept(
   loom_serve_speech_event(service, &LOOM_SERVICE_TELEMETRY_REQUEST_BEGIN,
                           pending.job.id);
   const bool post = iree_string_view_equal(request->method, IREE_SV("POST"));
-  const bool remove_voice = iree_string_view_equal(
-      request->target, IREE_SV("/v1/audio/voices/remove"));
+  const bool remove_voice =
+      iree_string_view_equal(request->path, IREE_SV("/v1/audio/voices/remove"));
   if (post &&
       (remove_voice ||
-       iree_string_view_equal(request->target, IREE_SV("/v1/audio/voices")))) {
+       iree_string_view_equal(request->path, IREE_SV("/v1/audio/voices")))) {
     return loom_serve_speech_accept_voice(service, connection, request,
                                           &pending, remove_voice);
   }
   if (!post ||
-      !iree_string_view_equal(request->target, IREE_SV("/v1/audio/speech"))) {
+      !iree_string_view_equal(request->path, IREE_SV("/v1/audio/speech"))) {
     return loom_serve_speech_reject(service, connection, &pending.job,
                                     "404 Not Found",
                                     IREE_SV("unknown speech endpoint"));

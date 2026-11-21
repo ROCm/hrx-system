@@ -905,7 +905,7 @@ static iree_status_t loom_serve_image_accept(
       .event = &LOOM_SERVICE_TELEMETRY_REQUEST_BEGIN};
   loom_runtime_telemetry_stream_append(service->telemetry.stream, &begin);
   if (!iree_string_view_equal(request->method, IREE_SV("POST")) ||
-      !iree_string_view_equal(request->target,
+      !iree_string_view_equal(request->path,
                               IREE_SV("/v1/images/generations"))) {
     return loom_serve_image_reject(service, connection, &receipt,
                                    "404 Not Found",
