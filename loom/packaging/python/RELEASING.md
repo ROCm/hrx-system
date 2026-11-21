@@ -279,14 +279,37 @@ rerun native tests or publish anything.
 
 ## Recover a failed publication
 
-Retrying failed publication jobs in the same run reuses successful build jobs'
-artifacts. Once the failure's cause is resolved, GitHub's **Re-run failed jobs**
-action, or the corresponding [CLI command](https://cli.github.com/manual/gh_run_rerun),
-keeps successful producers intact:
+Retrying a transiently failed publication job in the same run reuses successful
+build jobs' artifacts. GitHub's **Re-run failed jobs** action, or the
+corresponding [CLI command](https://cli.github.com/manual/gh_run_rerun), keeps
+successful producers intact:
 
 ```sh
 gh run rerun RUN_ID --repo ROCm/hrx-system --failed
 ```
+
+A defect in the tagged bundle or GitHub publication steps cannot be repaired by
+that rerun: GitHub correctly executes the workflow and scripts from the tag. For
+a prerelease whose build, native qualification, and security jobs all succeeded,
+merge the repair to `main`, then run **Loom / SDK / Recover candidate** with the
+failed run and its exact tag:
+
+```sh
+gh workflow run recover_loom_sdk_release.yml --repo ROCm/hrx-system --ref main \
+  -f tag=v1.2.3rc1 -f source_run_id=RUN_ID
+```
+
+Recovery downloads rather than rebuilds. It requires the source run to be the
+completed failed tag workflow in the same repository, requires every upstream
+job and the native CodeQL job to have succeeded, and accepts only a bundle or
+GitHub-publication failure. Current `main` owns those provenance and staging
+checks. The tag checkout still owns the release identity, complete artifact
+verification, checksums, catalog binding, editorial, and publication. Unexpected,
+missing, or duplicate payloads fail before release mutation.
+
+This path is intentionally prerelease-only. A stable tag with a source defect
+needs a corrected version; a transient stable publication failure retains the
+ordinary same-run retry and idempotent GitHub/PyPI behavior below.
 
 The retry behavior is deliberate:
 
@@ -317,7 +340,7 @@ producers; it is not the same operation as rerunning failed publication jobs.
 | Compiler, runner image, and cross-SDK pins | [Artifact workflow](../../../.github/workflows/build_loom_sdk_artifacts.yml), [Windows setup](../../../.github/scripts/setup_windows_cross.sh), [SDK manifest](../../../.github/scripts/windows-sdk-channel.json) |
 | Artifact export and installed qualification | [loom_wheel.py](../../../build_tools/ci/loom_wheel.py), [installed oracle](../../src/loom/tooling/target/cpu/serve/wheel_model_card_test.py) |
 | Standalone executables | [loom_server.py](../../../build_tools/ci/loom_server.py), [amdf_info_archive.py](../../../build_tools/ci/amdf_info_archive.py) |
-| Identity, bundle checks, and publication retries | [release.py](release.py), [loom_release.py](../../../build_tools/ci/loom_release.py), [release workflow](../../../.github/workflows/release_loom_sdk.yml) |
+| Identity, bundle checks, and publication retries | [release.py](release.py), [loom_release.py](../../../build_tools/ci/loom_release.py), [release workflow](../../../.github/workflows/release_loom_sdk.yml), [candidate recovery](../../../.github/workflows/recover_loom_sdk_release.yml) |
 
 A compiler, sysroot, native-library, or packaging change is qualified through
 the actual Linux and Windows wheels, including each affected instrumented
