@@ -53,11 +53,22 @@ class ServerTest(unittest.TestCase):
                 address = urlsplit(f"http://{bound}")
                 for model_id in (name, "variants"):
                     wait_status(address, model=model_id, phase="idle")
-                catalog = control(address, "GET", "/v1/models", 200)["data"]
+                # Client-wide query parameters accompany both discovery and inference.
+                query = "?request_id=a%2Fb&next=/v1/status"
+                catalog = control(address, "GET", "/v1/models" + query, 200)["data"]
                 self.assertEqual({entry["id"] for entry in catalog}, {name, "variants"})
                 for entry in catalog:
                     path = "/v1/models/" + quote(entry["id"], safe="+")
-                    self.assertEqual(control(address, "GET", path, 200), entry)
+                    self.assertEqual(control(address, "GET", path + query, 200), entry)
+                inferred = self.post(
+                    address,
+                    "/v1/embeddings" + query,
+                    {"model": name, "input": ["a", "bbb"], "dimensions": 2},
+                )
+                self.assertEqual(
+                    [row["embedding"] for row in inferred["data"]], [[1, 1], [6, 3]]
+                )
+                control(address, "GET", "/absent?next=/v1/models", 404)
                 inventory = control(
                     address,
                     "GET",
@@ -125,9 +136,11 @@ class ServerTest(unittest.TestCase):
                 empty = self.post(address, "/tokenize", text, expected=404)["error"]
                 self.assertNotEqual(empty.get("code"), "model_not_found")
                 self.post(address, "/v1/models/register", document, expected=202)
-                tokens = self.post(address, "/tokenize", text)
+                tokens = self.post(address, "/tokenize?request_id=encode", text)
                 self.assertEqual(tokens, {"tokens": [0, 1]})
-                self.assertEqual(self.post(address, "/detokenize", tokens), text)
+                self.assertEqual(
+                    self.post(address, "/detokenize?request_id=decode", tokens), text
+                )
                 self.post(address, "/tokenize", {**text, "model": ""}, expected=400)
                 missing = self.post(
                     address, "/tokenize", {**text, "model": "absent"}, expected=404

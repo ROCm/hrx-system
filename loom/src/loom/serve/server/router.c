@@ -155,8 +155,8 @@ static iree_status_t loom_serve_router_tokenization_run(
     iree_task_process_drain_result_t* result) {
   loom_serve_router_tokenization_t* job = process->user_data;
   IREE_TRACE_ZONE_BEGIN(z0);
-  IREE_TRACE_ZONE_APPEND_TEXT(z0, job->request->target.data,
-                              job->request->target.size);
+  IREE_TRACE_ZONE_APPEND_TEXT(z0, job->request->path.data,
+                              job->request->path.size);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, job->service_index);
   result->did_work = true;
   result->completed = true;
@@ -165,7 +165,7 @@ static iree_status_t loom_serve_router_tokenization_run(
               &job->output,
               "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
               "Connection: close\r\n\r\n"));
-  if (iree_string_view_equal(job->request->target, IREE_SV("/tokenize"))) {
+  if (iree_string_view_equal(job->request->path, IREE_SV("/tokenize"))) {
     const iree_status_t status = loom_serve_http_tokenize(
         job->tokenizer, job->request->body, &job->output, job->host_allocator);
     IREE_RETURN_AND_END_ZONE(z0, status);
@@ -778,7 +778,7 @@ static iree_status_t loom_serve_router_logs(
     loom_serve_router_t* router, loom_serve_http_connection_t* connection,
     const loom_serve_http_request_t* request) {
   const bool streaming =
-      iree_string_view_equal(request->target, IREE_SV("/logz/stream"));
+      iree_string_view_equal(request->path, IREE_SV("/logz/stream"));
   iree_host_size_t service_index = router->driver.runtime.capacity;
   const loom_runtime_telemetry_stream_t* stream =
       loom_serve_http_server_diagnostics(router->server);
@@ -992,9 +992,9 @@ static iree_status_t loom_serve_router_logs_advance(loom_serve_router_t* router,
   return status;
 }
 
-static bool loom_serve_router_is_tokenization(iree_string_view_t target) {
-  return iree_string_view_equal(target, IREE_SV("/tokenize")) ||
-         iree_string_view_equal(target, IREE_SV("/detokenize"));
+static bool loom_serve_router_is_tokenization(iree_string_view_t path) {
+  return iree_string_view_equal(path, IREE_SV("/tokenize")) ||
+         iree_string_view_equal(path, IREE_SV("/detokenize"));
 }
 
 static iree_status_t loom_serve_router_admit(
@@ -1002,7 +1002,7 @@ static iree_status_t loom_serve_router_admit(
     loom_serve_http_connection_t* connection,
     const loom_serve_http_request_t* request) {
   if (iree_string_view_equal(request->method, IREE_SV("POST")) &&
-      loom_serve_router_is_tokenization(request->target)) {
+      loom_serve_router_is_tokenization(request->path)) {
     return loom_serve_router_tokenization_accept(router, service_index,
                                                  connection, request);
   }
@@ -1385,12 +1385,13 @@ static iree_status_t loom_serve_router_accept(
     loom_serve_router_t* router, loom_serve_http_connection_t* connection,
     const loom_serve_http_request_t* request) {
   iree_string_builder_t* output = &router->output;
+  const iree_string_view_t path = request->path;
   const bool get = iree_string_view_equal(request->method, IREE_SV("GET"));
-  if (get && loom_serve_dashboard_handles(request->target)) {
+  if (get && loom_serve_dashboard_handles(path)) {
     loom_serve_dashboard_send(router->server, connection, request);
     return iree_ok_status();
   }
-  if (get && iree_string_view_equal(request->target, IREE_SV("/v1/observe"))) {
+  if (get && iree_string_view_equal(path, IREE_SV("/v1/observe"))) {
     if (router->held.count + router->logs.count +
             loom_serve_http_live_count(router->live) +
             loom_serve_http_variants_claims(router->variants) >=
@@ -1421,20 +1422,19 @@ static iree_status_t loom_serve_router_accept(
     return loom_serve_http_variants_accept(router->variants, connection,
                                            request, allow_wait, output);
   }
-  if (get && iree_string_view_equal(request->target, IREE_SV("/v1/requests"))) {
+  if (get && iree_string_view_equal(path, IREE_SV("/v1/requests"))) {
     return loom_serve_router_inspect(router, connection, request,
                                      LOOM_SERVE_HTTP_INSPECT_REQUESTS);
   }
-  if (get && iree_string_view_equal(request->target, IREE_SV("/v1/sessions"))) {
+  if (get && iree_string_view_equal(path, IREE_SV("/v1/sessions"))) {
     return loom_serve_router_inspect(router, connection, request,
                                      LOOM_SERVE_HTTP_INSPECT_SESSIONS);
   }
-  if (get &&
-      (iree_string_view_equal(request->target, IREE_SV("/logz")) ||
-       iree_string_view_equal(request->target, IREE_SV("/logz/stream")))) {
+  if (get && (iree_string_view_equal(path, IREE_SV("/logz")) ||
+              iree_string_view_equal(path, IREE_SV("/logz/stream")))) {
     return loom_serve_router_logs(router, connection, request);
   }
-  if (get && iree_string_view_equal(request->target, IREE_SV("/metrics"))) {
+  if (get && iree_string_view_equal(path, IREE_SV("/metrics"))) {
     iree_status_t status =
         loom_serve_http_metrics_format(router->driver.registry, output);
     if (iree_status_is_ok(status)) {
@@ -1445,8 +1445,8 @@ static iree_status_t loom_serve_router_accept(
     }
     return status;
   }
-  if (get && (iree_string_view_equal(request->target, IREE_SV("/healthz")) ||
-              iree_string_view_equal(request->target, IREE_SV("/readyz")))) {
+  if (get && (iree_string_view_equal(path, IREE_SV("/healthz")) ||
+              iree_string_view_equal(path, IREE_SV("/readyz")))) {
     loom_serve_http_response_send(
         router->server, connection,
         IREE_SV("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
@@ -1454,19 +1454,22 @@ static iree_status_t loom_serve_router_accept(
     return iree_ok_status();
   }
   const bool include_status =
-      iree_string_view_equal(request->target, IREE_SV("/v1/status"));
+      iree_string_view_equal(path, IREE_SV("/v1/status"));
   bool list_models = false;
   if (get) {
-    iree_string_view_t target = loom_serve_http_request_path(request);
-    iree_string_view_consume_prefix(&target, IREE_SV("/v1"));
-    const bool ready = iree_string_view_equal(target, IREE_SV("/ready"));
-    if (ready || iree_string_view_equal(target, IREE_SV("/health"))) {
+    iree_string_view_t unversioned_path = path;
+    iree_string_view_consume_prefix(&unversioned_path, IREE_SV("/v1"));
+    const bool ready =
+        iree_string_view_equal(unversioned_path, IREE_SV("/ready"));
+    if (ready || iree_string_view_equal(unversioned_path, IREE_SV("/health"))) {
       return loom_serve_router_inference_readiness(router, connection, ready);
     }
-    list_models = iree_string_view_equal(target, IREE_SV("/models"));
-    if (iree_string_view_consume_prefix(&target, IREE_SV("/models/")) &&
-        target.size) {
-      return loom_serve_router_retrieve_model(router, connection, target);
+    list_models = iree_string_view_equal(unversioned_path, IREE_SV("/models"));
+    if (iree_string_view_consume_prefix(&unversioned_path,
+                                        IREE_SV("/models/")) &&
+        unversioned_path.size) {
+      return loom_serve_router_retrieve_model(router, connection,
+                                              unversioned_path);
     }
   }
   if (get && (include_status || list_models)) {
@@ -1514,22 +1517,19 @@ static iree_status_t loom_serve_router_accept(
     }
     return status;
   }
-  const bool checkpoint = iree_string_view_starts_with(
-      request->target, IREE_SV("/v1/checkpoints/"));
-  const bool drain =
-      iree_string_view_equal(request->target, IREE_SV("/v1/models/drain"));
+  const bool checkpoint =
+      iree_string_view_starts_with(path, IREE_SV("/v1/checkpoints/"));
+  const bool drain = iree_string_view_equal(path, IREE_SV("/v1/models/drain"));
   const bool undrain =
-      iree_string_view_equal(request->target, IREE_SV("/v1/models/undrain"));
+      iree_string_view_equal(path, IREE_SV("/v1/models/undrain"));
   const bool unregister =
-      iree_string_view_equal(request->target, IREE_SV("/v1/models/unregister"));
+      iree_string_view_equal(path, IREE_SV("/v1/models/unregister"));
   const bool deactivate =
-      iree_string_view_equal(request->target, IREE_SV("/v1/models/deactivate"));
+      iree_string_view_equal(path, IREE_SV("/v1/models/deactivate"));
   const bool activate =
-      iree_string_view_equal(request->target, IREE_SV("/v1/models/activate"));
-  const bool pin =
-      iree_string_view_equal(request->target, IREE_SV("/v1/models/pin"));
-  const bool unpin =
-      iree_string_view_equal(request->target, IREE_SV("/v1/models/unpin"));
+      iree_string_view_equal(path, IREE_SV("/v1/models/activate"));
+  const bool pin = iree_string_view_equal(path, IREE_SV("/v1/models/pin"));
+  const bool unpin = iree_string_view_equal(path, IREE_SV("/v1/models/unpin"));
   const bool post = iree_string_view_equal(request->method, IREE_SV("POST"));
   if ((!checkpoint && !post) ||
       (checkpoint && !post &&
@@ -1538,16 +1538,13 @@ static iree_status_t loom_serve_router_accept(
         router->server, connection, 404, "Not Found",
         IREE_SV("unknown service endpoint"), output);
   }
-  if (post &&
-      iree_string_view_equal(request->target, IREE_SV("/v1/models/register"))) {
+  if (post && iree_string_view_equal(path, IREE_SV("/v1/models/register"))) {
     return loom_serve_router_register(router, connection, request);
   }
-  if (post &&
-      iree_string_view_equal(request->target, IREE_SV("/v1/pools/trim"))) {
+  if (post && iree_string_view_equal(path, IREE_SV("/v1/pools/trim"))) {
     return loom_serve_router_trim(router, connection, request, false);
   }
-  if (post &&
-      iree_string_view_equal(request->target, IREE_SV("/v1/devices/trim"))) {
+  if (post && iree_string_view_equal(path, IREE_SV("/v1/devices/trim"))) {
     return loom_serve_router_trim(router, connection, request, true);
   }
   iree_string_view_t name;
@@ -1574,7 +1571,7 @@ static iree_status_t loom_serve_router_accept(
     if (iree_status_is_ok(status) && !has_name) {
       const iree_host_size_t count =
           loom_serve_registry_count(router->driver.registry);
-      if (!loom_serve_router_is_tokenization(request->target)) {
+      if (!loom_serve_router_is_tokenization(path)) {
         status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                   "request requires a nonempty model string");
       } else if (count == 0) {
@@ -1650,15 +1647,14 @@ static iree_status_t loom_serve_router_accept(
                                                           state);
       }
       if (!state->service.endpoint &&
-          !loom_serve_router_is_tokenization(request->target)) {
+          !loom_serve_router_is_tokenization(path)) {
         return loom_serve_http_response_reject(
             router->server, connection, 404, "Not Found",
             IREE_SV("model has no HTTP inference endpoint"), output);
       }
       const bool voice_removal =
           state->service.kind == LOOM_SERVICE_KIND_SPEECH &&
-          iree_string_view_equal(request->target,
-                                 IREE_SV("/v1/audio/voices/remove"));
+          iree_string_view_equal(path, IREE_SV("/v1/audio/voices/remove"));
       if (voice_removal ||
           (checkpoint && !post &&
            (state->service.kind == LOOM_SERVICE_KIND_TEXT ||
@@ -1684,12 +1680,11 @@ static iree_status_t loom_serve_router_accept(
               IREE_SV("model admission holding capacity is full"), output);
         }
         const bool demands_parameters =
-            post && (iree_string_view_equal(
-                         request->target,
-                         iree_make_cstring_view(state->service.endpoint)) ||
-                     (state->service.kind == LOOM_SERVICE_KIND_SPEECH &&
-                      iree_string_view_equal(request->target,
-                                             IREE_SV("/v1/audio/voices"))));
+            post &&
+            (iree_string_view_equal(
+                 path, iree_make_cstring_view(state->service.endpoint)) ||
+             (state->service.kind == LOOM_SERVICE_KIND_SPEECH &&
+              iree_string_view_equal(path, IREE_SV("/v1/audio/voices"))));
         router->held.values[router->held.count++] =
             (loom_serve_router_held_request_t){connection, request, i,
                                                demands_parameters};

@@ -35,6 +35,8 @@ struct loom_serve_test_http_request_snapshot_t {
   std::string method;
   // Copied origin-form target.
   std::string target;
+  // Encoded path used for dispatch.
+  std::string path;
   // Copied header names and values in wire order.
   std::vector<std::pair<std::string, std::string>> headers;
   // Copied request body.
@@ -104,6 +106,7 @@ void CopyRequest(const loom_serve_http_request_t* request,
                  loom_serve_test_http_request_snapshot_t* out_snapshot) {
   out_snapshot->method = CopyString(request->method);
   out_snapshot->target = CopyString(request->target);
+  out_snapshot->path = CopyString(request->path);
   for (iree_host_size_t i = 0; i < request->headers.count; ++i) {
     out_snapshot->headers.emplace_back(
         CopyString(request->headers.pairs[i].key),
@@ -145,6 +148,7 @@ void ExpectSnapshotsEqual(
     const loom_serve_test_http_request_snapshot_t& expected) {
   EXPECT_EQ(actual.method, expected.method);
   EXPECT_EQ(actual.target, expected.target);
+  EXPECT_EQ(actual.path, expected.path);
   EXPECT_EQ(actual.headers, expected.headers);
   EXPECT_EQ(actual.body, expected.body);
   EXPECT_EQ(actual.form_fields, expected.form_fields);
@@ -211,6 +215,7 @@ TEST(HttpRequestTest, ParsesChunkedMultipartAcrossEverySplit) {
   loom_serve_test_http_request_snapshot_t expected{
       .method = "POST",
       .target = "/v1/audio/transcriptions",
+      .path = "/v1/audio/transcriptions",
       .headers = {{"Host", "local"},
                   {"Content-Type", "multipart/form-data; boundary=sample"},
                   {"Transfer-Encoding", "ChUnKeD"}},
@@ -240,6 +245,7 @@ TEST(HttpRequestTest, IgnoresChunkExtensionsAndDiscardsTrailers) {
   const loom_serve_test_http_request_snapshot_t expected{
       .method = "POST",
       .target = "/v1/audio/transcriptions",
+      .path = "/v1/audio/transcriptions",
       .headers = {{"Host", "local"}, {"Transfer-Encoding", "chunked"}},
       .body = "0123456789x",
   };
@@ -303,9 +309,9 @@ TEST(HttpRequestTest, ParsesCapturedOpenAiGetAndLooksUpHeaders) {
   EXPECT_TRUE(iree_string_view_is_empty(value));
 }
 
-TEST(HttpRequestTest, TrimsHeaderWhitespace) {
+TEST(HttpRequestTest, SplitsEncodedPathAndTrimsHeaderWhitespace) {
   const std::string wire_request =
-      "GET /resource?value=1 HTTP/1.1\r\n"
+      "GET /name%3Fpart?next=/other?value=1 HTTP/1.1\r\n"
       "Host:\texample.test \t\r\n"
       "X-Value:\t value with spaces \t\r\n"
       "Content-Encoding: identity\r\n"
@@ -313,9 +319,11 @@ TEST(HttpRequestTest, TrimsHeaderWhitespace) {
   loom_serve_test_http_request_snapshot_t snapshot;
   IREE_ASSERT_OK(
       ParseRequest({StringSpan(wire_request)}, DefaultLimits(), &snapshot));
-  EXPECT_EQ(snapshot.target, "/resource?value=1");
+  EXPECT_EQ(snapshot.target, "/name%3Fpart?next=/other?value=1");
+  EXPECT_EQ(snapshot.path, "/name%3Fpart");
   EXPECT_EQ(snapshot.headers[0].second, "example.test");
   EXPECT_EQ(snapshot.headers[1].second, "value with spaces");
+  ExpectEverySplit(wire_request, snapshot);
 }
 
 TEST(HttpRequestTest, RequestsContinueOnlyWhenHeadersArriveAheadOfTheBody) {

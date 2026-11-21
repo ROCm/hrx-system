@@ -147,8 +147,8 @@ static iree_status_t loom_serve_finite_http_accept(
   const iree_time_t arrival_time = iree_time_now();
   if (!iree_string_view_equal(request->method, IREE_SV("POST")) ||
       !iree_string_view_equal(
-          request->target, iree_make_cstring_view(loom_serve_service_endpoint(
-                               loom_service_finite_service_kind(service))))) {
+          request->path, iree_make_cstring_view(loom_serve_service_endpoint(
+                             loom_service_finite_service_kind(service))))) {
     loom_serve_finite_http_decline(
         service, arrival_time, connection,
         IREE_SV("HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\n"

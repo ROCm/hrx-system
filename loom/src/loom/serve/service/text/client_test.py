@@ -17,21 +17,21 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from loom_serve_testing.http_harness import control, running_server
+from loom_serve_testing.http_harness import control, running_server, wait_status
 
 SERVER = Path(sys.argv.pop(1)).resolve()
 PACKAGE = Path(sys.argv.pop(1)).resolve().parent
 
 
 class ClientTest(unittest.TestCase):
-    def request(self, address, body, session=None, expected=200):
+    def request(self, address, body, session=None, expected=200, *, query=""):
         connection = http.client.HTTPConnection(address.hostname, address.port)
         headers = {"Content-Type": "application/json"}
         if session is not None:
             headers["X-Loom-Session"] = session
         try:
             connection.request(
-                "POST", "/v1/chat/completions", json.dumps(body), headers
+                "POST", "/v1/chat/completions" + query, json.dumps(body), headers
             )
             response = connection.getresponse()
             payload = response.read()
@@ -212,7 +212,9 @@ class ClientTest(unittest.TestCase):
                         "draft_depth": 0,
                     },
                 }
-                (directory / "model.json").write_text(json.dumps(declaration))
+                (directory / "model.json").write_text(
+                    json.dumps({**declaration, "admission": "drained"})
+                )
                 log = directory / "server.log"
                 with running_server(
                     [
@@ -228,6 +230,31 @@ class ClientTest(unittest.TestCase):
                 ) as (process, bound):
                     self.assertIsNotNone(bound, log.read_text())
                     address = urlsplit(f"http://{bound}")
+                    # Hold the first chat request across model preparation.
+                    # Its route must survive the handoff to the text service.
+                    peer = http.client.HTTPConnection(address.hostname, address.port)
+                    try:
+                        peer.request(
+                            "POST",
+                            "/v1/chat/completions?request_id=first",
+                            json.dumps(self.body()),
+                            {"Content-Type": "application/json"},
+                        )
+                        wait_status(address, model="text", held_requests=1)
+                        control(
+                            address,
+                            "POST",
+                            "/v1/models/undrain",
+                            200,
+                            body=json.dumps({"model": "text"}),
+                        )
+                        with peer.getresponse() as response:
+                            self.assertEqual(response.status, 200)
+                            self.check_completion(
+                                json.load(response), "bx", "length", 4, 2
+                            )
+                    finally:
+                        peer.close()
                     self.check_request_diagnostics(address)
                     self.check_prompt_compaction(address)
                     for options in (
@@ -276,10 +303,11 @@ class ClientTest(unittest.TestCase):
                         media_io_kwargs=None,
                         client_extension={"request_label": "example"},
                     )
+                    query = "?request_id=chat%2F1"
                     count = control(
                         address,
                         "POST",
-                        "/v1/chat/completions/input_tokens",
+                        "/v1/chat/completions/input_tokens" + query,
                         200,
                         body=json.dumps(compatible),
                         headers={"Content-Type": "application/json"},
@@ -287,7 +315,7 @@ class ClientTest(unittest.TestCase):
                     self.assertEqual(count["object"], "response.input_tokens")
                     for streaming in (False, True):
                         result = self.request(
-                            address, {**compatible, "stream": streaming}
+                            address, {**compatible, "stream": streaming}, query=query
                         )
                         if streaming:
                             self.assertEqual(
