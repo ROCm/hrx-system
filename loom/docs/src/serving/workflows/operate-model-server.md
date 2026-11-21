@@ -218,10 +218,10 @@ changing inference. Explicit selection makes a ready choice preferred at a
 completed execution boundary. There is no unregister/register cycle or
 required admission drain.
 
-The author asserts that replacements preserve the meaning and layout of retained
-state and parameters. The server checks the native binding contract, not
-mathematical equivalence. Preparation declarations, shape catalog, control VM
-and tokenizer remain fixed; changing them requires a new registration.
+The server checks each replacement against the registered stage's native
+bindings. The author is responsible for numerical behavior and the meaning and
+layout of retained state and parameters. Changes to stage declarations, the
+control VM, or the tokenizer require a new registration.
 For a text deployment named `scout` with variant capacity enabled, these commands
 use `jq` to carry server-issued IDs:
 

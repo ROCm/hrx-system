@@ -20,8 +20,8 @@
 #include "loom/serve/service/text/capture.h"
 #include "loom/serve/service/text/chat.h"
 #include "loom/serve/service/text/media_input.h"
-#include "loom/serve/service/text/packing.h"
 #include "loom/serve/service/text/warmup.h"
+#include "loom/service/text/schedule.h"
 #include "loomc/sanitizer.h"
 
 #ifdef __cplusplus
@@ -111,7 +111,7 @@ typedef struct loom_serve_text_options_t {
   loom_serve_text_mode_t mode;
   // Explicit program inputs and local base, borrowed through load completion.
   loom_runtime_sources_t sources;
-  // Maximum input count specialized into isolated prefill.
+  // Maximum input positions admitted in a device epoch or an isolated prefill.
   iree_host_size_t prefill_capacity;
   // Logical attention-position ceiling per row, not a pooled reservation.
   iree_host_size_t context_capacity;
@@ -127,13 +127,12 @@ typedef struct loom_serve_text_options_t {
   // geometry converts this byte bound to token positions without committing
   // backing. Nonzero is mutually exclusive with pool_capacity.
   uint64_t cache_limit_bytes;
-  // Number of host packed token/span shape buckets; zero selects isolated
-  // execution. Source may map several buckets to the same command.
-  iree_host_size_t epoch_count;
-  // Borrowed scheduling shapes supplied to the source bootstrap.
-  const loom_serve_packing_shape_t* epoch_shapes;
-  // Proposed tokens after each known anchor (0-7). Zero disables drafting;
-  // the source bootstrap validates its supported nonzero depths.
+  // Maximum distinct rows in a submitted epoch. Zero reserves no epoch
+  // storage for a model used exclusively through its isolated row entry points.
+  iree_host_size_t span_capacity;
+  // Maximum proposals after an anchor, strictly less than
+  // LOOM_SERVICE_TEXT_MAX_EPOCH_OUTPUTS. Zero disables drafting. The model's
+  // preparation program validates the nonzero depths it supports.
   iree_host_size_t draft_depth;
   // Device assertion classes/reporting applied to every JIT kernel pipeline.
   // Initialize structure type and size even when no checks are enabled.
@@ -142,8 +141,9 @@ typedef struct loom_serve_text_options_t {
   iree_string_view_t weights_path;
   // Hugging Face tokenizer.json loaded once during creation.
   iree_string_view_t tokenizer_path;
-  // Initial addressable resident capacity, independent of epoch shape capacity.
-  // Service demand grows it; source-visible identities fit a positive i32.
+  // Initial addressable resident capacity, independent of the maximum spans per
+  // epoch. Service demand grows it; source-visible identities fit a positive
+  // i32.
   iree_host_size_t row_count;
   // Maximum explicitly retained endpoints; zero keeps no checkpoint reserve.
   // Requires pooled execution. Source reserves reader/writer slot headroom;
@@ -195,10 +195,8 @@ typedef struct loom_serve_text_span_t {
 // append new input after an unselected first chunk. Speculative spans require
 // SELECT|PROPOSE and consume the first result's final prediction on device;
 // their token_ids is unused. The producer compacts survivors without a host
-// wait. The shape bounds all entries before EOS/credit filtering.
+// wait. Counts reserve input positions before EOS and output-credit filtering.
 typedef struct loom_serve_text_continuation_t {
-  // Cached shape admitting the second plan's worst-case inputs and spans.
-  iree_host_size_t shape_index;
   // Nonempty subset of distinct rows present in the first plan.
   iree_host_size_t span_count;
   // Borrowed next input chunks or device-produced speculative anchors.
@@ -223,10 +221,11 @@ typedef struct loom_serve_text_result_t {
   // Number of speculative verifications that advanced this span.
   uint32_t verification_count;
   // Candidates presented to the target, including rejected and lookup-supplied
-  // tokens, excluding pending anchors. Summed across completed verifications.
+  // tokens, excluding pending anchors. UINT32_MAX if the publisher performed
+  // verification without reporting its candidate count.
   uint32_t proposal_count;
   // Valid prefix of output_count IDs across at most two device-fed epochs.
-  int32_t tokens[16];
+  int32_t tokens[LOOM_SERVICE_TEXT_MAX_EPOCH_OUTPUTS];
 } loom_serve_text_result_t;
 
 typedef struct loom_serve_text_metrics_t {
@@ -405,7 +404,7 @@ iree_status_t loom_serve_text_model_prepare_resize(
 void loom_serve_text_resize_free(loom_serve_text_resize_t* resize);
 
 // Applies a prepared growth on the serialized server/pool owner. Programs,
-// parameters, epoch shapes, and existing handles survive. Virtual backing
+// parameters, submission limits, and existing handles survive. Virtual backing
 // retains slabs; fixed backing copies at this cold boundary. Returns accepted
 // queue readiness without waiting. Submission failure retains accepted work
 // for normal model retirement. The prepared result is consumed, not freed.
@@ -589,36 +588,36 @@ iree_host_size_t loom_serve_text_row_pool_growth(
 // row's logical map; it belongs outside ordinary epoch scheduling.
 iree_host_size_t loom_serve_text_row_pool_reclaimable(
     const loom_serve_text_row_t* row);
-// Maximum chunk accepted by row_prefill. Pooled/draft execution is also bounded
-// by the largest packed shape, which owns mapped target/draft state updates.
+// Source-declared maximum chunk accepted by row_prefill.
 iree_host_size_t loom_serve_text_model_prefill_capacity(
     const loom_serve_text_model_t* model);
-// Shapes are in option order and borrow model-owned immutable storage.
-// Zero means no packed-epoch stages were prepared.
-iree_host_size_t loom_serve_text_model_shape_count(
+// Deployment budget for submitted input positions, including verifier inputs.
+iree_host_size_t loom_serve_text_model_token_capacity(
     const loom_serve_text_model_t* model);
-const loom_serve_packing_shape_t* loom_serve_text_model_shapes(
+// Maximum number of distinct rows in a submitted epoch.
+iree_host_size_t loom_serve_text_model_span_capacity(
     const loom_serve_text_model_t* model);
 
 // Enqueues distinct resident rows in one packed traversal without a host wait.
-// The nonempty span list and total token count must fit the prepared shape,
+// The nonempty span list and total token count must fit the submission budgets,
 // and each span must fit its row's remaining context. Validation rejects the
 // whole plan before submission. NULL output_limits selects ordinary known
 // input and requires NULL continuation. Non-NULL output_limits requires
 // drafting and mixes known input with spans of draft_depth + 1 speculative
 // inputs. An optional continuation enqueues a second mixed plan without an
 // intermediate host wait. A zero output limit denotes known input. Limits 1
-// through draft_depth + 1 (twice that with continuation) denote speculative
-// input, require SELECT and a pending non-EOS prediction, and cap the number of
-// new selected outputs. PROPOSE spans supply only the pending token: source
-// draft commands publish directly into the verifier input buffer. Other
-// speculative spans supply the pending token followed by proposals themselves.
-// Greedy acceptance stops at the first mismatch, EOS, or limit. Only accepted
-// state is published; catch-up pairs accepted inputs with target hidden state.
-// Proposal, verification, commit and catch-up have no intermediate host wait or
-// readback. Each known input chunk executes once. Continuation advances known
-// chunks or promotes a selected first result to speculation, stopping
-// speculative work at EOS, output credit or context bound.
+// through draft_depth + 1 (twice that with continuation, capped at the shared
+// result capacity) denote speculative input. They require SELECT and a pending
+// non-EOS prediction and cap the number of new selected outputs. PROPOSE spans
+// supply only the pending token: source draft commands publish directly into
+// the verifier input buffer. Other speculative spans supply the pending token
+// followed by proposals themselves. Greedy acceptance stops at the first
+// mismatch, EOS, or limit. Only accepted state is published; catch-up pairs
+// accepted inputs with target hidden state. Proposal, verification, commit and
+// catch-up have no intermediate host wait or readback. Each known input chunk
+// executes once. Continuation advances known chunks or promotes a selected
+// first result to speculation, stopping speculative work at EOS, output credit
+// or context bound.
 //
 // Known-input models require out_capture and reject selection, proposal, media,
 // and continuation. Their source capture plan is checked before row mutation;
@@ -639,9 +638,8 @@ const loom_serve_packing_shape_t* loom_serve_text_model_shapes(
 // new row/page ranges; ordinary resident text work allocates no physical
 // memory. A media epoch uses one exact transient workspace root.
 iree_status_t loom_serve_text_model_submit_epoch(
-    loom_serve_text_model_t* model, iree_host_size_t shape_index,
-    iree_host_size_t span_count, const loom_serve_text_span_t* spans,
-    const uint32_t* output_limits,
+    loom_serve_text_model_t* model, iree_host_size_t span_count,
+    const loom_serve_text_span_t* spans, const uint32_t* output_limits,
     const loom_serve_text_continuation_t* continuation,
     loom_serve_text_capture_t** out_capture,
     loom_runtime_execution_frontier_t* out_frontier);
@@ -660,13 +658,11 @@ iree_status_t loom_serve_text_model_complete_epoch(
 // progress. These entry points are for CLI consumers, not task-worker
 // execution.
 iree_status_t loom_serve_text_model_epoch(loom_serve_text_model_t* model,
-                                          iree_host_size_t shape_index,
                                           iree_host_size_t span_count,
                                           const loom_serve_text_span_t* spans);
 iree_status_t loom_serve_text_model_verify(
-    loom_serve_text_model_t* model, iree_host_size_t shape_index,
-    iree_host_size_t span_count, const loom_serve_text_span_t* spans,
-    const uint32_t* output_limits,
+    loom_serve_text_model_t* model, iree_host_size_t span_count,
+    const loom_serve_text_span_t* spans, const uint32_t* output_limits,
     const loom_serve_text_continuation_t* continuation,
     loom_serve_text_result_t* out_results);
 

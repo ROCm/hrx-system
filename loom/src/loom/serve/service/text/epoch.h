@@ -8,7 +8,8 @@
 #define LOOM_SERVE_SERVICE_TEXT_EPOCH_H_
 
 #include "loom/serve/service/text/model.h"
-#include "loom/serve/service/text/schedule.h"
+#include "loom/serve/service/text/packing.h"
+#include "loom/service/text/schedule.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,10 +32,10 @@ typedef struct loom_serve_text_epoch_options_t {
   loom_service_text_schedule_mode_t schedule_mode;
   // Whether known inputs and verifiers may share a cohort.
   loom_service_text_packing_mode_t packing_mode;
-  // Borrowed cached shape catalog, stable through the model lifetime.
-  const loom_serve_packing_shape_t* shapes;
-  // Number of candidate token/span shapes.
-  iree_host_size_t shape_count;
+  // Maximum input positions the service can admit in one device epoch.
+  iree_host_size_t token_capacity;
+  // Maximum distinct rows the service can admit in one device epoch.
+  iree_host_size_t span_capacity;
 } loom_serve_text_epoch_options_t;
 
 // Snapshot of a credited participant at a completed model boundary. Snapshots
@@ -69,8 +70,6 @@ typedef struct loom_serve_text_epoch_t {
   void* storage;
   // Number of admitted spans; zero when no cohort is retained.
   iree_host_size_t count;
-  // Cached command-program bucket for the first epoch.
-  iree_host_size_t shape_index;
   // Current span in isolated/matched execution.
   iree_host_size_t cursor;
   // First issued epoch identity and host-observed submission time.
@@ -84,9 +83,8 @@ typedef struct loom_serve_text_epoch_t {
   iree_host_size_t proposal_count;
   // Number of pre-issued model traversals for packed execution.
   iree_host_size_t device_epochs;
-  // Sum of issued packed bucket capacities, including the continuation. Zero
-  // for isolated/matched stages whose individual capacities are not retained.
-  iree_host_size_t token_slots;
+  // Input tokens scheduled for the device-fed continuation before acceptance.
+  iree_host_size_t continuation_token_count;
   // Known inputs scheduled in the second device epoch.
   iree_host_size_t continued_prefill_count;
   // Total first-epoch input slots, including speculative proposals.
@@ -109,10 +107,8 @@ typedef struct loom_serve_text_epoch_t {
     loom_serve_text_epoch_row_t* rows;
     // Remaining work indexed by the first cohort's ordinal.
     loom_serve_ready_span_t* ready;
-    // Winning continuation partition, still in first-cohort ordinals.
+    // Scheduled continuation spans in first-cohort order.
     loom_serve_packed_span_t* scheduled;
-    // Candidate partition reused for each continuation shape.
-    loom_serve_packed_span_t* candidate;
     // Following spans retaining the original resident identities.
     loom_serve_text_span_t* spans;
     // Following per-span output limits across both epochs.
@@ -120,9 +116,9 @@ typedef struct loom_serve_text_epoch_t {
   } planning;
 } loom_serve_text_epoch_t;
 
-// Allocates one reusable host block for a positive maximum cohort width. This
-// width describes the prepared dispatch catalog, not resident session count.
-// Partial/zero initialization may be deinitialized; no preparation allocates.
+// Allocates one reusable host block for up to span_capacity spans in a single
+// submission. The planner reuses this storage for each admitted cohort.
+// Zero-initialized or partially initialized state can be deinitialized.
 iree_status_t loom_serve_text_epoch_initialize(
     iree_host_size_t span_capacity, iree_allocator_t host_allocator,
     loom_serve_text_epoch_t* out_epoch);

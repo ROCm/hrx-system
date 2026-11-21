@@ -104,8 +104,7 @@ class SourceTextServiceTest : public ::testing::Test {
         .prefill_capacity = 32,
         .context_capacity = 96,
         .pool_capacity = 256,
-        .epoch_count = IREE_ARRAYSIZE(shapes_),
-        .epoch_shapes = shapes_,
+        .span_capacity = 4,
         .kernel_sanitizer = {.type = LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
                              .structure_size =
                                  sizeof(loomc_sanitizer_options_t)},
@@ -338,10 +337,7 @@ class SourceTextServiceTest : public ::testing::Test {
     }
     const auto log =
         Read(Send("", "X-Loom-Model: fixture-text\r\n", "/logz", "GET"));
-    EXPECT_NE(log.find(R"("token_slots":)"), std::string::npos) << log;
-    EXPECT_EQ(log.find(R"("token_slots":null)") != std::string::npos,
-              mode != LOOM_SERVICE_TEXT_SCHEDULE_PACKED)
-        << log;
+    EXPECT_NE(log.find(R"("scheduled_tokens":)"), std::string::npos) << log;
   }
 
   void Observe(const loom_serve_service_t& interface) {
@@ -706,8 +702,6 @@ class SourceTextServiceTest : public ::testing::Test {
 
   // Shared allocator for all production owners.
   const iree_allocator_t host_allocator_ = iree_allocator_system();
-  // Host geometry buckets share one command in the source bootstrap.
-  const loom_serve_packing_shape_t shapes_[3] = {{4, 1}, {16, 4}, {32, 4}};
   // External source package path.
   std::string directory_;
   // Real BPE tokenizer asset.

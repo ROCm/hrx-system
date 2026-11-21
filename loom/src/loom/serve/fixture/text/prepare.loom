@@ -6,6 +6,8 @@ func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
 
 func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 
+func.decl import("prepare") @dispatch(%root: buffer, %tag: i64) -> (i32)
+
 func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
 
 func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
@@ -16,13 +18,11 @@ func.decl import("prepare") @source_scope(%scope: buffer) -> (i32)
 
 func.decl @fixture_storage(%maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64) -> (buffer, buffer, buffer, buffer, buffer)
 
-// One shared command handles every host token/span bucket. The cold program
-// owns storage geometry; the host owns physical page IDs and recurrent slots.
-func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64, %draft_depth: i32, %shapes: buffer, %shape_count: i64, %weights: buffer, %options: buffer) -> (i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer) {
+// Text selects tokens inside its weighted command. Media submits selection as
+// a direct kernel after its weighted command. Both share target state.
+func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64, %draft_depth: i32, %span_capacity: i64, %weights: buffer, %options: buffer) -> (i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer) {
   %c0_source = scalar.constant 0 : i32
   %origin = index.constant 0 : offset
-  %c0 = index.constant 0 : index
-  %c1 = index.constant 1 : index
   %c0_i32 = scalar.constant 0 : i32
   %c1_i32 = scalar.constant 1 : i32
   %c2_i32 = scalar.constant 2 : i32
@@ -30,7 +30,7 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %c1_i64 = scalar.constant 1 : i64
   %c4_i64 = scalar.constant 4 : i64
   %pooled = scalar.cmpi ne, %pool, %c0_i64 : i64
-  %packed = scalar.cmpi ne, %shape_count, %c0_i64 : i64
+  %packed = scalar.cmpi ne, %span_capacity, %c0_i64 : i64
   %no_draft = scalar.cmpi eq, %draft_depth, %c0_i32 : i32
   %has_epochs = scalar.andi %pooled, %packed : i1
   %supported_mode = scalar.andi %has_epochs, %no_draft : i1
@@ -47,10 +47,13 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %stage = func.call @stage(%root, %c0_i64) : (buffer, i64) -> (i32)
   %media_root = buffer.constant utf8("advance_media") : buffer
   %media_stage = func.call @stage(%media_root, %c1_i64) : (buffer, i64) -> (i32)
+  %select_root = buffer.constant utf8("select") : buffer
+  %select_stage = func.call @dispatch(%select_root, %c0_i64) : (buffer, i64) -> (i32)
   %context_key = buffer.constant utf8("fixture.context") : buffer
   %media_key = buffer.constant utf8("fixture.media") : buffer
   func.call @config_i64(%stage, %context_key, %context) : (i32, buffer, i64)
   func.call @config_i64(%media_stage, %context_key, %context) : (i32, buffer, i64)
+  func.call @config_i64(%select_stage, %context_key, %context) : (i32, buffer, i64)
   func.call @config_i64(%stage, %media_key, %c0_i64) : (i32, buffer, i64)
   func.call @config_i64(%media_stage, %media_key, %c1_i64) : (i32, buffer, i64)
   %empty = buffer.constant utf8("") : buffer
@@ -66,37 +69,25 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   }
   func.call @parameter(%stage, %c0_i32, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
   func.call @parameter(%media_stage, %c0_i32, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
-  %state_bytes = index.constant 128 : offset
+  %state_bytes = index.constant 136 : offset
   %state = buffer.alloca<private> align(8) %state_bytes : buffer
-  %state_view = buffer.view %state[%origin] : buffer -> view<2xi32>
-  view.store %stage, %state_view[0] : i32, view<2xi32>
-  view.store %media_stage, %state_view[1] : i32, view<2xi32>
+  %state_view = buffer.view %state[%origin] : buffer -> view<3xi32>
+  view.store %stage, %state_view[0] : i32, view<3xi32>
+  view.store %media_stage, %state_view[1] : i32, view<3xi32>
+  view.store %select_stage, %state_view[2] : i32, view<3xi32>
 
-  %bounded_count = scalar.assume %shape_count [range(%shape_count, 1, 2147483647)] : i64
-  %count = index.cast %bounded_count : i64 to index
-  %shape_view = buffer.view %shapes[%origin] : buffer -> view<[%count]x2xi64>
-  %maximum, %span_capacity = scf.for %i = [%c0 to %count step %c1](%previous = %c0_i64 : i64, %previous_spans = %c0_i64 : i64) -> (i64, i64) {
-    %tokens = view.load %shape_view[%i, 0] : view<[%count]x2xi64> -> i64
-    %larger = scalar.cmpi ugt, %tokens, %previous : i64
-    %next = scf.select %larger, %tokens, %previous : i64
-    %spans = view.load %shape_view[%i, 1] : view<[%count]x2xi64> -> i64
-    %more_spans = scalar.cmpi ugt, %spans, %previous_spans : i64
-    %next_spans = scf.select %more_spans, %spans, %previous_spans : i64
-    scf.yield %next, %next_spans : i64, i64
-  }
-  %smaller = scalar.cmpi ult, %maximum, %prefill : i64
-  %effective = scf.select %smaller, %maximum, %prefill : i64
   %spans_key = buffer.constant utf8("fixture.spans") : buffer
   func.call @config_i64(%stage, %spans_key, %span_capacity) : (i32, buffer, i64)
   func.call @config_i64(%media_stage, %spans_key, %span_capacity) : (i32, buffer, i64)
-  %layout_origin = index.constant 88 : offset
+  func.call @config_i64(%select_stage, %spans_key, %span_capacity) : (i32, buffer, i64)
+  %layout_origin = index.constant 96 : offset
   %layout = buffer.view %state[%layout_origin] : buffer -> view<5xi64>
-  view.store %maximum, %layout[0] : i64, view<5xi64>
+  view.store %prefill, %layout[0] : i64, view<5xi64>
   view.store %span_capacity, %layout[1] : i64, view<5xi64>
   view.store %context, %layout[2] : i64, view<5xi64>
   view.store %pool, %layout[3] : i64, view<5xi64>
   view.store %pins, %layout[4] : i64, view<5xi64>
-  %allocations, %views, %origins, %draft, %geometry = func.call @fixture_storage(%maximum, %span_capacity, %context, %pool, %rows, %pins) : (i64, i64, i64, i64, i64, i64) -> (buffer, buffer, buffer, buffer, buffer)
+  %allocations, %views, %origins, %draft, %geometry = func.call @fixture_storage(%prefill, %span_capacity, %context, %pool, %rows, %pins) : (i64, i64, i64, i64, i64, i64) -> (buffer, buffer, buffer, buffer, buffer)
   %terminal = buffer.constant utf8("#") : buffer
-  func.return %effective, %c2_i32, %state, %terminal, %allocations, %views, %origins, %empty, %geometry : i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer
+  func.return %prefill, %c2_i32, %state, %terminal, %allocations, %views, %origins, %empty, %geometry : i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer
 }

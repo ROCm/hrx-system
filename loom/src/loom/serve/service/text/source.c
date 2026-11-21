@@ -38,31 +38,12 @@ static iree_status_t loom_serve_text_prepare(
     const loom_serve_text_options_t* options,
     loom_serve_text_storage_t* storage) {
   const iree_allocator_t host_allocator = source->host_allocator;
-  iree_vm_buffer_t* shapes = NULL;
-  iree_status_t status =
-      iree_vm_buffer_create(options->epoch_count * 2 * sizeof(int64_t),
-                            iree_alignof(int64_t), host_allocator, &shapes);
-  iree_byte_span_t shape_bytes = iree_byte_span_empty();
-  if (iree_status_is_ok(status)) {
-    status = iree_vm_buffer_map_write(shapes, 0, iree_vm_buffer_length(shapes),
-                                      &shape_bytes);
-  }
-  if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < options->epoch_count; ++i) {
-      iree_unaligned_store_le_u64(shape_bytes.data + i * 16,
-                                  options->epoch_shapes[i].token_capacity);
-      iree_unaligned_store_le_u64(shape_bytes.data + i * 16 + 8,
-                                  options->epoch_shapes[i].span_capacity);
-    }
-  }
   iree_vm_buffer_t* weights = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_vm_buffer_clone(
-        IREE_VM_BUFFER_ACCESS_FLAG_READ,
-        iree_make_const_byte_span(options->weights_path.data,
-                                  options->weights_path.size),
-        1, host_allocator, &weights);
-  }
+  iree_status_t status = iree_vm_buffer_clone(
+      IREE_VM_BUFFER_ACCESS_FLAG_READ,
+      iree_make_const_byte_span(options->weights_path.data,
+                                options->weights_path.size),
+      1, host_allocator, &weights);
   if (iree_status_is_ok(status)) {
     const iree_string_view_t json = iree_string_view_is_empty(options->options)
                                         ? IREE_SV("{}")
@@ -72,19 +53,28 @@ static iree_status_t loom_serve_text_prepare(
                              iree_make_const_byte_span(json.data, json.size), 1,
                              host_allocator, &source->options);
   }
-  iree_vm_variant_t arguments[] = {
+  iree_vm_variant_t arguments[10] = {
       iree_vm_variant_from_i64((int64_t)options->prefill_capacity),
       iree_vm_variant_from_i64((int64_t)options->context_capacity),
       iree_vm_variant_from_i64((int64_t)options->pool_capacity),
       iree_vm_variant_from_i64((int64_t)options->row_count),
       iree_vm_variant_from_i64((int64_t)options->checkpoint_capacity),
       iree_vm_variant_from_i32((int32_t)options->draft_depth),
-      iree_vm_buffer_variant_from_ptr_move(&source->vm_types, &shapes),
-      iree_vm_variant_from_i64((int64_t)options->epoch_count),
-      iree_vm_buffer_variant_from_ptr_move(&source->vm_types, &weights),
-      iree_vm_buffer_variant_from_ptr_borrowed(&source->vm_types,
-                                               source->options),
   };
+  iree_host_size_t argument_count = 6;
+  if (source->v1) {
+    arguments[argument_count++] = iree_vm_buffer_variant_from_ptr_borrowed(
+        &source->vm_types, source->v1->catalog);
+    arguments[argument_count++] =
+        iree_vm_variant_from_i64(source->v1->catalog_count);
+  } else {
+    arguments[argument_count++] =
+        iree_vm_variant_from_i64((int64_t)options->span_capacity);
+  }
+  arguments[argument_count++] =
+      iree_vm_buffer_variant_from_ptr_move(&source->vm_types, &weights);
+  arguments[argument_count++] = iree_vm_buffer_variant_from_ptr_borrowed(
+      &source->vm_types, source->options);
   iree_vm_variant_t results[4 + LOOM_SERVE_TEXT_STORAGE_RESULT_COUNT] = {0};
   iree_vm_module_t* modules[2] = {0};
   if (iree_status_is_ok(status)) {
@@ -100,7 +90,7 @@ static iree_status_t loom_serve_text_prepare(
         source->environment, module, &options->sources, IREE_SV("prepare"),
         LOOM_RUNTIME_PREPARATION_FLAG_PARAMETERS |
             LOOM_RUNTIME_PREPARATION_FLAG_STORAGE,
-        iree_vm_variant_span_from_array(arguments),
+        iree_vm_variant_span_from_ptr(arguments, argument_count),
         iree_vm_variant_span_from_array(results),
         iree_vm_module_span_from_array(modules), host_allocator,
         &source->preparation);
@@ -113,9 +103,13 @@ static iree_status_t loom_serve_text_prepare(
   if (iree_status_is_ok(status)) {
     status = iree_vm_i32_from_variant(results[1], &shared_stage_count);
   }
+  // Pooled and draft-backed rows submit through the source epoch even for
+  // one request. Their command stages may each own a distinct weight layout.
+  const int32_t minimum_shared_stages =
+      (options->pool_capacity || options->draft_depth) ? 0 : 1;
   if (iree_status_is_ok(status) &&
       (prefill_capacity < 1 || prefill_capacity > INT32_MAX ||
-       shared_stage_count < 1 ||
+       shared_stage_count < minimum_shared_stages ||
        (iree_host_size_t)shared_stage_count >
            loom_runtime_preparation_stage_count(source->preparation))) {
     status =
@@ -314,6 +308,17 @@ iree_status_t loom_serve_text_source_initialize(
       iree_vm_ref_types_resolve(iree_vm_environment_lookup_ref_type_table(
                                     out_source->environment, IREE_SV("vm")),
                                 &out_source->vm_types));
+  if (options->sources.card) {
+    const uint32_t version =
+        options->sources.component
+            ? options->sources.component->version
+            : loom_model_card_selection(options->sources.card)->version;
+    if (version == 1) {
+      IREE_RETURN_IF_ERROR(loom_serve_text_v1_allocate(
+          jit, out_source->environment, &out_source->vm_types,
+          (int32_t)options->prefill_capacity, host_allocator, &out_source->v1));
+    }
+  }
   const iree_string_view_t prepare = IREE_SV("prepare");
   loom_serve_text_source_sizing_t sizing = {
       .options = options,
@@ -389,5 +394,6 @@ void loom_serve_text_source_deinitialize(loom_serve_text_source_t* source) {
   iree_vm_buffer_release(source->options);
   loom_runtime_tokenizer_release(source->tokenizer);
   iree_vm_buffer_release(source->terminal_marker);
+  loom_serve_text_v1_free(source->v1, source->host_allocator);
   iree_vm_environment_free(source->environment);
 }

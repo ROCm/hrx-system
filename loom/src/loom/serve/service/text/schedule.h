@@ -8,23 +8,10 @@
 #define LOOM_SERVE_SERVICE_TEXT_SCHEDULE_H_
 
 #include "iree/base/api.h"
-#include "loom/serve/service/text/packing.h"
-#include "loom/service/text/schedule.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// Cold catalog construction for a positive token capacity fitting signed i32.
-// Token buckets start at one, double, and include the exact terminal capacity.
-// Span buckets follow the same progression up to the token count. Each session
-// contributes at most one span, so a hard max_sessions keeps only the buckets
-// through the first that covers it. Zero permits every token to advance a
-// distinct session. Initial resident storage does not constrain the catalog.
-// Returns the nonzero count; shapes may be NULL to query storage first.
-iree_host_size_t loom_serve_text_default_shapes(
-    iree_host_size_t token_capacity, iree_host_size_t max_sessions,
-    loom_serve_packing_shape_t* shapes);
 
 // Reserves page-rounded capacity for a validated request through completion.
 // input_count includes retained and appended input. The final selected output

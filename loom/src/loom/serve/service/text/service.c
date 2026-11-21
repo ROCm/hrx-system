@@ -37,7 +37,6 @@
 #include "loom/serve/service/text/reconfiguration.h"
 #include "loom/serve/service/text/request_admission.h"
 #include "loom/serve/service/text/reservation.h"
-#include "loom/serve/service/text/schedule.h"
 #include "loom/serve/service/text/service_owner.h"
 #include "loom/serve/service/text/session.h"
 #include "loom/serve/service/text/session_cache.h"
@@ -518,8 +517,9 @@ static iree_status_t loom_serve_text_submit_epoch(
 
 static void loom_serve_text_publish_epoch(loom_serve_text_service_t* service) {
   loom_serve_text_telemetry_epoch(&service->telemetry, &service->heartbeat,
-                                  &service->scheduling, &service->epoch,
-                                  service->sessions);
+                                  service->scheduling.schedule_mode,
+                                  service->scheduling.packing_mode,
+                                  &service->epoch, service->sessions);
   loom_serve_text_observe(service, "output");
   for (iree_host_size_t i = 0; i < service->epoch.count; ++i) {
     loom_serve_text_session_t* session =
@@ -647,10 +647,8 @@ static iree_status_t loom_serve_text_capture_prefix(
     }
     // A later checkpoint uses spare capacity near the prompt's end without
     // forcing a new epoch boundary or replacing an already useful ancestor.
-    const iree_host_size_t window =
-        iree_min(service->scheduling.chunk_size,
-                 loom_serve_text_model_prefill_capacity(service->model)) *
-        service->scheduling.continuation_epochs;
+    const iree_host_size_t window = service->scheduling.chunk_size *
+                                    service->scheduling.continuation_epochs;
     const iree_host_size_t input_count =
         session->request.input.origin + session->request.input.count;
     const iree_host_size_t extension_start =
@@ -717,13 +715,9 @@ static iree_status_t loom_serve_text_complete_epoch(
 static iree_status_t loom_serve_text_service_initialize(
     loom_serve_text_service_t* service, iree_host_size_t initial_count,
     loom_runtime_telemetry_stream_t* stream) {
-  iree_host_size_t span_capacity = 0;
-  for (iree_host_size_t i = 0; i < service->scheduling.shape_count; ++i) {
-    span_capacity =
-        iree_max(span_capacity, service->scheduling.shapes[i].span_capacity);
-  }
   IREE_RETURN_IF_ERROR(loom_serve_text_epoch_initialize(
-      span_capacity, service->host_allocator, &service->epoch));
+      service->scheduling.span_capacity, service->host_allocator,
+      &service->epoch));
   IREE_RETURN_IF_ERROR(loom_serve_text_telemetry_initialize(
       stream, service->host_allocator, &service->telemetry));
   IREE_RETURN_IF_ERROR(loom_serve_text_input_count_initialize(
@@ -862,6 +856,15 @@ iree_status_t loom_serve_text_service_allocate(
   }
   const iree_host_size_t draft_depth = loom_serve_text_model_draft_depth(model);
   const loom_serve_text_mode_t model_mode = loom_serve_text_model_mode(model);
+  const iree_host_size_t span_capacity =
+      loom_serve_text_model_span_capacity(model);
+  if (!span_capacity &&
+      (options->schedule_mode == LOOM_SERVICE_TEXT_SCHEDULE_PACKED ||
+       options->image)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "packed or image submissions require epoch storage");
+  }
   if (model_mode == LOOM_SERVE_TEXT_MODE_ENCODE &&
       (options->schedule_mode != LOOM_SERVICE_TEXT_SCHEDULE_PACKED ||
        options->image || options->prefix_cache_capacity ||
@@ -894,6 +897,13 @@ iree_status_t loom_serve_text_service_allocate(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "prefix cache exceeds remaining native endpoints");
   }
+  const iree_host_size_t token_capacity =
+      loom_serve_text_model_token_capacity(model);
+  iree_host_size_t chunk_size = iree_min(options->chunk_size, token_capacity);
+  if (options->schedule_mode != LOOM_SERVICE_TEXT_SCHEDULE_PACKED) {
+    chunk_size =
+        iree_min(chunk_size, loom_serve_text_model_prefill_capacity(model));
+  }
   loom_runtime_host_t* host =
       loom_runtime_device_host(loom_serve_text_model_device(model));
   iree_async_proactor_t* proactor = NULL;
@@ -909,8 +919,6 @@ iree_status_t loom_serve_text_service_allocate(
       .image = options->image,
       .name = options->name,
       .max_sessions = options->max_sessions,
-      .isolated_shape = {loom_serve_text_model_prefill_capacity(model),
-                         options->row_count},
       .default_max_tokens = options->default_max_tokens,
       .pending = {.capacity = options->pending_capacity,
                   .admission = {.budget = options->admission_overtakes}},
@@ -919,18 +927,14 @@ iree_status_t loom_serve_text_service_allocate(
       .pool = {.geometry = loom_serve_text_model_pool_usage(model)},
       .scheduling = {
           .model_mode = model_mode,
-          .chunk_size = options->chunk_size,
+          .chunk_size = chunk_size,
           .context_capacity = loom_serve_text_model_context_capacity(model),
           .schedule_mode = options->schedule_mode,
           .packing_mode = options->packing_mode,
           .continuation_epochs = options->continuation_epochs,
           .draft_depth = draft_depth,
-          .shapes = loom_serve_text_model_shapes(model),
-          .shape_count = loom_serve_text_model_shape_count(model)}};
-  if (!service->scheduling.shape_count) {
-    service->scheduling.shapes = &service->isolated_shape;
-    service->scheduling.shape_count = 1;
-  }
+          .token_capacity = token_capacity,
+          .span_capacity = span_capacity ? span_capacity : options->row_count}};
   loom_serve_text_heartbeat_initialize(&service->heartbeat);
   loom_runtime_readiness_initialize(loom_runtime_host_executor(host), proactor,
                                     &service->readiness);
@@ -1234,11 +1238,10 @@ static iree_status_t loom_serve_text_advance_work(
       loom_serve_text_separate_ready(service, ready);
     }
     loom_serve_packed_span_t* spans = service->epoch.planning.scheduled;
-    loom_serve_packed_span_t* scratch = service->epoch.planning.candidate;
-    const loom_serve_packing_plan_t plan = loom_serve_pack_shapes(
-        service->row_count, ready, service->scheduling.shape_count,
-        service->scheduling.shapes, service->scheduling.chunk_size,
-        service->cursor, spans, scratch);
+    const loom_serve_packing_plan_t plan = loom_serve_pack_spans(
+        service->row_count, ready, service->scheduling.token_capacity,
+        service->scheduling.span_capacity, service->scheduling.chunk_size,
+        service->cursor, spans);
     if (plan.span_count) {
       *out_progress = true;
       status = loom_serve_text_submit_epoch(service, &plan, spans);

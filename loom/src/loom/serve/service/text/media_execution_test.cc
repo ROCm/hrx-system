@@ -254,15 +254,15 @@ TEST_F(NativeMediaHandoffTest, CancelledPeerAndRemovedProducerPreserveText) {
       .chunk_size = 4,
       .continuation_epochs = 1,
       .schedule_mode = mode,
-      .shapes = shapes_,
-      .shape_count = IREE_ARRAYSIZE(shapes_),
+      .token_capacity = 32,
+      .span_capacity = 4,
   };
   std::array<size_t, 3> offsets = {};
   for (size_t chunk = 0; chunk < 2; ++chunk) {
     const size_t count = chunk ? 3 : 2;
     loom_serve_text_epoch_row_t rows[3] = {};
     loom_serve_packed_span_t scheduled[3] = {};
-    loom_serve_packing_plan_t plan = {.span_count = count, .shape_index = 1};
+    loom_serve_packing_plan_t plan = {.span_count = count};
     for (size_t row = 0; row < count; ++row) {
       rows[row] = {
           .input_tokens = tokens[row].data() + offsets[row],
@@ -375,8 +375,8 @@ TEST_F(MediaExecutionTest, RaggedCohortConditionsPackedAndIsolatedTextChunks) {
         .chunk_size = 4,
         .continuation_epochs = 1,
         .schedule_mode = mode,
-        .shapes = shapes_,
-        .shape_count = IREE_ARRAYSIZE(shapes_),
+        .token_capacity = 32,
+        .span_capacity = 4,
     };
     std::array<size_t, 3> offsets = {};
     loom_serve_text_epoch_t epoch;
@@ -387,7 +387,6 @@ TEST_F(MediaExecutionTest, RaggedCohortConditionsPackedAndIsolatedTextChunks) {
       loom_serve_packed_span_t scheduled[3];
       loom_serve_packing_plan_t plan = {
           .span_count = 3,
-          .shape_index = 1,
           .next_row = 1,
           .next_span = 1,
       };
@@ -463,11 +462,11 @@ TEST_F(MediaExecutionTest,
       .media = &media,
   };
   IREE_ASSERT_OK(loom_serve_text_media_epoch_initialize(
-      1, &span, 4, 0, nullptr, 0, host_allocator_, &packet_));
+      1, &span, span.token_count, 0, nullptr, 0, host_allocator_, &packet_));
   EXPECT_EQ(packet_.first_feature_count, 2u);
   EXPECT_EQ(packet_.transfer.result_count, 1u);
   EXPECT_EQ(packet_.transfer.operation_count, 2u);
-  EXPECT_EQ(packet_.device_length, 160u);
+  EXPECT_EQ(packet_.device_length, 96u);
   for (size_t i = 0; i < packet_.transfer.operation_count; ++i) {
     EXPECT_EQ(packet_.transfer.operations[i].type,
               IREE_HAL_TRANSFER_OPERATION_TYPE_COPY);
@@ -542,8 +541,8 @@ TEST_F(MediaExecutionTest,
   IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, 1, nullptr));
   IREE_ASSERT_OK(loom_runtime_execution_drain(consumer_));
   EXPECT_EQ(output_[0], 0x5A);
-  EXPECT_EQ(iree_unaligned_load_le_u32(output_.data() + 128), Fingerprint(1));
-  EXPECT_EQ(iree_unaligned_load_le_u32(output_.data() + 144), Fingerprint(9));
+  EXPECT_EQ(iree_unaligned_load_le_u32(output_.data() + 64), Fingerprint(1));
+  EXPECT_EQ(iree_unaligned_load_le_u32(output_.data() + 80), Fingerprint(9));
 }
 
 TEST_F(MediaExecutionTest, DenseRangesCoalesceAcrossRequestsAndContinuation) {
@@ -617,7 +616,7 @@ TEST_F(MediaExecutionTest, DenseRangesCoalesceAcrossRequestsAndContinuation) {
   // Already consumed images leave no metadata, packet, or transfer allocation.
   next.input_offset = 2;
   IREE_ASSERT_OK(loom_serve_text_media_epoch_initialize(
-      1, &next, 4, 0, nullptr, 0, host_allocator_, &packet_));
+      1, &next, next.token_count, 0, nullptr, 0, host_allocator_, &packet_));
   EXPECT_EQ(packet_.plan, nullptr);
   EXPECT_EQ(packet_.packet_records, nullptr);
   EXPECT_EQ(packet_.transfer.operations, nullptr);

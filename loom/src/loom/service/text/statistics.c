@@ -6,6 +6,8 @@
 
 #include "loom/service/text/statistics.h"
 
+#include <string.h>
+
 iree_status_t loom_service_text_sample_statistics(
     const loom_service_text_statistics_t* statistics,
     loom_runtime_telemetry_sample_sink_t sink) {
@@ -30,7 +32,7 @@ iree_status_t loom_service_text_sample_statistics(
       {"draft_proposed_tokens", "tokens", LOOM_RUNTIME_TELEMETRY_COUNTER},
       {"draft_accepted_inputs", "tokens", LOOM_RUNTIME_TELEMETRY_COUNTER},
   };
-  const uint64_t values[] = {
+  uint64_t values[] = {
       statistics->prefill_rows,
       statistics->decode_rows,
       statistics->backpressured_rows,
@@ -53,7 +55,19 @@ iree_status_t loom_service_text_sample_statistics(
   };
   static_assert(IREE_ARRAYSIZE(fields) == IREE_ARRAYSIZE(values),
                 "one value per text field");
-  const loom_runtime_telemetry_topic_t topic = {"text", 1,
-                                                IREE_ARRAYSIZE(fields), fields};
+  static const loom_runtime_telemetry_topic_t topic = {
+      "text", 1, IREE_ARRAYSIZE(fields), fields};
+  if (statistics->draft.proposed_tokens == UINT64_MAX) {
+    // Numeric samples have no null value. Keep the accepted count as the
+    // final metric in the schema without the unavailable proposal counter.
+    loom_runtime_telemetry_metric_t legacy_fields[IREE_ARRAYSIZE(fields) - 1];
+    const iree_host_size_t last = IREE_ARRAYSIZE(legacy_fields) - 1;
+    memcpy(legacy_fields, fields, last * sizeof(fields[0]));
+    legacy_fields[last] = fields[last + 1];
+    values[last] = values[last + 1];
+    const loom_runtime_telemetry_topic_t legacy_topic = {
+        "text", 2, IREE_ARRAYSIZE(legacy_fields), legacy_fields};
+    return sink.emit(sink.self, &legacy_topic, values);
+  }
   return sink.emit(sink.self, &topic, values);
 }

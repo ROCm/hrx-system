@@ -85,7 +85,7 @@ class RequestTest(unittest.TestCase):
         self.assertEqual(json.loads(selected.stdout), json.loads(direct.stdout))
 
     def test_card_rejects_unsupported_service_before_compilation(self):
-        for kind, version in (("text", 2), ("image", 1)):
+        for kind, version in (("text", 1), ("text", 3), ("image", 1)):
             with self.subTest(kind=kind, version=version):
                 document = json.loads((PACKAGE / "native.card.json").read_text())
                 document["services"]["chat"] = {"kind": kind, "version": version}
@@ -95,7 +95,7 @@ class RequestTest(unittest.TestCase):
                     result = self.execute(self.request(), card=card)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(result.stdout, "")
-                self.assertIn("require text service version 1", result.stderr)
+                self.assertIn("require text service version 2", result.stderr)
 
     def test_invalid_source_reasoning_declaration_rejects_before_rendering(self):
         source = (PACKAGE / "control.loom").read_text()

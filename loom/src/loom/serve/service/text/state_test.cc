@@ -29,7 +29,7 @@ class TextStateTest : public ::testing::TestWithParam<uint32_t> {
                                  : LOOM_SERVE_TEXT_MODE_GENERATE,
         .context_capacity = 17,
         .pool_capacity = 32,
-        .epoch_count = 1,
+        .span_capacity = 2,
         .draft_depth = (GetParam() & 8) ? 0u : 5u,
         .row_count = 2,
         .checkpoint_capacity = 2,

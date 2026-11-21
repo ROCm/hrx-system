@@ -69,10 +69,10 @@ struct loom_serve_text_model_t {
   loom_runtime_stage_t* stage_bindings;
   // Original command private peak, retained for explicit variant restoration.
   uint64_t stage_workspace_bytes;
-  // Number of target packed shapes, independent of auxiliary draft stages.
-  iree_host_size_t shape_count;
-  // Immutable prepared shape capacities, owned in epoch option order.
-  loom_serve_packing_shape_t* shapes;
+  // Maximum input positions admitted in one device epoch.
+  iree_host_size_t token_capacity;
+  // Maximum distinct rows admitted in one device epoch.
+  iree_host_size_t span_capacity;
   // Context specialization shared by every compiled stage.
   iree_host_size_t context_capacity;
   // Proposed tokens after each known anchor; zero disables drafting.
@@ -95,9 +95,9 @@ struct loom_serve_text_model_t {
   struct {
     // Number of first-plan spans, zero after successful completion.
     iree_host_size_t span_count;
-    // Resident identities in caller order; owns this planning allocation.
-    iree_host_size_t* row_indices;
-    // Temporary worst-case state growth in first-plan order.
+    // Publication bounds in caller order. Owns this planning allocation.
+    struct loom_serve_text_epoch_grant_t* grants;
+    // Maximum state growth reserved for each first-plan owner.
     uint32_t* extents;
     // First-plan ordinals for the compact continuation plan.
     uint32_t* next_indices;

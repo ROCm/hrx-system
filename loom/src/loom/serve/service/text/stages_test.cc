@@ -83,7 +83,7 @@ class TextStagesTest : public loom_runtime::testing::JitTest {
       compilation.Start(
           loom_runtime_host_executor(loom_runtime_device_host(device_owner_)));
       IREE_ASSERT_OK(compilation.Await(&stages_[i].compiled));
-      stages_[i].program = *loom_runtime_jit_stage_program(stages_[i].compiled);
+      stages_[i].program = loom_runtime_jit_stage_program(stages_[i].compiled);
     }
     // Prepared products, not their source catalog, own the executable inputs.
     loom_runtime_jit_release(jit_);

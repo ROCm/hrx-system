@@ -38,11 +38,14 @@ distribute runnable model cards directly. The
 includes community ports with device and memory guidance in their READMEs.
 For a first request on a Vulkan device, [try the tiny text model](#try-vulkan).
 
-To see which presets a card offers before downloading weights, pass its
-repository to `--list`. Then fetch the preset that matches your hardware.
+Pass a publisher's repository to `--list --json` to see the presets and
+service versions before downloading weights. The installed SDK's default
+catalog selects programs for its release. For an independently published
+model, the card names the [service version](../model-documents.md#service-versions)
+and the publisher's README describes supported devices.
 
 ```sh
-loom-fetch huggingface:loom-fun/unsloth-Qwen3-0.6B-loom --list
+loom-fetch huggingface:loom-fun/unsloth-Qwen3-0.6B-loom --list --json
 loom-fetch huggingface:loom-fun/unsloth-Qwen3-0.6B-loom:chat --output=./qwen3
 ```
 
@@ -335,12 +338,14 @@ families and the Vulkan execution requirements. Check each model publisher's
 supported backends when choosing a port.
 
 The tiny text model uses a four-byte parameter and runs on both Vulkan and CPU.
-Fetch it from the tag matching your installed SDK. These commands use
-`hrx-loom==0.2.0`.
+For a published SDK, use the release tag of the installed wheel so the model
+and server speak the same text ABI. For a development build, use its source
+commit as `sdk_ref`.
 
 ```sh
 loom-run --list_devices=vulkan
-loom-fetch https://raw.githubusercontent.com/ROCm/hrx-system/v0.2.0/loom/docs/examples/serving/model-publication/model/tiny-text/model.json --output=./tiny-text
+sdk_ref=$(python -c 'from importlib.metadata import version; print("v" + version("hrx-loom").split("+")[0])')
+loom-fetch "https://raw.githubusercontent.com/ROCm/hrx-system/${sdk_ref}/loom/docs/examples/serving/model-publication/model/tiny-text/model.json" --output=./tiny-text
 loom-serve --device=vulkan --pool_backing=fixed --listen=127.0.0.1:8081 --model=./tiny-text
 ```
 
@@ -359,21 +364,22 @@ In Windows PowerShell, send the same JSON with `Invoke-RestMethod`.
 
 ## Inspect the SDK library catalog
 
-To select a specific library revision, including from a development SDK,
-pass its catalog explicitly.
+List the catalog selected by the installed SDK.
 
 ```sh
-loom-fetch --catalog=github:ROCm/hrx-loom-library@v0.2.0 --list --json
+loom-fetch --list --json
 ```
 
-This snapshot includes Moonshine speech recognition, Pocket speech synthesis,
+To select a particular library tag or commit, use
+`--catalog=github:ROCm/hrx-loom-library@REVISION` with that revision.
+The library includes Moonshine speech recognition, Pocket speech synthesis,
 Qwen3.8 Flash-Next text generation, Qwen3.8-27B text and vision, Qwen3 Embedding,
 and Krea image generation. Pocket's `streaming` preset uses Alba, Marius, and
 Anna; `streaming-noncommercial` adds Jean.
 
 Each catalog entry identifies a runnable package with published programs and
 asset sources. The
-[model map](https://github.com/ROCm/hrx-loom-library/tree/v0.2.0/model)
+[model map](https://github.com/ROCm/hrx-loom-library/tree/main/model)
 records each package's supported devices and presets.
 
 Acquisition and startup are the same across modalities. The selected service

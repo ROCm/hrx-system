@@ -113,6 +113,14 @@ iree_status_t loom_runtime_program_allocate_service(
     loom_runtime_compilation_report_t* report, iree_allocator_t host_allocator,
     loom_runtime_program_t** out_program);
 
+// Reads the compiled role's signature before linking its native capabilities.
+// The argument and result tables borrow the module. Direct namespaces use
+// the role verbatim, and card-backed namespaces use their selected version.
+iree_status_t loom_runtime_program_service_signature(
+    const iree_vm_module_t* module, const loom_model_card_t* card,
+    const loom_model_component_t* component, iree_string_view_t role,
+    iree_allocator_t host_allocator, iree_vm_module_signature_t* out_signature);
+
 // Resolves an exact authored export without invoking it.
 iree_status_t loom_runtime_program_lookup(loom_runtime_program_t* program,
                                           iree_string_view_t name,

@@ -84,7 +84,7 @@ The referenced `model.json` can contain:
       "config": {"model.width": 64}
     }
   },
-  "services": {"chat": {"kind": "text", "version": 1}},
+  "services": {"chat": {"kind": "text", "version": 2}},
   "variants": {
     "small": {
       "services": {
@@ -117,26 +117,32 @@ The referenced `model.json` can contain:
 }
 ```
 
-These programs implement the text service ABI, including `text_prepare_v1` and
-the corresponding `text_<role>_v1` control exports. Service `version` is
-independent of `schema_version` and the bytecode encoding version. Omitting it
-selects the unversioned development names, `text_<role>`. A missing versioned
-export is an error; bare exports are not substituted. Several services and ABI
-revisions can coexist in one provider set. The host checks the selected service.
-Native card execution supports service ABI 1 for text, sequence, image,
-embedding, decision, speech, recognition, and activity, plus their unversioned
-development contracts. Each uses its own `<kind>_<role>_v1` exports for both
-preparation and control. Selecting a different service does not rename exports
-or substitute another service's ABI.
+### Service versions
 
-Text services can declare an independently versioned image projector:
+New text and sequence services publish `"version": 2`. The service kind
+determines the export names. For the chat card above, the server binds
+`text_prepare_v2`, `text_epoch_v2`, and the other `text_<role>_v2` exports.
+A sequence controller exports `sequence_<role>_v2`. In both services, the
+inputs to `epoch` include each packet's
+[live token and span counts](model-programs.md#retained-text-and-staged-images).
+
+Service versions are independent of the card's `schema_version` and the
+LoomBC encoding. A versioned service requires the matching exports from its
+selected programs. Omitting `version` selects development names such as
+`text_prepare`, which follow the current calling convention. The 0.3 SDK
+also runs published ABI 1 text and sequence packages from 0.2 with their
+original model cards, source or LoomBC archives, and weights.
+
+Each service and component declares its own version. Speech uses version 2.
+Image, embedding, decision, recognition, and activity use version 1. This
+chat service pairs its ABI 2 text controller with an ABI 1 image projector.
 
 ```json
 {
   "services": {
     "chat": {
       "kind": "text",
-      "version": 1,
+      "version": 2,
       "components": {"image": {"version": 1}}
     }
   }
@@ -145,11 +151,8 @@ Text services can declare an independently versioned image projector:
 
 The component uses `text_image_prepare_v1`, `text_image_prepare_request_v1`,
 `text_image_prepare_batch_v1`, `text_image_collect_batch_v1`, and
-`text_image_run_v1`. These exports may share
-one bytecode bundle with the primary text exports. Both use the card's selected
-providers and named parameter scopes. The server supports image component ABI 1
-and the unversioned `text_image_<role>` development contract. Other selected
-component roles or revisions fail before program loading.
+`text_image_run_v1`. The projector and text controller may share a bytecode
+bundle. Both use the card's selected providers and named parameter scopes.
 
 Presets can supply `components.image.options` for option names declared by the
 component, and `components.image.execution.specialization_cache` for its idle
@@ -358,19 +361,21 @@ Native capacity fields are:
 | `max_sessions` | omitted | Positive ceiling on resident session owners. Preparation and outstanding output retain their owners; extra requests wait in `pending_requests`. Omission leaves concurrency memory-limited. |
 | `rows` | `4` | Initial resident capacity hint, capped by `max_sessions` when set. The directory grows as requests arrive, independently of epoch token/span capacity and up to the configured maximum. |
 | `context_capacity` | `16384` | Per-row logical context limit in token positions, fitting a positive signed 32-bit count. The source validates the model's supported context window. |
-| `prefill_capacity` | `512` | Largest automatically specialized packed token shape; not a prompt-length limit. |
+| `prefill_capacity` | `512` | Maximum tokens admitted to one submission across all active rows. Longer prompts span multiple submissions. |
 | `checkpoint_capacity` | `0` | Explicit pinned endpoint slots, independent of execution rows. |
 | `session_cache_capacity` | automatic | Evictable idle histories beyond resident rows. An explicit count is exact; zero disables this cache. Nonzero counts also reserve one admission-exchange endpoint. |
 | `prefix_cache_capacity` | automatic | Evictable exact intermediate-prefix endpoints. An explicit count is exact; zero disables capture. |
 | `cache_target_bytes` | automatic | Soft sizing target for additional initial cache storage. Omission uses 2 GiB, reduced to 1/16 of a configured shared physical-memory budget. Zero disables automatic counts without changing explicit counts. |
 | `admission_overtakes` | `rows` | Successful fitting admissions allowed to pass a blocked oldest request; zero selects FIFO. |
 | `max_tokens` | `512` | Default request output limit, fitting a positive signed 32-bit count. Prompt and output together must fit the configured context. |
-| `draft_depth` | `0` | Proposed tokens after each anchor, from 0 through 7; requires matching source support. |
+| `draft_depth` | `0` | Maximum proposals after each anchor, from 0 through 15. The model source determines how many it can supply from its predictor or accepted history. |
 | `continuation_epochs` | `1` | Device-fed epochs per scheduling turn, either 1 or 2. |
 
 Context and prefill capacities fit positive signed 32-bit counts. Packed token capacity may exceed
 an individual context limit: one epoch can combine many short sessions. It must
-fit an anchor plus every draft proposal.
+fit an anchor plus every draft proposal. Each request can publish up to 16
+output tokens per scheduling turn. A device-fed continuation consumes the
+credit left by the first verification.
 
 Cache addressability is serving policy, not a model field. Fixed backing
 reserves one `context_capacity` shared across the model's resident rows.
@@ -429,7 +434,7 @@ remain separate measurements; the cold estimate does not change with resident
 growth.
 
 The shared pool can grow independently of the per-session context limit and
-prefill shape. Its token count must fit both host indexing and a signed 64-bit
+per-submission token budget. Its token count must fit both host indexing and a signed 64-bit
 integer. Source preparation declares the page size and storage layout; the
 resulting pool must contain at most 4,294,967,295 physical pages, and each region
 must fit its declared allocation. These representation limits do not guarantee
@@ -445,8 +450,7 @@ can visit the deployment over its lifetime. Finished or cancelled requests
 release their owners for reuse. Slow output readers still count while they
 retain a request, and a full pending queue rejects additional requests with
 HTTP 503. Growth stops exactly at the maximum, including non-power-of-two
-limits such as six. Dispatch shapes remain independent: a single session can
-still use a large prefill shape.
+limits such as six. A single session can consume the full per-submission token budget.
 
 Idle session caches, shared prefix endpoints, and explicit checkpoints have
 their own capacities; the session maximum is not a byte budget for those

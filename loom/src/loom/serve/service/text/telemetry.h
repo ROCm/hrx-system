@@ -13,6 +13,7 @@
 #include "loom/serve/service/text/session.h"
 #include "loom/service/telemetry/latency.h"
 #include "loom/service/telemetry/record.h"
+#include "loom/service/text/schedule.h"
 #include "loom/service/text/telemetry.h"
 
 #ifdef __cplusplus
@@ -93,7 +94,8 @@ void loom_serve_text_telemetry_session_end(
 void loom_serve_text_telemetry_epoch(
     loom_serve_text_telemetry_t* telemetry,
     loom_serve_text_heartbeat_t* heartbeat,
-    const loom_serve_text_epoch_options_t* options,
+    loom_service_text_schedule_mode_t schedule_mode,
+    loom_service_text_packing_mode_t packing_mode,
     const loom_serve_text_epoch_t* cohort,
     loom_serve_text_session_t* const* sessions);
 

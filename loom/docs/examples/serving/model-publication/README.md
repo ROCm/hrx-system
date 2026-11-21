@@ -17,6 +17,12 @@ parameter. Prompt `abxa` with `max_tokens: 2` produces `bx`. The checkpoint is
 small enough to embed in the model card; fetch materializes it as safetensors.
 Execution uses real JIT-compiled kernels, pooled state, and the text service.
 
+The [model card](model/tiny-text/model.json) selects text service ABI 2.
+The [preparation program](model/tiny-text/program/prepare.loom) sizes one
+`advance` stage for the token and span limits. The
+[controller](model/tiny-text/program/control.loom) packs each submission
+and runs that stage with its live buffers.
+
 Token IDs are `a=0`, `b=1`, `x=2`, and `#=3`. Starting at zero, each token updates
 `h = (5*h + token + 2) % 97` and `k = (7*k + h + position) % 101`, then appends
 `k` to history and advances position. Prediction is `(h + sum(history)) % 3`,

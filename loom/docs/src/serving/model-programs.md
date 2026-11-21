@@ -17,7 +17,8 @@ The important distinction is the shape of state and output, not the model name:
 
 | Contract | Source responsibilities | Starting package |
 | --- | --- | --- |
-| Retained text | Token framing, paged state geometry, mixed prompt/decode math, progress, sampling and chat policy. | [Tiny text model](https://github.com/ROCm/hrx-system/tree/main/loom/src/loom/serve/fixture/text) |
+| Retained text | Token framing, paged state geometry, mixed prompt/decode math, progress, sampling and chat policy. | [Tiny text publication](sharing/hugging-face.md#start-from-a-working-publication) |
+| Known-token sequence | Validate supplied token IDs, advance retained state, and return the captured bytes for each span. | [Tiny sequence package](https://github.com/ROCm/hrx-system/tree/main/loom/src/loom/serve/fixture/text) |
 | Staged image | Prompt preparation, parameter domains, numerical stages, invocation continuation and final RGBA8. | [Image model](https://github.com/ROCm/hrx-system/tree/main/loom/src/loom/serve/fixture/image) |
 | Finite embeddings | Input preparation, cohort cost/compatibility, pooling/projection and final vectors. | [Embedding model](https://github.com/ROCm/hrx-system/tree/main/loom/src/loom/serve/fixture/embedding) |
 | Finite decisions | Structured question framing and compact normalized answer distributions. | [Decision model](https://github.com/ROCm/hrx-system/tree/main/loom/src/loom/serve/fixture/decision) |
@@ -453,14 +454,31 @@ for exact record layouts and ownership.
 
 ## Retained text and staged images
 
-Text uses one prepared model and cached stage set. Sessions are rows and storage
-references, not independent VM processes. Its source declares page/recurrent
-geometry and consumes packed spans that can mix prompt tokens, decode anchors
-and speculative verifier work. Token capacity and independently advancing span
-capacity are separate. The source reports completed progress; native ownership
-commits it after readiness.
+A text or sequence controller prepares stages once and shares them across
+sessions. A *span* is one session's contribution to a packet. Text spans can
+carry prompt tokens, decode anchors, or draft candidates for verification.
 
-Resident capacity grows independently of those epoch shapes. Source control
+At registration, `prepare(prefill_capacity, context_capacity, pool_capacity,
+rows, pins, draft_depth, span_capacity, weights, options)` receives separate
+limits for token positions and spans per packet. Use them to size reusable
+buffers and declare the stages the model needs. A longer prompt can span
+several packets.
+
+At execution, `epoch` receives the first packet's `token_count` and
+`span_count`. For example, 33 prompt tokens from one session and one decode
+token from each of two others give 35 tokens and three spans. The controller
+can size a dispatch from those counts or choose a prepared stage. If a second
+packet will run on the device using the first packet's results, it has its
+own `next_span_count` and `next_token_count`. Both are zero for a single
+packet.
+
+The second result of `prepare` counts leading stages that share one weight
+layout and implement the single-row bindings. A pooled or draft-backed model
+that serves all rows through `epoch` can return zero. Each recorded stage can
+then declare its own weight bindings. The first binding of the first stage
+identifies the primary checkpoint.
+
+Resident capacity grows independently of the work in each packet. Source control
 exports `resize_state(control_state, resident_capacity)`, returning replacement
 control state followed by the same five storage records used at preparation.
 Existing private views, recurrent slots, and KV planes retain their byte offsets;
@@ -530,7 +548,7 @@ defines entry signatures, alignment and cancellation.
 
 ### Declare reasoning support
 
-The text control program exports `text_chat_reasoning_v1()`, returning three
+The text control program exports `text_chat_reasoning_v2()`, returning three
 I32 values: whether reasoning is supported, a bitmap of selectable efforts, and
 the effort ordinal used when a request omits controls. Preparation calls this
 once and validates the declaration before publishing the model. The server
@@ -599,8 +617,10 @@ known IDs and publishes source-defined opaque output. It can implement an
 encoder or another retained stage; a source may also run a head and include its
 result bytes explicitly, without asking the server to sample or feed them back.
 
-Preparation retains the text model's nine-result ABI. The terminal-token marker
-may be null. Control exports `epoch`, `encode_epoch`, `publish_epoch`,
+Published [sequence controllers](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/fixture/text/service.loom)
+export `sequence_<role>_v2`. For example, `sequence_prepare_v2` returns the
+same nine results as `text_prepare_v2`, with an optional terminal-token marker.
+The control roles are `epoch`, `encode_epoch`, `publish_epoch`,
 `encode_state`, `resize_state`, `bind_request`, `request_defaults`, `prepare_request`, and
 `capture_epoch`. Isolated `step`, tokenizer/chat roots, and drafting are not
 required. Every submitted span has selection/proposal flags zero, and completed
@@ -646,12 +666,11 @@ draft depth is a ceiling and cannot substitute for these counts. Serving
 telemetry consumes this semantic output without decoding device-private packets
 or issuing another readback.
 
-`encode_epoch` receives the selected first-epoch and continuation token
-capacities as `first_packet_capacity` and `next_packet_capacity`. These are
-the prepared shapes, independent of live token counts and whether the inputs
-contain media. The continuation capacity is zero when no continuation is
-submitted. Source can use these values to lay out packets and associate
-captured state with the prepared programs that consume it.
+`encode_epoch` receives the numbers of tokens reserved in the submitted plans
+as `first_token_count` and `next_token_count`. A missing continuation has zero
+tokens and zero spans. Mixed input stores projected feature data after the
+records for both submitted packets. The device may subsequently accept fewer
+tokens during verification. The reservation keeps those feature offsets valid.
 
 `encode_epoch` writes metadata and input packets, then returns
 `(output_count, transfer_plan, byte_offset, byte_length)`. The plan view contains
@@ -679,7 +698,7 @@ The same contract applies to generative text and media epochs. See
 [epoch uploads](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/service/text/epoch_upload.h)
 for local HAL binding and payload ownership.
 
-`capture_epoch(control_state, shape_index, span_count, plan)` returns a buffer
+`capture_epoch(control_state, span_count, plan)` returns a buffer
 of little-endian i64 triples: `[span_ordinal, residual_byte_offset, byte_length]`.
 Ranges are grouped in submitted span order, with at least one nonempty range
 per span. Multiple ranges concatenate in source order. The plan is checked and

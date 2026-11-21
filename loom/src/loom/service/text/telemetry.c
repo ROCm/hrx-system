@@ -115,6 +115,13 @@ static iree_status_t loom_service_text_session_end_fields(
   return sink.emit(sink.self, IREE_ARRAYSIZE(fields), fields);
 }
 
+static loom_runtime_telemetry_field_t loom_service_text_proposals_field(
+    uint64_t count) {
+  return count == UINT64_MAX
+             ? loom_runtime_telemetry_field_null("proposed_tokens")
+             : loom_runtime_telemetry_field_uint64("proposed_tokens", count);
+}
+
 static iree_status_t loom_service_text_epoch_fields(
     const loom_runtime_telemetry_record_t* record,
     loom_runtime_telemetry_field_sink_t sink) {
@@ -127,15 +134,11 @@ static iree_status_t loom_service_text_epoch_fields(
                                                                   : "isolated";
   const loom_runtime_telemetry_field_t draft[] = {
       loom_runtime_telemetry_field_uint64("verifications", value.verifications),
-      loom_runtime_telemetry_field_uint64("proposed_tokens",
-                                          value.proposed_tokens),
+      loom_service_text_proposals_field(value.proposed_tokens),
       loom_runtime_telemetry_field_uint64("accepted_draft_inputs",
                                           value.accepted_draft_inputs),
   };
   const loom_runtime_telemetry_field_t fields[] = {
-      value.token_slots ? loom_runtime_telemetry_field_uint64("token_slots",
-                                                              value.token_slots)
-                        : loom_runtime_telemetry_field_null("token_slots"),
       loom_runtime_telemetry_field_uint64("epoch", value.epoch),
       loom_runtime_telemetry_field_string("scheduler",
                                           iree_make_cstring_view(schedule)),
@@ -146,10 +149,8 @@ static iree_status_t loom_service_text_epoch_fields(
                                      ? "separate"
                                      : "mixed")),
       loom_runtime_telemetry_field_uint64("spans", value.spans),
-      loom_runtime_telemetry_field_uint64("shape", value.shape),
-      loom_runtime_telemetry_field_uint64("token_capacity",
-                                          value.token_capacity),
-      loom_runtime_telemetry_field_uint64("span_capacity", value.span_capacity),
+      loom_runtime_telemetry_field_uint64("scheduled_tokens",
+                                          value.scheduled_tokens),
       loom_runtime_telemetry_field_uint64("prefill_tokens",
                                           value.prefill_tokens),
       loom_runtime_telemetry_field_uint64("decode_tokens", value.decode_tokens),
@@ -190,8 +191,7 @@ static iree_status_t loom_service_text_span_fields(
       loom_runtime_telemetry_field_uint64("known_tokens", value.known_tokens),
       loom_runtime_telemetry_field_uint64("verification_epochs",
                                           value.verification_epochs),
-      loom_runtime_telemetry_field_uint64("proposed_tokens",
-                                          value.proposed_tokens),
+      loom_service_text_proposals_field(value.proposed_tokens),
   };
   return sink.emit(sink.self, IREE_ARRAYSIZE(fields), fields);
 }
@@ -304,8 +304,7 @@ static iree_status_t loom_service_text_work_fields(
   static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
   memcpy(&value, record->data.words, sizeof(value));
   const loom_runtime_telemetry_field_t draft[] = {
-      loom_runtime_telemetry_field_uint64("proposed_tokens",
-                                          value.proposed_tokens),
+      loom_service_text_proposals_field(value.proposed_tokens),
       loom_runtime_telemetry_field_uint64("accepted_draft_inputs",
                                           value.accepted_inputs),
   };

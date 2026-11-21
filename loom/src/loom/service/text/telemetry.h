@@ -93,19 +93,12 @@ typedef struct loom_service_text_epoch_record_t {
   uint64_t epoch;
   // Completed cohort span count.
   uint64_t spans;
-  // Selected first-epoch bucket index.
-  uint32_t shape;
   // Packed execution or an isolated/matched control.
   uint8_t schedule_mode;
   // Whether prompt inputs and verifiers may share a cohort.
   uint8_t packing_mode;
-  // Compiled token capacity of the first-epoch bucket, not the whole cohort.
-  uint64_t token_capacity;
-  // Sum of issued packed bucket capacities across the cohort. Zero means
-  // unavailable for isolated/matched stages and is exposed as unavailable.
-  uint64_t token_slots;
-  // Compiled independent span capacity.
-  uint64_t span_capacity;
+  // Input tokens scheduled across both epochs before device-side acceptance.
+  uint64_t scheduled_tokens;
   // Prompt tokens consumed, excluding retained history.
   uint64_t prefill_tokens;
   // Generated tokens consumed by the target.
@@ -125,6 +118,7 @@ typedef struct loom_service_text_epoch_record_t {
   // Draft inputs accepted by the target, excluding pending anchors.
   uint64_t accepted_draft_inputs;
   // Actual candidates presented to the target, including rejected candidates.
+  // UINT64_MAX when the publisher does not expose the count.
   uint64_t proposed_tokens;
 } loom_service_text_epoch_record_t;
 
@@ -150,6 +144,7 @@ typedef struct loom_service_text_span_record_t {
   // Completed verifications for this span.
   uint64_t verification_epochs;
   // Actual candidates presented to the target across this span's verifications.
+  // UINT64_MAX when the publisher does not expose the count.
   uint64_t proposed_tokens;
   // Whether the span was consuming prompt input at submission.
   uint64_t prefill;
@@ -251,6 +246,7 @@ typedef struct loom_service_text_work_record_t {
   // Cumulative host submission-to-readiness nanoseconds.
   uint64_t model_ns;
   // Draft candidates from completed verification.
+  // UINT64_MAX when the publisher does not expose the count.
   uint64_t proposed_tokens;
   // Accepted draft inputs excluding pending anchors.
   uint64_t accepted_inputs;

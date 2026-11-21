@@ -20,6 +20,8 @@ typedef struct loom_runtime_parameters_module_t {
   iree_allocator_t host_allocator;
   // Canonical VM buffer, HAL buffer, HAL fence, and HAL file identities.
   iree_vm_ref_type_t types[4];
+  // Selected argument fields for the linked model's gather declaration.
+  const iree_vm_module_signature_type_t* gather_arguments;
   // Retained physical device used by the provider to import checkpoint files.
   iree_hal_device_t* device;
   // Retained queue for descriptor downloads and deferred reads.
@@ -131,6 +133,15 @@ static const iree_vm_module_signature_type_t gather_arguments[] = {
     {IREE_VM_SCALAR_TYPE_I64, 0},
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 1},
 };
+static const iree_vm_module_signature_type_t gather_arguments_v1[] = {
+    {IREE_VM_SCALAR_TYPE_I32, 0},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 2},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 1},
+    {IREE_VM_SCALAR_TYPE_I64, 0},
+    {IREE_VM_SCALAR_TYPE_I64, 0},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 1},
+};
 static const iree_vm_module_signature_type_t gather_result = {
     IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 2};
 static const iree_vm_module_signature_type_t file_arguments[] = {
@@ -176,6 +187,10 @@ static void loom_runtime_parameters_module_query_callable(
     const iree_vm_module_t* base, iree_host_size_t ordinal,
     iree_vm_module_callable_type_declaration_t* out_value) {
   *out_value = callables[ordinal];
+  if (ordinal == 1) {
+    out_value->signature.arguments.data =
+        ((const loom_runtime_parameters_module_t*)base)->gather_arguments;
+  }
 }
 
 static void loom_runtime_parameters_module_query_import_group(
@@ -207,7 +222,8 @@ static const iree_vm_module_vtable_t module_vtable = {
 iree_status_t loom_runtime_parameters_module_create(
     iree_vm_environment_t* environment, const iree_hal_vm_types_t* types,
     iree_hal_queue_t* queue, loom_runtime_parameter_sources_t* sources,
-    iree_allocator_t host_allocator, iree_vm_module_t** out_module) {
+    bool owned_hal_arguments, iree_allocator_t host_allocator,
+    iree_vm_module_t** out_module) {
   *out_module = NULL;
   iree_vm_ref_types_t vm_types = {0};
   IREE_RETURN_IF_ERROR(iree_vm_ref_types_resolve(
@@ -217,6 +233,8 @@ iree_status_t loom_runtime_parameters_module_create(
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*module), (void**)&module));
   module->host_allocator = host_allocator;
+  module->gather_arguments =
+      owned_hal_arguments ? gather_arguments_v1 : gather_arguments;
   module->types[0] = vm_types.buffer;
   module->types[1] = types->buffer;
   module->types[2] = types->fence;

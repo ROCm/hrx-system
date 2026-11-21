@@ -67,7 +67,7 @@ TEST_F(SourceEncodingExecutionTest, KnownInputOutputOutlivesEpochAndModel) {
   const loom_serve_text_span_t first = {0, prefix.size(), prefix.data(), 0};
   loom_runtime_execution_frontier_t ready;
   IREE_ASSERT_OK(loom_serve_text_model_submit_epoch(
-      model_, 1, 1, &first, nullptr, nullptr, &captures_[0], &ready));
+      model_, 1, &first, nullptr, nullptr, &captures_[0], &ready));
   ASSERT_NO_FATAL_FAILURE(Wait(ready));
   loom_serve_text_result_t progress[2] = {};
   IREE_ASSERT_OK(loom_serve_text_model_complete_epoch(model_, progress));
@@ -84,7 +84,7 @@ TEST_F(SourceEncodingExecutionTest, KnownInputOutputOutlivesEpochAndModel) {
   const loom_serve_text_span_t next[] = {{1, peer.size(), peer.data(), 0},
                                          {0, 1, &appended, 0}};
   IREE_ASSERT_OK(loom_serve_text_model_submit_epoch(
-      model_, 1, 2, next, nullptr, nullptr, &captures_[1], &ready));
+      model_, 2, next, nullptr, nullptr, &captures_[1], &ready));
   ASSERT_NO_FATAL_FAILURE(Wait(ready));
   IREE_ASSERT_OK(loom_serve_text_model_complete_epoch(model_, progress));
   EXPECT_EQ(progress[0].consumed_count, 3u);
@@ -124,8 +124,8 @@ TEST_F(SourceEncodingExecutionTest, SelectionRejectsBeforeMutation) {
     const loom_serve_text_span_t span = {0, 1, &token, flags};
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
-        loom_serve_text_model_submit_epoch(model_, 0, 1, &span, nullptr,
-                                           nullptr, &captures_[0], &ready));
+        loom_serve_text_model_submit_epoch(model_, 1, &span, nullptr, nullptr,
+                                           &captures_[0], &ready));
     EXPECT_EQ(captures_[0], nullptr);
     EXPECT_EQ(loom_serve_text_model_pool_usage(model_).available,
               initial.available);

@@ -30,7 +30,7 @@ TEST_F(SourceTextServiceTest,
     // An intermediate prompt chunk has no selected output token. Its consumed
     // frontier, not a retokenized response, is the shared prefix identity.
     const loom_serve_text_span_t span = {0, length, tokens.data(), 0};
-    IREE_ASSERT_OK(loom_serve_text_model_epoch(model_, 1, 1, &span));
+    IREE_ASSERT_OK(loom_serve_text_model_epoch(model_, 1, &span));
     const auto before = loom_serve_text_model_pool_usage(model_);
     loom_serve_text_checkpoint_t* endpoint = nullptr;
     IREE_ASSERT_OK(loom_serve_text_row_try_pin(source, &endpoint));
@@ -57,8 +57,8 @@ TEST_F(SourceTextServiceTest,
         {0, 1, &source_token, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT},
         {1, 1, &branch_token, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT},
     };
-    IREE_ASSERT_OK(loom_serve_text_model_epoch(
-        model_, 1, IREE_ARRAYSIZE(branches), branches));
+    IREE_ASSERT_OK(loom_serve_text_model_epoch(model_, IREE_ARRAYSIZE(branches),
+                                               branches));
     source_oracle.Consume(source_token);
     branch_oracle.Consume(branch_token);
     EXPECT_EQ(loom_serve_text_row_token(source), source_oracle.Predict());
@@ -101,7 +101,7 @@ TEST_F(SourceTextServiceTest, ActivePrefixPinDenialPreservesFullPoolRequest) {
     oracle.Consume(token);
   }
   const loom_serve_text_span_t first = {0, IREE_ARRAYSIZE(tokens), tokens, 0};
-  IREE_ASSERT_OK(loom_serve_text_model_epoch(model_, 0, 1, &first));
+  IREE_ASSERT_OK(loom_serve_text_model_epoch(model_, 1, &first));
   const auto before = loom_serve_text_model_pool_usage(model_);
   EXPECT_EQ(before.available, 0u);
   loom_serve_text_checkpoint_t* denied = nullptr;

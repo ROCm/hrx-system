@@ -14,6 +14,7 @@
 #include "loom/runtime/parameter/sources.h"
 #include "loom/runtime/program/preparation.h"
 #include "loom/runtime/program/tokenizer_cache.h"
+#include "loom/serve/service/text/abi_v1.h"
 #include "loom/serve/service/text/model.h"
 #include "loom/serve/service/text/storage.h"
 #include "loomc/target.h"
@@ -38,6 +39,8 @@ typedef struct loom_serve_text_source_t {
   iree_vm_ref_types_t vm_types;
   // Resolved HAL reference descriptors, without device capabilities.
   iree_hal_vm_types_t types;
+  // Compatibility data owned only by released version 1 text/sequence services.
+  loom_serve_text_v1_t* v1;
   // Owned source declarations and parameter policies.
   loom_runtime_preparation_t* preparation;
   // Owned immutable checkpoint indexes shared by resident and demand reads.
@@ -56,7 +59,8 @@ typedef struct loom_serve_text_source_t {
   int32_t eos_token;
   // Effective prefill capacity selected by source preparation.
   iree_host_size_t prefill_capacity;
-  // Leading stages sharing one immutable parameter placement.
+  // Leading direct-row stages sharing one immutable parameter placement.
+  // An epoch handling every row may declare zero.
   iree_host_size_t shared_stage_count;
   // Source-resolved cache addressability in token positions.
   iree_host_size_t pool_capacity;

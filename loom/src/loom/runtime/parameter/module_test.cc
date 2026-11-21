@@ -118,7 +118,8 @@ class ParameterModuleTest : public loom_runtime::testing::ParameterTest {
         nullptr, &names, 1, &files, allocator_, &sources_));
     if (!module_) {
       IREE_ASSERT_OK(loom_runtime_parameters_module_create(
-          environment_, &types_, queue_, sources_, allocator_, &module_));
+          environment_, &types_, queue_, sources_,
+          /*owned_hal_arguments=*/false, allocator_, &module_));
       IREE_ASSERT_OK(loom_runtime_program_link(module_, {nullptr, 0},
                                                allocator_, &program_));
       IREE_ASSERT_OK(iree_vm_process_lookup_function(

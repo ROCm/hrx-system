@@ -28,8 +28,8 @@ and wake the owner; they do not mutate sessions or destroy the model. Input
 preparation can overlap an accepted epoch on other rows. No service creates a
 private worker thread or polls device completion in a busy loop.
 
-The [epoch planner](epoch.h) receives already-credited rows and a selected
-packing shape. It produces bounded spans and optional device-fed continuation
+The [epoch planner](epoch.h) receives already-credited rows and the deployment’s
+token and span budgets. It produces bounded spans and optional device-fed continuation
 without allocation or HTTP access. The model program's completed progress is
 authoritative; the service commits that progress only after readiness.
 
@@ -45,7 +45,7 @@ The text [reconfiguration policy](reconfiguration.h) stages native providers
 against the original model's parameter and state contract. It captures provider
 locators before returning and compiles on the shared task pool while inference
 continues. Both source text and portable bytecode providers use this path.
-Preparation declarations, control VM, tokenizer, shape catalog and retained
+Preparation declarations, control VM, tokenizer, resource limits, and retained
 state stay fixed. Reflection checks parameter binding layout; the author remains
 responsible for semantic compatibility of retained bytes.
 
@@ -66,10 +66,10 @@ not resources still held by the model or its selected native module.
 
 [Packing](packing.h) treats token capacity and independently advancing span
 capacity as separate dimensions. Known prompt tokens, decode anchors and full
-speculative verifier spans can share one traversal. The policy evaluates cached
-shapes against the same readiness set and rotating priority, then chooses the
-most useful tokens with stable tie-breaking. It is an occupancy policy, not a
-claim that every device has the same execution-cost curve.
+speculative verifier spans can share one traversal. Each submitted packet visits readiness in rotating priority order.
+Each admitted row receives its indivisible minimum first. Longer rows can use
+the remaining token budget up to their chunk limit. The model receives the
+resulting counts and chooses its own dispatch geometry.
 
 [Admission](admission.h) applies bounded backfilling to a stable request queue.
 A parked request retains prepared input and may own projected image results,
@@ -81,7 +81,7 @@ Insufficient capacity queues or rejects the request before successful output
 headers. Slow output readers backpressure their own row without preventing
 credited peers from advancing.
 
-Resident identities are independent of epoch shape. The initial `rows` value
+Resident identities are independent of the number of spans in each submission. The initial `rows` value
 sizes a directory, capped by the optional per-deployment `max_sessions`.
 That ceiling bounds resident owners, including preparation and output loans,
 not the number of participants selected for one epoch. No separate active

@@ -10,9 +10,9 @@
 #include "loom/serve/service/service.h"
 #include "loom/serve/service/text/checkpoint_control.h"
 #include "loom/serve/service/text/model.h"
-#include "loom/serve/service/text/schedule.h"
 #include "loom/serve/service/text/stream.h"
 #include "loom/service/finite/component.h"
+#include "loom/service/text/schedule.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -146,7 +146,7 @@ iree_status_t loom_serve_text_service_try_open_checkpoint(
 // Lookup leaves at least one known input to establish selection normally.
 // Automatic prefixes yield before idle histories under admission pressure,
 // including replaying a selected prefix if keeping it prevents admission.
-// This policy does not alter epoch shapes or wait for matching requests.
+// This policy preserves the submitted packet and imposes no wait for peers.
 // Peer cancellation discards its live row, not independently pinned endpoints,
 // at a completed stage boundary. Capacities match the created model.
 //

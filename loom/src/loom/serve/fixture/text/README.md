@@ -60,19 +60,19 @@ a deliberately partial four-token page for checkpoint tests.
 
 ## Source boundaries
 
-[prepare.loom](prepare.loom) declares one command, one checkpoint binding,
-private row views, four-token pages and independent four-byte recurrent slots.
-Every host token/span bucket uses that command; a bucket does not inherently
-require another compiled kernel. Supported configurations use pooled capacity,
-packed epochs and no MTP. Unsupported configurations fail through the cold
-source program's `input.require` capability.
-The source sizes its packet storage for the largest requested shape and uses
-the runner's signed 32-bit logical token coordinates. Physical page IDs and
-packed input offsets retain their unsigned range and produce wide byte offsets;
-they are not bounded by one session's context.
-Tests exercise 513-, 1024- and 4097-token shapes, mixed decode/prefill, and
-4089-token HTTP history reuse against the dense oracle. The same two-kernel
-command serves every smaller bucket; no native capacity edit is required.
+[prepare.loom](prepare.loom) declares a text command and a media command that
+share a checkpoint. The text command consumes input and selects output. For
+media, the control program dispatches the selection kernel after the command.
+Preparation sizes packet storage from the deployment's token and span limits.
+Each submission supplies its live counts and reuses the prepared stages.
+This fixture requires pooled capacity, packed epochs, and disabled drafting.
+
+Each row has private views, four-token pages, and an independent four-byte
+recurrent slot. The runner uses signed 32-bit logical token coordinates.
+Physical page IDs and packed input offsets retain their unsigned range and
+produce wide byte offsets across sessions. Tests exercise 513-, 1024-, and
+4097-token submission limits, mixed decode and prefill, and 4089-token HTTP
+history reuse against the dense oracle.
 
 [advance.loom](advance.loom) consumes known spans, then selects output. The
 command has one parameter root and the text ABI's six dynamic bindings. Its

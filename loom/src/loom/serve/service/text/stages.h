@@ -18,10 +18,11 @@ extern "C" {
 #endif
 
 typedef struct loom_serve_text_stage_t {
-  // Owned JIT command image and loaded executable entries.
+  // Owned JIT command image or direct-dispatch executable.
   loom_runtime_jit_stage_t* compiled;
-  // Immutable layout borrowing compiled (or its still-running producer).
-  loom_cmd_program_t program;
+  // Borrowed immutable command layout, also available during compilation.
+  // Direct kernels have no command layout.
+  const loom_cmd_program_t* program;
   // Reusable command retaining its executable and fixed weight resources.
   iree_hal_command_buffer_t* command;
   // Number of owned fixed-root slots, including partial initialization.

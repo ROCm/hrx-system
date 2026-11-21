@@ -6,8 +6,10 @@
 
 load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_fuzz", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:defs.bzl", "loom_test")
 load("//loom/build_tools/bazel:python.bzl", "loom_py_test")
 load("//loom/src/loom/serve/fixture/text:sources.bzl", TEXT_SOURCES = "SOURCES")
+load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
 
 package(
     default_visibility = ["//loom/src/loom/serve:implementation"],
@@ -55,6 +57,37 @@ loom_py_test(
     data = [
         "//loom/src/loom/serve/fixture/text:portable_chat.loom",
         "//loom/src/loom/serve/testing:text_request_check",
+    ],
+)
+
+iree_c_embed_data(
+    name = "abi_v1_data",
+    srcs = ["abi_v1.loom"],
+    c_file_output = "abi_v1_data.c",
+    flatten = True,
+    h_file_output = "abi_v1_data.h",
+    identifier = "loom_serve_text_v1_data",
+)
+
+loom_test(
+    name = "abi_v1_test",
+    srcs = [
+        "abi_v1.loom",
+        "abi_v1_test.loom",
+    ],
+    execution_profiles = [VM_REFERENCE_PROFILE],
+)
+
+loom_cc_library(
+    name = "abi_v1",
+    srcs = ["abi_v1.c"],
+    hdrs = ["abi_v1.h"],
+    deps = [
+        ":abi_v1_data",
+        "//loom/src/loom/runtime/program",
+        "//loom/src/loom/runtime/program:package",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/vm",
     ],
 )
 
@@ -124,8 +157,6 @@ loom_cc_library(
         "//loom/src/loom/serve/service/text:chat",
         "//loom/src/loom/serve/service/text:input",
         "//loom/src/loom/serve/service/text:model",
-        "//loom/src/loom/serve/service/text:packing",
-        "//loom/src/loom/serve/service/text:schedule",
         "//loom/src/loom/serve/service/text:service",
         "//loom/src/loom/serve/service/text:telemetry",
         "//loom/src/loom/serve/testing:http_harness",
@@ -758,11 +789,11 @@ loom_cc_library(
         "warmup.h",
     ],
     deps = [
+        ":abi_v1",
         ":cache_policy",
         ":capture",
         ":chat",
         ":epoch_upload",
-        ":packing",
         ":storage",
         ":storage_bounds",
         ":tool_xml",
@@ -795,6 +826,7 @@ loom_cc_library(
         "//loom/src/loom/runtime/storage:relocation",
         "//loom/src/loom/runtime/storage:snapshot",
         "//loom/src/loom/service/finite:result",
+        "//loom/src/loom/service/text:schedule",
         "//loom/src/loom/util:index_set",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/async",
@@ -861,11 +893,7 @@ loom_cc_library(
     name = "schedule",
     srcs = ["schedule.c"],
     hdrs = ["schedule.h"],
-    deps = [
-        ":packing",
-        "//loom/src/loom/service/text:schedule",
-        "//runtime/src/iree/base",
-    ],
+    deps = ["//runtime/src/iree/base"],
 )
 
 loom_cc_library(
@@ -1012,8 +1040,8 @@ loom_cc_library(
     deps = [
         ":model",
         ":packing",
-        ":schedule",
         "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/service/text:schedule",
         "//runtime/src/iree/base",
     ],
 )
@@ -1028,7 +1056,6 @@ loom_cc_test(
         ":epoch",
         ":model",
         ":packing",
-        ":schedule",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -1327,7 +1354,6 @@ loom_cc_library(
         ":pending_request",
         ":prefix_cache",
         ":reconfiguration",
-        ":schedule",
         ":sequence",
         ":session",
         ":session_cache",
@@ -1353,6 +1379,7 @@ loom_cc_library(
         "//loom/src/loom/service/finite:component",
         "//loom/src/loom/service/telemetry:record",
         "//loom/src/loom/service/telemetry:tracing",
+        "//loom/src/loom/service/text:schedule",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",

@@ -14,6 +14,7 @@
 #include "iree/io/file_contents.h"
 #include "loom/serve/service/text/cache_policy.h"
 #include "loom/service/kind.h"
+#include "loom/service/text/schedule.h"
 
 typedef struct loom_serve_model_configuration_field_t {
   // Literal model key; escaped keys are rejected.
@@ -327,7 +328,8 @@ static iree_status_t loom_serve_model_configuration_text(
   IREE_RETURN_IF_ERROR(loom_serve_model_configuration_size(
       &fields[DEFINITION_MAX_TOKENS], 1, INT32_MAX, &text->max_tokens));
   IREE_RETURN_IF_ERROR(loom_serve_model_configuration_size(
-      &fields[DEFINITION_DRAFT_DEPTH], 0, 7, &text->draft_depth));
+      &fields[DEFINITION_DRAFT_DEPTH], 0,
+      LOOM_SERVICE_TEXT_MAX_EPOCH_OUTPUTS - 1, &text->draft_depth));
   IREE_RETURN_IF_ERROR(loom_serve_model_configuration_size(
       &fields[DEFINITION_CONTINUATION_EPOCHS], 1, 2,
       &text->continuation_epochs));
@@ -487,15 +489,19 @@ static iree_status_t loom_serve_model_configuration_definition_parse(
           fields[DEFINITION_KIND].value.data, (int)selection->kind.size,
           selection->kind.data);
     }
-    const uint32_t supported_version =
-        iree_string_view_equal(selection->kind, IREE_SV("speech")) ? 2 : 1;
-    if (selection->version > supported_version) {
+    const bool text =
+        iree_string_view_equal(selection->kind, IREE_SV("text")) ||
+        iree_string_view_equal(selection->kind, IREE_SV("sequence"));
+    const uint32_t last_version =
+        text || iree_string_view_equal(selection->kind, IREE_SV("speech")) ? 2
+                                                                           : 1;
+    if (selection->version > last_version) {
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
-          "selected service requires %.*s ABI %u; this host implements "
-          "ABI 1 through %u and the unversioned development contract",
+          "selected service requires unsupported %.*s ABI version %u "
+          "(current version %u)",
           (int)selection->kind.size, selection->kind.data, selection->version,
-          supported_version);
+          last_version);
     }
     if (!fields[DEFINITION_KIND].value.data) {
       fields[DEFINITION_KIND].value = selection->kind;

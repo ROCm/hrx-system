@@ -42,7 +42,7 @@ def test_components_share_files_and_retain_independent_contracts():
         _service(document)["parameters"]["model"]
     )
     selected = ModelCard(document).select("check")
-    assert selected.service["version"] == 1
+    assert selected.service["version"] == document["services"]["chat"]["version"]
     assert selected.service["components"]["image"]["version"] == 3
     assert len(selected.files) == len(ModelCard(_document()).select("check").files)
     projected = ModelCard(selected.document).select()
@@ -207,8 +207,9 @@ def test_partition_choices_require_names_and_supported_shape():
 
 
 def test_native_selected_closure():
-    selected = ModelCard(_document()).select("check")
-    assert selected.service == {"kind": "text", "version": 1}
+    document = _document()
+    selected = ModelCard(document).select("check")
+    assert selected.service == document["services"]["chat"]
     assert selected.config == {"fixture.card": True, "fixture.bias_delta": 1}
     assert selected.settings["execution"]["rows"] == 4
     assert set(selected.files) == {
@@ -229,12 +230,13 @@ def test_native_selected_closure():
 
 
 def test_shared_providers_keep_distinct_service_selections():
-    card = ModelCard(_document())
+    document = _document()
+    card = ModelCard(document)
     with pytest.raises(ManifestError, match="select explicitly"):
         card.select()
     text = card.select("check")
     sequence = card.select("encode")
-    assert sequence.service == {"kind": "sequence", "version": 1}
+    assert sequence.service == document["services"]["encode"]
     assert sequence.program == text.program
     assert sequence.parameters == text.parameters
     assert sequence.config == {"fixture.card": True, "fixture.bias_delta": 0}
@@ -299,9 +301,10 @@ def test_owned_snapshots():
 
 def test_independent_service_versions():
     document = _document()
+    document["services"]["chat"]["version"] = 7
     document["services"]["future"] = {"kind": "image", "version": 54}
     _service(document)["programs"] = ["source"]
-    assert ModelCard(document).select("check").service["version"] == 1
+    assert ModelCard(document).select("check").service["version"] == 7
     document["services"]["chat"].pop("version")
     assert "version" not in ModelCard(document).select("check").service
 

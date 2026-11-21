@@ -26,8 +26,8 @@ a text deployment named `scout`; its package has `prepare.loom`, `control.loom`,
 
 Source uploads and live native selection work across these serving modalities:
 prepared deployments advertise `loom.variants` when enabled.
-It preserves preparation declarations, the stage/shape catalog, control VM,
-tokenizer, parameter interpretation and retained-state layout. The author
+Each variant uses the registered stages and their binding contracts, control VM,
+tokenizer, parameter interpretation, and retained-state layout. The author
 asserts compatibility; binding checks do not prove mathematical equivalence.
 Changes to those preserved contracts require a new registration, not a native
 variant. A compatible optimization can change instructions, traversal, fusion

@@ -7,6 +7,7 @@
 #ifndef LOOM_SERVE_SERVICE_TEXT_SERVICE_CAPACITY_H_
 #define LOOM_SERVE_SERVICE_TEXT_SERVICE_CAPACITY_H_
 
+#include "loom/serve/service/text/packing.h"
 #include "loom/serve/service/text/service.h"
 #include "loom/serve/service/text/session.h"
 
@@ -19,7 +20,8 @@ extern "C" {
 // Public inspection sees the old directory until publication. Existing records
 // remain stable throughout either loan.
 typedef struct loom_serve_text_service_capacity_t {
-  // Requested next capacity, independent of epoch shape and live KV extent.
+  // Requested next capacity, independent of the submitted work and live KV
+  // extent.
   iree_host_size_t requested;
   // Initialized prefix of sessions; the old prefix is borrowed, not owned.
   iree_host_size_t count;

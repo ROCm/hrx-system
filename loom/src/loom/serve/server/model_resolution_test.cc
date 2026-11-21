@@ -23,7 +23,7 @@ constexpr char kCard[] = R"json({
   "model": {"id": "fixture/text", "name": "Text fixture"},
   "programs": {"source": {"inputs": ["prepare.loom", "control.loom"],
                           "libraries": []}},
-  "services": {"chat": {"kind": "text", "version": 1}},
+  "services": {"chat": {"kind": "text", "version": 2}},
   "variants": {"tiny": {"services": {"chat": {
     "programs": ["source"],
     "parameters": {"weights": {"files": ["model.safetensors"]}},
@@ -225,6 +225,11 @@ class ServiceCardResolutionTest
     : public ModelResolutionTest,
       public ::testing::WithParamInterface<const char*> {
  protected:
+  int LatestServiceVersion() const {
+    const std::string kind = GetParam();
+    return kind == "text" || kind == "sequence" || kind == "speech" ? 2 : 1;
+  }
+
   void InitializeService(int version) {
     const std::string kind = GetParam();
     const std::string card =
@@ -243,8 +248,7 @@ class ServiceCardResolutionTest
 };
 
 TEST_P(ServiceCardResolutionTest, SupportedVersionResolvesWithoutProgramIo) {
-  const int latest = std::string(GetParam()) == "speech" ? 2 : 1;
-  for (int version = 1; version <= latest; ++version) {
+  for (int version = 1; version <= LatestServiceVersion(); ++version) {
     SCOPED_TRACE(version);
     InitializeService(version);
     loom_serve_model_resolution_t* resolution = nullptr;
@@ -263,7 +267,7 @@ TEST_P(ServiceCardResolutionTest, SupportedVersionResolvesWithoutProgramIo) {
 }
 
 TEST_P(ServiceCardResolutionTest, UnsupportedVersionFailsBeforeProgramIo) {
-  InitializeService(std::string(GetParam()) == "speech" ? 3 : 2);
+  InitializeService(LatestServiceVersion() + 1);
   loom_serve_model_resolution_t* resolution = nullptr;
   IREE_ASSERT_OK(loom_serve_model_resolution_start(
       Sink(), &configuration_, Observer(), allocator_, &resolution));

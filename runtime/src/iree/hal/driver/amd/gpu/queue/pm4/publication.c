@@ -866,22 +866,17 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_dispatch(
       before.acquire_cache_control |= queue->options.barriers.shader;
     }
   }
-  const uint16_t indirect_copy_count =
-      dispatch && indirect_parameters && !indirect
-          ? function->base.kernarg->indirect_copy_count
-          : 0;
   const bool prepare_packet =
       dispatch && function->packet && indirect_parameters;
+  const uint32_t prepare_words =
+      iree_hal_amd_gpu_pm4_dispatch_prepare_word_count(
+          prepare_packet, argument_storage.count_offset != 0);
   const uint32_t launch_words =
-      dispatch ? (prepare_packet ? IREE_HAL_AMD_GPU_PM4_DISPATCH_PREPARE_WORDS
-                                 : 0u) +
+      dispatch ? prepare_words +
                      (function->launch.user_data_count
                           ? 24 + function->launch.user_data_count
                           : 22) +
-                     (indirect_parameters
-                          ? iree_hal_amd_gpu_pm4_dispatch_indirect_word_count(
-                                indirect_copy_count)
-                          : 5)
+                     (indirect_parameters ? 4 : 5)
                : 0;
   const bool native_signal =
       iree_hal_amd_gpu_pm4_needs_native_signal(request->signals);
@@ -978,8 +973,15 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_dispatch(
   if (argument_storage.length) {
     iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
         function, &dispatch_request->launch, dispatch_request->constants,
-        addresses, dispatch_request->flags,
+        addresses, dispatch_request->flags, &argument_storage,
         arguments->memory.contents.data + argument_offset);
+  }
+  if (argument_storage.count_offset) {
+    iree_hal_amd_gpu_pm4_count_arguments_t* inputs =
+        (void*)(arguments->memory.contents.data + argument_offset +
+                argument_storage.count_offset);
+    inputs->counts = parameters_address;
+    inputs->target = argument_address;
   }
   uint64_t packet_address = 0;
   if (dispatch && function->packet) {
@@ -1020,11 +1022,14 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_dispatch(
   words = iree_hal_amd_gpu_pm4_scratch_emit(words, &queue->producer.scratch,
                                             scratch_words);
   if (dispatch) {
-    if (prepare_packet) {
+    if (prepare_words) {
+      const uint64_t origin = arguments->address + argument_offset;
       words = iree_hal_amd_gpu_pm4_dispatch_emit_prepare(
-          words, function->packet->prepare,
-          arguments->address + argument_offset +
-              argument_storage.prepare_offset,
+          words, prepare_packet ? function->packet->prepare : NULL,
+          origin + argument_storage.prepare_offset,
+          argument_storage.count_offset ? &queue->options.programs->counts
+                                        : NULL,
+          origin + argument_storage.count_offset,
           queue->options.barriers.shader);
     }
     const iree_hal_amd_gpu_pm4_launch_inputs_t inputs = {
@@ -1053,13 +1058,8 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_dispatch(
       words = iree_hal_amd_gpu_pm4_emit_clock(words, sample_address, true);
     }
     if (indirect_parameters) {
-      words = iree_hal_amd_gpu_pm4_dispatch_emit_indirect(
-          words, function->base.kernarg, indirect_copy_count,
-          parameters_address, argument_address,
-          queue->options.barriers.command_processor_bypasses_l2
-              ? queue->options.barriers.acquire
-              : queue->options.barriers.shader,
-          initiator);
+      words = iree_hal_amd_gpu_pm4_emit_dispatch_indirect(
+          words, parameters_address, initiator);
     } else {
       words = iree_hal_amd_gpu_pm4_emit_dispatch_direct(
           words, dispatch_request->launch.geometry.workgroup_count, initiator);

@@ -53,6 +53,9 @@ typedef struct loom_serve_text_control_t {
   iree_vm_function_t encode_epoch;
   // Retired feedback to semantic row progress.
   iree_vm_function_t publish_epoch;
+  // Number of bound publisher arguments. Released publishers lack the final
+  // actual-candidate-count destination.
+  iree_host_size_t publish_argument_count;
   // Row-table encoding after recurrent slot ownership changes.
   iree_vm_function_t encode_state;
   // Cold retained-layout growth and migration of source-owned host policy.
@@ -82,7 +85,7 @@ typedef struct loom_serve_text_control_t {
 iree_status_t loom_serve_text_control_initialize(
     const loom_serve_text_source_t* source, loom_runtime_execution_t* execution,
     iree_hal_queue_t* transfer, const loom_serve_text_state_t* state,
-    iree_host_size_t shape_count, const loom_serve_packing_shape_t* shapes,
+    iree_host_size_t token_capacity, iree_host_size_t span_capacity,
     iree_host_size_t stage_count, const loom_runtime_stage_t* stages,
     iree_allocator_t host_allocator, loom_serve_text_control_t* out_control);
 
@@ -106,7 +109,7 @@ iree_status_t loom_serve_text_control_prepare_request(
 // copies and validates its output ranges before any retained row is mutated.
 iree_status_t loom_serve_text_control_capture(
     loom_serve_text_control_t* control, const loom_serve_text_source_t* source,
-    iree_host_size_t shape_index, iree_host_size_t span_count,
+    int32_t v1_ordinal, iree_host_size_t span_count,
     iree_device_size_t residual_length, iree_allocator_t host_allocator,
     loom_serve_text_capture_t** out_capture);
 

@@ -6,8 +6,6 @@
 
 #include "loom/serve/service/text/packing.h"
 
-#include <string.h>
-
 loom_serve_packing_plan_t loom_serve_pack_spans(
     iree_host_size_t row_count, const loom_serve_ready_span_t* ready,
     iree_host_size_t token_capacity, iree_host_size_t span_capacity,
@@ -65,31 +63,4 @@ loom_serve_packing_plan_t loom_serve_pack_spans(
       .next_span = next_span,
       .deferred = deferred,
   };
-}
-
-loom_serve_packing_plan_t loom_serve_pack_shapes(
-    iree_host_size_t row_count, const loom_serve_ready_span_t* ready,
-    iree_host_size_t shape_count, const loom_serve_packing_shape_t* shapes,
-    iree_host_size_t chunk_size, iree_host_size_t cursor,
-    loom_serve_packed_span_t* spans, loom_serve_packed_span_t* scratch) {
-  loom_serve_packing_plan_t best = {0};
-  for (iree_host_size_t i = 0; i < shape_count; ++i) {
-    loom_serve_packing_plan_t candidate = loom_serve_pack_spans(
-        row_count, ready, shapes[i].token_capacity, shapes[i].span_capacity,
-        chunk_size, cursor, scratch);
-    candidate.shape_index = i;
-    const loom_serve_packing_shape_t best_shape = shapes[best.shape_index];
-    const bool smaller =
-        shapes[i].token_capacity < best_shape.token_capacity ||
-        (shapes[i].token_capacity == best_shape.token_capacity &&
-         shapes[i].span_capacity < best_shape.span_capacity);
-    if (i == 0 || candidate.token_count > best.token_count ||
-        (candidate.token_count == best.token_count &&
-         (candidate.span_count > best.span_count ||
-          (candidate.span_count == best.span_count && smaller)))) {
-      best = candidate;
-      memcpy(spans, scratch, best.span_count * sizeof(*spans));
-    }
-  }
-  return best;
 }

@@ -146,6 +146,38 @@ static iree_status_t loom_runtime_program_service_names(
   return iree_ok_status();
 }
 
+static iree_status_t loom_runtime_program_export_callable(
+    const iree_vm_module_t* module, iree_string_view_t name,
+    iree_vm_export_t* out_export,
+    iree_vm_module_callable_type_declaration_t* out_callable) {
+  IREE_RETURN_IF_ERROR(iree_vm_module_lookup_export(module, name, out_export));
+  iree_vm_module_export_declaration_t declaration = {0};
+  IREE_RETURN_IF_ERROR(
+      iree_vm_module_query_export(module, out_export->ordinal, &declaration));
+  return iree_vm_module_query_callable_type(
+      module, declaration.callable_type_ordinal, out_callable);
+}
+
+iree_status_t loom_runtime_program_service_signature(
+    const iree_vm_module_t* module, const loom_model_card_t* card,
+    const loom_model_component_t* component, iree_string_view_t role,
+    iree_allocator_t host_allocator,
+    iree_vm_module_signature_t* out_signature) {
+  iree_string_view_t* names = NULL;
+  if (card) {
+    IREE_RETURN_IF_ERROR(loom_runtime_program_service_names(
+        loom_model_card_selection(card), component, 1, &role, host_allocator,
+        &names));
+  }
+  iree_vm_export_t selected = {0};
+  iree_vm_module_callable_type_declaration_t callable = {0};
+  iree_status_t status = loom_runtime_program_export_callable(
+      module, names ? names[0] : role, &selected, &callable);
+  iree_allocator_free(host_allocator, names);
+  *out_signature = callable.signature;
+  return status;
+}
+
 static iree_status_t loom_runtime_program_compile_service_impl(
     loom_runtime_jit_t* jit, loomc_target_environment_t* target_environment,
     iree_vm_environment_t* environment, const loom_runtime_sources_t* sources,
@@ -435,14 +467,9 @@ static iree_status_t loom_runtime_program_bind_names(
     const loom_runtime_program_binding_t* binding = &bindings[i];
     const iree_string_view_t name = names ? names[i] : binding->name;
     iree_vm_export_t export_value = {0};
-    IREE_RETURN_IF_ERROR(
-        iree_vm_module_lookup_export(program->module, name, &export_value));
-    iree_vm_module_export_declaration_t declaration = {0};
-    IREE_RETURN_IF_ERROR(iree_vm_module_query_export(
-        program->module, export_value.ordinal, &declaration));
     iree_vm_module_callable_type_declaration_t callable = {0};
-    IREE_RETURN_IF_ERROR(iree_vm_module_query_callable_type(
-        program->module, declaration.callable_type_ordinal, &callable));
+    IREE_RETURN_IF_ERROR(loom_runtime_program_export_callable(
+        program->module, name, &export_value, &callable));
     if (iree_any_bit_set(callable.flags,
                          IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

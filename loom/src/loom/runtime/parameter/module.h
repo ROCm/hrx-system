@@ -22,7 +22,8 @@ extern "C" {
 //          ptr<hal.buffer> target)
 //       -> ref<hal.fence>
 //
-// HAL inputs borrow handles; file and fence results transfer an owner.
+// owned_hal_arguments selects the released owning input signatures. The
+// current ABI borrows handles. File and fence results transfer an owner.
 // file resolves an entry once without loading its bytes, returning the retained
 // whole backing file and its absolute byte origin/length. Native transfer
 // geometry belongs to that file; an entry's origin may be unaligned. The
@@ -44,7 +45,8 @@ extern "C" {
 iree_status_t loom_runtime_parameters_module_create(
     iree_vm_environment_t* environment, const iree_hal_vm_types_t* types,
     iree_hal_queue_t* queue, loom_runtime_parameter_sources_t* sources,
-    iree_allocator_t host_allocator, iree_vm_module_t** out_module);
+    bool owned_hal_arguments, iree_allocator_t host_allocator,
+    iree_vm_module_t** out_module);
 
 // Publishes a retained immutable source catalog at a serialized invocation
 // boundary. NULL clears access to all sources. Does not wait for or redirect

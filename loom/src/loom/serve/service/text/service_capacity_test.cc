@@ -52,8 +52,7 @@ class TextServiceCapacityTest : public SourceTextServiceTest {
     auto options = SourceTextServiceTest::ModelOptions();
     options.prefill_capacity = 128;
     options.pool_capacity = 4096;
-    options.epoch_count = IREE_ARRAYSIZE(shapes_);
-    options.epoch_shapes = shapes_;
+    options.span_capacity = 128;
     return options;
   }
 
@@ -101,8 +100,6 @@ class TextServiceCapacityTest : public SourceTextServiceTest {
     }
   }
 
-  // One cohort is independent of the four initial residents.
-  const loom_serve_packing_shape_t shapes_[1] = {{128, 128}};
   // Service owns only request state; the parent fixture retains its model.
   loom_serve_text_service_t* service_ = nullptr;
   // Borrowed public scheduler callbacks used by the real HTTP router.

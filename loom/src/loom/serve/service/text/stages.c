@@ -49,7 +49,7 @@ static iree_status_t loom_serve_text_check_layouts(
     const loom_runtime_preparation_t* preparation,
     iree_host_size_t shared_count, iree_host_size_t stage_count,
     const loom_serve_text_stage_t* stages) {
-  const loom_cmd_program_t* prefill = &stages[0].program;
+  const loom_cmd_program_t* prefill = stages[0].program;
   const loom_runtime_preparation_stage_t* first =
       loom_runtime_preparation_stage(preparation, 0);
   if (!first->parameter_count) {
@@ -59,7 +59,14 @@ static iree_status_t loom_serve_text_check_layouts(
   const loom_runtime_preparation_parameter_t* checkpoint =
       &first->parameters[0];
   for (iree_host_size_t i = 0; i < stage_count; ++i) {
-    const loom_cmd_program_t* program = &stages[i].program;
+    const loom_cmd_program_t* program = stages[i].program;
+    if (!program) {
+      if (i < shared_count) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "shared stages require a checkpoint binding");
+      }
+      continue;
+    }
     const loom_runtime_preparation_stage_t* declaration =
         loom_runtime_preparation_stage(preparation, i);
     IREE_RETURN_IF_ERROR(loom_runtime_preparation_stage_check_workspace(
@@ -116,7 +123,8 @@ static iree_status_t loom_serve_text_stages_initialize(
   for (iree_host_size_t i = 0; i < stage_count && iree_status_is_ok(status);
        ++i) {
     loom_serve_text_stage_t* stage = &stages[i];
-    const uint32_t count = stage->program.requirements.fixed_buffer_count;
+    const uint32_t count =
+        stage->program ? stage->program->requirements.fixed_buffer_count : 0;
     if (count) {
       status = iree_allocator_malloc_array(host_allocator, count,
                                            sizeof(*stage->fixed_buffers),
@@ -182,8 +190,8 @@ iree_status_t loom_serve_text_stages_bind(
       iree_host_size_t root_index = 0;
       iree_host_size_t count = 0;
       for (iree_host_size_t i = 0; i < stage_count; ++i) {
-        const loom_cmd_program_t* program = &stages[i].program;
-        for (uint32_t r = 0; r < program->parameter_roots.count; ++r) {
+        const loom_cmd_program_t* program = stages[i].program;
+        for (uint32_t r = 0; r < stages[i].fixed_buffer_count; ++r) {
           if (domains[root_index++] != domain) {
             continue;
           }
@@ -222,23 +230,17 @@ iree_status_t loom_serve_text_stages_rebind(
   IREE_RETURN_IF_ERROR(loom_serve_text_check_layouts(preparation, shared_count,
                                                      stage_count, stages));
   for (iree_host_size_t i = 0; i < stage_count; ++i) {
-    const loom_cmd_program_requirements_t* original =
-        &baseline[i].program.requirements;
-    const loom_cmd_program_requirements_t* replacement =
-        &stages[i].program.requirements;
-    const uint32_t original_arity =
-        original->rebindable_binding_count -
-        (original->transient.required_byte_length != 0);
-    const uint32_t replacement_arity =
-        replacement->rebindable_binding_count -
-        (replacement->transient.required_byte_length != 0);
-    if (original_arity != replacement_arity) {
+    if (loom_serve_text_stage_binding(&baseline[i]).binding_count !=
+        loom_serve_text_stage_binding(&stages[i]).binding_count) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "replacement stage %zu changes model bindings",
                               i);
     }
-    IREE_RETURN_IF_ERROR(loom_serve_text_check_parameters(&baseline[i].program,
-                                                          &stages[i].program));
+    if (!stages[i].program) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(loom_serve_text_check_parameters(baseline[i].program,
+                                                          stages[i].program));
     for (uint32_t j = 0; j < stages[i].fixed_buffer_count; ++j) {
       stages[i].fixed_buffers[j] = baseline[i].fixed_buffers[j];
       iree_hal_buffer_retain(stages[i].fixed_buffers[j]);
@@ -313,9 +315,11 @@ static void loom_serve_text_record_execute(loomc_task_t* base,
       break;
     }
     loom_serve_text_stage_t* stage = &job->stages[index];
-    task->status = loom_runtime_jit_stage_record(
-        stage->compiled, job->queue_family, job->mode, NULL,
-        stage->fixed_buffers, &stage->command);
+    if (stage->program) {
+      task->status = loom_runtime_jit_stage_record(
+          stage->compiled, job->queue_family, job->mode, NULL,
+          stage->fixed_buffers, &stage->command);
+    }
   }
   if (!iree_status_is_ok(task->status)) {
     iree_atomic_store(&job->next_index, job->stage_count,
@@ -378,8 +382,16 @@ iree_status_t loom_serve_text_stages_record_async(
 
 loom_runtime_stage_t loom_serve_text_stage_binding(
     const loom_serve_text_stage_t* stage) {
+  if (!stage->program) {
+    loom_runtime_dispatch_t* dispatch =
+        loom_runtime_jit_stage_dispatch(stage->compiled);
+    return (loom_runtime_stage_t){
+        .dispatch = dispatch,
+        .binding_count = loom_runtime_dispatch_binding_count(dispatch),
+    };
+  }
   const loom_cmd_program_requirements_t* requirements =
-      &stage->program.requirements;
+      &stage->program->requirements;
   return (loom_runtime_stage_t){
       .command_buffer = stage->command,
       .binding_count = requirements->rebindable_binding_count -
