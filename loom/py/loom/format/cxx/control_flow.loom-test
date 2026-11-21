@@ -116,3 +116,50 @@ unsigned total(loom::type::index selector) {
   }
   __builtin_unreachable();
 }
+
+// ====
+// A keyed value row carries its writable view and the value stored through it.
+func.def public @store_row(%key: index, %left: view<1xi32>, %right: view<1xi32>, %a: i32, %b: i32) {
+  %target, %value = scf.lookup %key {
+    -7 = (%left, %a),
+    9 = (%right, %b)
+  } default(%left, %b) : view<1xi32>, i32
+  view.store %value, %target[0] : i32, view<1xi32>
+  func.return
+}
+// ----
+#include <loomcxx/view.h>
+
+[[loom::symbol("store_row")]]
+void store_row(loom::type::index key, loom::type::view<loom::type::shape<1>, unsigned> left, loom::type::view<loom::type::shape<1>, unsigned> right, unsigned a, unsigned b);
+
+[[loom::symbol("store_row")]]
+void store_row(loom::type::index key, loom::type::view<loom::type::shape<1>, unsigned> left, loom::type::view<loom::type::shape<1>, unsigned> right, unsigned a, unsigned b) {
+  loom::type::view<loom::type::shape<1>, unsigned> target;
+  unsigned value{};
+  switch (static_cast<long long>(key)) {
+    case -7ll: {
+      auto next_target = left;
+      auto next_value = a;
+      target = next_target;
+      value = next_value;
+      break;
+    }
+    case 9ll: {
+      auto next_target_2 = right;
+      auto next_value_2 = b;
+      target = next_target_2;
+      value = next_value_2;
+      break;
+    }
+    default: {
+      auto next_target_3 = left;
+      auto next_value_3 = b;
+      target = next_target_3;
+      value = next_value_3;
+      break;
+    }
+  }
+  loom::view::store<loom::memory_access::may_alias>(value, target, 0);
+  return;
+}

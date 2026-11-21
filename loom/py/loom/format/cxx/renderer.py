@@ -9,8 +9,9 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
+from itertools import chain
 
 from loom.format.cxx.buffer_access import BufferAccessPlan
 from loom.format.cxx.context import (
@@ -1311,24 +1312,38 @@ class CxxRenderer(CxxFunctionRenderer):
         self._declare_selection_results(operation)
         selector = self.expression(resolved.value_id("selector"))
         yield_targets = self._transport_targets(operation.results)
-        self.writer.open(f"switch (static_cast<long long>({selector}))")
-        for key, region in zip(
-            resolved.attr("case_keys"), resolved.regions("case_regions"), strict=True
-        ):
-            # Spell the signed minimum without a positive literal outside i64.
-            literal = (
-                "(-9223372036854775807ll - 1ll)" if key == -(1 << 63) else f"{key}ll"
+        arms: Iterable[Block | Sequence[int]]
+        if operation.name == "scf.lookup":
+            width = len(operation.results)
+            values = resolved.value_ids("values")
+            arms = (
+                values[start : start + width] for start in range(0, len(values), width)
             )
-            self.writer.open(f"case {literal}:")
-            self._render_block(region.blocks[0], yield_targets=yield_targets)
+        else:
+            regions = chain(
+                resolved.regions("case_regions"), (resolved.region("default_region"),)
+            )
+            arms = (region.blocks[0] for region in regions)
+        self.writer.open(f"switch (static_cast<long long>({selector}))")
+        for key, arm in zip(
+            chain(resolved.attr("case_keys"), (None,)), arms, strict=True
+        ):
+            if key is None:
+                self.writer.open("default:")
+            else:
+                # Spell the signed minimum without a positive literal outside i64.
+                literal = (
+                    "(-9223372036854775807ll - 1ll)"
+                    if key == -(1 << 63)
+                    else f"{key}ll"
+                )
+                self.writer.open(f"case {literal}:")
+            if isinstance(arm, Block):
+                self._render_block(arm, yield_targets=yield_targets)
+            else:
+                self._assign_values(yield_targets, arm)
             self.writer.line("break;")
             self.writer.close()
-        self.writer.open("default:")
-        self._render_block(
-            resolved.region("default_region").blocks[0], yield_targets=yield_targets
-        )
-        self.writer.line("break;")
-        self.writer.close()
         self.writer.close()
 
     def _direct_terminator_assignments(
@@ -1461,7 +1476,7 @@ class CxxRenderer(CxxFunctionRenderer):
                     self._validate_projected_attributes(operation, ())
                     self._render_if(operation)
                     continue
-                if operation.name == "scf.switch":
+                if operation.name in {"scf.switch", "scf.lookup"}:
                     self._validate_projected_attributes(operation, ("case_keys",))
                     self._render_switch(operation)
                     continue

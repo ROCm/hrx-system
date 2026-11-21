@@ -16,6 +16,7 @@ from loom.dialect.func.defs import ArgumentAccess
 from loom.dsl import EffectKind
 from loom.format.cxx.errors import CxxRenderError
 from loom.format.cxx.registry import source_ops
+from loom.format.cxx.value_transport import lookup_columns
 from loom.ir import Module, Operation, ParameterizedType, ShapedType, TypeKind
 
 _CHANNEL_READ_MUTABLE_MODE = ChannelReadMode.case("mutable").value
@@ -132,6 +133,20 @@ def _connect_columns(plan: ViewAccessPlan, columns: Iterable[Iterable[int]]) -> 
         plan.connect(*column)
 
 
+def _connect_selection(plan: ViewAccessPlan, operation: Operation) -> None:
+    if operation.name == "scf.lookup":
+        for result, alternatives in lookup_columns(operation):
+            plan.connect(result, *alternatives)
+        return
+    for region in operation.regions:
+        if len(region.blocks) == 1 and region.blocks[0].ops:
+            terminator = region.blocks[0].ops[-1]
+            if terminator.name == "scf.yield":
+                _connect_columns(
+                    plan, zip(operation.results, terminator.operands, strict=True)
+                )
+
+
 def _function_signatures(
     plan: ViewAccessPlan,
     module: Module,
@@ -207,6 +222,8 @@ def plan_view_access(
                 resolved.value_id("false_value"),
                 resolved.value_id("result"),
             )
+        elif operation.name in {"scf.if", "scf.switch", "scf.lookup"}:
+            _connect_selection(plan, operation)
         elif operation.name == "scf.for":
             body = resolved.region("body")
             if body is None or len(body.blocks) != 1 or not body.blocks[0].ops:
@@ -225,21 +242,6 @@ def plan_view_access(
                     strict=True,
                 ),
             )
-        elif operation.name == "scf.if":
-            results = resolved.value_ids("results")
-            for region_name in ("then_region", "else_region"):
-                region = resolved.region(region_name)
-                if (
-                    region is None
-                    or len(region.blocks) != 1
-                    or not region.blocks[0].ops
-                ):
-                    continue
-                terminator = region.blocks[0].ops[-1]
-                if terminator.name == "scf.yield":
-                    _connect_columns(
-                        plan, zip(results, terminator.operands, strict=True)
-                    )
         elif operation.name == "scf.while":
             before_region = resolved.region("before")
             after_region = resolved.region("after")
