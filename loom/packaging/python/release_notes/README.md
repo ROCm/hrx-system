@@ -1,24 +1,31 @@
-# Authoring Loom release notes
+# Authoring Loom SDK release notes
 
-Loom release notes are a reviewed product document carried by the SDK
-version-bump pull request. They explain the user-visible outcomes of a release,
-show how those outcomes are exercised, and make required migrations
-conspicuous. GitHub's generated notes and pull request titles are discovery
-inputs, not publishable release notes.
+Loom uses two editorial surfaces during a release cycle because release
+candidates and the final stable release have different review and GitHub
+cross-reference costs.
 
-The release tag points at the exact commit GitHub records as that pull request's
-merge result. The publisher resolves the pull request from the commit, extracts
-one version-marked notes section from its description, and places the prose
-before the generated installation, artifact, checksum, and qualification
-appendix. A missing, duplicate, mismatched, empty, or placeholder-bearing
-section stops publication before any release mutation.
+- An unlisted Gist carries the evolving full release notes across the candidate
+  cycle. It contains migrations, examples, measured results, notable pull
+  requests, and the complete comparison link. The same Gist is updated in place
+  for `rc1`, `rc2`, and later candidates.
+- Each candidate identity pull request carries a short marked summary and a
+  link to that Gist. Its public prerelease copies the summary, followed by the
+  generated installation and qualification appendix.
+- The final stable identity pull request carries the reviewed full notes copied
+  from the Gist. This is the one intentional point at which notable pull-request
+  links create repository cross-references.
 
-The pull request is the review surface; individual release documents do not
-accumulate in the source tree. Publication records the pull request, merge
-commit, version, and editorial digest in the release body. A partial draft must
-continue to match the pull request description. Once public, the immutable
-release body is authoritative and validates without consulting the mutable pull
-request.
+GitHub creates persistent timeline references when one pull request description
+links another. Repeating the full notable-change index in every candidate would
+spray the same release bookkeeping across the entire development range. A Gist
+keeps the working editorial public to testers without creating those repository
+backreferences.
+
+The identity pull request remains the publication boundary. The release tag
+points at the exact commit GitHub records as that pull request's merge result,
+and the publisher extracts one version-marked section from its description. A
+missing, duplicate, mismatched, empty, or placeholder-bearing section stops
+publication before any release mutation.
 
 ## Evidence boundary
 
@@ -39,76 +46,67 @@ describe that exact comparison are revised or removed. Performance results keep
 their workload, scale, hardware, and measurement boundary; a microbenchmark is
 never promoted into an end-to-end product claim.
 
-## Authoring sequence
+## Candidate editorial
 
-1. Verify the previous tag and candidate commit, then enumerate the exact
-   first-parent merge range.
-2. Audit changes to public CLI, API, IR, configuration, serialized formats,
-   target or driver defaults, packaging, and supported platforms.
-3. Draft `Behavioral changes and migrations` before the feature narrative so
-   required user action cannot be hidden by highlights.
-4. Cluster the remaining evidence by user outcome. Repository ownership,
-   subsystem prefixes, authors, and merge order are not release-note sections.
-5. Select no more than six major areas. Each area carries one real command,
-   API or IR fragment, report excerpt, or bounded measured result.
-6. Select only the pull requests needed to navigate headline capabilities,
-   migrations, measured product improvements, and critical correctness
-   boundaries. The complete range is represented by one comparison link.
-7. Recheck every command, number, link, supported-platform statement, and
-   migration against the frozen candidate and its qualification record.
-8. Put the final prose between the marked section boundaries in the version-bump
-   pull request, then review the complete composed GitHub body as the user will
-   read it.
+[CANDIDATE_TEMPLATE.md](CANDIDATE_TEMPLATE.md) is the identity pull-request
+template for `aN`, `bN`, and `rcN` versions. Its marked section contains:
 
-## Page structure
+- the candidate theme and compatibility headline;
+- the intended evaluators and actionable feedback fields;
+- one link to the release line's unlisted full-notes Gist.
 
-The opening paragraph states the release theme and intended audience. Three to
-six highlights link the major user outcomes to their detailed sections. Each
-major section explains what is newly possible or materially different, gives a
-representative example, and links the smallest useful evidence set.
+The candidate body omits the notable pull-request index and complete comparison
+link. Those remain in the Gist. A later candidate updates the same Gist and uses
+another short marked summary for its own exact identity and feedback delta.
 
-`Behavioral changes and migrations` is mandatory. Each row identifies the
+The Gist is mutable working editorial rather than release provenance. Candidate
+publication snapshots the short marked summary and records the source pull
+request, merge commit, version, editorial digest, artifacts, and qualification.
+The generated release appendix supplies artifact names, installation commands,
+checksums, platform inventory, and profile coverage.
+
+## Full stable editorial
+
+[TEMPLATE.md](TEMPLATE.md) is the final stable identity pull-request template.
+Before that pull request opens, the Gist is refreshed against the exact stable
+range and qualification record, then its full prose is copied between the
+stable pull request's marked boundaries.
+
+The full notes lead with `Behavioral changes and migrations`. Each row names the
 affected user surface, previous contract, current contract, and required action.
-`None` is valid only after the public-surface audit in the authoring sequence.
+`None` is valid only after the public-surface audit.
 
-Release candidates identify the intended evaluators, feedback channel, and the
-information needed for an actionable report. Potential security issues follow
-the repository's private reporting policy. Patch releases use the same contract
-with a shorter feature narrative and a complete user-visible fix list.
-
-The final section contains notable pull requests and one complete comparison
-link. Artifact filenames, install commands, checksums, platform inventory, and
-qualification profiles remain in the generated appendix so editorial prose
-cannot drift from the bytes being published.
-
-## Editorial contract
+The remaining evidence is clustered by user outcome rather than repository
+ownership, subsystem prefix, author, or merge order. Three to six highlights
+link no more than six major areas. Each area carries a real command, API or IR
+fragment, report excerpt, or bounded measured result. The final section selects
+only the pull requests needed to navigate headline capabilities, migrations,
+measured product improvements, and critical correctness boundaries, followed by
+one complete comparison link.
 
 User outcomes lead; implementation details appear when they explain a
-constraint, migration, cost, or meaningful measured result. Examples come from
-an executable or qualified production path rather than decorative pseudocode.
+constraint, migration, cost, or meaningful measured result. Supported
+platforms, qualified hardware, and compiler representation support remain
+distinct claims. Costs sit beside benefits when users experience them. Exact
+model or product names appear only when reproduction or interpretation requires
+them.
 
-Supported platforms, qualified hardware, and compiler representation support
-are distinct claims. Costs sit beside benefits when users experience them.
-Uncertainty remains visible: a bounded production witness stays bounded, and an
-unmeasured internal improvement does not become a product performance claim.
+## Review and publication
 
-Exact model or product names appear only when reproduction or interpretation
-requires them. Representative workload descriptions otherwise keep the release
-story useful beyond one integration witness.
+The marked version always matches the exact `package-version` carried by the
+merge commit. Pull-request-specific guidance stays outside the marked section,
+and placeholder syntax inside it is rejected.
 
-## Starting a release pull request
+Editorial and technical review finish before merge. Any description edit after
+merge receives the same review before the tag is created. Once a publication
+draft exists, changing the marked prose is a conflict rather than an implicit
+release-note update.
 
-Copy [TEMPLATE.md](TEMPLATE.md) into the version-bump pull request description,
-replace every `{{PLACEHOLDER}}`, and set the marked version to the exact
-`package-version` that the merge commit will carry. Only the marked section is
-copied into the public release; pull-request-specific review guidance remains
-outside it. The publisher rejects placeholder syntax inside the marked section.
-
-Finish editorial and technical review before merging. The merge result is the
-release revision, and the release tag must point directly at it. Any description
-edit after merge must receive the same review before the tag is created. Once a
-publication draft has been created, changing the marked prose is a conflict
-rather than an implicit release-note update.
+The immutable GitHub release body is authoritative after publication. A
+candidate release contains its short snapshot and Gist link; a stable release
+contains the complete reviewed notes. Retries validate the recorded source and
+editorial digest rather than treating the mutable Gist or pull request as the
+published record.
 
 The previous release is a style reference, not evidence for the next release.
 Each release is rederived from its own exact range.
