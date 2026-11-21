@@ -235,15 +235,27 @@ not measured HBM or bus traffic.
 `--chain_runtime=hrx|hip` selects the runtime. HRX takes an exact
 `--chain_device` URI; HIP takes an explicit `--chain_hip_library` DSO and
 `--chain_hip_device` ordinal. Both runs must select the same physical GPU. The
-output label records the architecture and device selection. By default, both
-paths poll their public stream-query API before joining completion.
-`--chain_active_wait=false` uses blocking completion instead.
+output label records the architecture, device selection, and wait policies.
+
+`--chain_host_wait_mode=blocking|yield|active|query` controls the caller. Blocking,
+yield, and active use the runtime's synchronization entry point directly; query
+polls the public stream-query API before joining completion. The default remains
+query. HIP uses its corresponding blocking, yield, or spin scheduling policy;
+query also selects spin. These are each runtime's public policies, not a promise
+of identical observation budgets.
+
+`--chain_completion_wait_mode=blocking|yield|active` independently selects HRX's
+device-worker policy, defaulting to active. HIP has no equivalent control in
+this benchmark. To isolate caller-owned observation from worker wakeup, compare
+blocking and active host waits with the HRX worker held at blocking. All modes
+retain the same completed-output checks and timing boundaries.
 
 For example, after building the target with `--config=opt`, run the executable
 under the qualified runner's measurement lease with:
 
 ```text
 --chain_runtime=hrx --chain_device=amdgpu://0
+--chain_host_wait_mode=active --chain_completion_wait_mode=blocking
 --benchmark_filter=StreamFlushEnd/elements:131072/dispatches:64/
 --benchmark_min_time=100x --benchmark_repetitions=5
 ```
