@@ -14,11 +14,6 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import BinaryIO, TextIO
 
-from loom.diagnostics import LoomDiagnosticError
-from loom.format.bytecode.reader import BytecodeError
-from loom.format.cxx import CxxRenderError, load_module, render_module
-from loom.format.text.tokenizer import ParseError
-
 
 def run(
     input_path: str,
@@ -30,6 +25,12 @@ def run(
     stderr: TextIO,
 ) -> int:
     """Writes UTF-8 C++ and returns its public process exit code."""
+
+    # Help and usage diagnostics only need the argument parser.
+    from loom.diagnostics import LoomDiagnosticError
+    from loom.format.bytecode.reader import BytecodeError
+    from loom.format.cxx import CxxRenderError, load_module, render_module
+    from loom.format.text.tokenizer import ParseError
 
     try:
         if input_path == "-":
