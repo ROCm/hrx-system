@@ -18,6 +18,26 @@ from loom.format.cxx.test_support import LOOP_MODULE, SOURCE_MODULE
 from loom.tools.export_cxx import run
 
 
+def test_cli_help_when_the_renderer_is_unavailable() -> None:
+    # Other cases import the renderer. Exercise startup in a fresh interpreter.
+    process = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys\n"
+            "sys.modules['loom.format.cxx'] = None\n"
+            "from loom.tools.export_cxx import main\n"
+            "sys.exit(main())",
+            "--help",
+        ],
+        capture_output=True,
+        env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
+    )
+
+    assert process.returncode == 0, process.stderr
+    assert process.stdout
+
+
 def test_cli_emits_utf8_with_legacy_stdout_encoding(tmp_path: Path) -> None:
     source = SOURCE_MODULE.replace(
         "  kernel.return",
