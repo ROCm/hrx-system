@@ -122,7 +122,7 @@ iree_status_t loom_serve_http_response_model_not_found(
   // The decoded selector may borrow scratch. Capture it before rendering.
   iree_status_t status =
       iree_make_status(IREE_STATUS_NOT_FOUND,
-                       "model '%.*s' is not registered. List available "
+                       "model '%.*s' was not found. List available "
                        "model IDs with GET /v1/models",
                        (int)name.size, name.data);
   return loom_serve_http_send_status(server, connection, status,

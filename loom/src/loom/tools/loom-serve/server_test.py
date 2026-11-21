@@ -15,9 +15,9 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
-from loom_serve_testing.http_harness import control, running_server
+from loom_serve_testing.http_harness import control, running_server, wait_status
 
 SERVER = Path(sys.argv.pop(1)).resolve()
 PACKAGE = Path(sys.argv.pop(1)).resolve().parent
@@ -25,6 +25,75 @@ FORMAT = Path(sys.argv.pop(1)).resolve()
 
 
 class ServerTest(unittest.TestCase):
+    def test_model_retrieval_tracks_the_published_catalog(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            name = "org/vectors+local%2F?rev#2"
+            document = json.loads((PACKAGE / "model.json").read_text())
+            startup = []
+            for index, model_id in enumerate((name, "variants")):
+                path = directory / f"{index}.json"
+                path.write_text(
+                    json.dumps(
+                        {**document, "base_directory": str(PACKAGE), "name": model_id}
+                    )
+                )
+                startup.append(f"--model={path}")
+            with running_server(
+                [
+                    str(SERVER),
+                    "--device=task",
+                    "--pool_backing=fixed",
+                    "--workers=1",
+                    "--listen=127.0.0.1:0",
+                    *startup,
+                ],
+                directory / "server.log",
+            ) as (_, bound):
+                address = urlsplit(f"http://{bound}")
+                for model_id in (name, "variants"):
+                    wait_status(address, model=model_id, phase="idle")
+                catalog = control(address, "GET", "/v1/models", 200)["data"]
+                self.assertEqual({entry["id"] for entry in catalog}, {name, "variants"})
+                for entry in catalog:
+                    path = "/v1/models/" + quote(entry["id"], safe="+")
+                    self.assertEqual(control(address, "GET", path, 200), entry)
+                inventory = control(
+                    address,
+                    "GET",
+                    "/v1/models/variants",
+                    200,
+                    headers={"X-Loom-Model": name},
+                )
+                self.assertEqual(inventory["model"], name)
+
+                path = "/v1/models/" + quote(name, safe="")
+                self.post(address, "/v1/models/drain", {"model": name})
+                drained = {
+                    entry["id"]: entry
+                    for entry in control(address, "GET", "/v1/models", 200)["data"]
+                }
+                self.assertEqual(
+                    control(
+                        address,
+                        "GET",
+                        "/models/" + quote(name, safe="/+") + "?request_id=1",
+                        200,
+                    ),
+                    drained[name],
+                )
+                self.post(
+                    address, "/v1/models/unregister", {"model": name}, expected=202
+                )
+                missing = control(address, "GET", path, 404)["error"]
+                self.assertEqual(missing["code"], "model_not_found")
+                self.assertIn(name, missing["message"])
+                missing = control(address, "GET", "/v1/models/caf%C3%A9", 404)["error"]
+                self.assertEqual(missing["code"], "model_not_found")
+                self.assertIn("café", missing["message"])
+                for invalid in ("bad%2", "%gg", "%00", "%ff"):
+                    control(address, "GET", "/v1/models/" + invalid, 400)
+
     def test_raw_tokenization_tracks_the_single_registered_model(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)

@@ -39,6 +39,7 @@ the first body bytes. It routes the request after the complete body arrives.
 | `GET /health`, `GET /v1/health` | Returns `{"status":"ok"}` when a prepared deployment accepts HTTP inference, or HTTP 503 while none do. |
 | `GET /ready`, `GET /v1/ready` | The same inference readiness check. Returns `{"status":"ready","model":"name"}` for a single eligible deployment and `{"status":"ready"}` for several. |
 | `GET /v1/models`, `GET /models` | Lists prepared deployments with their input/output modalities and a `loom` capability object. |
+| `GET /v1/models/{id}`, `GET /models/{id}` | Returns one deployment's catalog entry. Encode the model ID as a URL path segment, for example `team%2Fscout` for `team/scout`. |
 | `GET /v1/status` | Every registration, progress/errors, admission, scheduler state and shared server resources. |
 | `POST /v1/models/register` | Complete model document, optionally with uploaded source files; HTTP 202 accepts registration intent. |
 | `POST /v1/models/drain`, `POST /v1/models/undrain` | `{"model":"name"}`; HTTP 200 acknowledges the gate change. |
@@ -111,8 +112,10 @@ nonzero `variant_capacity`. Disabled or custom services without the capability
 return 501. A registration must have a healthy prepared service; drained
 admission is permitted, removal is not.
 
-`GET /v1/models/variants` requires `X-Loom-Model: scout` and an empty body.
-It returns `object:"list"`, `model`, `selected`, `count`, `offset`, `data` and
+`GET /v1/models/variants` with `X-Loom-Model: scout` and an empty body
+selects the variant inventory for `scout`. Without the header, the same URL
+looks up a deployment named `variants` in the model catalog.
+The inventory response contains `object:"list"`, `model`, `selected`, `count`, `offset`, `data` and
 `next_offset`. Optional `X-Loom-Offset` selects a zero-based index; each page
 contains at most 64 entries in creation order. This is live inventory, not a
 stable snapshot across concurrent removals. Instead, `X-Loom-Variant: 13`

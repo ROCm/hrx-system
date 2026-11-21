@@ -78,6 +78,10 @@ iree_status_t loom_serve_http_request_parser_finalize(
     loom_serve_http_request_parser_t* parser,
     const loom_serve_http_request_t** out_request);
 
+// Returns the encoded path of an origin-form target, excluding its query.
+iree_string_view_t loom_serve_http_request_path(
+    const loom_serve_http_request_t* request);
+
 // Looks up one completed header name using ASCII case-insensitive comparison.
 // Returns false when absent and leaves |out_value| empty.
 bool loom_serve_http_request_lookup_header(
