@@ -1071,6 +1071,9 @@ bool loom_value_fact_vector_iota_bounds(loom_value_fact_vector_iota_t iota,
 bool loom_value_facts_query_vector_integer_bounds(
     const loom_fact_context_t* context, loom_value_facts_t facts,
     uint64_t maximum_lane_count, int64_t* out_lower, int64_t* out_upper) {
+  if (facts.extension_id == LOOM_VALUE_FACT_EXTENSION_ID_NONE) {
+    return loom_value_facts_bounded_integer_range(facts, out_lower, out_upper);
+  }
   const loom_value_fact_extension_entry_t* entry =
       loom_value_facts_lookup_extension(context, facts);
   if (!entry) {

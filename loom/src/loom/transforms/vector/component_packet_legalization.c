@@ -575,6 +575,11 @@ static bool loom_vector_component_root_is_selected(
   if (root_index == component_root_index) {
     return true;
   }
+  // An undemanded operand remains at its authored position. It can consume
+  // another operand's result before the proposed component insertion point.
+  if (!plan->records[root_index].demanded) {
+    return false;
+  }
   for (uint16_t i = 0; i < record->op->operand_count; ++i) {
     if (loom_vector_component_operand_root(plan, record, i) == root_index) {
       return true;

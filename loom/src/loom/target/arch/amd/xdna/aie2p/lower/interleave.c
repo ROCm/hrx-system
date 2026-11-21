@@ -47,6 +47,7 @@ static_assert(sizeof(loom_aie2p_interleave_plan_t) == 18,
 
 static bool loom_aie2p_interleave_plan_from_op(
     const loom_module_t* module, const loom_op_t* source_op,
+    loom_target_contract_vector_lane_projection_t projection,
     loom_aie2p_interleave_plan_t* out_plan) {
   *out_plan = (loom_aie2p_interleave_plan_t){0};
 
@@ -55,23 +56,23 @@ static bool loom_aie2p_interleave_plan_from_op(
   loom_vector_interleave_kind_t kind = LOOM_VECTOR_INTERLEAVE_KIND_ZIP;
   int64_t axis = 0;
   if (loom_vector_interleave_isa(source_op)) {
-    source_type =
-        loom_module_value_type(module, loom_vector_interleave_even(source_op));
-    const loom_type_t odd_type =
-        loom_module_value_type(module, loom_vector_interleave_odd(source_op));
-    result_type = loom_module_value_type(
-        module, loom_vector_interleave_result(source_op));
+    source_type = loom_target_contract_query_value_type(
+        projection, module, loom_vector_interleave_even(source_op));
+    const loom_type_t odd_type = loom_target_contract_query_value_type(
+        projection, module, loom_vector_interleave_odd(source_op));
+    result_type = loom_target_contract_query_value_type(
+        projection, module, loom_vector_interleave_result(source_op));
     if (!loom_type_equal(source_type, odd_type)) {
       return false;
     }
     axis = loom_vector_interleave_axis(source_op);
   } else if (loom_vector_deinterleave_isa(source_op)) {
-    source_type = loom_module_value_type(
-        module, loom_vector_deinterleave_source(source_op));
-    result_type = loom_module_value_type(
-        module, loom_vector_deinterleave_even(source_op));
-    const loom_type_t odd_type =
-        loom_module_value_type(module, loom_vector_deinterleave_odd(source_op));
+    source_type = loom_target_contract_query_value_type(
+        projection, module, loom_vector_deinterleave_source(source_op));
+    result_type = loom_target_contract_query_value_type(
+        projection, module, loom_vector_deinterleave_even(source_op));
+    const loom_type_t odd_type = loom_target_contract_query_value_type(
+        projection, module, loom_vector_deinterleave_odd(source_op));
     if (!loom_type_equal(result_type, odd_type)) {
       return false;
     }
@@ -142,11 +143,9 @@ iree_status_t loom_aie2p_query_interleave_contract(
     loom_target_contract_query_result_t* out_result) {
   (void)user_data;
   *out_result = loom_target_contract_query_result_empty();
-  if (environment->vector_lane_projection.source_lane_count != 0) {
-    return iree_ok_status();
-  }
   loom_aie2p_interleave_plan_t plan = {0};
   if (loom_aie2p_interleave_plan_from_op(environment->module, source_op,
+                                         environment->vector_lane_projection,
                                          &plan)) {
     out_result->outcome = LOOM_TARGET_CONTRACT_QUERY_LEGAL;
   }
@@ -159,7 +158,8 @@ iree_status_t loom_aie2p_select_interleave_plan(
   *out_plan = loom_low_lower_plan_empty();
   loom_aie2p_interleave_plan_t matched_plan = {0};
   if (!loom_aie2p_interleave_plan_from_op(
-          loom_low_lower_context_module(context), source_op, &matched_plan)) {
+          loom_low_lower_context_module(context), source_op,
+          (loom_target_contract_vector_lane_projection_t){0}, &matched_plan)) {
     return iree_ok_status();
   }
 

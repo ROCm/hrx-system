@@ -1237,6 +1237,25 @@ TEST_F(FactTableTest, MaximumElementCountUsesExtentFacts) {
             UINT64_MAX);
 }
 
+TEST_F(FactTableTest, VectorIntegerBoundsUseSharedNumericRange) {
+  loom_value_fact_table_t table = {0};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
+
+  int64_t lower = 0;
+  int64_t upper = 0;
+  EXPECT_TRUE(loom_value_facts_query_vector_integer_bounds(
+      &table.context, loom_value_facts_make(0, 127, 1), 32, &lower, &upper));
+  EXPECT_EQ(lower, 0);
+  EXPECT_EQ(upper, 127);
+
+  for (const auto facts :
+       {loom_value_facts_unknown(), loom_value_facts_make(0, INT64_MAX, 1),
+        loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 1.0)}) {
+    EXPECT_FALSE(loom_value_facts_query_vector_integer_bounds(
+        &table.context, facts, 32, &lower, &upper));
+  }
+}
+
 TEST_F(FactTableTest, VectorIntegerBoundsSummarizeExplicitLanes) {
   loom_value_fact_table_t table = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));

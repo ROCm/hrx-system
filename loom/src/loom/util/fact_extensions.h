@@ -618,8 +618,9 @@ bool loom_value_fact_vector_iota_bounds(loom_value_fact_vector_iota_t iota,
                                         uint64_t maximum_lane_count,
                                         int64_t* out_lower, int64_t* out_upper);
 
-// Returns inclusive integer bounds across every logical lane represented by a
-// uniform-element, small-static-lanes, or vector-iota extension. Iota bounds
+// Returns inclusive integer bounds across every logical lane from a numeric
+// summary or a uniform-element, small-static-lanes, or vector-iota extension.
+// A numeric summary bounds each lane independently of the other lanes. Iotas
 // use |maximum_lane_count| as either the exact static lane count or a proven
 // upper bound; UINT64_MAX means the lane count is unavailable. Empty explicit
 // lane lists and zero-count iotas report the canonical empty interval [0, -1].
