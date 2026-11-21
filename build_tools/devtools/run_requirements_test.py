@@ -81,7 +81,18 @@ REQUIREMENTS = [BUILD, RUN]
     def test_audits_actual_tag_fields_in_both_build_system_formats(self):
         for requirement in ("device", "typo"):
             tag = "iree-run-requirement=" + requirement
-            xml = f'<query><rule name="//suite:test"><list name="tags"><string value="{tag}"/></list></rule></query>'
+            other = {
+                "name": "other",
+                "stringListValue": ["iree-run-requirement=unrelated"],
+            }
+            records = []
+            for name, value in (
+                ("//suite:first", "iree-run-requirement=device"),
+                ("//suite:test", tag),
+            ):
+                tags = {"name": "tags", "stringListValue": [value]}
+                rule = {"name": name, "attribute": [other, tags]}
+                records.append(json.dumps({"rule": rule}))
             ctest = json.dumps(
                 {
                     "kind": "ctestInfo",
@@ -95,7 +106,7 @@ REQUIREMENTS = [BUILD, RUN]
                 }
             )
             for audit, payload in (
-                (run_requirements.audit_bazel_xml, xml),
+                (run_requirements.audit_bazel_json, "\n".join(records)),
                 (run_requirements.audit_ctest_json, ctest),
             ):
                 with self.subTest(requirement=requirement, audit=audit.__name__):

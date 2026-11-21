@@ -17,7 +17,6 @@ import shutil
 import subprocess
 import sys
 import time
-import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -526,12 +525,9 @@ def bazel_test_step(
         dev_command(*command),
         requirement_audit=RequirementAudit(
             dev_command(
-                "bazel",
-                "query",
-                run_requirements.bazel_test_query(targets),
-                "--output=xml",
+                "bazel", "query", *run_requirements.bazel_audit_query_args(targets)
             ),
-            run_requirements.audit_bazel_xml,
+            run_requirements.audit_bazel_json,
         ),
     )
 
@@ -1870,7 +1866,7 @@ def audit_requirements(
         return completed.returncode
     try:
         audit.validate(completed.stdout)
-    except (ValueError, ET.ParseError, KeyError, TypeError) as error:
+    except (ValueError, KeyError, TypeError) as error:
         print(f"Invalid test run requirements: {error}", file=sys.stderr)
         return 1
     return 0

@@ -204,7 +204,13 @@ class CiTest(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as directory:
                     root = Path(directory)
                     output = root / "executed"
-                    payload = f'<query><rule name="//suite:test"><list name="tags"><string value="iree-run-requirement={requirement}"/></list></rule></query>'
+                    tags = {
+                        "name": "tags",
+                        "stringListValue": [f"iree-run-requirement={requirement}"],
+                    }
+                    payload = json.dumps(
+                        {"rule": {"name": "//suite:test", "attribute": [tags]}}
+                    )
                     step = ci.CiStep(
                         "Test",
                         (
@@ -218,7 +224,7 @@ class CiTest(unittest.TestCase):
                                 "-c",
                                 f"print({payload!r}); raise SystemExit({audit_code})",
                             ),
-                            run_requirements.audit_bazel_xml,
+                            run_requirements.audit_bazel_json,
                         ),
                     )
                     with (
