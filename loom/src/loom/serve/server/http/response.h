@@ -33,7 +33,7 @@ iree_status_t loom_serve_http_response_error(
     loom_serve_http_server_t* server, loom_serve_http_connection_t* connection,
     iree_status_t status, iree_string_builder_t* scratch);
 
-// Sends a 404 with the model_not_found code for an unregistered selector.
+// Sends a 404 with model_not_found when a named model cannot be found.
 // The name may borrow scratch. Other missing resources have their own errors.
 iree_status_t loom_serve_http_response_model_not_found(
     loom_serve_http_server_t* server, loom_serve_http_connection_t* connection,

@@ -9,6 +9,7 @@
 #include <inttypes.h>
 
 #include "iree/base/internal/json.h"
+#include "iree/base/internal/unicode.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/task/owner.h"
 #include "loom/runtime/device/device.h"
@@ -1071,9 +1072,9 @@ static void loom_serve_router_held_collect(loom_serve_router_t* router,
   router->held.count = remaining;
 }
 
-static iree_status_t loom_serve_router_control(
-    loom_serve_router_t* router, iree_host_size_t service_index,
-    loom_serve_http_connection_t* connection, int code) {
+static iree_status_t loom_serve_router_send_model(
+    loom_serve_router_t* router, const loom_serve_registered_model_t* model,
+    loom_serve_http_connection_t* connection, int code, bool include_status) {
   iree_string_builder_t* output = &router->output;
   iree_string_builder_reset(output);
   iree_status_t status = iree_string_builder_append_format(
@@ -1082,8 +1083,7 @@ static iree_status_t loom_serve_router_control(
       "Connection: close\r\n\r\n",
       code, code == 202 ? "Accepted" : "OK");
   if (iree_status_is_ok(status)) {
-    status = loom_serve_router_describe_service(
-        loom_serve_router_model_at(router, service_index), true, output);
+    status = loom_serve_router_describe_service(model, include_status, output);
   }
   if (iree_status_is_ok(status)) {
     loom_serve_http_response_send(router->server, connection,
@@ -1118,7 +1118,9 @@ static iree_status_t loom_serve_router_register(
     return loom_serve_http_response_error(router->server, connection, status,
                                           &router->output);
   }
-  return loom_serve_router_control(router, index, connection, 202);
+  return loom_serve_router_send_model(router,
+                                      loom_serve_router_model_at(router, index),
+                                      connection, 202, /*include_status=*/true);
 }
 
 static iree_status_t loom_serve_router_trim(
@@ -1266,6 +1268,70 @@ static bool loom_serve_router_model_is_published(
          iree_status_is_ok(model->status);
 }
 
+// Plain IDs borrow the request. Escaped IDs borrow the router's response
+// scratch until lookup completes. A '+' is literal in a path component.
+static iree_status_t loom_serve_router_decode_model_id(
+    iree_string_view_t encoded, iree_string_builder_t* scratch,
+    iree_string_view_t* out_name) {
+  if (iree_string_view_find_char(encoded, '%', 0) == IREE_STRING_VIEW_NPOS) {
+    *out_name = encoded;
+    return iree_ok_status();
+  }
+  iree_string_builder_reset(scratch);
+  char* data = NULL;
+  iree_host_size_t capacity = 0;
+  IREE_RETURN_IF_ERROR(iree_string_builder_reserve_for_append(
+      scratch, encoded.size, &data, &capacity));
+  iree_host_size_t length = 0;
+  for (iree_host_size_t i = 0; i < encoded.size; ++i) {
+    uint8_t byte = (uint8_t)encoded.data[i];
+    if (byte == '%') {
+      if (!iree_string_view_parse_hex_bytes(
+              iree_string_view_substr(encoded, i + 1, 2), 1, &byte)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "invalid percent escape in model ID");
+      }
+      if (!byte) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "model ID must not contain NUL");
+      }
+      i += 2;
+    }
+    data[length++] = (char)byte;
+  }
+  iree_string_builder_commit_append(scratch, length);
+  const iree_string_view_t name = iree_string_builder_view(scratch);
+  if (!iree_unicode_utf8_validate(name)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "model ID must be valid UTF-8");
+  }
+  *out_name = name;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_serve_router_retrieve_model(
+    loom_serve_router_t* router, loom_serve_http_connection_t* connection,
+    iree_string_view_t encoded_name) {
+  iree_string_view_t name;
+  iree_status_t status =
+      loom_serve_router_decode_model_id(encoded_name, &router->output, &name);
+  if (!iree_status_is_ok(status)) {
+    return loom_serve_http_response_error(router->server, connection, status,
+                                          &router->output);
+  }
+  for (iree_host_size_t i = 0; i < router->driver.runtime.capacity; ++i) {
+    const loom_serve_registered_model_t* model =
+        loom_serve_router_model_at(router, i);
+    if (iree_string_view_equal(model->service.name, name) &&
+        loom_serve_router_model_is_published(model)) {
+      return loom_serve_router_send_model(router, model, connection, 200,
+                                          /*include_status=*/false);
+    }
+  }
+  return loom_serve_http_response_model_not_found(router->server, connection,
+                                                  name, &router->output);
+}
+
 static iree_status_t loom_serve_router_inference_readiness(
     loom_serve_router_t* router, loom_serve_http_connection_t* connection,
     bool identify_model) {
@@ -1346,7 +1412,7 @@ static iree_status_t loom_serve_router_accept(
     loom_serve_http_live_accept(router->live, connection, request);
     return iree_ok_status();
   }
-  if (loom_serve_http_variants_handles(request->target)) {
+  if (loom_serve_http_variants_handles(request)) {
     const bool allow_wait =
         router->held.count + router->logs.count +
             loom_serve_http_live_count(router->live) +
@@ -1391,13 +1457,17 @@ static iree_status_t loom_serve_router_accept(
       iree_string_view_equal(request->target, IREE_SV("/v1/status"));
   bool list_models = false;
   if (get) {
-    iree_string_view_t target = request->target;
+    iree_string_view_t target = loom_serve_http_request_path(request);
     iree_string_view_consume_prefix(&target, IREE_SV("/v1"));
     const bool ready = iree_string_view_equal(target, IREE_SV("/ready"));
     if (ready || iree_string_view_equal(target, IREE_SV("/health"))) {
       return loom_serve_router_inference_readiness(router, connection, ready);
     }
     list_models = iree_string_view_equal(target, IREE_SV("/models"));
+    if (iree_string_view_consume_prefix(&target, IREE_SV("/models/")) &&
+        target.size) {
+      return loom_serve_router_retrieve_model(router, connection, target);
+    }
   }
   if (get && (include_status || list_models)) {
     iree_string_builder_reset(output);
@@ -1534,7 +1604,8 @@ static iree_status_t loom_serve_router_accept(
           return loom_serve_http_response_error(router->server, connection,
                                                 status, &router->output);
         }
-        return loom_serve_router_control(router, i, connection, 202);
+        return loom_serve_router_send_model(router, state, connection, 202,
+                                            /*include_status=*/true);
       }
       if (pin || unpin) {
         iree_status_t status =
@@ -1543,7 +1614,8 @@ static iree_status_t loom_serve_router_accept(
           return loom_serve_http_response_error(router->server, connection,
                                                 status, &router->output);
         }
-        return loom_serve_router_control(router, i, connection, 200);
+        return loom_serve_router_send_model(router, state, connection, 200,
+                                            /*include_status=*/true);
       }
       if (deactivate || activate) {
         iree_status_t status =
@@ -1553,7 +1625,8 @@ static iree_status_t loom_serve_router_accept(
           return loom_serve_http_response_error(router->server, connection,
                                                 status, &router->output);
         }
-        return loom_serve_router_control(router, i, connection, 202);
+        return loom_serve_router_send_model(router, state, connection, 202,
+                                            /*include_status=*/true);
       }
       if (drain || undrain) {
         if (undrain &&
@@ -1569,7 +1642,8 @@ static iree_status_t loom_serve_router_accept(
               output);
         }
         state->closed = drain;
-        return loom_serve_router_control(router, i, connection, 200);
+        return loom_serve_router_send_model(router, state, connection, 200,
+                                            /*include_status=*/true);
       }
       if (state->removal || !iree_status_is_ok(state->status)) {
         return loom_serve_router_reject_unavailable_model(router, connection,

@@ -404,7 +404,9 @@ TEST_P(HttpRouterVariantTest, InvalidInputLeavesPoolAndServiceUnchanged) {
         Read(Send("POST", "/v1/models/variants", prefix + suffix));
     EXPECT_EQ(response.find("HTTP/1.1 400"), 0u) << response;
   }
-  EXPECT_EQ(Read(Send("GET", "/v1/models/variants")).find("HTTP/1.1 400"), 0u);
+  const auto missing = Read(Send("GET", "/v1/models/variants"));
+  EXPECT_EQ(missing.find("HTTP/1.1 404"), 0u);
+  EXPECT_NE(missing.find("\"code\":\"model_not_found\""), std::string::npos);
   EXPECT_EQ(Inventory("X-Loom-Variant: 0\r\n").find("HTTP/1.1 400"), 0u);
   EXPECT_EQ(Inventory("X-Loom-Offset: -1\r\n").find("HTTP/1.1 400"), 0u);
   EXPECT_EQ(Read(Send("GET", "/v1/models/variants", "", "X-Loom-Model: a\r\n"))

@@ -29,8 +29,9 @@ bool loom_serve_http_variants_pending(
 iree_host_size_t loom_serve_http_variants_claims(
     const loom_serve_http_variants_t* variants);
 
-// Recognizes the variant inventory/stage/select/remove management paths.
-bool loom_serve_http_variants_handles(iree_string_view_t target);
+// Recognizes variant management. On GET, X-Loom-Model selects inventory at
+// the path also used by the catalog for a deployment named "variants".
+bool loom_serve_http_variants_handles(const loom_serve_http_request_t* request);
 
 // Consumes the request claim by responding or retaining an asynchronous
 // observer. allow_wait reflects shared transport credit, including other

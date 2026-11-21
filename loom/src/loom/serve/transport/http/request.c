@@ -816,6 +816,13 @@ iree_status_t loom_serve_http_request_parser_finalize(
                               : "HTTP connection ended inside the body");
 }
 
+iree_string_view_t loom_serve_http_request_path(
+    const loom_serve_http_request_t* request) {
+  iree_string_view_t path;
+  iree_string_view_split(request->target, '?', &path, NULL);
+  return path;
+}
+
 bool loom_serve_http_request_lookup_header(
     const loom_serve_http_request_t* request, iree_string_view_t name,
     iree_string_view_t* out_value) {

@@ -32,10 +32,11 @@ typedef struct loom_serve_router_options_t {
 // Routes JSON request bodies by their model field and checkpoint operations by
 // X-Loom-Model. A checkpoint request may omit its selector with exactly one
 // service. GET /v1/models lists prepared, non-removing deployments and their
-// namespaced capabilities. GET /v1/status includes every registration through
-// retirement, copied scheduler ownership and a server object containing actual
-// worker/admission/framing bounds and published resources. No hardware polling
-// or device synchronization is performed. /healthz and /readyz are
+// namespaced capabilities. GET /v1/models/{id} returns the same catalog entry.
+// GET /v1/status includes every registration through retirement, copied
+// scheduler ownership, and the server's worker, admission, and framing limits
+// and published resources. These queries read host state without polling
+// hardware or synchronizing devices. /healthz and /readyz are
 // model-free: HTTP is available, independently of model preparation/activation.
 // Zero services is valid: model/status lists are empty, work counters are zero,
 // and inference or tokenization requests receive model-not-registered errors.
