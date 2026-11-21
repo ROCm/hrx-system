@@ -26,9 +26,9 @@ typedef struct loom_low_source_scf_projection_result_t {
 } loom_low_source_scf_projection_result_t;
 
 // Projects source SCF forms not admitted by the selected source-to-Low control
-// representation. Keyed value lookups are projected in every mode. Structured
-// lowering additionally projects multi-way control to nested conditions; CFG
-// lowering consumes scf.switch directly before source-to-Low runs.
+// representation. Remaining keyed lookups use selects in their original block.
+// Structured targets also project multi-way control to nested conditions.
+// CFG targets consume scf.switch before source-to-Low.
 iree_status_t loom_low_source_scf_projection_run(
     loom_module_t* module, loom_func_like_t function,
     loom_low_control_flow_lowering_t control_flow_lowering,
