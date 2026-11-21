@@ -15,13 +15,13 @@ Install the [Loom SDK](../../getting-started/acquiring-loom.md), including the
 `hf` extra for Hugging Face acquisition. The example's smoke test requires
 `loom-serve` with the x86 CPU JIT and `task` device enabled.
 
-Use the template from the same release as your SDK. Its model card and
-programs use that release's serving interface. For `hrx-loom==0.2.0`, the
-[publication files](https://github.com/ROCm/hrx-system/tree/v0.2.0/loom/docs/examples/serving/model-publication)
-are available with a sparse checkout.
+The publication template in each release implements that SDK's text service
+ABI. Select the release tag from the installed wheel and check out just the
+template directory.
 
 ```sh
-git clone --depth=1 --filter=blob:none --sparse --branch=v0.2.0 https://github.com/ROCm/hrx-system.git loom-template
+sdk_tag=$(python -c 'from importlib.metadata import version; print("v" + version("hrx-loom").split("+")[0])')
+git clone --depth=1 --filter=blob:none --sparse --branch="$sdk_tag" https://github.com/ROCm/hrx-system.git loom-template
 git -C loom-template sparse-checkout set loom/docs/examples/serving/model-publication
 cd loom-template/loom/docs/examples/serving/model-publication
 python smoke.py

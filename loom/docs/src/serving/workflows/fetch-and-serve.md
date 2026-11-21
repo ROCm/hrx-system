@@ -38,11 +38,14 @@ distribute runnable model cards directly. The
 includes community ports with device and memory guidance in their READMEs.
 For a first request on a Vulkan device, [try the tiny text model](#try-vulkan).
 
-To see which presets a card offers before downloading weights, pass its
-repository to `--list`. Then fetch the preset that matches your hardware.
+To see which presets and service ABI versions a card offers before downloading
+weights, pass its repository to `--list --json`. For a `text` service, version
+2 runs with the 0.3 SDK and version 1 runs with the 0.2 SDK. The default SDK
+catalog selects model programs for its release. Independent publishers choose
+which releases and devices their programs support.
 
 ```sh
-loom-fetch huggingface:loom-fun/unsloth-Qwen3-0.6B-loom --list
+loom-fetch huggingface:loom-fun/unsloth-Qwen3-0.6B-loom --list --json
 loom-fetch huggingface:loom-fun/unsloth-Qwen3-0.6B-loom:chat --output=./qwen3
 ```
 
@@ -335,12 +338,14 @@ families and the Vulkan execution requirements. Check each model publisher's
 supported backends when choosing a port.
 
 The tiny text model uses a four-byte parameter and runs on both Vulkan and CPU.
-Fetch it from the tag matching your installed SDK. These commands use
-`hrx-loom==0.2.0`.
+For a published SDK, use the release tag of the installed wheel so the model
+and server speak the same text ABI. For a development build, use its source
+commit as `sdk_ref`.
 
 ```sh
 loom-run --list_devices=vulkan
-loom-fetch https://raw.githubusercontent.com/ROCm/hrx-system/v0.2.0/loom/docs/examples/serving/model-publication/model/tiny-text/model.json --output=./tiny-text
+sdk_ref=$(python -c 'from importlib.metadata import version; print("v" + version("hrx-loom").split("+")[0])')
+loom-fetch "https://raw.githubusercontent.com/ROCm/hrx-system/${sdk_ref}/loom/docs/examples/serving/model-publication/model/tiny-text/model.json" --output=./tiny-text
 loom-serve --device=vulkan --pool_backing=fixed --listen=127.0.0.1:8081 --model=./tiny-text
 ```
 
