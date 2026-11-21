@@ -157,7 +157,9 @@ def parse_json(source: str) -> Any:
 
     try:
         value = json.loads(
-            source, object_pairs_hook=_unique_object, parse_constant=reject_constant
+            source.removeprefix("\ufeff"),
+            object_pairs_hook=_unique_object,
+            parse_constant=reject_constant,
         )
     except json.JSONDecodeError as error:
         raise ManifestError(f"$: {error}") from error

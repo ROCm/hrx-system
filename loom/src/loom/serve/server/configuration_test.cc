@@ -152,6 +152,17 @@ TEST_F(ConfigurationTest, DeploymentOwnsItsPresetSelection) {
   EXPECT_EQ(model_.name.data, nullptr);
 }
 
+TEST_F(ConfigurationTest, LoadsUtf8FilesWithAByteOrderMark) {
+  IREE_ASSERT_OK(Load("\xEF\xBB\xBF\r\n" + Card("text")));
+  EXPECT_EQ(String(model_.name), "publisher/model");
+
+  const std::string with_comment = "\xEF\xBB\xBF// local settings\r\n";
+  IREE_ASSERT_OK(Load(with_comment + Text()));
+  EXPECT_EQ(String(model_.name), "scout");
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Load(with_comment + Card("text")));
+}
+
 TEST_F(ConfigurationTest, DirectCardRetainsLazyImageContractAndDefaults) {
   auto json = Card("text");
   json.insert(json.find("\"version\":1"),

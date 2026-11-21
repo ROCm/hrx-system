@@ -962,9 +962,15 @@ iree_status_t loom_serve_model_configuration_load(
   const iree_string_view_t json =
       iree_make_string_view((const char*)contents->const_buffer.data,
                             contents->const_buffer.data_length);
+  // Probe on a cursor so the selected parser still sees the whole file.
+  // Portable cards must reject even a leading JSONC comment.
+  iree_string_view_t object = json;
   iree_string_view_t revision = iree_string_view_empty();
-  iree_status_t status = iree_json_try_lookup_object_value(
-      json, IREE_SV("schema_version"), &revision);
+  iree_status_t status = iree_json_consume_insignificant(&object);
+  if (iree_status_is_ok(status)) {
+    status = iree_json_try_lookup_object_value(
+        object, IREE_SV("schema_version"), &revision);
+  }
   if (iree_status_is_ok(status)) {
     if (revision.data) {
       status = loom_serve_model_configuration_card(json, directory, preset,

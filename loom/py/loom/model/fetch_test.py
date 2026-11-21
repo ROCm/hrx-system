@@ -57,10 +57,11 @@ def test_catalog_receipt_is_owned_verified_and_published_with_the_card(tmp_path)
     publication.mkdir()
     (publication / "code.loom").write_bytes(b"code")
     (publication / "weights.data").write_bytes(b"weights")
-    text = json.dumps(_card())
     card = publication / "model.json"
-    card.write_text(text)
+    card.write_bytes((json.dumps(_card()) + "\r\n").encode("utf-8-sig"))
     cache = ContentCache(tmp_path / "cache")
+    document = cache.read_document(str(card), offline=True)
+    selection = ModelCard.parse(document.text).select()
     snapshot = {
         "source": "github:fixture/library@compatible",
         "location": "https://raw.githubusercontent.com/fixture/library/"
@@ -69,8 +70,8 @@ def test_catalog_receipt_is_owned_verified_and_published_with_the_card(tmp_path)
         "revision": "a" * 40,
     }
     plan = plan_fetch(
-        cache.read_document(str(card), offline=True),
-        ModelCard.parse(text).select(),
+        document,
+        selection,
         cache,
         no_lock=True,
         catalog=snapshot,
@@ -82,12 +83,12 @@ def test_catalog_receipt_is_owned_verified_and_published_with_the_card(tmp_path)
     assert receipt["catalog"]["revision"] == "a" * 40
     assert receipt["card"] == {
         "location": str(card),
-        "sha256": hashlib.sha256(text.encode()).hexdigest(),
+        "sha256": hashlib.sha256(card.read_bytes()).hexdigest(),
     }
     check_output(plan, output)
     aliased_plan = plan_fetch(
-        cache.read_document(str(card), offline=True),
-        ModelCard.parse(text).select(),
+        document,
+        selection,
         cache,
         no_lock=True,
         catalog={
