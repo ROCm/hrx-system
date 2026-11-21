@@ -685,6 +685,23 @@ def check_startup_failures(server_command, directory, catalog):
             )
 
 
+def check_model_lookup_errors(client):
+    for target, body, headers in (
+        ("/v1/chat/completions", {"model": "absent"}, None),
+        ("/v1/embeddings", {"model": "absent"}, None),
+        ("/tokenize", {"model": "absent"}, None),
+        ("/detokenize", {"model": "absent"}, None),
+        ("/v1/models/variants", None, {"X-Loom-Model": "absent"}),
+        ("/v1/models/variants/remove", {"model": "absent", "variant": 1}, None),
+    ):
+        error = client.request(target, body, headers=headers, status=404)["error"]
+        assert error["code"] == "model_not_found", error
+        assert error["type"] == "loom_route_error", error
+        assert "absent" in error["message"] and "/v1/models" in error["message"], error
+    unknown_route = client.request("/v1/absent-endpoint", status=404)["error"]
+    assert unknown_route.get("code") != "model_not_found", unknown_route
+
+
 def check_empty_server(server_command, directory, driver, backing):
     catalog = directory / "empty.flags"
     catalog.write_text("# No startup models\n")
@@ -809,12 +826,7 @@ def check_empty_server(server_command, directory, driver, backing):
                 {"pool": "pool", "target_bytes": 2**64},
             ):
                 client.request("/v1/pools/trim", value, status=400)
-            for target in ("/v1/embeddings", "/tokenize", "/detokenize"):
-                error = client.request(target, {"model": "absent"}, status=404)["error"]
-                assert error["type"] == "loom_route_error", error
-                assert (
-                    "absent" in error["message"] and "/v1/models" in error["message"]
-                ), error
+            check_model_lookup_errors(client)
             observer = LogClient("http://" + address, timeout=None)
             assert observer.models() == []
             batch = observer.poll()
@@ -1742,6 +1754,7 @@ def run_from_command_line(*, stress=False):
                     "fixture-text",
                 ]
             )
+            check_model_lookup_errors(client)
             if stress:
                 with paused_log_reader(client, arguments.rounds):
                     for iteration in range(arguments.rounds):

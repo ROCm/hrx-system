@@ -243,7 +243,9 @@ static iree_status_t loom_serve_http_variant_parse(
                                          loom_serve_http_variant_source, input);
 }
 
-static iree_status_t loom_serve_http_variant_model(
+// Returns the matching slot or IREE_HOST_SIZE_MAX for an unregistered name.
+// A registered model that cannot serve variants returns its own error.
+static iree_status_t loom_serve_http_variant_find_model(
     loom_serve_http_variants_t* variants, iree_string_view_t name,
     iree_host_size_t* out_index) {
   const iree_host_size_t capacity =
@@ -266,7 +268,8 @@ static iree_status_t loom_serve_http_variant_model(
     *out_index = i;
     return iree_ok_status();
   }
-  return loom_serve_http_model_not_found(name);
+  *out_index = IREE_HOST_SIZE_MAX;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_serve_http_variant_write(
@@ -350,7 +353,12 @@ static iree_status_t loom_serve_http_variant_inventory(
         scratch);
   }
   iree_host_size_t index = 0;
-  iree_status_t status = loom_serve_http_variant_model(variants, name, &index);
+  iree_status_t status =
+      loom_serve_http_variant_find_model(variants, name, &index);
+  if (iree_status_is_ok(status) && index == IREE_HOST_SIZE_MAX) {
+    return loom_serve_http_response_model_not_found(variants->server,
+                                                    connection, name, scratch);
+  }
   iree_string_view_t identity = iree_string_view_empty();
   loom_serve_http_request_lookup_header(request, IREE_SV("X-Loom-Variant"),
                                         &identity);
@@ -517,7 +525,13 @@ iree_status_t loom_serve_http_variants_accept(
   }
   iree_host_size_t index = 0;
   if (iree_status_is_ok(status)) {
-    status = loom_serve_http_variant_model(variants, input.model, &index);
+    status = loom_serve_http_variant_find_model(variants, input.model, &index);
+    if (iree_status_is_ok(status) && index == IREE_HOST_SIZE_MAX) {
+      iree_status_t response = loom_serve_http_response_model_not_found(
+          variants->server, connection, input.model, scratch);
+      loom_serve_http_variant_input_deinitialize(&input);
+      return response;
+    }
   }
   const bool observe = action == LOOM_SERVE_HTTP_VARIANT_SELECT || input.wait;
   if (iree_status_is_ok(status) && observe && !allow_wait) {

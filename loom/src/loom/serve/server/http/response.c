@@ -8,13 +8,6 @@
 
 #include "loom/util/json.h"
 
-iree_status_t loom_serve_http_model_not_found(iree_string_view_t name) {
-  return iree_make_status(IREE_STATUS_NOT_FOUND,
-                          "model '%.*s' is not registered. List available "
-                          "model IDs with GET /v1/models",
-                          (int)name.size, name.data);
-}
-
 void loom_serve_http_response_send(loom_serve_http_server_t* server,
                                    loom_serve_http_connection_t* connection,
                                    iree_string_view_t response) {
@@ -33,10 +26,10 @@ void loom_serve_http_response_send(loom_serve_http_server_t* server,
   }
 }
 
-iree_status_t loom_serve_http_response_reject(
+static iree_status_t loom_serve_http_write_rejection(
     loom_serve_http_server_t* server, loom_serve_http_connection_t* connection,
     int code, const char* reason, iree_string_view_t message,
-    iree_string_builder_t* scratch) {
+    const char* error_code, iree_string_builder_t* scratch) {
   iree_string_builder_reset(scratch);
   iree_status_t status = iree_string_builder_append_format(
       scratch,
@@ -47,6 +40,10 @@ iree_status_t loom_serve_http_response_reject(
     loom_output_stream_t stream;
     loom_output_stream_for_builder(scratch, &stream);
     status = loom_json_write_escaped_string(&stream, message);
+  }
+  if (iree_status_is_ok(status) && error_code) {
+    status = iree_string_builder_append_format(scratch, ",\"code\":\"%s\"",
+                                               error_code);
   }
   if (iree_status_is_ok(status)) {
     status = iree_string_builder_append_cstring(
@@ -61,9 +58,18 @@ iree_status_t loom_serve_http_response_reject(
   return status;
 }
 
-iree_status_t loom_serve_http_response_error(
+iree_status_t loom_serve_http_response_reject(
     loom_serve_http_server_t* server, loom_serve_http_connection_t* connection,
-    iree_status_t status, iree_string_builder_t* scratch) {
+    int code, const char* reason, iree_string_view_t message,
+    iree_string_builder_t* scratch) {
+  return loom_serve_http_write_rejection(server, connection, code, reason,
+                                         message, NULL, scratch);
+}
+
+static iree_status_t loom_serve_http_send_status(
+    loom_serve_http_server_t* server, loom_serve_http_connection_t* connection,
+    iree_status_t status, const char* error_code,
+    iree_string_builder_t* scratch) {
   int code = 500;
   const char* reason = "Internal Server Error";
   switch (iree_status_code(status)) {
@@ -98,8 +104,27 @@ iree_status_t loom_serve_http_response_error(
   if (!message.size) {
     message = iree_make_cstring_view(reason);
   }
-  iree_status_t response = loom_serve_http_response_reject(
-      server, connection, code, reason, message, scratch);
+  iree_status_t response = loom_serve_http_write_rejection(
+      server, connection, code, reason, message, error_code, scratch);
   iree_status_free(status);
   return response;
+}
+
+iree_status_t loom_serve_http_response_error(
+    loom_serve_http_server_t* server, loom_serve_http_connection_t* connection,
+    iree_status_t status, iree_string_builder_t* scratch) {
+  return loom_serve_http_send_status(server, connection, status, NULL, scratch);
+}
+
+iree_status_t loom_serve_http_response_model_not_found(
+    loom_serve_http_server_t* server, loom_serve_http_connection_t* connection,
+    iree_string_view_t name, iree_string_builder_t* scratch) {
+  // The decoded selector may borrow scratch. Capture it before rendering.
+  iree_status_t status =
+      iree_make_status(IREE_STATUS_NOT_FOUND,
+                       "model '%.*s' is not registered. List available "
+                       "model IDs with GET /v1/models",
+                       (int)name.size, name.data);
+  return loom_serve_http_send_status(server, connection, status,
+                                     "model_not_found", scratch);
 }

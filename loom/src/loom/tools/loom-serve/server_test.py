@@ -53,15 +53,17 @@ class ServerTest(unittest.TestCase):
                 self.assertIsNotNone(bound_address, log.read_text())
                 address = urlsplit(f"http://{bound_address}")
                 text = {"content": "ab"}
-                self.post(address, "/tokenize", text, expected=404)
+                empty = self.post(address, "/tokenize", text, expected=404)["error"]
+                self.assertNotEqual(empty.get("code"), "model_not_found")
                 self.post(address, "/v1/models/register", document, expected=202)
                 tokens = self.post(address, "/tokenize", text)
                 self.assertEqual(tokens, {"tokens": [0, 1]})
                 self.assertEqual(self.post(address, "/detokenize", tokens), text)
                 self.post(address, "/tokenize", {**text, "model": ""}, expected=400)
-                self.post(
+                missing = self.post(
                     address, "/tokenize", {**text, "model": "absent"}, expected=404
-                )
+                )["error"]
+                self.assertEqual(missing["code"], "model_not_found")
                 self.post(address, "/v1/embeddings", {"input": "ab"}, expected=400)
                 self.post(address, "/v1/models/drain", {}, expected=400)
 
