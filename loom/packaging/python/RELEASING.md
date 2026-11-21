@@ -128,10 +128,10 @@ Repeating without `--dry-run` edits only the named JSON. The release-preparation
 PR includes that change and any updates to [PYPI_README.md](PYPI_README.md), the
 package description embedded in every wheel. Its pull request description also
 contains the exact version-marked editorial section selected for publication.
-The [release-note authoring contract](release_notes/README.md) starts from the
-previous public tag and candidate commit, audits migrations before feature
-prose, and records only evidence-backed outcomes and notable changes. A missing,
-ambiguous, stale, empty, or placeholder-bearing section cannot publish.
+The [release-note authoring contract](release_notes/README.md) gives candidates
+a short summary and unlisted-Gist link while the final stable pull request
+carries the complete reviewed notes. A missing, ambiguous, stale, empty, or
+placeholder-bearing section cannot publish.
 
 Review and CI establish the source revision to release. The release tag points
 directly at the commit GitHub records as the version-bump pull request's merge
@@ -175,6 +175,13 @@ workflow creates the same-version library tag, proves that the candidate SDK's
 implicit `loom-fetch --list` path resolves the tagged admitted catalog, and
 publishes the empty immutable library release.
 
+Create the candidate pull request from
+[CANDIDATE_TEMPLATE.md](release_notes/CANDIDATE_TEMPLATE.md). Its marked section
+contains a short compatibility and evaluator summary plus the unlisted Gist
+holding the evolving full notes. Notable pull requests and the complete
+comparison stay in that Gist throughout the candidate cycle, so each RC does not
+create another set of repository cross-references.
+
 Only after that catalog release is immutable, tag the merged HRX release-line
 commit as `vX.Y.Zrc1`. The SDK workflow requires the matching immutable catalog
 release before any SDK release mutation, then publishes a public GitHub
@@ -198,6 +205,11 @@ normal GitHub release, and publishes its two Release wheels to PyPI. Promoting
 GitHub metadata or reusing candidate artifacts cannot substitute for the stable
 build: the stable version has its own library association, tag, wheel metadata,
 checksums, and attestations.
+
+Before opening that stable identity pull request, refresh the Gist against the
+exact stable range and qualification record, then copy its complete reviewed
+prose into [TEMPLATE.md](release_notes/TEMPLATE.md). The stable pull request is
+the one deliberate source of notable pull-request cross-references.
 
 Successful PyPI publication concludes by opening the main-branch development
 identity pull request described above. Prerelease publication never proposes a
@@ -229,12 +241,14 @@ resumes a draft, verifies its exact asset inventory and SHA-256 digests, uploads
 only missing assets, and publishes only after the set is complete. GitHub
 publication completes before the stable-only PyPI publication starts.
 
-GitHub publication copies the marked editorial section from the exact merged
-version-bump pull request, followed by a generated appendix naming the
-installation path, attached native profiles, standalone executables, checksum
-document, and qualification shape. The body records the source pull request,
-merge commit, version, and editorial digest. Stable releases install from PyPI;
-prereleases install their attached Release wheel directly.
+GitHub publication copies the channel-appropriate marked editorial section from
+the exact merged version-bump pull request, followed by a generated appendix
+naming the installation path, attached native profiles, standalone executables,
+checksum document, and qualification shape. Candidate releases carry the short
+summary and Gist link; the stable release carries the complete reviewed notes.
+The body records the source pull request, merge commit, version, and editorial
+digest. Stable releases install from PyPI; prereleases install their attached
+Release wheel directly.
 
 A draft retry resolves the source pull request again and requires the complete
 composed body to match. After publication, the immutable release body is the
