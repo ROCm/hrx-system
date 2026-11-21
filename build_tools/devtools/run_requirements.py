@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import re
-import xml.etree.ElementTree as ET
 from functools import lru_cache
 from pathlib import Path
 
@@ -76,6 +75,16 @@ def bazel_test_query(targets: tuple[str, ...]) -> str:
     return expression
 
 
+def bazel_audit_query_args(targets: tuple[str, ...]) -> tuple[str, ...]:
+    # Select by namespace so the audit also sees empty and misspelled IDs.
+    return (
+        f'attr("tags", "{TAG_PREFIX}", {bazel_test_query(targets)})',
+        "--output=streamed_jsonproto",
+        "--proto:output_rule_attrs=tags",
+        "--noproto:rule_inputs_and_outputs",
+    )
+
+
 def validate_tags(name: str, tags: list[str]) -> None:
     requirements = {
         tag.removeprefix(TAG_PREFIX) for tag in tags if tag.startswith(TAG_PREFIX)
@@ -87,18 +96,11 @@ def validate_tags(name: str, tags: list[str]) -> None:
         )
 
 
-def audit_bazel_xml(payload: str) -> None:
-    model = ET.fromstring(payload)
-    if model.tag != "query":
-        raise ValueError("Bazel did not return a query XML document")
-    for rule in model.findall("rule"):
-        validate_tags(
-            rule.attrib["name"],
-            [
-                entry.attrib["value"]
-                for entry in rule.findall("list[@name='tags']/string")
-            ],
-        )
+def audit_bazel_json(payload: str) -> None:
+    for line in payload.splitlines():
+        rule = json.loads(line)["rule"]
+        attributes = {attribute["name"]: attribute for attribute in rule["attribute"]}
+        validate_tags(rule["name"], attributes["tags"]["stringListValue"])
 
 
 def audit_ctest_json(payload: str) -> None:
