@@ -24,6 +24,39 @@
 
 namespace {
 
+#if (defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_ANDROID)) && \
+    defined(IREE_PLATFORM_HAS_FUTEX)
+
+TEST(FutexTest, NativeTimeoutPreservesFractionalSeconds) {
+  iree_futex_timespec_t timeout;
+  EXPECT_TRUE(iree_futex_timespec_from_duration(1, &timeout));
+  EXPECT_EQ(timeout.tv_sec, 0);
+  EXPECT_EQ(timeout.tv_nsec, 1);
+
+  // A finite duration that rounds up to UINT32_MAX milliseconds.
+  constexpr int64_t kDuration = int64_t{UINT32_MAX} * 1000000 - 1;
+  EXPECT_TRUE(iree_futex_timespec_from_duration(kDuration, &timeout));
+  EXPECT_EQ(timeout.tv_sec, 4294967);
+  EXPECT_EQ(timeout.tv_nsec, 294999999);
+}
+
+TEST(FutexTest, NativeTimeoutPreservesFiniteRange) {
+  iree_futex_timespec_t timeout;
+  constexpr int64_t kLargestFinite = IREE_DURATION_INFINITE - 1;
+  const bool fits = iree_futex_timespec_from_duration(kLargestFinite, &timeout);
+  if (sizeof(timeout.tv_sec) == 4) {
+    EXPECT_FALSE(fits);
+    EXPECT_EQ(timeout.tv_sec, INT32_MAX);
+    EXPECT_EQ(timeout.tv_nsec, 999999999);
+  } else {
+    EXPECT_TRUE(fits);
+    EXPECT_EQ(timeout.tv_sec, kLargestFinite / 1000000000);
+    EXPECT_EQ(timeout.tv_nsec, kLargestFinite % 1000000000);
+  }
+}
+
+#endif  // (IREE_PLATFORM_LINUX || IREE_PLATFORM_ANDROID) && HAS_FUTEX
+
 #if defined(IREE_RUNTIME_USE_FUTEX)
 
 // Tests that waking an address with no waiters returns immediately without
