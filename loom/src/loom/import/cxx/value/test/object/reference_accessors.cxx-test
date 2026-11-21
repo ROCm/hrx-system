@@ -298,97 +298,67 @@ func.def public @array_access(%value: i32, %index$1: i32) -> (i32) {
   }
   %22 = scalar.constant 2 : i32
   %23 = func.call pure @Array1D__operator_call_value(%array_data_0$12, %array_data_1$15, %array_data_2$18, %array_data_3$21, %index$4) : (i32, i32, i32, i32, i32) -> (i32)
-  %24 = scalar.constant 2 : i32
-  %25 = scalar.cmpi ult, %23, %24 : i32
-  %26 = scf.if %25 -> (i32) {
-    %27 = scalar.constant 0 : i32
-    %28 = scalar.cmpi eq, %23, %27 : i32
-    %29 = scf.if %28 -> (i32) {
-      scf.yield %array_data_0$12 : i32
-    } else {
-      scf.yield %array_data_1$15 : i32
-    }
-    scf.yield %29 : i32
-  } else {
-    %30 = scalar.constant 2 : i32
-    %31 = scalar.cmpi eq, %23, %30 : i32
-    %32 = scf.if %31 -> (i32) {
-      scf.yield %array_data_2$18 : i32
-    } else {
-      scf.yield %array_data_3$21 : i32
-    }
-    scf.yield %32 : i32
-  }
-  %33 = scalar.addi %26, %22 : i32
-  %34 = scalar.constant 0 : i32
-  %35 = scalar.cmpi eq, %23, %34 : i32
-  %array_data_0$36 = scf.if %35 -> (i32) {
-    scf.yield %33 : i32
+  %24 = index.cast %23 : i32 to index
+  %25 = scf.lookup %24 {
+    0 = (%array_data_0$12),
+    1 = (%array_data_1$15),
+    2 = (%array_data_2$18)
+  } default(%array_data_3$21) : i32
+  %26 = scalar.addi %25, %22 : i32
+  %27 = scalar.constant 0 : i32
+  %28 = scalar.cmpi eq, %23, %27 : i32
+  %array_data_0$29 = scf.if %28 -> (i32) {
+    scf.yield %26 : i32
   } else {
     scf.yield %array_data_0$12 : i32
   }
-  %37 = scalar.constant 1 : i32
-  %38 = scalar.cmpi eq, %23, %37 : i32
-  %array_data_1$39 = scf.if %38 -> (i32) {
-    scf.yield %33 : i32
+  %30 = scalar.constant 1 : i32
+  %31 = scalar.cmpi eq, %23, %30 : i32
+  %array_data_1$32 = scf.if %31 -> (i32) {
+    scf.yield %26 : i32
   } else {
     scf.yield %array_data_1$15 : i32
   }
-  %40 = scalar.constant 2 : i32
-  %41 = scalar.cmpi eq, %23, %40 : i32
-  %array_data_2$42 = scf.if %41 -> (i32) {
-    scf.yield %33 : i32
+  %33 = scalar.constant 2 : i32
+  %34 = scalar.cmpi eq, %23, %33 : i32
+  %array_data_2$35 = scf.if %34 -> (i32) {
+    scf.yield %26 : i32
   } else {
     scf.yield %array_data_2$18 : i32
   }
-  %43 = scalar.constant 3 : i32
-  %44 = scalar.cmpi eq, %23, %43 : i32
-  %array_data_3$45 = scf.if %44 -> (i32) {
-    scf.yield %33 : i32
+  %36 = scalar.constant 3 : i32
+  %37 = scalar.cmpi eq, %23, %36 : i32
+  %array_data_3$38 = scf.if %37 -> (i32) {
+    scf.yield %26 : i32
   } else {
     scf.yield %array_data_3$21 : i32
   }
-  %46 = func.call pure @Array1D__operator_call_value_1(%array_data_0$36, %array_data_1$39, %array_data_2$42, %array_data_3$45, %index$4) : (i32, i32, i32, i32, i32) -> (i32)
-  %47 = scalar.constant 2 : i32
-  %48 = scalar.cmpi ult, %46, %47 : i32
-  %49 = scf.if %48 -> (i32) {
-    %50 = scalar.constant 0 : i32
-    %51 = scalar.cmpi eq, %46, %50 : i32
-    %52 = scf.if %51 -> (i32) {
-      scf.yield %array_data_0$36 : i32
-    } else {
-      scf.yield %array_data_1$39 : i32
-    }
-    scf.yield %52 : i32
-  } else {
-    %53 = scalar.constant 2 : i32
-    %54 = scalar.cmpi eq, %46, %53 : i32
-    %55 = scf.if %54 -> (i32) {
-      scf.yield %array_data_2$42 : i32
-    } else {
-      scf.yield %array_data_3$45 : i32
-    }
-    scf.yield %55 : i32
-  }
-  func.return %49 : i32
+  %39 = func.call pure @Array1D__operator_call_value_1(%array_data_0$29, %array_data_1$32, %array_data_2$35, %array_data_3$38, %index$4) : (i32, i32, i32, i32, i32) -> (i32)
+  %40 = index.cast %39 : i32 to index
+  %41 = scf.lookup %40 {
+    0 = (%array_data_0$29),
+    1 = (%array_data_1$32),
+    2 = (%array_data_2$35)
+  } default(%array_data_3$38) : i32
+  func.return %41 : i32
 }
 
 func.def @Array1D__operator_subscript_value(%this_data_0: i32, %this_data_1: i32, %this_data_2: i32, %this_data_3: i32, %index: i32) -> (i32) {
-  %62 = scalar.constant 1 : i32
-  %63 = scalar.subi %index, %62 : i32
-  func.return %63 : i32
+  %48 = scalar.constant 1 : i32
+  %49 = scalar.subi %index, %48 : i32
+  func.return %49 : i32
 }
 
 func.def @Array1D__operator_call_value(%this_data_0: i32, %this_data_1: i32, %this_data_2: i32, %this_data_3: i32, %index: i32) -> (i32) {
-  %70 = scalar.constant 1 : i32
-  %71 = scalar.subi %index, %70 : i32
-  func.return %71 : i32
+  %56 = scalar.constant 1 : i32
+  %57 = scalar.subi %index, %56 : i32
+  func.return %57 : i32
 }
 
 func.def @Array1D__operator_call_value_1(%this_data_0: i32, %this_data_1: i32, %this_data_2: i32, %this_data_3: i32, %index: i32) -> (i32) {
-  %78 = scalar.constant 1 : i32
-  %79 = scalar.subi %index, %78 : i32
-  func.return %79 : i32
+  %64 = scalar.constant 1 : i32
+  %65 = scalar.subi %index, %64 : i32
+  func.return %65 : i32
 }
 
 // ====

@@ -120,6 +120,9 @@ class ValueBindings {
   // supplied every component yet. Partial records never become High values.
   std::optional<Value> project(cxx::Symbol* binding, const Partition& partition,
                                size_t offset, ValueArena& arena) const;
+  // Reads an evaluated destination. Whole-object reads require a complete
+  // binding; member reads can project an initialized slice of a pending one.
+  std::optional<Value> project(Destination source, ValueArena& arena) const;
   // Replaces an immutable subobject, completing a pending aggregate when its
   // final missing component arrives. Snapshots retain independent availability.
   void replace(cxx::Symbol* binding, size_t offset, Value value,

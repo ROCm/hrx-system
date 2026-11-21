@@ -23,6 +23,7 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -2885,16 +2886,11 @@ class Translator final : private Initialization::Evaluation,
     }
     if (auto* source = std::get_if<Destination>(&target.location)) {
       const Destination destination = source_destination(*source, owner);
-      const auto& partition = destination.member
-                                  ? *destination.member
-                                  : values_.partition(destination.binding);
       auto members = member_storage_.lookup(destination.binding);
-      auto value =
-          members.empty()
-              ? values_.project(destination.binding, partition,
-                                destination.component_offset, value_arena_)
-              : member_storage_.read(members, values_, destination, target.type,
-                                     owner);
+      auto value = members.empty()
+                       ? values_.project(destination, value_arena_)
+                       : member_storage_.read(members, values_, destination,
+                                              target.type, owner);
       if (!value) {
         fail(owner, "source subobject is read before initialization");
       }
@@ -3643,8 +3639,79 @@ class Translator final : private Initialization::Evaluation,
         {loom_op_results(op), kPointerPartition.component_count});
   }
 
+  // Reading an ordinal can reuse the already-evaluated components of every
+  // alternative. Storage-backed reads and writes still need their selected arm.
+  std::optional<Value> read_bound_rows(const SelectedLvalue& selected,
+                                       cxx::AST* owner) {
+    const auto& partition =
+        types_.partition(types_.unqualified_value(selected.type), owner);
+    const size_t columns = partition.component_count;
+    const size_t rows = selected.alternatives.size();
+    // A binary choice already has a direct conditional representation. The
+    // lookup has one selector operand followed by every component of every row.
+    if (rows < 3 || !columns || rows > (UINT16_MAX - 1) / columns) {
+      return std::nullopt;
+    }
+
+    std::vector<loom_value_id_t> cells;
+    std::vector<loom_type_t> column_types;
+    cells.reserve(rows * columns);
+    column_types.reserve(columns);
+    for (const Lvalue& alternative : selected.alternatives) {
+      const auto* object = std::get_if<ObjectLvalue>(&alternative.projection);
+      if (!object || unit_.typeTraits().is_volatile(object->type)) {
+        return std::nullopt;
+      }
+      const auto* binding = std::get_if<Destination>(&object->location);
+      if (!binding) {
+        return std::nullopt;
+      }
+      const Destination source = source_destination(*binding, owner);
+      if (!member_storage_.lookup(source.binding).empty()) {
+        return std::nullopt;
+      }
+      auto row = values_.project(source, value_arena_);
+      if (!row) {
+        return std::nullopt;
+      }
+      const auto components = row->components();
+      if (cells.empty()) {
+        for (loom_value_id_t component : components) {
+          column_types.push_back(value_type(component));
+        }
+      } else {
+        // The C++ type can have different dependent High types at different
+        // origins. Only a common concrete column type admits keyed transport.
+        for (size_t i = 0; i < columns; ++i) {
+          if (!loom_type_equal(value_type(components[i]), column_types[i])) {
+            return std::nullopt;
+          }
+        }
+      }
+      row->append_to(cells);
+    }
+
+    // The final alternative is the default, as in ordinal dispatch.
+    std::vector<int64_t> keys(rows - 1);
+    std::iota(keys.begin(), keys.end(), int64_t{0});
+    const auto location = locations_.get(owner);
+    loom_op_t* index;
+    check(loom_index_cast_build(
+        &builder_, selected.selector, value_type(selected.selector),
+        loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), location, &index));
+    loom_op_t* lookup;
+    check(loom_scf_lookup_build(&builder_, result(index), keys.data(),
+                                keys.size(), cells.data(), cells.size(),
+                                column_types.data(), columns, nullptr, 0,
+                                location, &lookup));
+    return value_arena_.capture(partition, {loom_op_results(lookup), columns});
+  }
+
   Value read(const Lvalue& target, cxx::AST* owner) {
     if (const auto* selected = target.selection()) {
+      if (auto row = read_bound_rows(*selected, owner)) {
+        return *row;
+      }
       return dispatch_selection(*selected, owner, [&](size_t arm) {
         return read(selected->alternatives[arm], owner);
       });

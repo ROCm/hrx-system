@@ -76,8 +76,8 @@ func.def @update_eos_state_double(%input: buffer, %input_byte_offset: index, %in
   %13 = scalar.extui %index : i32 to i64
   %14 = index.cast %13 : i64 to index
   %15 = index.constant 8 : index
-  %60 = index.madd %14, %15, %input_byte_offset : index
-  %18 = buffer.view %input[%60] : buffer -> view<1xf64>
+  %42 = index.madd %14, %15, %input_byte_offset : index
+  %18 = buffer.view %input[%42] : buffer -> view<1xf64>
   %19 = view.load<root_in_bounds|type_disjoint> %18[0] : view<1xf64> -> f64
   %20 = scalar.constant 3 : i32
   %21 = scalar.andi %index, %20 : i32
@@ -92,12 +92,13 @@ func.def @update_eos_state_double(%input: buffer, %input_byte_offset: index, %in
   %state_xn_2 = scf.select %29, %19, %zero$f64 : f64
   %32 = scalar.cmpi eq, %21, %20 : i32
   %state_xn_3 = scf.select %32, %19, %zero$f64 : f64
-  %37 = scalar.cmpi ult, %21, %28 : i32
-  %53 = scf.select %37, %23, %29 : i1
-  %54 = scf.select %37, %state_xn_0, %state_xn_2 : f64
-  %55 = scf.select %37, %state_xn_1, %state_xn_3 : f64
-  %52 = scf.select %53, %54, %55 : f64
-  func.return %52 : f64
+  %36 = index.cast %21 : i32 to index
+  %37 = scf.lookup %36 {
+    0 = (%state_xn_0),
+    1 = (%state_xn_1),
+    2 = (%state_xn_2)
+  } default(%state_xn_3) : f64
+  func.return %37 : f64
 }
 
 // ====
