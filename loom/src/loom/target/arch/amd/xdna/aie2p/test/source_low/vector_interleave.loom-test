@@ -123,3 +123,50 @@ CHECK: COMPILE-REPORT: source_low[*] function=interleave_i1_3x21_axis0 source_op
 CHECK: COMPILE-REPORT: source_low[*] function=deinterleave_i1_6x21_axis0 source_op=vector.deinterleave selection=plan plan_key=deinterleave.predicate-block-route *
 CHECK: COMPILE-REPORT: source_low[*] function=interleave_i8_1x64_axis0 source_op=vector.interleave selection=plan plan_key=interleave.block-route *
 CHECK: COMPILE-REPORT: source_low[*] function=deinterleave_i8_2x64_axis0 source_op=vector.deinterleave selection=plan plan_key=deinterleave.block-route *
+
+// ====
+// RUN: pass target-legalize{mode=eager},canonicalize,dce,target-legalize{mode=final},canonicalize,dce
+
+aie2p.target<core> @target
+
+// One FP32 accumulator spans two native pairs of halfword shuffle packets.
+// Both halves remain observable across the register-class change.
+func.def target(@target) @split_float_words(%values: vector<64xf32>) -> (vector<64xi16>, vector<64xi16>) {
+  %bits = vector.bitcast %values : vector<64xf32> to vector<128xi16>
+  %low, %high = vector.deinterleave<0> %bits : vector<128xi16> -> vector<64xi16>, vector<64xi16>
+  func.return %low, %high : vector<64xi16>, vector<64xi16>
+}
+
+func.def target(@target) @join_float_words(%low: vector<64xi16>, %high: vector<64xi16>) -> (vector<64xf32>) {
+  %bits = vector.interleave<0> %low, %high : vector<64xi16>, vector<64xi16> -> vector<128xi16>
+  %values = vector.bitcast %bits : vector<128xi16> to vector<64xf32>
+  func.return %values : vector<64xf32>
+}
+
+// ----
+aie2p.target<core> @target
+
+func.def target(@target) @split_float_words(%values: vector<64xf32>) -> (vector<64xi16>, vector<64xi16>) {
+  %19 = vector.slice %values[0] : vector<64xf32> -> vector<32xf32>
+  %20 = vector.bitcast %19 : vector<32xf32> to vector<64xi16>
+  %21 = vector.slice %values[32] : vector<64xf32> -> vector<32xf32>
+  %22 = vector.bitcast %21 : vector<32xf32> to vector<64xi16>
+  %12, %13 = vector.deinterleave<0> %20 : vector<64xi16> -> vector<32xi16>, vector<32xi16>
+  %15, %16 = vector.deinterleave<0> %22 : vector<64xi16> -> vector<32xi16>, vector<32xi16>
+  %low = vector.concat<0> %12, %15 : vector<32xi16>, vector<32xi16> -> vector<64xi16>
+  %high = vector.concat<0> %13, %16 : vector<32xi16>, vector<32xi16> -> vector<64xi16>
+  func.return %low, %high : vector<64xi16>, vector<64xi16>
+}
+
+func.def target(@target) @join_float_words(%low: vector<64xi16>, %high: vector<64xi16>) -> (vector<64xf32>) {
+  %29 = vector.slice %low[0] : vector<64xi16> -> vector<32xi16>
+  %30 = vector.slice %high[0] : vector<64xi16> -> vector<32xi16>
+  %31 = vector.interleave<0> %29, %30 : vector<32xi16>, vector<32xi16> -> vector<64xi16>
+  %32 = vector.slice %low[32] : vector<64xi16> -> vector<32xi16>
+  %33 = vector.slice %high[32] : vector<64xi16> -> vector<32xi16>
+  %34 = vector.interleave<0> %32, %33 : vector<32xi16>, vector<32xi16> -> vector<64xi16>
+  %25 = vector.bitcast %31 : vector<64xi16> to vector<32xf32>
+  %27 = vector.bitcast %34 : vector<64xi16> to vector<32xf32>
+  %values = vector.concat<0> %25, %27 : vector<32xf32>, vector<32xf32> -> vector<64xf32>
+  func.return %values : vector<64xf32>
+}

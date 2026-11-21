@@ -17,6 +17,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/legalization_table.h"
 #include "loom/target/arch/amd/xdna/aie2p/vector_carrier.h"
 #include "loom/transforms/scalar/target_legalization.h"
+#include "loom/transforms/vector/cast_packet_legalization.h"
 #include "loom/transforms/vector/packet_insert_legalization.h"
 #include "loom/transforms/vector/packet_legalization.h"
 #include "loom/transforms/vector/reduction_legalization.h"
@@ -135,6 +136,23 @@ static bool loom_aie2p_defer_scalarization(
   }
   out_result->action = LOOM_TARGET_LEGALIZER_ACTION_DEFER;
   return true;
+}
+
+static iree_status_t loom_aie2p_legalize_vector_bitcast(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  bool rewritten = false;
+  if (!loom_target_legalization_op_has_source_vector_carriers(context, op)) {
+    IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_bitcast(
+        context, op, context->vector_packet_policy, &rewritten));
+  }
+  *out_result = (loom_target_legalizer_result_t){
+      .action = rewritten ? LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN
+                          : LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
+  };
+  return iree_ok_status();
 }
 
 static iree_status_t loom_aie2p_legalize_vector_to_scalar(
@@ -634,6 +652,10 @@ static const loom_target_legalizer_rule_t kAie2pLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_VECTOR_CONSTANTF,
         .legalize = loom_aie2p_legalize_vector_literal_patches,
+    },
+    {
+        .root_kind = LOOM_OP_VECTOR_BITCAST,
+        .legalize = loom_aie2p_legalize_vector_bitcast,
     },
     {
         .root_kind = LOOM_OP_VECTOR_BROADCAST,
