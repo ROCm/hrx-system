@@ -241,6 +241,19 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_flush_barrier(
   if (!count) {
     return iree_ok_status();
   }
+  // Primary publication acquires host inputs before either inline commands or
+  // resident fixups. That acquisition also covers a leading visibility-only
+  // dependency; internal fixup writes publish themselves before command fetch.
+  if (!buffer->recording.storage.commands.length &&
+      !buffer->pending_barrier.execution &&
+      !buffer->pending_barrier.release_cache_control &&
+      !(buffer->pending_barrier.acquire_cache_control &
+        ~buffer->profile.acquire)) {
+    buffer->pending_barrier.acquire_cache_control = 0;
+    // Profiling identities remain independent of packet elision.
+    ++buffer->program->operation_count;
+    return iree_ok_status();
+  }
   uint32_t offset = 0;
   uint32_t* words = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_recording_commands(

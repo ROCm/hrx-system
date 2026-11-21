@@ -66,7 +66,7 @@ typedef struct iree_hal_amd_gpu_pm4_command_program_t {
   uint32_t dispatch_count;
   // Maximum admitted private bytes per hardware wave across all dispatches.
   uint32_t scratch_wave_byte_length;
-  // Encoded payload operation count used only by optional queue profiling.
+  // Payload operation count for profiling, including elided entry barriers.
   uint32_t operation_count;
   // Union of dispatch queue requirements, admitted once at execution.
   iree_hal_queue_feature_flags_t required_features;
