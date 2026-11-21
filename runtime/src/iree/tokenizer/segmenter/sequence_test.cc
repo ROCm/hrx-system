@@ -518,6 +518,38 @@ TEST_F(SequenceSegmenterTest, FinalizeOffsetContinuity) {
   EXPECT_EQ(count, 0);
 }
 
+TEST_F(SequenceSegmenterTest, FinalizeResumesExpansionAtOriginalOffsets) {
+  std::vector<ScopedSegmenter> children;
+  children.push_back(CreateWhitespace());
+  children.push_back(CreateMetaspace());
+  auto segmenter = CreateSequence(std::move(children));
+  ScopedSegmenterState state(segmenter.get());
+
+  // The first word splits in two. Process can emit its first segment but
+  // must retain the whole input until its second segment has been emitted.
+  std::string input = M("a") + M("b") + " " + M("c");
+  iree_string_view_t view = iree_make_string_view(input.data(), input.size());
+  iree_tokenizer_segment_t segments[2];
+  iree_host_size_t consumed = 0, count = 0;
+  IREE_ASSERT_OK(iree_tokenizer_segmenter_state_process(
+      state.get(), view, iree_tokenizer_make_segment_output(segments, 1),
+      &consumed, &count));
+  ASSERT_EQ(consumed, 0u);
+  ASSERT_EQ(count, 1u);
+  EXPECT_EQ(segments[0].start, 0u);
+  EXPECT_EQ(segments[0].end, 4u);
+
+  // Both the remaining segment and the final word refer to the same view.
+  IREE_ASSERT_OK(iree_tokenizer_segmenter_state_finalize(
+      state.get(), view, iree_tokenizer_make_segment_output(segments, 2),
+      &count));
+  ASSERT_EQ(count, 2u);
+  EXPECT_EQ(segments[0].start, 4u);
+  EXPECT_EQ(segments[0].end, 8u);
+  EXPECT_EQ(segments[1].start, 9u);
+  EXPECT_EQ(segments[1].end, 13u);
+}
+
 //===----------------------------------------------------------------------===//
 // Deep Chain: 3-Level Recursion
 // Tests whitespace -> metaspace -> metaspace chain with skip_count logic.

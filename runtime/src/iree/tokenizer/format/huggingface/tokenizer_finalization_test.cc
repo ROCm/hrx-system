@@ -46,7 +46,7 @@ std::string Config(const std::string& normalizer,
       "TAIL":{"id":"TAIL","ids":[3],"tokens":["TAIL"]}}},
   "model":{"type":"BPE","vocab":{"c":0,"BOS":1,"EOS":2,"TAIL":3,
     "<":4,"?":5,"☃":6,"☂":7,"[":10,"N":11,"]":12,"cc":13,"c[":14,
-    "ᄀ":15,"ᅡ":16,"ᆨ":17,"가":18,"각":19,"▁":20,")" +
+    "ᄀ":15,"ᅡ":16,"ᆨ":17,"가":18,"각":19,"▁":20,"\n":21,")" +
          raw + R"(":8,")" + normalized + R"(":9},"merges":)" + merges +
          R"(},"pre_tokenizer":)" + pre_tokenizer + "}";
 }
@@ -240,6 +240,24 @@ TEST_F(TokenizerFinalizationTest, RawTokenCompletesPreviousModelSpan) {
 
 TEST_F(TokenizerFinalizationTest, NormalizedTokenCompletesPreviousModelSpan) {
   Check(SpanConfig("null"), "ccc[N]ccc", {13, 0, 9, 13, 0});
+}
+
+TEST_F(TokenizerFinalizationTest, SequenceDrainsEachSpanBeforeItsAddedToken) {
+  const std::string config = Config("null", "<R>", "[N]", "[]",
+                                    R"({"type":"Sequence","pretokenizers":[
+    {"type":"Split","pattern":{"Regex":"\\n+"},"behavior":"MergedWithNext","invert":false},
+    {"type":"Split","pattern":{"String":"c"},"behavior":"Isolated","invert":false}]})");
+  // Each line expands into more segments than one internal batch can hold.
+  // Follow one with a raw token, one with a normalized token, and one with EOF.
+  const std::string line = std::string(130, 'c') + "\n";
+  std::vector<int32_t> body;
+  for (int32_t added_token : {8, 9}) {
+    body.insert(body.end(), 130, 0);
+    body.insert(body.end(), {21, added_token});
+  }
+  body.insert(body.end(), 130, 0);
+  body.push_back(21);
+  Check(config, line + "<R>" + line + "[N]" + line, body);
 }
 
 TEST_F(TokenizerFinalizationTest, FailedNormalizedPrefixKeepsModelSpanOpen) {

@@ -178,10 +178,10 @@ static inline iree_status_t iree_tokenizer_segmenter_state_process(
       state, input, output, out_consumed, out_segment_count);
 }
 
-// Finalizes the stream, flushing any pending segment. |remaining_input|
-// contains the unconsumed bytes from the last process() call. Typically
-// produces 0 or 1 segment (the final incomplete segment). Segment offsets
-// are relative to the start of |remaining_input|, as with process().
+// Finishes a span, writing up to |output.capacity| segments from the bytes
+// left unconsumed by process(). While has_pending() remains true, call
+// finalize() again with the same |remaining_input|. Every batch returns
+// offsets relative to the start of that view.
 static inline iree_status_t iree_tokenizer_segmenter_state_finalize(
     iree_tokenizer_segmenter_state_t* state, iree_string_view_t remaining_input,
     iree_tokenizer_segment_output_t output,

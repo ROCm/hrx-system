@@ -68,15 +68,13 @@ typedef struct iree_tokenizer_segmenter_sequence_state_t {
   // segments. Cleared once all levels exhaust (expansion complete).
   bool have_current_segment;
 
-  // True once child[0].finalize() has returned all segments.
+  // True once child[0] has finished its current span. A subsequent process()
+  // begins a new span even when the preceding finalize filled its last batch.
   bool finalize_child0_complete;
 
-  // Bytes child[0] consumed to produce the current in-progress segment.
-  // Committed as out_consumed only after the entire expansion completes.
+  // Bytes accepted by child[0] but still borrowed by an in-progress expansion.
+  // In finalize(), this is the start of the suffix still owed to child[0].
   iree_host_size_t current_consumed;
-
-  // Cumulative byte offset into remaining_input that finalize() has processed.
-  iree_host_size_t finalize_input_offset;
 
   // Pipeline levels: levels[i] drives child[i+1].
   // Active level count = child_count - 1.
@@ -481,6 +479,10 @@ static iree_status_t iree_tokenizer_segmenter_sequence_state_process(
     return iree_ok_status();
   }
 
+  if (state->finalize_child0_complete) {
+    state->finalize_child0_complete = false;
+    state->current_consumed = 0;
+  }
   iree_host_size_t output_count = 0;
   iree_host_size_t total_consumed = 0;
 
@@ -505,6 +507,7 @@ static iree_status_t iree_tokenizer_segmenter_sequence_state_process(
     if (exhausted) {
       // Expansion complete. Commit the consumption from child[0].
       total_consumed = state->current_consumed;
+      state->current_consumed = 0;
       state->have_current_segment = false;
     } else {
       // Output filled again mid-expansion. Pipeline state is preserved.
@@ -708,139 +711,48 @@ static iree_status_t iree_tokenizer_segmenter_sequence_state_finalize(
   const iree_tokenizer_segmenter_sequence_t* segmenter =
       (const iree_tokenizer_segmenter_sequence_t*)base_state->segmenter;
 
-  iree_host_size_t output_count = 0;
-
-  // Apply cumulative offset from previous finalize() calls. When we store
-  // pipeline state, level offsets are relative to this adjusted position.
-  // We save base_offset so we can adjust output segments back to the caller's
-  // coordinate system before returning.
-  iree_host_size_t base_offset = state->finalize_input_offset;
-  remaining_input.data += base_offset;
-  remaining_input.size -= base_offset;
-
-  iree_host_size_t final_level = segmenter->child_count - 2;
-
-  // Resume a pending pipeline expansion from process() or a prior finalize().
-  if (state->have_current_segment) {
-    bool exhausted = false;
-    while (output_count < output.capacity) {
-      iree_tokenizer_segment_t segment;
-      IREE_RETURN_IF_ERROR(
-          iree_tokenizer_segmenter_sequence_pull_next_output_segment(
-              state, segmenter, remaining_input, final_level, &segment,
-              &exhausted));
-      if (exhausted) {
-        break;
-      }
-      output.values[output_count++] = segment;
-    }
-
-    if (exhausted) {
-      // Expansion complete. Advance past what child[0] consumed during
-      // process() but didn't commit (because we returned consumed=0).
-      iree_host_size_t consumed_in_process = state->current_consumed;
-      remaining_input.data += consumed_in_process;
-      remaining_input.size -= consumed_in_process;
-      state->finalize_input_offset += consumed_in_process;
-      base_offset += consumed_in_process;
-
-      state->have_current_segment = false;
-      state->current_consumed = 0;
-
-      // If child[0] has no more pending segments, mark it complete.
-      iree_tokenizer_segmenter_state_t* child0_state =
-          iree_tokenizer_segmenter_sequence_get_child_state(state, segmenter,
-                                                            0);
-      if (!iree_tokenizer_segmenter_state_has_pending(child0_state)) {
-        state->finalize_child0_complete = true;
-      }
-    } else {
-      // Output filled mid-expansion. Pipeline state is preserved.
-      for (iree_host_size_t i = 0; i < output_count; ++i) {
-        output.values[i].start += base_offset;
-        output.values[i].end += base_offset;
-      }
-      *out_segment_count = output_count;
-      return iree_ok_status();
-    }
-  }
-
-  // Skip child[0].finalize() if we've already drained all its segments.
-  if (state->finalize_child0_complete) {
-    for (iree_host_size_t i = 0; i < output_count; ++i) {
-      output.values[i].start += base_offset;
-      output.values[i].end += base_offset;
-    }
-    *out_segment_count = output_count;
-    return iree_ok_status();
-  }
-
-  // Get segments from child[0].finalize() one at a time and expand each
-  // through the pipeline.
   iree_tokenizer_segmenter_state_t* child0_state =
       iree_tokenizer_segmenter_sequence_get_child_state(state, segmenter, 0);
-
-  iree_tokenizer_segment_t child0_segment;
-  iree_tokenizer_segment_output_t child0_output =
-      iree_tokenizer_make_segment_output(&child0_segment, 1);
-
-  // Loop while child[0] has pending segments or we haven't called finalize yet.
-  bool need_first_call =
-      !iree_tokenizer_segmenter_state_has_pending(child0_state);
-
-  while (iree_tokenizer_segmenter_state_has_pending(child0_state) ||
-         need_first_call) {
-    need_first_call = false;
-
-    iree_host_size_t child0_count = 0;
-    IREE_RETURN_IF_ERROR(iree_tokenizer_segmenter_state_finalize(
-        child0_state, remaining_input, child0_output, &child0_count));
-
-    if (child0_count == 0) {
-      state->finalize_child0_complete = true;
-      break;
-    }
-
-    // Set up pipeline with child[0]'s finalize segment and expand.
-    iree_tokenizer_segmenter_sequence_setup_level_parent(&state->levels[0],
-                                                         child0_segment);
-    IREE_RETURN_IF_ERROR(iree_tokenizer_segmenter_sequence_reinit_child_state(
-        state, segmenter, 1));
-
-    bool expansion_complete = false;
-    while (output_count < output.capacity) {
-      iree_tokenizer_segment_t segment;
-      bool exhausted = false;
-      IREE_RETURN_IF_ERROR(
-          iree_tokenizer_segmenter_sequence_pull_next_output_segment(
-              state, segmenter, remaining_input, final_level, &segment,
-              &exhausted));
-      if (exhausted) {
-        expansion_complete = true;
+  iree_host_size_t final_level = segmenter->child_count - 2;
+  iree_host_size_t output_count = 0;
+  while (output_count < output.capacity) {
+    if (!state->have_current_segment) {
+      if (state->finalize_child0_complete) {
         break;
       }
-      output.values[output_count++] = segment;
-    }
-
-    if (!expansion_complete) {
-      // Output filled mid-expansion. Save state for next finalize() call.
-      state->have_current_segment = true;
-      // current_consumed = 0 because finalize segments are already relative
-      // to the adjusted remaining_input (no additional offset needed).
-      state->current_consumed = 0;
-      for (iree_host_size_t i = 0; i < output_count; ++i) {
-        output.values[i].start += base_offset;
-        output.values[i].end += base_offset;
+      // Only child[0] sees the suffix past its uncommitted process() bytes.
+      // The expansion levels always index the caller's original view.
+      iree_string_view_t suffix = iree_string_view_substr(
+          remaining_input, state->current_consumed, IREE_HOST_SIZE_MAX);
+      iree_tokenizer_segment_t parent;
+      iree_host_size_t parent_count = 0;
+      IREE_RETURN_IF_ERROR(iree_tokenizer_segmenter_state_finalize(
+          child0_state, suffix, iree_tokenizer_make_segment_output(&parent, 1),
+          &parent_count));
+      state->finalize_child0_complete =
+          !iree_tokenizer_segmenter_state_has_pending(child0_state);
+      if (parent_count == 0) {
+        break;
       }
-      *out_segment_count = output_count;
-      return iree_ok_status();
+      parent.start += state->current_consumed;
+      parent.end += state->current_consumed;
+      iree_tokenizer_segmenter_sequence_setup_level_parent(&state->levels[0],
+                                                           parent);
+      IREE_RETURN_IF_ERROR(iree_tokenizer_segmenter_sequence_reinit_child_state(
+          state, segmenter, 1));
+      state->have_current_segment = true;
     }
-  }
 
-  // Adjust all output segments to the caller's coordinate system.
-  for (iree_host_size_t i = 0; i < output_count; ++i) {
-    output.values[i].start += base_offset;
-    output.values[i].end += base_offset;
+    bool exhausted = false;
+    IREE_RETURN_IF_ERROR(
+        iree_tokenizer_segmenter_sequence_pull_next_output_segment(
+            state, segmenter, remaining_input, final_level,
+            &output.values[output_count], &exhausted));
+    if (exhausted) {
+      state->have_current_segment = false;
+    } else {
+      ++output_count;
+    }
   }
   *out_segment_count = output_count;
   return iree_ok_status();
