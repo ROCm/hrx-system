@@ -1,0 +1,83 @@
+// The released text and sequence programs number their token/span pairs by
+// increasing token capacity, then increasing span capacity within that row.
+func.def @level(%count: i32) -> (i32) {
+  %c1 = scalar.constant 1 : i32
+  %width = scalar.constant 32 : i32
+  %last = scalar.subi %count, %c1 : i32
+  %leading = scalar.ctlzi %last : i32
+  %level = scalar.subi %width, %leading : i32
+  func.return %level : i32
+}
+
+func.def @row_begin(%level: i32) -> (i32) {
+  %c1 = scalar.constant 1 : i32
+  %next = scalar.addi %level, %c1 : i32
+  %product = scalar.muli %level, %next : i32
+  %begin = scalar.shrui %product, %c1 : i32
+  func.return %begin : i32
+}
+
+func.def @capacity(%level: i32, %limit: i32) -> (i32) {
+  %c1 = scalar.constant 1 : i32
+  %power = scalar.shli %c1, %level : i32
+  %capacity = scalar.minui %power, %limit : i32
+  func.return %capacity : i32
+}
+
+func.def public @catalog(%limit: i32) -> (buffer, i64) {
+  %last = func.call @level(%limit) : (i32) -> (i32)
+  %c1 = scalar.constant 1 : i32
+  %levels = scalar.addi %last, %c1 : i32
+  %count = func.call @row_begin(%levels) : (i32) -> (i32)
+  %extent = index.cast %count : i32 to index
+  %count64 = scalar.extui %count : i32 to i64
+  %stride = scalar.constant 16 : i64
+  %bytes64 = scalar.muli %count64, %stride : i64
+  %bytes = index.cast %bytes64 : i64 to offset
+  %pairs = buffer.alloca<private> align(8) %bytes : buffer
+  %origin = index.constant 0 : offset
+  %table = buffer.view %pairs[%origin] : buffer -> view<[%extent]x2xi64>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.cast %levels : i32 to index
+  scf.for %k = [%begin to %end step %step] {
+    %level = index.cast %k : index to i32
+    %tokens = func.call @capacity(%level, %limit) : (i32, i32) -> (i32)
+    %tokens64 = scalar.extui %tokens : i32 to i64
+    %first = func.call @row_begin(%level) : (i32) -> (i32)
+    %base = index.cast %first : i32 to index
+    %columns = index.add %k, %step : index
+    scf.for %j = [%begin to %columns step %step] {
+      %column = index.cast %j : index to i32
+      %spans = func.call @capacity(%column, %tokens) : (i32, i32) -> (i32)
+      %spans64 = scalar.extui %spans : i32 to i64
+      %row = index.add %base, %j : index
+      %ordinal = index.assume %row [lt(%row, %extent)] : index
+      view.store %tokens64, %table[%ordinal, 0] : i64, view<[%extent]x2xi64>
+      view.store %spans64, %table[%ordinal, 1] : i64, view<[%extent]x2xi64>
+    }
+  }
+  func.return %pairs, %count64 : buffer, i64
+}
+
+func.def @packet(%limit: i32, %tokens: i32, %spans: i32) -> (i32, i32) {
+  %k = func.call @level(%tokens) : (i32) -> (i32)
+  %j = func.call @level(%spans) : (i32) -> (i32)
+  %first = func.call @row_begin(%k) : (i32) -> (i32)
+  %ordinal = scalar.addi %first, %j : i32
+  %records = func.call @capacity(%k, %limit) : (i32, i32) -> (i32)
+  func.return %ordinal, %records : i32, i32
+}
+
+func.def public @packets(%limit: i32, %tokens: i32, %spans: i32, %next_tokens: i32, %next_spans: i32) -> (i32, i32, i32, i32) {
+  %ordinal, %records = func.call @packet(%limit, %tokens, %spans) : (i32, i32, i32) -> (i32, i32)
+  %c0 = scalar.constant 0 : i32
+  %continues = scalar.cmpi ne, %next_tokens, %c0 : i32
+  %next_ordinal, %next_records = scf.if %continues -> (i32, i32) {
+    %slot, %size = func.call @packet(%limit, %next_tokens, %next_spans) : (i32, i32, i32) -> (i32, i32)
+    scf.yield %slot, %size : i32, i32
+  } else {
+    scf.yield %c0, %c0 : i32, i32
+  }
+  func.return %ordinal, %records, %next_ordinal, %next_records : i32, i32, i32, i32
+}

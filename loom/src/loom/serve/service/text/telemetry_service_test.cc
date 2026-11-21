@@ -134,6 +134,47 @@ TEST_F(SourceTextServiceTest, ActualDraftCountsReachSpansEpochAndHeartbeat) {
   const auto snapshot = loom_serve_text_heartbeat_read(&heartbeat);
   EXPECT_EQ(snapshot.draft.proposed_tokens, 11u);
   EXPECT_EQ(snapshot.draft.accepted_inputs, 2u);
+
+  // An older publisher supplies progress for a verification but no proposed
+  // count. Accepted inputs remain exact even across the reporting boundary.
+  results[0].proposal_count = UINT32_MAX;
+  loom_serve_text_telemetry_epoch(
+      &telemetry, &heartbeat, LOOM_SERVICE_TEXT_SCHEDULE_PACKED,
+      LOOM_SERVICE_TEXT_PACKING_MIXED, &cohort, session_table);
+  for (size_t i = 0; i <= IREE_ARRAYSIZE(spans); ++i) {
+    ASSERT_EQ(
+        loom_runtime_telemetry_stream_read(telemetry.stream, &cursor, &record),
+        LOOM_RUNTIME_TELEMETRY_READ_RECORD);
+  }
+  ASSERT_EQ(record.event, &LOOM_SERVICE_TEXT_EPOCH);
+  iree_string_builder_t output;
+  iree_string_builder_initialize(host_allocator_, &output);
+  IREE_EXPECT_OK(loom_serve_telemetry_record_format(0, &record, &output));
+  const auto view = iree_string_builder_view(&output);
+  const std::string json(view.data, view.size);
+  EXPECT_NE(json.find(R"("proposed_tokens":null)"), std::string::npos);
+  iree_string_builder_deinitialize(&output);
+
+  results[0].proposal_count = 3;
+  loom_serve_text_telemetry_epoch(
+      &telemetry, &heartbeat, LOOM_SERVICE_TEXT_SCHEDULE_PACKED,
+      LOOM_SERVICE_TEXT_PACKING_MIXED, &cohort, session_table);
+  IREE_EXPECT_OK(loom_serve_text_heartbeat_sample(
+      &heartbeat,
+      {nullptr, [](void*, const loom_runtime_telemetry_topic_t* topic,
+                   const uint64_t* values) {
+         bool found_accepted = false;
+         for (iree_host_size_t i = 0; i < topic->count; ++i) {
+           EXPECT_STRNE(topic->fields[i].name, "draft_proposed_tokens");
+           if (std::strcmp(topic->fields[i].name, "draft_accepted_inputs") ==
+               0) {
+             EXPECT_EQ(values[i], 6u);
+             found_accepted = true;
+           }
+         }
+         EXPECT_TRUE(found_accepted);
+         return iree_ok_status();
+       }}));
   loom_serve_text_heartbeat_deinitialize(&heartbeat);
   loom_serve_text_telemetry_deinitialize(&telemetry);
 }

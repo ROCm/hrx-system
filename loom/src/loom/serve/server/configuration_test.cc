@@ -140,8 +140,8 @@ TEST_P(CardConfigurationTest, DirectCardRejectsUnsupportedAbiBeforeProgramIo) {
 }
 
 INSTANTIATE_TEST_SUITE_P(NativeServices, CardConfigurationTest,
-                         ::testing::Values(ServiceVersions{"text", 2, 2},
-                                           ServiceVersions{"sequence", 2, 2},
+                         ::testing::Values(ServiceVersions{"text", 1, 2},
+                                           ServiceVersions{"sequence", 1, 2},
                                            ServiceVersions{"image", 1, 1},
                                            ServiceVersions{"embedding", 1, 1},
                                            ServiceVersions{"decision", 1, 1},

@@ -1,0 +1,56 @@
+func.decl @catalog(%limit: i32) -> (buffer, i64)
+
+func.decl @packets(%limit: i32, %tokens: i32, %spans: i32, %next_tokens: i32, %next_spans: i32) -> (i32, i32, i32, i32)
+
+// Read the two preparation operands exactly as a released controller does.
+func.def @pair(%table: buffer, %ordinal: i32) -> (i64, i64) {
+  %stride = scalar.constant 16 : i64
+  %slot = scalar.extui %ordinal : i32 to i64
+  %position = scalar.muli %slot, %stride : i64
+  %origin = index.cast %position : i64 to offset
+  %pair = buffer.view %table[%origin] : buffer -> view<2xi64>
+  %tokens = view.load %pair[0] : view<2xi64> -> i64
+  %spans = view.load %pair[1] : view<2xi64> -> i64
+  func.return %tokens, %spans : i64, i64
+}
+
+check.case @odd_limit_with_two_packets {
+  %limit = check.literal value(13) : i32
+  %first = check.literal value(5) : i32
+  %spans = check.literal value(3) : i32
+  %next = check.literal value(12) : i32
+  %next_spans = check.literal value(9) : i32
+  %table, %count = func.call @catalog(%limit) : (i32) -> (buffer, i64)
+  %expected_count = check.literal value(15) : i64
+  check.expect.equal actual(%count) expected(%expected_count) : i64
+  %a, %a_records, %b, %b_records = func.call @packets(%limit, %first, %spans, %next, %next_spans) : (i32, i32, i32, i32, i32) -> (i32, i32, i32, i32)
+  %c8 = check.literal value(8) : i32
+  %c14 = check.literal value(14) : i32
+  check.expect.equal actual(%a) expected(%c8) : i32
+  check.expect.equal actual(%a_records) expected(%c8) : i32
+  check.expect.equal actual(%b) expected(%c14) : i32
+  check.expect.equal actual(%b_records) expected(%limit) : i32
+  %tokens_a, %spans_a = func.call @pair(%table, %a) : (buffer, i32) -> (i64, i64)
+  %tokens_b, %spans_b = func.call @pair(%table, %b) : (buffer, i32) -> (i64, i64)
+  %c8_i64 = check.literal value(8) : i64
+  %c4_i64 = check.literal value(4) : i64
+  %c13_i64 = check.literal value(13) : i64
+  check.expect.equal actual(%tokens_a) expected(%c8_i64) : i64
+  check.expect.equal actual(%spans_a) expected(%c4_i64) : i64
+  check.expect.equal actual(%tokens_b) expected(%c13_i64) : i64
+  check.expect.equal actual(%spans_b) expected(%c13_i64) : i64
+  check.return
+}
+
+check.case @single_packet_at_largest_signed_capacity {
+  %limit = check.literal value(2147483647) : i32
+  %c1 = check.literal value(1) : i32
+  %c0 = check.literal value(0) : i32
+  %row, %records, %unused, %empty = func.call @packets(%limit, %limit, %c1, %c0, %c0) : (i32, i32, i32, i32, i32) -> (i32, i32, i32, i32)
+  %expected = check.literal value(496) : i32
+  check.expect.equal actual(%row) expected(%expected) : i32
+  check.expect.equal actual(%records) expected(%limit) : i32
+  check.expect.equal actual(%unused) expected(%c0) : i32
+  check.expect.equal actual(%empty) expected(%c0) : i32
+  check.return
+}

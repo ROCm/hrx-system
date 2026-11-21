@@ -181,6 +181,7 @@ void loom_serve_text_telemetry_epoch(
   iree_host_size_t prefill_count = 0, decode_count = 0, output_count = 0;
   iree_host_size_t verification_count = 0, accepted_drafts = 0;
   uint64_t proposed_tokens = 0;
+  bool proposal_counts_known = true;
   uint64_t scheduled_tokens = cohort->continuation_token_count;
   loom_service_text_statistics_t* state = &heartbeat->snapshot;
   const iree_time_t completed = iree_time_now();
@@ -195,6 +196,7 @@ void loom_serve_text_telemetry_epoch(
         results[i].consumed_count - (prefill ? results[i].known_count : 0);
     output_count += results[i].output_count;
     verification_count += results[i].verification_count;
+    proposal_counts_known &= results[i].proposal_count != UINT32_MAX;
     proposed_tokens += results[i].proposal_count;
     accepted_drafts += results[i].consumed_count - results[i].known_count -
                        results[i].verification_count;
@@ -219,7 +221,9 @@ void loom_serve_text_telemetry_epoch(
         .output_limit = output_limits[i],
         .known_tokens = results[i].known_count,
         .verification_epochs = results[i].verification_count,
-        .proposed_tokens = results[i].proposal_count,
+        .proposed_tokens = results[i].proposal_count == UINT32_MAX
+                               ? UINT64_MAX
+                               : results[i].proposal_count,
         .prefill = prefill,
         .select = select};
     loom_service_text_record(telemetry->stream, &LOOM_SERVICE_TEXT_SPAN,
@@ -231,7 +235,14 @@ void loom_serve_text_telemetry_epoch(
   state->prefill_tokens += prefill_count;
   state->decode_tokens += decode_count;
   state->model_duration += completed - start;
-  state->draft.proposed_tokens += proposed_tokens;
+  if (!proposal_counts_known) {
+    proposed_tokens = UINT64_MAX;
+  }
+  if (state->draft.proposed_tokens != UINT64_MAX) {
+    state->draft.proposed_tokens =
+        proposal_counts_known ? state->draft.proposed_tokens + proposed_tokens
+                              : UINT64_MAX;
+  }
   state->draft.accepted_inputs += accepted_drafts;
   state->last_completion = completed;
   iree_slim_mutex_unlock(&heartbeat->mutex);

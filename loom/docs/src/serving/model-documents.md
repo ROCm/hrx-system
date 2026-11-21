@@ -123,10 +123,10 @@ independent of `schema_version` and the bytecode encoding version. Omitting it
 selects the unversioned development names, `text_<role>`. A missing versioned
 export is an error; bare exports are not substituted. Several services and ABI
 revisions can coexist in one provider set. The host checks the selected service.
-Text and sequence implement ABI 2. Image, embedding, decision, recognition,
-and activity implement ABI 1. Speech implements ABIs 1 and 2. Each uses its
-own `<kind>_<role>_v<version>` exports for preparation and control. Selecting a different service does not rename exports
-or substitute another service's ABI.
+Text and sequence support ABIs 1 and 2. New controllers use ABI 2. Image,
+embedding, decision, recognition, and activity implement ABI 1. Speech supports
+ABIs 1 and 2. Each uses its own `<kind>_<role>_v<version>` exports for
+preparation and control.
 
 Text services can declare an independently versioned image projector:
 

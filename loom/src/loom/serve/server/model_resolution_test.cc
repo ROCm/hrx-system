@@ -225,6 +225,11 @@ class ServiceCardResolutionTest
     : public ModelResolutionTest,
       public ::testing::WithParamInterface<const char*> {
  protected:
+  int LatestServiceVersion() const {
+    const std::string kind = GetParam();
+    return kind == "text" || kind == "sequence" || kind == "speech" ? 2 : 1;
+  }
+
   void InitializeService(int version) {
     const std::string kind = GetParam();
     const std::string card =
@@ -243,10 +248,7 @@ class ServiceCardResolutionTest
 };
 
 TEST_P(ServiceCardResolutionTest, SupportedVersionResolvesWithoutProgramIo) {
-  const std::string kind = GetParam();
-  const int first = kind == "text" || kind == "sequence" ? 2 : 1;
-  const int latest = kind == "speech" ? 2 : first;
-  for (int version = first; version <= latest; ++version) {
+  for (int version = 1; version <= LatestServiceVersion(); ++version) {
     SCOPED_TRACE(version);
     InitializeService(version);
     loom_serve_model_resolution_t* resolution = nullptr;
@@ -265,13 +267,7 @@ TEST_P(ServiceCardResolutionTest, SupportedVersionResolvesWithoutProgramIo) {
 }
 
 TEST_P(ServiceCardResolutionTest, UnsupportedVersionFailsBeforeProgramIo) {
-  const std::string kind = GetParam();
-  // Version one text programs require the host to register a size catalog.
-  // Other services exercise a version newer than their published contract.
-  const int version = kind == "text" || kind == "sequence" ? 1
-                      : kind == "speech"                   ? 3
-                                                           : 2;
-  InitializeService(version);
+  InitializeService(LatestServiceVersion() + 1);
   loom_serve_model_resolution_t* resolution = nullptr;
   IREE_ASSERT_OK(loom_serve_model_resolution_start(
       Sink(), &configuration_, Observer(), allocator_, &resolution));

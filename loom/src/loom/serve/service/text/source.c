@@ -53,18 +53,28 @@ static iree_status_t loom_serve_text_prepare(
                              iree_make_const_byte_span(json.data, json.size), 1,
                              host_allocator, &source->options);
   }
-  iree_vm_variant_t arguments[] = {
+  iree_vm_variant_t arguments[10] = {
       iree_vm_variant_from_i64((int64_t)options->prefill_capacity),
       iree_vm_variant_from_i64((int64_t)options->context_capacity),
       iree_vm_variant_from_i64((int64_t)options->pool_capacity),
       iree_vm_variant_from_i64((int64_t)options->row_count),
       iree_vm_variant_from_i64((int64_t)options->checkpoint_capacity),
       iree_vm_variant_from_i32((int32_t)options->draft_depth),
-      iree_vm_variant_from_i64((int64_t)options->span_capacity),
-      iree_vm_buffer_variant_from_ptr_move(&source->vm_types, &weights),
-      iree_vm_buffer_variant_from_ptr_borrowed(&source->vm_types,
-                                               source->options),
   };
+  iree_host_size_t argument_count = 6;
+  if (source->v1) {
+    arguments[argument_count++] = iree_vm_buffer_variant_from_ptr_borrowed(
+        &source->vm_types, source->v1->catalog);
+    arguments[argument_count++] =
+        iree_vm_variant_from_i64(source->v1->catalog_count);
+  } else {
+    arguments[argument_count++] =
+        iree_vm_variant_from_i64((int64_t)options->span_capacity);
+  }
+  arguments[argument_count++] =
+      iree_vm_buffer_variant_from_ptr_move(&source->vm_types, &weights);
+  arguments[argument_count++] = iree_vm_buffer_variant_from_ptr_borrowed(
+      &source->vm_types, source->options);
   iree_vm_variant_t results[4 + LOOM_SERVE_TEXT_STORAGE_RESULT_COUNT] = {0};
   iree_vm_module_t* modules[2] = {0};
   if (iree_status_is_ok(status)) {
@@ -80,7 +90,7 @@ static iree_status_t loom_serve_text_prepare(
         source->environment, module, &options->sources, IREE_SV("prepare"),
         LOOM_RUNTIME_PREPARATION_FLAG_PARAMETERS |
             LOOM_RUNTIME_PREPARATION_FLAG_STORAGE,
-        iree_vm_variant_span_from_array(arguments),
+        iree_vm_variant_span_from_ptr(arguments, argument_count),
         iree_vm_variant_span_from_array(results),
         iree_vm_module_span_from_array(modules), host_allocator,
         &source->preparation);
@@ -298,6 +308,17 @@ iree_status_t loom_serve_text_source_initialize(
       iree_vm_ref_types_resolve(iree_vm_environment_lookup_ref_type_table(
                                     out_source->environment, IREE_SV("vm")),
                                 &out_source->vm_types));
+  if (options->sources.card) {
+    const uint32_t version =
+        options->sources.component
+            ? options->sources.component->version
+            : loom_model_card_selection(options->sources.card)->version;
+    if (version == 1) {
+      IREE_RETURN_IF_ERROR(loom_serve_text_v1_allocate(
+          jit, out_source->environment, &out_source->vm_types,
+          (int32_t)options->prefill_capacity, host_allocator, &out_source->v1));
+    }
+  }
   const iree_string_view_t prepare = IREE_SV("prepare");
   loom_serve_text_source_sizing_t sizing = {
       .options = options,
@@ -373,5 +394,6 @@ void loom_serve_text_source_deinitialize(loom_serve_text_source_t* source) {
   iree_vm_buffer_release(source->options);
   loom_runtime_tokenizer_release(source->tokenizer);
   iree_vm_buffer_release(source->terminal_marker);
+  loom_serve_text_v1_free(source->v1, source->host_allocator);
   iree_vm_environment_free(source->environment);
 }

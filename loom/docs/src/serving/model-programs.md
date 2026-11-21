@@ -468,6 +468,17 @@ For example, three sessions with one ready token each supply three tokens and
 three spans. A single prompt offering three tokens supplies three tokens and
 one span. Both can use the same prepared command program.
 
+Published text and sequence packages can keep `"version": 1` and their original
+controllers. The server supplies the ordered capacity table those controllers
+expect during preparation, then selects a row for each packet. For example,
+35 live tokens from three spans select the 64-token, four-span row if the
+deployment admits 64 tokens. Image features begin after all 64 reserved token
+records. An ABI 2 controller receives 35 tokens and three spans directly.
+
+Both versions report output and accepted draft inputs. A publisher that omits
+the number of candidates it proposed reports `null` for that count after a
+verification. The corresponding numeric metric is omitted.
+
 The second result of `prepare` counts leading stages that share one weight
 layout and implement the direct-row bindings. A model that serves all rows
 through its epoch can return zero. Each recorded stage then declares its own

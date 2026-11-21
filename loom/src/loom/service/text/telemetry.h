@@ -118,6 +118,7 @@ typedef struct loom_service_text_epoch_record_t {
   // Draft inputs accepted by the target, excluding pending anchors.
   uint64_t accepted_draft_inputs;
   // Actual candidates presented to the target, including rejected candidates.
+  // UINT64_MAX when the publisher does not expose the count.
   uint64_t proposed_tokens;
 } loom_service_text_epoch_record_t;
 
@@ -143,6 +144,7 @@ typedef struct loom_service_text_span_record_t {
   // Completed verifications for this span.
   uint64_t verification_epochs;
   // Actual candidates presented to the target across this span's verifications.
+  // UINT64_MAX when the publisher does not expose the count.
   uint64_t proposed_tokens;
   // Whether the span was consuming prompt input at submission.
   uint64_t prefill;
@@ -244,6 +246,7 @@ typedef struct loom_service_text_work_record_t {
   // Cumulative host submission-to-readiness nanoseconds.
   uint64_t model_ns;
   // Draft candidates from completed verification.
+  // UINT64_MAX when the publisher does not expose the count.
   uint64_t proposed_tokens;
   // Accepted draft inputs excluding pending anchors.
   uint64_t accepted_inputs;

@@ -95,7 +95,8 @@ typedef struct loom_service_text_statistics_t {
   iree_duration_t model_duration;
   // Completed speculative work, separate from committed output progress.
   struct {
-    // Candidate tokens produced across completed verifications.
+    // Candidate tokens produced across completed verifications, or UINT64_MAX
+    // if a completed verification did not report its count.
     uint64_t proposed_tokens;
     // Draft inputs consumed by the target, excluding each pending anchor.
     uint64_t accepted_inputs;

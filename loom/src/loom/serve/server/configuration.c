@@ -492,12 +492,10 @@ static iree_status_t loom_serve_model_configuration_definition_parse(
     const bool text =
         iree_string_view_equal(selection->kind, IREE_SV("text")) ||
         iree_string_view_equal(selection->kind, IREE_SV("sequence"));
-    const uint32_t first_version = text ? 2 : 1;
     const uint32_t last_version =
         text || iree_string_view_equal(selection->kind, IREE_SV("speech")) ? 2
                                                                            : 1;
-    if (selection->version && (selection->version < first_version ||
-                               selection->version > last_version)) {
+    if (selection->version > last_version) {
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
           "selected service requires unsupported %.*s ABI version %u "

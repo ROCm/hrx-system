@@ -221,7 +221,8 @@ typedef struct loom_serve_text_result_t {
   // Number of speculative verifications that advanced this span.
   uint32_t verification_count;
   // Candidates presented to the target, including rejected and lookup-supplied
-  // tokens, excluding pending anchors. Summed across completed verifications.
+  // tokens, excluding pending anchors. UINT32_MAX if the publisher performed
+  // verification without reporting its candidate count.
   uint32_t proposal_count;
   // Valid prefix of output_count IDs across at most two device-fed epochs.
   int32_t tokens[LOOM_SERVICE_TEXT_MAX_EPOCH_OUTPUTS];

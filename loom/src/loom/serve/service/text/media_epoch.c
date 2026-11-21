@@ -199,11 +199,13 @@ static void loom_serve_text_media_epoch_store(
 iree_status_t loom_serve_text_media_epoch_initialize(
     iree_host_size_t first_span_count,
     const loom_serve_text_span_t* first_spans,
-    iree_host_size_t first_token_count, iree_host_size_t next_span_count,
-    const loom_serve_text_span_t* next_spans, iree_host_size_t next_token_count,
-    iree_allocator_t host_allocator, loom_serve_text_media_epoch_t* out_epoch) {
+    iree_host_size_t first_record_capacity, iree_host_size_t next_span_count,
+    const loom_serve_text_span_t* next_spans,
+    iree_host_size_t next_record_capacity, iree_allocator_t host_allocator,
+    loom_serve_text_media_epoch_t* out_epoch) {
   memset(out_epoch, 0, sizeof(*out_epoch));
-  const uint64_t record_count = (uint64_t)first_token_count + next_token_count;
+  const uint64_t record_count =
+      (uint64_t)first_record_capacity + next_record_capacity;
   if (record_count > UINT32_MAX / LOOM_SERVE_TEXT_MEDIA_PACKET_RECORD_BYTES) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
