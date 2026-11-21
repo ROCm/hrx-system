@@ -44,7 +44,10 @@ larger than the set of models that can be resident simultaneously.
 The normal default is `"open"`. Registration returns HTTP 202 after accepting
 server-owned intent. Preparation and JIT happen asynchronously. A client
 disconnect does not cancel that registration; `/v1/status` reports its outcome.
-A failed source package remains inspectable without stopping healthy peers.
+If preparation fails, inference requests waiting for the model and subsequent
+requests for it receive HTTP 503. The response's `error.message` carries the
+available diagnostic, such as the path of a missing program. Other models
+continue serving.
 After correcting its inputs, unregistering and registering again starts an
 explicit new attempt with a new incarnation.
 

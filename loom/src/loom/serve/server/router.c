@@ -1016,6 +1016,23 @@ static iree_status_t loom_serve_router_admit(
                                         status);
 }
 
+static iree_status_t loom_serve_router_reject_unavailable_model(
+    loom_serve_router_t* router, loom_serve_http_connection_t* connection,
+    const loom_serve_registered_model_t* model) {
+  if (model->removal) {
+    return loom_serve_http_response_reject(
+        router->server, connection, 410, "Gone",
+        IREE_SV("model is being unregistered"), &router->output);
+  }
+  iree_string_view_t message = iree_status_message(model->status);
+  if (iree_string_view_is_empty(message)) {
+    message = IREE_SV("model is unavailable; inspect /v1/status");
+  }
+  return loom_serve_http_response_reject(router->server, connection, 503,
+                                         "Service Unavailable", message,
+                                         &router->output);
+}
+
 static void loom_serve_router_held_collect(loom_serve_router_t* router,
                                            bool* out_progress) {
   iree_host_size_t remaining = 0;
@@ -1028,15 +1045,10 @@ static void loom_serve_router_held_collect(loom_serve_router_t* router,
         loom_serve_http_connection_failed(entry.connection)) {
       loom_serve_http_connection_abort(entry.connection);
     } else if (state->removal || !iree_status_is_ok(state->status)) {
-      router->driver.runtime.status = iree_status_join(
-          router->driver.runtime.status,
-          loom_serve_http_response_reject(
-              router->server, entry.connection, state->removal ? 410 : 503,
-              state->removal ? "Gone" : "Service Unavailable",
-              state->removal
-                  ? IREE_SV("model is being unregistered")
-                  : IREE_SV("model is unavailable; inspect /v1/status"),
-              &router->output));
+      router->driver.runtime.status =
+          iree_status_join(router->driver.runtime.status,
+                           loom_serve_router_reject_unavailable_model(
+                               router, entry.connection, state));
       router->driver.runtime.stopping |=
           !iree_status_is_ok(router->driver.runtime.status);
     } else if (!state->closed &&
@@ -1561,15 +1573,9 @@ static iree_status_t loom_serve_router_accept(
         state->closed = drain;
         return loom_serve_router_control(router, i, connection, 200);
       }
-      if (state->removal) {
-        return loom_serve_http_response_reject(
-            router->server, connection, 410, "Gone",
-            IREE_SV("model is being unregistered"), output);
-      }
-      if (!iree_status_is_ok(state->status)) {
-        return loom_serve_http_response_reject(
-            router->server, connection, 503, "Service Unavailable",
-            IREE_SV("model is unavailable; inspect /v1/status"), output);
+      if (state->removal || !iree_status_is_ok(state->status)) {
+        return loom_serve_router_reject_unavailable_model(router, connection,
+                                                          state);
       }
       if (!state->service.endpoint &&
           !loom_serve_router_is_tokenization(request->target)) {

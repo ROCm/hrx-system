@@ -433,6 +433,44 @@ class ServerTest(unittest.TestCase):
                     if state == "missing":
                         self.assertIn(str(package / "model.json"), result.stderr)
 
+    def test_inference_names_the_missing_model_file_and_peers_keep_serving(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            document = json.loads((PACKAGE / "model.json").read_text())
+            document.update(name="incomplete", base_directory=str(PACKAGE))
+            missing = "missing-prepare.loom"
+            document["definition"]["prepare"] = missing
+            incomplete = directory / "incomplete.json"
+            incomplete.write_text(json.dumps(document))
+            log = directory / "server.log"
+            with running_server(
+                [
+                    str(SERVER),
+                    "--device=task",
+                    "--workers=1",
+                    "--pool_backing=fixed",
+                    "--listen=127.0.0.1:0",
+                    f"--model={incomplete}",
+                    f"--model={PACKAGE}",
+                ],
+                log,
+            ) as (process, bound_address):
+                self.assertIsNotNone(bound_address, log.read_text())
+                address = urlsplit(f"http://{bound_address}")
+                payload = {"input": ["ab"], "dimensions": 2}
+                error = self.post(
+                    address,
+                    "/v1/embeddings",
+                    {**payload, "model": "incomplete"},
+                    expected=503,
+                )["error"]
+                self.assertIn(missing, error["message"])
+                result = self.post(
+                    address, "/v1/embeddings", {**payload, "model": "vectors"}
+                )
+                self.assertEqual(result["data"][0]["embedding"], [3, 2])
+            self.assertEqual(process.returncode, 0, log.read_text())
+
     def test_repeated_documents_share_cli_and_http_registration(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
