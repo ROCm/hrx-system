@@ -38,11 +38,11 @@ distribute runnable model cards directly. The
 includes community ports with device and memory guidance in their READMEs.
 For a first request on a Vulkan device, [try the tiny text model](#try-vulkan).
 
-To see which presets and service ABI versions a card offers before downloading
-weights, pass its repository to `--list --json`. For a `text` service, version
-2 runs with the 0.3 SDK and version 1 runs with the 0.2 SDK. The default SDK
-catalog selects model programs for its release. Independent publishers choose
-which releases and devices their programs support.
+Pass a publisher's repository to `--list --json` to see the presets and
+service versions before downloading weights. The installed SDK's default
+catalog selects programs for its release. For an independently published
+model, the card names the [service version](../model-documents.md#service-versions)
+and the publisher's README describes supported devices.
 
 ```sh
 loom-fetch huggingface:loom-fun/unsloth-Qwen3-0.6B-loom --list --json
@@ -364,21 +364,22 @@ In Windows PowerShell, send the same JSON with `Invoke-RestMethod`.
 
 ## Inspect the SDK library catalog
 
-To select a specific library revision, including from a development SDK,
-pass its catalog explicitly.
+List the catalog selected by the installed SDK.
 
 ```sh
-loom-fetch --catalog=github:ROCm/hrx-loom-library@v0.2.0 --list --json
+loom-fetch --list --json
 ```
 
-This snapshot includes Moonshine speech recognition, Pocket speech synthesis,
+To select a particular library tag or commit, use
+`--catalog=github:ROCm/hrx-loom-library@REVISION` with that revision.
+The library includes Moonshine speech recognition, Pocket speech synthesis,
 Qwen3.8 Flash-Next text generation, Qwen3.8-27B text and vision, Qwen3 Embedding,
 and Krea image generation. Pocket's `streaming` preset uses Alba, Marius, and
 Anna; `streaming-noncommercial` adds Jean.
 
 Each catalog entry identifies a runnable package with published programs and
 asset sources. The
-[model map](https://github.com/ROCm/hrx-loom-library/tree/v0.2.0/model)
+[model map](https://github.com/ROCm/hrx-loom-library/tree/main/model)
 records each package's supported devices and presets.
 
 Acquisition and startup are the same across modalities. The selected service

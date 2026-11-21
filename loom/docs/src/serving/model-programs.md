@@ -17,7 +17,8 @@ The important distinction is the shape of state and output, not the model name:
 
 | Contract | Source responsibilities | Starting package |
 | --- | --- | --- |
-| Retained text | Token framing, paged state geometry, mixed prompt/decode math, progress, sampling and chat policy. | [Tiny text model](https://github.com/ROCm/hrx-system/tree/main/loom/src/loom/serve/fixture/text) |
+| Retained text | Token framing, paged state geometry, mixed prompt/decode math, progress, sampling and chat policy. | [Tiny text publication](sharing/hugging-face.md#start-from-a-working-publication) |
+| Known-token sequence | Validate supplied token IDs, advance retained state, and return the captured bytes for each span. | [Tiny sequence package](https://github.com/ROCm/hrx-system/tree/main/loom/src/loom/serve/fixture/text) |
 | Staged image | Prompt preparation, parameter domains, numerical stages, invocation continuation and final RGBA8. | [Image model](https://github.com/ROCm/hrx-system/tree/main/loom/src/loom/serve/fixture/image) |
 | Finite embeddings | Input preparation, cohort cost/compatibility, pooling/projection and final vectors. | [Embedding model](https://github.com/ROCm/hrx-system/tree/main/loom/src/loom/serve/fixture/embedding) |
 | Finite decisions | Structured question framing and compact normalized answer distributions. | [Decision model](https://github.com/ROCm/hrx-system/tree/main/loom/src/loom/serve/fixture/decision) |
@@ -453,37 +454,29 @@ for exact record layouts and ownership.
 
 ## Retained text and staged images
 
-Text uses one prepared model and cached stage set. Sessions are rows and storage
-references, not independent VM processes. Its source declares page/recurrent
-geometry and consumes packed spans that can mix prompt tokens, decode anchors
-and speculative verifier work. Token capacity and independently advancing span
-capacity are separate. The source reports completed progress; native ownership
-commits it after readiness.
+A text or sequence controller prepares stages once and shares them across
+sessions. A *span* is one session's contribution to a packet. Text spans can
+carry prompt tokens, decode anchors, or draft candidates for verification.
 
-During preparation, `prepare(prefill_capacity, context_capacity, pool_capacity,
-rows, pins, draft_depth, span_capacity, weights, options)` receives token and
-span budgets for staging. Each call to `epoch` identifies the actual number of
-tokens and spans submitted for the first packet and its optional continuation.
-For example, three sessions with one ready token each supply three tokens and
-three spans. A single prompt offering three tokens supplies three tokens and
-one span. Both can use the same prepared command program.
+At registration, `prepare(prefill_capacity, context_capacity, pool_capacity,
+rows, pins, draft_depth, span_capacity, weights, options)` receives separate
+limits for token positions and spans per packet. Use them to size reusable
+buffers and declare the stages the model needs. A longer prompt can span
+several packets.
 
-Published text and sequence packages can keep `"version": 1` and their original
-controllers. The server supplies the ordered capacity table those controllers
-expect during preparation, then selects a row for each packet. For example,
-35 live tokens from three spans select the 64-token, four-span row if the
-deployment admits 64 tokens. Image features begin after all 64 reserved token
-records. An ABI 2 controller receives 35 tokens and three spans directly.
-
-Both versions report output and accepted draft inputs. A publisher that omits
-the number of candidates it proposed reports `null` for that count after a
-verification. The corresponding numeric metric is omitted.
+At execution, `epoch` receives the first packet's `token_count` and
+`span_count`. For example, 33 prompt tokens from one session and one decode
+token from each of two others give 35 tokens and three spans. The controller
+can size a dispatch from those counts or choose a prepared stage. If a second
+packet will run on the device using the first packet's results, it has its
+own `next_span_count` and `next_token_count`. Both are zero for a single
+packet.
 
 The second result of `prepare` counts leading stages that share one weight
-layout and implement the direct-row bindings. A model that serves all rows
-through its epoch can return zero. Each recorded stage then declares its own
-weight bindings, and the first binding of the first stage identifies the
-primary checkpoint.
+layout and implement the single-row bindings. A pooled or draft-backed model
+that serves all rows through `epoch` can return zero. Each recorded stage can
+then declare its own weight bindings. The first binding of the first stage
+identifies the primary checkpoint.
 
 Resident capacity grows independently of the work in each packet. Source control
 exports `resize_state(control_state, resident_capacity)`, returning replacement
@@ -624,8 +617,10 @@ known IDs and publishes source-defined opaque output. It can implement an
 encoder or another retained stage; a source may also run a head and include its
 result bytes explicitly, without asking the server to sample or feed them back.
 
-Preparation retains the text model's nine-result ABI. The terminal-token marker
-may be null. Control exports `epoch`, `encode_epoch`, `publish_epoch`,
+Published [sequence controllers](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/fixture/text/service.loom)
+export `sequence_<role>_v2`. For example, `sequence_prepare_v2` returns the
+same nine results as `text_prepare_v2`, with an optional terminal-token marker.
+The control roles are `epoch`, `encode_epoch`, `publish_epoch`,
 `encode_state`, `resize_state`, `bind_request`, `request_defaults`, `prepare_request`, and
 `capture_epoch`. Isolated `step`, tokenizer/chat roots, and drafting are not
 required. Every submitted span has selection/proposal flags zero, and completed

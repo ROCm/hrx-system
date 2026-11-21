@@ -203,7 +203,13 @@ trust. The [sandboxing guide](../sandboxing.md) covers isolation.
 
 Replace the example's programs, tokenizer, and parameters with a working
 [model package](../model-programs.md), and give the card its own model ID.
-Its README describes the model, supported devices, presets, provenance,
+For a text or sequence service, publish the controller sources or LoomBC
+archive alongside a card selecting `"version": 2`. The template's
+`text_prepare_v2` sizes storage for the deployment and its `text_epoch_v2`
+runs a prepared stage for the live request. The same pattern works for
+[sequence controllers](../model-programs.md#known-token-stages).
+
+The package README describes the model, supported devices, presets, provenance,
 license, and output checks. `AGENTS.md` can continue routing agents to the Loom
 website rather than copying these instructions into each repository.
 

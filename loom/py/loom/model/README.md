@@ -150,10 +150,10 @@ A service may declare components whose roles and lifecycle it owns. Text's
 }
 ```
 
-The projector exports `text_image_prepare_v1`,
-`text_image_prepare_request_v1`, `text_image_prepare_batch_v1`, and
-`text_image_run_v1`. Its revision is independent of the parent text revision;
-omitting it selects `text_image_<role>` development names. Components share
+The projector's version selects its own `text_image_<role>_v1` exports.
+The [service version reference](../../../docs/src/serving/model-documents.md#service-versions)
+lists the projector roles. Omitting its version selects the
+`text_image_<role>` development names. Components share
 the selected providers, JIT `config`, parameter scopes, and tokenizers. They
 introduce no separate program or variant choice. A single bytecode library can
 provide both contracts; source and mixed-provider selections work the same way.

@@ -117,18 +117,25 @@ The referenced `model.json` can contain:
 }
 ```
 
-These programs implement the text service ABI, including `text_prepare_v2` and
-the corresponding `text_<role>_v2` control exports. Service `version` is
-independent of `schema_version` and the bytecode encoding version. Omitting it
-selects the unversioned development names, `text_<role>`. A missing versioned
-export is an error; bare exports are not substituted. Several services and ABI
-revisions can coexist in one provider set. The host checks the selected service.
-Text and sequence support ABIs 1 and 2. New controllers use ABI 2. Image,
-embedding, decision, recognition, and activity implement ABI 1. Speech supports
-ABIs 1 and 2. Each uses its own `<kind>_<role>_v<version>` exports for
-preparation and control.
+### Service versions
 
-Text services can declare an independently versioned image projector:
+New text and sequence services publish `"version": 2`. The service kind
+determines the export names. For the chat card above, the server binds
+`text_prepare_v2`, `text_epoch_v2`, and the other `text_<role>_v2` exports.
+A sequence controller exports `sequence_<role>_v2`. In both services, the
+inputs to `epoch` include each packet's
+[live token and span counts](model-programs.md#retained-text-and-staged-images).
+
+Service versions are independent of the card's `schema_version` and the
+LoomBC encoding. A versioned service requires the matching exports from its
+selected programs. Omitting `version` selects development names such as
+`text_prepare`, which follow the current calling convention. The 0.3 SDK
+also runs published ABI 1 text and sequence packages from 0.2 with their
+original model cards, source or LoomBC archives, and weights.
+
+Each service and component declares its own version. Speech uses version 2.
+Image, embedding, decision, recognition, and activity use version 1. This
+chat service pairs its ABI 2 text controller with an ABI 1 image projector.
 
 ```json
 {
@@ -144,11 +151,8 @@ Text services can declare an independently versioned image projector:
 
 The component uses `text_image_prepare_v1`, `text_image_prepare_request_v1`,
 `text_image_prepare_batch_v1`, `text_image_collect_batch_v1`, and
-`text_image_run_v1`. These exports may share
-one bytecode bundle with the primary text exports. Both use the card's selected
-providers and named parameter scopes. The server supports image component ABI 1
-and the unversioned `text_image_<role>` development contract. Other selected
-component roles or revisions fail before program loading.
+`text_image_run_v1`. The projector and text controller may share a bytecode
+bundle. Both use the card's selected providers and named parameter scopes.
 
 Presets can supply `components.image.options` for option names declared by the
 component, and `components.image.execution.specialization_cache` for its idle

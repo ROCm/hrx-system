@@ -412,6 +412,9 @@ continuation. `scheduled_tokens` counts the input positions submitted for
 its spans across both epochs. A verifier can accept fewer positions than were
 scheduled. `prefill_tokens` and `decode_tokens` count the positions actually
 consumed, and `draft` reports the proposals presented and accepted.
+When a controller reports accepted inputs without a proposal count,
+`draft.proposed_tokens` is `null` and the corresponding numeric counter is
+omitted. The accepted-input count remains available.
 
 ## Measure the user-visible result
 
