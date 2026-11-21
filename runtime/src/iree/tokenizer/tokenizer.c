@@ -105,6 +105,9 @@ struct iree_tokenizer_encode_state_t {
   // write_position). Used for view management and reclaim tracking. Advances
   // when segmenter consumes bytes or when post-norm special tokens skip bytes.
   iree_host_size_t segmenter_view_start;
+  // Contiguous ring view borrowed while finalizing a span. Writers and ring
+  // growth resume after the last batch. NULL data means no span is draining.
+  iree_string_view_t finalizing_span;
 
   // Segment buffer (points into state_storage after stage states).
   iree_tokenizer_segment_t* segments;
@@ -177,8 +180,8 @@ static inline iree_host_size_t iree_tokenizer_ring_writable_space(
 }
 
 // Cold overflow path. Logical positions and segmenter-relative offsets do not
-// change; only the mapping into physical ring storage changes. No producer
-// retains a pointer into the old ring across calls.
+// change; only the mapping into physical ring storage changes. The pump drains
+// any finalized span before returning to the producers that can require growth.
 static iree_status_t iree_tokenizer_ring_grow(
     iree_tokenizer_encode_state_t* state) {
   iree_host_size_t old_capacity = state->capacity_mask + 1;
@@ -678,6 +681,7 @@ static iree_status_t iree_tokenizer_encode_state_reset_internal(
   state->read_position = 0;
   state->write_position = 0;
   state->segmenter_view_start = 0;
+  state->finalizing_span = iree_string_view_empty();
   state->post_norm_scan_position = 0;
   state->segment_count = 0;
   state->segments_consumed = 0;
@@ -1472,6 +1476,38 @@ static bool iree_tokenizer_try_emit_pending_special_token(
   return false;
 }
 
+// Queues a batch for the model using logical ring positions. The model may
+// consume it over several calls after the segmenter's input view advances.
+static void iree_tokenizer_encode_state_queue_segments(
+    iree_tokenizer_encode_state_t* state, iree_host_size_t count) {
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    state->segments[i].start += state->segmenter_view_start;
+    state->segments[i].end += state->segmenter_view_start;
+  }
+  state->segment_count = count;
+}
+
+// Drains one batch from a completed span. Every batch borrows the same bytes
+// and offset origin, including when the span crosses the physical ring wrap.
+static iree_status_t iree_tokenizer_encode_state_drain_segment_span(
+    iree_tokenizer_encode_state_t* state, bool* made_progress) {
+  iree_host_size_t count = 0;
+  IREE_RETURN_IF_ERROR(iree_tokenizer_segmenter_state_finalize(
+      state->segmenter_state, state->finalizing_span,
+      iree_tokenizer_make_segment_output(state->segments,
+                                         state->tokenizer->segment_batch_size),
+      &count));
+  iree_tokenizer_encode_state_queue_segments(state, count);
+  if (!iree_tokenizer_segmenter_state_has_pending(state->segmenter_state)) {
+    state->segmenter_view_start += state->finalizing_span.size;
+    state->finalizing_span = iree_string_view_empty();
+    *made_progress = true;
+  } else {
+    *made_progress |= count > 0;
+  }
+  return iree_ok_status();
+}
+
 // Internal helper: run one iteration of the encode pipeline.
 // Sets |out_made_progress| to true if data moved through the pipeline.
 static iree_status_t iree_tokenizer_encode_state_pump(
@@ -1554,6 +1590,10 @@ static iree_status_t iree_tokenizer_encode_state_pump(
   // Queued model output precedes every later span and added token.
   if (state->segment_count > state->segments_consumed) {
     return iree_ok_status();
+  }
+  if (state->finalizing_span.data) {
+    return iree_tokenizer_encode_state_drain_segment_span(state,
+                                                          out_made_progress);
   }
 
   // A raw token boundary or final input completes normalization only after
@@ -1665,14 +1705,12 @@ static iree_status_t iree_tokenizer_encode_state_pump(
     normalized_text.size = post_norm_segment_limit;
   }
   bool span_complete = post_norm_boundary || normalized_span_complete;
-  if (state->segment_count < tokenizer->segment_batch_size &&
-      (normalized_text.size > 0 ||
-       (post_norm_boundary && state->segmenter_state &&
-        iree_tokenizer_segmenter_state_has_pending(state->segmenter_state)))) {
-    iree_tokenizer_segment_output_t segment_output = {
-        .capacity = tokenizer->segment_batch_size - state->segment_count,
-        .values = &state->segments[state->segment_count],
-    };
+  if (normalized_text.size > 0 ||
+      (post_norm_boundary && state->segmenter_state &&
+       iree_tokenizer_segmenter_state_has_pending(state->segmenter_state))) {
+    iree_tokenizer_segment_output_t segment_output =
+        iree_tokenizer_make_segment_output(state->segments,
+                                           tokenizer->segment_batch_size);
 
     iree_host_size_t bytes_consumed = 0;
     iree_host_size_t segments_produced = 0;
@@ -1692,29 +1730,14 @@ static iree_status_t iree_tokenizer_encode_state_pump(
     // Only an established producer boundary can finish a pending segment.
     // A possible added-token prefix reserves bytes without ending the span.
     if (bytes_consumed == 0 && segments_produced == 0 && span_complete &&
-        segment_output.capacity > 0 && state->segmenter_state) {
-      IREE_RETURN_IF_ERROR(iree_tokenizer_segmenter_state_finalize(
-          state->segmenter_state, normalized_text, segment_output,
-          &segments_produced));
-      bytes_consumed = normalized_text.size;
+        state->segmenter_state) {
+      state->finalizing_span = normalized_text;
+      return iree_tokenizer_encode_state_drain_segment_span(state,
+                                                            out_made_progress);
     }
 
-    // Capture segmenter_view_start before mutation for offset adjustment.
-    // Segments use this captured value to convert from relative to absolute
-    // offsets. This makes segments immune to later state mutations (e.g.,
-    // post-norm special token matching advancing segmenter_view_start).
-    iree_host_size_t view_start = state->segmenter_view_start;
-
-    // Convert segment offsets from relative to absolute (logical cumulative).
-    // Models receive these unchanged with the logical origin of their buffer.
-    for (iree_host_size_t i = 0; i < segments_produced; ++i) {
-      state->segments[state->segment_count + i].start += view_start;
-      state->segments[state->segment_count + i].end += view_start;
-    }
-
-    // Advance segmenter_view_start for next call.
+    iree_tokenizer_encode_state_queue_segments(state, segments_produced);
     state->segmenter_view_start += bytes_consumed;
-    state->segment_count += segments_produced;
     if (bytes_consumed > 0 || segments_produced > 0) {
       *out_made_progress = true;
     }
@@ -2172,33 +2195,15 @@ static iree_status_t iree_tokenizer_encode_state_finalize_internal(
         break;
       }
       state->phase = IREE_TOKENIZER_ENCODE_PHASE_SEGMENT;
-      made_progress = true;
+      if (state->segmenter_state) {
+        state->finalizing_span = iree_tokenizer_ring_get_view(
+            state, state->segmenter_view_start, state->write_position);
+        status = iree_tokenizer_encode_state_drain_segment_span(state,
+                                                                &made_progress);
+      }
     }
     if (state->phase == IREE_TOKENIZER_ENCODE_PHASE_SEGMENT) {
-      if (state->segmenter_state) {
-        iree_tokenizer_segment_output_t segment_output = {
-            .capacity = state->tokenizer->segment_batch_size,
-            .values = state->segments,
-        };
-        iree_host_size_t segments_produced = 0;
-        status = iree_tokenizer_segmenter_state_finalize(
-            state->segmenter_state,
-            iree_tokenizer_ring_get_view(state, state->segmenter_view_start,
-                                         state->write_position),
-            segment_output, &segments_produced);
-        if (iree_status_is_ok(status)) {
-          for (iree_host_size_t i = 0; i < segments_produced; ++i) {
-            state->segments[i].start += state->segmenter_view_start;
-            state->segments[i].end += state->segmenter_view_start;
-          }
-          state->segment_count = segments_produced;
-          made_progress |= segments_produced > 0;
-        }
-      }
-      if (iree_status_is_ok(status) &&
-          (!state->segmenter_state ||
-           !iree_tokenizer_segmenter_state_has_pending(
-               state->segmenter_state))) {
+      if (!state->finalizing_span.data) {
         state->segmenter_view_start = state->write_position;
         state->phase = IREE_TOKENIZER_ENCODE_PHASE_MODEL;
         made_progress = true;
