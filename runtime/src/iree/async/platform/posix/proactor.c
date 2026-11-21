@@ -1975,40 +1975,6 @@ iree_status_t iree_async_proactor_posix_submit_continuation(
 // Timer helpers
 //===----------------------------------------------------------------------===//
 
-// Calculates the poll timeout considering pending timers.
-// Returns the timeout in milliseconds, clamped to avoid overflow.
-static int iree_async_proactor_posix_calculate_timeout_ms(
-    iree_async_proactor_posix_t* proactor, iree_timeout_t user_timeout) {
-  // Start with user-requested timeout.
-  int timeout_ms = 0;
-  if (iree_timeout_is_immediate(user_timeout)) {
-    timeout_ms = 0;
-  } else if (iree_timeout_is_infinite(user_timeout)) {
-    timeout_ms = -1;
-  } else {
-    uint32_t remaining_ms = iree_absolute_deadline_to_timeout_ms(
-        iree_timeout_as_deadline_ns(user_timeout));
-    timeout_ms = remaining_ms > INT_MAX ? INT_MAX : (int)remaining_ms;
-  }
-
-  // If we have pending timers, reduce timeout to fire them on time.
-  iree_time_t earliest_deadline =
-      iree_async_posix_timer_list_next_deadline_ns(&proactor->timers);
-  if (earliest_deadline != IREE_TIME_INFINITE_FUTURE) {
-    uint32_t timer_timeout_ms =
-        iree_absolute_deadline_to_timeout_ms(earliest_deadline);
-    int clamped_timer_timeout_ms =
-        timer_timeout_ms > INT_MAX ? INT_MAX : (int)timer_timeout_ms;
-
-    // Use the smaller of user timeout and timer timeout.
-    if (timeout_ms < 0 || clamped_timer_timeout_ms < timeout_ms) {
-      timeout_ms = clamped_timer_timeout_ms;
-    }
-  }
-
-  return timeout_ms;
-}
-
 // Processes expired timers by pushing completions to the queue.
 // Uses remove-then-queue pattern with cancelled flag check for safety.
 // Returns the number of callbacks invoked directly when the completion pool is
@@ -3167,12 +3133,14 @@ static iree_status_t iree_async_proactor_posix_poll(
     return cancel_status;
   }
 
-  // Calculate timeout considering both user request and pending timers.
-  int timeout_ms =
-      iree_async_proactor_posix_calculate_timeout_ms(proactor, timeout);
-  if (completed_count > 0 || base_proactor->progress_list ||
-      base_proactor->cancellations.list.head) {
-    timeout_ms = 0;
+  // Ready or cooperative work must return control to the poll owner. Otherwise
+  // sleep until the earlier of the caller's deadline and the first timer.
+  iree_time_t deadline_ns = IREE_TIME_INFINITE_PAST;
+  if (completed_count == 0 && !base_proactor->progress_list &&
+      !base_proactor->cancellations.list.head) {
+    iree_time_t timer_deadline_ns =
+        iree_async_posix_timer_list_next_deadline_ns(&proactor->timers);
+    deadline_ns = iree_min(timeout.nanos, timer_deadline_ns);
   }
 
   // Poll for ready fds.
@@ -3180,7 +3148,7 @@ static iree_status_t iree_async_proactor_posix_poll(
   bool timed_out = false;
   IREE_TRACE_ZONE_END(z0);
   iree_status_t poll_status = iree_async_posix_event_set_wait(
-      proactor->event_set, timeout_ms, &ready_count, &timed_out);
+      proactor->event_set, deadline_ns, &ready_count, &timed_out);
   if (!iree_status_is_ok(poll_status)) {
     if (out_completed_count) {
       *out_completed_count = completed_count;

@@ -4,13 +4,22 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#if defined(__APPLE__) && !defined(_DARWIN_UNLIMITED_SELECT)
+// Darwin pselect accepts fd_set storage sized to nfds.
+#define _DARWIN_UNLIMITED_SELECT
+#endif
+
 #include "iree/async/event.h"
 
 #if defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_ANDROID) || \
     defined(IREE_PLATFORM_APPLE) || defined(IREE_PLATFORM_BSD)
 
-#include <limits.h>
 #include <poll.h>
+#if defined(IREE_PLATFORM_APPLE)
+#include <sys/select.h>
+#endif
+
+#include "iree/async/posix_wait.h"
 
 #if defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_ANDROID)
 
@@ -125,29 +134,65 @@ iree_async_event_native_consume(const iree_async_event_native_t* event) {
   return iree_ok_status();
 }
 
+#if defined(IREE_PLATFORM_APPLE)
+// Darwin supplies pselect for a single pipe reader. Size the read mask to the
+// actual fd when it falls outside the inline fd_set.
+static iree_status_t iree_async_event_select_pipe(struct pollfd* descriptor,
+                                                  iree_time_t deadline_ns,
+                                                  int* out_result) {
+  int fd = descriptor->fd;
+  fd_set local_set;
+  fd_set* sets = &local_set;
+  const int block = fd / FD_SETSIZE;
+  if (IREE_UNLIKELY(block > 0)) {
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+        iree_allocator_system(), (iree_host_size_t)block + 1, sizeof(fd_set),
+        (void**)&sets));
+  } else {
+    FD_ZERO(&local_set);
+  }
+  FD_SET(fd % FD_SETSIZE, &sets[block]);
+  struct timespec storage;
+  const struct timespec* timeout = iree_async_posix_timeout_timespec(
+      iree_absolute_deadline_to_timeout_ns(deadline_ns), &storage);
+  *out_result = pselect(fd + 1, sets, NULL, NULL, timeout, NULL);
+  if (IREE_UNLIKELY(block > 0)) {
+    int error = errno;
+    iree_allocator_free(iree_allocator_system(), sets);
+    errno = error;
+  }
+  descriptor->revents = *out_result > 0 ? POLLIN : 0;
+  return iree_ok_status();
+}
+#endif  // IREE_PLATFORM_APPLE
+
 IREE_API_EXPORT iree_status_t iree_async_event_native_wait(
     const iree_async_event_native_t* event, iree_timeout_t timeout) {
   const iree_time_t deadline = iree_timeout_as_deadline_ns(timeout);
-  struct pollfd descriptor = {
-      .fd = event->wait_primitive.value.fd,
-      .events = POLLIN,
-  };
+  // The Darwin poll adapter uses the second slot only while blocking.
+  struct pollfd descriptors[2];
+  descriptors[0] =
+      (struct pollfd){.fd = event->wait_primitive.value.fd, .events = POLLIN};
   for (;;) {
-    const iree_duration_t remaining =
-        iree_absolute_deadline_to_timeout_ns(deadline);
-    const int milliseconds =
-        remaining == IREE_DURATION_INFINITE
-            ? -1
-            : (int)iree_min(remaining / 1000000 + (remaining % 1000000 != 0),
-                            INT_MAX);
-    const int result = poll(&descriptor, 1, milliseconds);
+#if defined(IREE_PLATFORM_APPLE)
+    int result = iree_async_darwin_poll_until(descriptors, 1, deadline, -1);
+    if ((result < 0 && (errno == EMFILE || errno == ENFILE)) ||
+        (result > 0 && (descriptors[0].revents & POLLNVAL))) {
+      // An owned pipe remains waitable when no spare fd is available. Darwin
+      // poll can also report POLLNVAL for a live fd above a lowered soft limit.
+      IREE_RETURN_IF_ERROR(
+          iree_async_event_select_pipe(descriptors, deadline, &result));
+    }
+#else
+    int result = iree_async_posix_poll_until(descriptors, 1, deadline);
+#endif  // IREE_PLATFORM_APPLE
     if (result > 0) {
-      if (descriptor.revents & POLLIN) {
+      if (descriptors[0].revents & POLLIN) {
         return iree_async_event_native_consume(event);
       }
       return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "native event wait returned events 0x%x",
-                              descriptor.revents);
+                              descriptors[0].revents);
     }
     if (result < 0 && errno != EINTR) {
       return iree_make_status(iree_status_code_from_errno(errno),
