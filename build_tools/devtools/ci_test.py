@@ -840,47 +840,76 @@ class CiTest(unittest.TestCase):
             ),
         )
 
-    def test_repeated_test_phases_preserve_each_result(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            result_dir = root / "results"
-            ci.bazel_test_results.prepare_output_directory(result_dir)
-            source = root / "testlogs" / "example" / "test.xml"
-            source.parent.mkdir(parents=True)
-            steps = ci.add_bazel_test_results(
-                [
-                    ci.bazel_test_step("First", ("//example:test",)),
-                    ci.bazel_test_step("Second", ("//example:test",)),
-                ],
-                result_dir,
-            )
-            event = {
-                "id": {
-                    "testResult": {
-                        "label": "//example:test",
-                        "configuration": {"id": "configuration"},
-                        "run": 1,
-                        "shard": 1,
-                        "attempt": 1,
-                    }
-                },
-                "testResult": {
-                    "status": "PASSED",
-                    "testActionOutput": [{"name": "test.xml", "uri": source.as_uri()}],
-                },
-            }
-            for step, payload in zip(steps, ("first result", "second result")):
-                source.write_text(payload)
-                capture = step.test_results
-                capture.build_event_path.write_text(json.dumps(event) + "\n")
-                result = ci.bazel_test_results.stage(
-                    capture.build_event_path, capture.output_dir
+    def test_result_capture_follows_the_run_outcome(self):
+        always = "--bazel-test-results-dir"
+        on_failure = "--bazel-failure-results-dir"
+        # The last exit code belongs to a build following all test phases.
+        for option, exits, expected_logs in (
+            (always, (0, 0, 0), ["first", "second"]),
+            (on_failure, (0, 0), []),
+            (on_failure, (0, 17), ["first"]),
+            (on_failure, (0, 17, 0), ["first", "second"]),
+            (on_failure, (17, 0, 0), ["first", "second"]),
+        ):
+            with (
+                self.subTest(option=option, exits=exits),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                result_dir = root / "results"
+                source = root / "testlogs/example/test.log"
+                source.parent.mkdir(parents=True)
+                steps = [
+                    ci.CiStep(
+                        f"Test {index}",
+                        ci.dev_command("bazel", "test", "//example:test"),
+                    )
+                    for index in range(len(exits) - 1)
+                ]
+                steps.append(ci.bazel_build_step("Build", ("//example:tool",)))
+                exit_codes = iter(exits)
+                payloads = iter(("first", "second"))
+
+                def run_bazel(argv, *, cwd, env):
+                    exit_code = next(exit_codes)
+                    if argv[3] == "test":
+                        source.write_text(next(payloads))
+                        event_path = next(
+                            arg.split("=", 1)[1]
+                            for arg in argv
+                            if arg.startswith("--build_event_json_file=")
+                        )
+                        event = {
+                            "id": {
+                                "testResult": {
+                                    "label": "//example:test",
+                                    "configuration": {"id": "config"},
+                                }
+                            },
+                            "testResult": {
+                                "status": "FAILED" if exit_code else "PASSED",
+                                "testActionOutput": [
+                                    {"name": "test.log", "uri": source.as_uri()}
+                                ],
+                            },
+                        }
+                        Path(event_path).write_text(json.dumps(event) + "\n")
+                    return subprocess.CompletedProcess(argv, exit_code)
+
+                with (
+                    mock.patch.dict(os.environ, {}, clear=True),
+                    mock.patch.object(ci, "_steps_from_args", return_value=steps),
+                    mock.patch.object(subprocess, "run", side_effect=run_bazel),
+                    contextlib.redirect_stdout(io.StringIO()),
+                ):
+                    status = ci.main(
+                        ["iree-bazel-cpu", "--keep-going", option, str(result_dir)]
+                    )
+                self.assertEqual(status, max(exits))
+                self.assertEqual(
+                    sorted(path.read_text() for path in result_dir.rglob("test.log")),
+                    expected_logs,
                 )
-                self.assertEqual(result.output_count, 1)
-            self.assertEqual(
-                sorted(path.read_text() for path in result_dir.rglob("test.xml")),
-                ["first result", "second result"],
-            )
 
     def test_failed_test_stages_results_before_stopping_later_phases(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1031,12 +1060,13 @@ class CiTest(unittest.TestCase):
         for option, path in (
             ("--bazel-profile-dir", "/tmp/profiles"),
             ("--bazel-test-results-dir", "/tmp/results"),
+            ("--bazel-failure-results-dir", "/tmp/results"),
         ):
             with self.subTest(option=option):
                 args = ci.parse_arguments(["iree-cmake-cpu", option, path])
                 with self.assertRaisesRegex(
                     ValueError,
-                    f"{option} is only supported for Bazel CI commands",
+                    "is only supported for Bazel CI commands",
                 ):
                     ci.steps_from_args(args)
 

@@ -520,7 +520,7 @@ jobs:
           if [[ "$IREE_CI_KIND" == amdgpu ]]; then
             result_args=(--bazel-test-results-dir "${RUNNER_TEMP}/native-test-results-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")
           elif [[ "$IREE_CI_COMMAND" != iree-bazel-repository-build ]]; then
-            result_args=(--bazel-test-results-dir "${RUNNER_TEMP}/repository-test-results-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")
+            result_args=(--bazel-failure-results-dir "${RUNNER_TEMP}/repository-test-results-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")
           fi
           failure_args=()
           if [[ "$IREE_CI_KIND" == cpu || "$IREE_CI_KIND" == windows_msvc ]]; then
@@ -893,7 +893,7 @@ jobs:
           $resultArgs = @()
           if ('${{ matrix.command }}' -ne 'iree-bazel-repository-build') {
             $repositoryResultsDir = Join-Path $env:RUNNER_TEMP "repository-test-results-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
-            $resultArgs += @('--bazel-test-results-dir', $repositoryResultsDir)
+            $resultArgs += @('--bazel-failure-results-dir', $repositoryResultsDir)
           }
           $targetArgs = @()
           if ("${{ matrix.target_selector }}") {
