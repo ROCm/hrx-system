@@ -21,6 +21,38 @@ using loom_serve::testing::text::Oracle;
 using loom_serve::testing::text::RegisteredSourceTextServiceTest;
 using loom_serve::testing::text::SourceTextServiceTest;
 
+class TextPrefillLimitTest
+    : public RegisteredSourceTextServiceTest,
+      public ::testing::WithParamInterface<loom_service_text_schedule_mode_t> {
+};
+
+TEST_P(TextPrefillLimitTest, UsesSelectedEntryPointCapacity) {
+  const auto prepare =
+      iree::testing::MakeTempFilePath("single_token_row_prefill", ".loom");
+  ASSERT_NO_FATAL_FAILURE(EditNativeProvider(directory_ + "/prepare.loom",
+                                             prepare, "func.return %prefill,",
+                                             "func.return %c1_i64,"));
+  auto options = ModelOptions();
+  options.sources.prepare = iree_make_cstring_view(prepare.c_str());
+  IREE_ASSERT_OK(loom_serve_text_model_allocate(
+      device_, storage_owner_, &options, host_allocator_, &model_));
+  Start(4, GetParam());
+  const auto response = Read(Send(Request(Message("user", "abxa"), 1)));
+  ASSERT_EQ(Content(response), Oracle::Complete("abxa", 1)) << response;
+  const auto log =
+      Read(Send("", "X-Loom-Model: fixture-text\r\n", "/logz", "GET"));
+  const bool packed = GetParam() == LOOM_SERVICE_TEXT_SCHEDULE_PACKED;
+  EXPECT_NE(log.find(packed ? R"("scheduled_tokens":4,)"
+                            : R"("scheduled_tokens":1,)"),
+            std::string::npos)
+      << log;
+}
+
+INSTANTIATE_TEST_SUITE_P(ExecutionModes, TextPrefillLimitTest,
+                         ::testing::Values(LOOM_SERVICE_TEXT_SCHEDULE_PACKED,
+                                           LOOM_SERVICE_TEXT_SCHEDULE_ISOLATED,
+                                           LOOM_SERVICE_TEXT_SCHEDULE_MATCHED));
+
 TEST_F(RegisteredSourceTextServiceTest,
        LongContextPublishesCapacityAndAdmitsCompleteRequests) {
   ASSERT_NO_FATAL_FAILURE(StartManaged());

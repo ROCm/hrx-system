@@ -647,10 +647,8 @@ static iree_status_t loom_serve_text_capture_prefix(
     }
     // A later checkpoint uses spare capacity near the prompt's end without
     // forcing a new epoch boundary or replacing an already useful ancestor.
-    const iree_host_size_t window =
-        iree_min(service->scheduling.chunk_size,
-                 loom_serve_text_model_prefill_capacity(service->model)) *
-        service->scheduling.continuation_epochs;
+    const iree_host_size_t window = service->scheduling.chunk_size *
+                                    service->scheduling.continuation_epochs;
     const iree_host_size_t input_count =
         session->request.input.origin + session->request.input.count;
     const iree_host_size_t extension_start =
@@ -899,6 +897,13 @@ iree_status_t loom_serve_text_service_allocate(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "prefix cache exceeds remaining native endpoints");
   }
+  const iree_host_size_t token_capacity =
+      loom_serve_text_model_token_capacity(model);
+  iree_host_size_t chunk_size = iree_min(options->chunk_size, token_capacity);
+  if (options->schedule_mode != LOOM_SERVICE_TEXT_SCHEDULE_PACKED) {
+    chunk_size =
+        iree_min(chunk_size, loom_serve_text_model_prefill_capacity(model));
+  }
   loom_runtime_host_t* host =
       loom_runtime_device_host(loom_serve_text_model_device(model));
   iree_async_proactor_t* proactor = NULL;
@@ -922,13 +927,13 @@ iree_status_t loom_serve_text_service_allocate(
       .pool = {.geometry = loom_serve_text_model_pool_usage(model)},
       .scheduling = {
           .model_mode = model_mode,
-          .chunk_size = options->chunk_size,
+          .chunk_size = chunk_size,
           .context_capacity = loom_serve_text_model_context_capacity(model),
           .schedule_mode = options->schedule_mode,
           .packing_mode = options->packing_mode,
           .continuation_epochs = options->continuation_epochs,
           .draft_depth = draft_depth,
-          .token_capacity = loom_serve_text_model_token_capacity(model),
+          .token_capacity = token_capacity,
           .span_capacity = span_capacity ? span_capacity : options->row_count}};
   loom_serve_text_heartbeat_initialize(&service->heartbeat);
   loom_runtime_readiness_initialize(loom_runtime_host_executor(host), proactor,
