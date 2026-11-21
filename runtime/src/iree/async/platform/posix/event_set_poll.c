@@ -14,6 +14,11 @@
 #include <string.h>
 
 #include "iree/async/platform/posix/event_set.h"
+#include "iree/async/posix_wait.h"
+
+#if defined(IREE_PLATFORM_APPLE)
+#include <unistd.h>
+#endif
 
 // Initial capacity for the pollfd array.
 #define IREE_EVENT_SET_POLL_INITIAL_CAPACITY 16
@@ -25,10 +30,15 @@
 typedef struct iree_async_posix_event_set_poll_t {
   iree_async_posix_event_set_t base;  // Must be first.
   iree_allocator_t allocator;
+  // Registered descriptors. On Darwin one spare trailing slot holds the timer.
   struct pollfd* fds;
   iree_host_size_t count;
   iree_host_size_t capacity;
   iree_host_size_t iteration_index;  // For next_ready iteration.
+#if defined(IREE_PLATFORM_APPLE)
+  // A private one-shot timer makes a finite wait wake the pollfd array.
+  int timer_fd;
+#endif
 } iree_async_posix_event_set_poll_t;
 
 static iree_async_posix_event_set_poll_t* iree_async_posix_event_set_poll_cast(
@@ -46,6 +56,9 @@ static void iree_async_posix_event_set_poll_free(
   iree_async_posix_event_set_poll_t* event_set =
       iree_async_posix_event_set_poll_cast(base_event_set);
   iree_allocator_t allocator = event_set->allocator;
+#if defined(IREE_PLATFORM_APPLE)
+  close(event_set->timer_fd);
+#endif
   iree_allocator_free(allocator, event_set->fds);
   iree_allocator_free(allocator, event_set);
   IREE_TRACE_ZONE_END(z0);
@@ -53,7 +66,11 @@ static void iree_async_posix_event_set_poll_free(
 
 static iree_status_t iree_async_posix_event_set_poll_ensure_capacity(
     iree_async_posix_event_set_poll_t* event_set) {
-  if (event_set->count < event_set->capacity) {
+  iree_host_size_t required_capacity = event_set->count + 1;
+#if defined(IREE_PLATFORM_APPLE)
+  ++required_capacity;  // The poll timer occupies fds[count] during a wait.
+#endif
+  if (required_capacity <= event_set->capacity) {
     return iree_ok_status();
   }
   iree_host_size_t new_capacity = event_set->capacity;
@@ -131,7 +148,7 @@ static iree_status_t iree_async_posix_event_set_poll_remove(
 }
 
 static iree_status_t iree_async_posix_event_set_poll_wait(
-    iree_async_posix_event_set_t* base_event_set, int timeout_ms,
+    iree_async_posix_event_set_t* base_event_set, iree_time_t deadline_ns,
     iree_host_size_t* out_ready_count, bool* out_timed_out) {
   iree_async_posix_event_set_poll_t* event_set =
       iree_async_posix_event_set_poll_cast(base_event_set);
@@ -145,7 +162,14 @@ static iree_status_t iree_async_posix_event_set_poll_wait(
     event_set->fds[i].revents = 0;
   }
 
-  int result = poll(event_set->fds, (nfds_t)event_set->count, timeout_ms);
+#if defined(IREE_PLATFORM_APPLE)
+  int result =
+      iree_async_darwin_poll_until(event_set->fds, (nfds_t)event_set->count,
+                                   deadline_ns, event_set->timer_fd);
+#else
+  int result = iree_async_posix_poll_until(
+      event_set->fds, (nfds_t)event_set->count, deadline_ns);
+#endif
   if (result < 0) {
     int error = errno;
     if (error == EINTR) {
@@ -231,10 +255,21 @@ iree_status_t iree_async_posix_event_set_allocate_poll(
   iree_status_t status = iree_allocator_malloc_array_uninitialized(
       allocator, IREE_EVENT_SET_POLL_INITIAL_CAPACITY, sizeof(struct pollfd),
       (void**)&event_set->fds);
+#if defined(IREE_PLATFORM_APPLE)
+  if (iree_status_is_ok(status)) {
+    event_set->timer_fd = iree_async_posix_kqueue();
+    if (event_set->timer_fd < 0) {
+      int error = errno;
+      status = iree_make_status(iree_status_code_from_errno(error),
+                                "creating poll timer: %s", strerror(error));
+    }
+  }
+#endif
   if (iree_status_is_ok(status)) {
     event_set->capacity = IREE_EVENT_SET_POLL_INITIAL_CAPACITY;
     *out_event_set = &event_set->base;
   } else {
+    iree_allocator_free(allocator, event_set->fds);
     iree_allocator_free(allocator, event_set);
   }
 

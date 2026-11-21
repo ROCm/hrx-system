@@ -35,7 +35,8 @@ typedef struct iree_async_posix_event_set_vtable_t {
   iree_status_t (*modify)(iree_async_posix_event_set_t* event_set, int fd,
                           short events);
   iree_status_t (*remove)(iree_async_posix_event_set_t* event_set, int fd);
-  iree_status_t (*wait)(iree_async_posix_event_set_t* event_set, int timeout_ms,
+  iree_status_t (*wait)(iree_async_posix_event_set_t* event_set,
+                        iree_time_t deadline_ns,
                         iree_host_size_t* out_ready_count, bool* out_timed_out);
   void (*reset_ready_iteration)(iree_async_posix_event_set_t* event_set);
   bool (*next_ready)(iree_async_posix_event_set_t* event_set, int* out_fd,
@@ -81,10 +82,8 @@ static inline iree_status_t iree_async_posix_event_set_remove(
 
 // Waits for events on fds in the event set.
 //
-// |timeout_ms| controls blocking behavior:
-//   - < 0: Block indefinitely until an event occurs.
-//   - 0: Non-blocking poll, returns immediately.
-//   - > 0: Block for at most this many milliseconds.
+// |deadline_ns| is an absolute monotonic deadline. IREE_TIME_INFINITE_PAST
+// polls once and IREE_TIME_INFINITE_FUTURE waits for readiness indefinitely.
 //
 // On success, |out_ready_count| (if non-NULL) receives the number of fds with
 // events. Use reset_ready_iteration() and next_ready() to enumerate them.
@@ -94,9 +93,9 @@ static inline iree_status_t iree_async_posix_event_set_remove(
 // On signal interruption, returns iree_ok_status() with ready_count 0 and
 // |*out_timed_out| false.
 static inline iree_status_t iree_async_posix_event_set_wait(
-    iree_async_posix_event_set_t* event_set, int timeout_ms,
+    iree_async_posix_event_set_t* event_set, iree_time_t deadline_ns,
     iree_host_size_t* out_ready_count, bool* out_timed_out) {
-  return event_set->vtable->wait(event_set, timeout_ms, out_ready_count,
+  return event_set->vtable->wait(event_set, deadline_ns, out_ready_count,
                                  out_timed_out);
 }
 

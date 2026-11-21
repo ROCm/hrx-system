@@ -38,12 +38,13 @@
 #if defined(IREE_PLATFORM_APPLE) || defined(IREE_PLATFORM_BSD)
 
 #include <errno.h>
-#include <fcntl.h>
 #include <string.h>
 #include <sys/event.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#include "iree/async/posix_wait.h"
 
 // Fixed capacity for the kevent results buffer.
 #define IREE_EVENT_SET_KQUEUE_EVENTS_CAPACITY 64
@@ -283,7 +284,7 @@ static iree_status_t iree_async_posix_event_set_kqueue_remove(
 }
 
 static iree_status_t iree_async_posix_event_set_kqueue_wait(
-    iree_async_posix_event_set_t* base_event_set, int timeout_ms,
+    iree_async_posix_event_set_t* base_event_set, iree_time_t deadline_ns,
     iree_host_size_t* out_ready_count, bool* out_timed_out) {
   iree_async_posix_event_set_kqueue_t* event_set =
       iree_async_posix_event_set_kqueue_cast(base_event_set);
@@ -295,16 +296,11 @@ static iree_status_t iree_async_posix_event_set_kqueue_wait(
   event_set->ready_count = 0;
   event_set->iteration_index = 0;
 
-  struct timespec timeout_spec;
-  struct timespec* timeout_ptr = NULL;
-  if (timeout_ms >= 0) {
-    timeout_spec.tv_sec = timeout_ms / 1000;
-    timeout_spec.tv_nsec = (timeout_ms % 1000) * 1000000;
-    timeout_ptr = &timeout_spec;
-  }
-
+  struct timespec storage;
+  const struct timespec* timeout = iree_async_posix_timeout_timespec(
+      iree_absolute_deadline_to_timeout_ns(deadline_ns), &storage);
   int result = kevent(event_set->kqueue_fd, NULL, 0, event_set->events,
-                      IREE_EVENT_SET_KQUEUE_EVENTS_CAPACITY, timeout_ptr);
+                      IREE_EVENT_SET_KQUEUE_EVENTS_CAPACITY, timeout);
   if (result < 0) {
     int error = errno;
     if (error == EINTR) {
@@ -384,30 +380,14 @@ iree_status_t iree_async_posix_event_set_allocate_kqueue(
   memset(event_set, 0, sizeof(*event_set));
   event_set->base.vtable = &iree_async_posix_event_set_kqueue_vtable;
   event_set->allocator = allocator;
-  event_set->kqueue_fd = -1;
-
-  // Create the kqueue fd with close-on-exec where possible.
-#if defined(IREE_PLATFORM_FREEBSD) || defined(IREE_PLATFORM_NETBSD)
-  // FreeBSD 12+ and NetBSD 10+ provide kqueue1() for atomic CLOEXEC.
-  event_set->kqueue_fd = kqueue1(O_CLOEXEC);
-#else
-  // macOS and OpenBSD lack kqueue1(). We use kqueue() + fcntl() which has
-  // a theoretical TOCTOU race if another thread forks between the two calls.
-  // This is acceptable: IREE processes do not fork, and the fcntl is a
-  // defense-in-depth measure for fd hygiene across exec.
-  event_set->kqueue_fd = kqueue();
-#endif  // IREE_PLATFORM_FREEBSD || IREE_PLATFORM_NETBSD
+  event_set->kqueue_fd = iree_async_posix_kqueue();
   if (event_set->kqueue_fd < 0) {
     int error = errno;
     iree_allocator_free(allocator, event_set);
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(iree_status_code_from_errno(error),
-                            "kqueue() failed: %s", strerror(error));
+                            "creating kqueue: %s", strerror(error));
   }
-#if !defined(IREE_PLATFORM_FREEBSD) && !defined(IREE_PLATFORM_NETBSD)
-  fcntl(event_set->kqueue_fd, F_SETFD, FD_CLOEXEC);
-#endif  // !IREE_PLATFORM_FREEBSD && !IREE_PLATFORM_NETBSD
-
   *out_event_set = &event_set->base;
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();

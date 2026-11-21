@@ -23,9 +23,18 @@
 #include <errno.h>
 #include <string.h>
 #include <sys/epoll.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 #include "iree/async/platform/posix/event_set.h"
+#include "iree/async/posix_wait.h"
+
+// Android first admits epoll_pwait2 to the application ABI at API level 35.
+#if defined(SYS_epoll_pwait2) && __has_include(<linux/time_types.h>) && \
+    (!defined(IREE_PLATFORM_ANDROID) || __ANDROID_API__ >= 35)
+#include <linux/time_types.h>
+#define IREE_EPOLL_HAS_PWAIT2 1
+#endif
 
 // Fixed capacity for the epoll events buffer.
 // If more fds are ready than this, level-triggered epoll will return them on
@@ -37,6 +46,10 @@ typedef struct iree_async_posix_event_set_epoll_t {
   iree_async_posix_event_set_t base;  // Must be first.
   iree_allocator_t allocator;
   int epoll_fd;
+#if defined(IREE_EPOLL_HAS_PWAIT2)
+  // Only the poll owner waits. Remember ENOSYS from a pre-5.11 kernel.
+  bool pwait2_unavailable;
+#endif  // IREE_EPOLL_HAS_PWAIT2
 
   // Ready event iteration state.
   iree_host_size_t ready_count;      // Number of ready events from last wait.
@@ -172,8 +185,50 @@ static iree_status_t iree_async_posix_event_set_epoll_remove(
   return iree_ok_status();
 }
 
+static int iree_async_posix_epoll_wait_until(
+    iree_async_posix_event_set_epoll_t* event_set, iree_time_t deadline_ns) {
+  if (deadline_ns == IREE_TIME_INFINITE_FUTURE ||
+      deadline_ns == IREE_TIME_INFINITE_PAST) {
+    return epoll_wait(event_set->epoll_fd, event_set->events,
+                      IREE_EVENT_SET_EPOLL_EVENTS_CAPACITY,
+                      deadline_ns == IREE_TIME_INFINITE_FUTURE ? -1 : 0);
+  }
+#if defined(IREE_EPOLL_HAS_PWAIT2)
+  if (!event_set->pwait2_unavailable) {
+    // The syscall uses two 64-bit fields even on a 32-bit userspace ABI.
+    iree_duration_t remaining_ns =
+        iree_absolute_deadline_to_timeout_ns(deadline_ns);
+    struct __kernel_timespec timeout = {.tv_sec = remaining_ns / 1000000000,
+                                        .tv_nsec = remaining_ns % 1000000000};
+    int result =
+        (int)syscall(SYS_epoll_pwait2, event_set->epoll_fd, event_set->events,
+                     IREE_EVENT_SET_EPOLL_EVENTS_CAPACITY, &timeout, NULL, 0UL);
+    if (result >= 0 || errno != ENOSYS) {
+      return result;
+    }
+    event_set->pwait2_unavailable = true;
+  }
+#endif  // IREE_EPOLL_HAS_PWAIT2
+  // The epoll descriptor is readable while its ready list is nonempty.
+  // Older kernels can therefore sleep precisely and collect a ready batch
+  // with a nonblocking epoll_wait only when there is one.
+  struct pollfd descriptor = {.fd = event_set->epoll_fd, .events = POLLIN};
+  for (;;) {
+    int result = iree_async_posix_poll_until(&descriptor, 1, deadline_ns);
+    if (result <= 0) {
+      return result;
+    }
+    result = epoll_wait(event_set->epoll_fd, event_set->events,
+                        IREE_EVENT_SET_EPOLL_EVENTS_CAPACITY, 0);
+    // The underlying fd may have lost its readiness between the two calls.
+    if (result != 0 || iree_absolute_deadline_to_timeout_ns(deadline_ns) == 0) {
+      return result;
+    }
+  }
+}
+
 static iree_status_t iree_async_posix_event_set_epoll_wait(
-    iree_async_posix_event_set_t* base_event_set, int timeout_ms,
+    iree_async_posix_event_set_t* base_event_set, iree_time_t deadline_ns,
     iree_host_size_t* out_ready_count, bool* out_timed_out) {
   iree_async_posix_event_set_epoll_t* event_set =
       iree_async_posix_event_set_epoll_cast(base_event_set);
@@ -186,8 +241,7 @@ static iree_status_t iree_async_posix_event_set_epoll_wait(
   event_set->ready_count = 0;
   event_set->iteration_index = 0;
 
-  int result = epoll_wait(event_set->epoll_fd, event_set->events,
-                          IREE_EVENT_SET_EPOLL_EVENTS_CAPACITY, timeout_ms);
+  int result = iree_async_posix_epoll_wait_until(event_set, deadline_ns);
   if (result < 0) {
     int error = errno;
     if (error == EINTR) {
