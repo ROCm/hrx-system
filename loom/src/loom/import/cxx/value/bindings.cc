@@ -72,6 +72,16 @@ std::optional<Value> ValueBindings::project(cxx::Symbol* binding,
   return project(uninitialized_.at(binding), part, offset, arena);
 }
 
+std::optional<Value> ValueBindings::project(Destination source,
+                                            ValueArena& arena) const {
+  if (source.member) {
+    return project(source.binding, *source.member, source.component_offset,
+                   arena);
+  }
+  auto found = values_.find(source.binding);
+  return found == values_.end() ? std::nullopt : std::optional(found->second);
+}
+
 std::optional<Value> ValueBindings::project(const Pending& pending,
                                             const Partition& part,
                                             size_t offset, ValueArena& arena) {

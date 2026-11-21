@@ -45,6 +45,13 @@ _CONSTRUCTOR_COMPONENTS = {
 }
 
 
+def lookup_columns(operation: Operation) -> Iterable[tuple[int, Sequence[int]]]:
+    """Pairs each result with all of its possible sources, including the default."""
+    width = len(operation.results)
+    for column, result in enumerate(operation.results):
+        yield result, operation.operands[1 + column :: width]
+
+
 def _constructor_operands(module: Module, operation: Operation) -> Iterable[int]:
     components = _CONSTRUCTOR_COMPONENTS.get(operation.name)
     if components is None:
@@ -89,6 +96,11 @@ def plan_value_transport(
 
     def conditional(operation: Operation) -> Sequence[int]:
         return [resolve(operation).value_id("condition")]
+
+    def lookup(operation: Operation) -> Sequence[int]:
+        for result, alternatives in lookup_columns(operation):
+            sources[result].update(alternatives)
+        return [resolve(operation).value_id("selector")]
 
     def counted(operation: Operation) -> Sequence[int]:
         fields = resolve(operation)
@@ -145,6 +157,7 @@ def plan_value_transport(
 
     projections = {
         "scf.if": conditional,
+        "scf.lookup": lookup,
         "scf.for": counted,
         "scf.while": condition_loop,
         "scf.condition": condition,

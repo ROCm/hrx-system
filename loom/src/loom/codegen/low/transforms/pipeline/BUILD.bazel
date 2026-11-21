@@ -48,6 +48,7 @@ loom_cc_library(
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/scf",
         "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/transforms/scf:lookup",
         "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

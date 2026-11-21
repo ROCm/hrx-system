@@ -6,14 +6,13 @@
 
 #include "loom/codegen/low/transforms/pipeline/source_scf_projection.h"
 
-#include <string.h>
-
 #include "loom/ir/attribute.h"
 #include "loom/ir/module.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scf/canonicalize.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/transforms/scf/lookup.h"
 #include "loom/util/walk.h"
 
 typedef struct loom_low_source_scf_projection_state_t {
@@ -142,57 +141,6 @@ static iree_status_t loom_low_source_scf_project_switch(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_source_scf_project_lookup(
-    loom_low_source_scf_projection_state_t* state, loom_op_t* op) {
-  const loom_attribute_t case_keys = loom_scf_lookup_case_keys(op);
-  const loom_value_slice_t table = loom_scf_lookup_values(op);
-  const uint16_t column_count = op->result_count;
-  loom_value_id_t* replacements = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(state->arena, column_count,
-                                                 sizeof(*replacements),
-                                                 (void**)&replacements));
-  memcpy(replacements,
-         table.values + (iree_host_size_t)case_keys.count * column_count,
-         (iree_host_size_t)column_count * sizeof(*replacements));
-
-  loom_builder_t* builder = &state->rewriter->builder;
-  loom_builder_set_before(builder, op);
-  const loom_value_id_t result_checkpoint =
-      loom_rewriter_value_checkpoint(state->rewriter);
-  const loom_type_t selector_type =
-      loom_module_value_type(state->module, loom_scf_lookup_selector(op));
-  for (uint16_t row = case_keys.count; row > 0; --row) {
-    const uint16_t case_index = row - 1;
-    loom_op_t* key_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_index_constant_build(
-        builder, loom_attr_i64(case_keys.i64_array[case_index]), selector_type,
-        op->location, &key_op));
-    loom_op_t* comparison_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_index_cmp_build(
-        builder, LOOM_INDEX_CMP_PREDICATE_EQ, loom_scf_lookup_selector(op),
-        loom_index_constant_result(key_op), op->location, &comparison_op));
-    for (uint16_t column = 0; column < column_count; ++column) {
-      const loom_value_id_t case_value =
-          table.values[(iree_host_size_t)case_index * column_count + column];
-      loom_op_t* select_op = NULL;
-      IREE_RETURN_IF_ERROR(loom_scf_select_build(
-          builder, loom_index_cmp_result(comparison_op), case_value,
-          replacements[column],
-          loom_module_value_type(state->module,
-                                 loom_op_const_results(op)[column]),
-          op->location, &select_op));
-      replacements[column] = loom_scf_select_result(select_op);
-    }
-  }
-
-  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
-      state->rewriter, op, replacements, column_count, result_checkpoint));
-  IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
-      state->rewriter, op, replacements, column_count));
-  ++state->result->lookups_projected;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_low_source_scf_projection_visit(
     void* user_data, loom_op_t* op, const loom_walk_context_t* context,
     loom_walk_result_t* out_result) {
@@ -201,7 +149,10 @@ static iree_status_t loom_low_source_scf_projection_visit(
   loom_low_source_scf_projection_state_t* state =
       (loom_low_source_scf_projection_state_t*)user_data;
   if (loom_scf_lookup_isa(op)) {
-    return loom_low_source_scf_project_lookup(state, op);
+    IREE_RETURN_IF_ERROR(
+        loom_scf_lookup_project_selects(state->rewriter, state->arena, op));
+    ++state->result->lookups_projected;
+    return iree_ok_status();
   }
   if (state->control_flow_lowering ==
           LOOM_LOW_CONTROL_FLOW_LOWERING_STRUCTURED_LOW &&

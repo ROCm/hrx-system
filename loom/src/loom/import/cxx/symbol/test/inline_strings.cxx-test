@@ -193,35 +193,32 @@ func.def public @nested(%row: i32, %position: i32) -> (i32) {
   %12 = buffer.constant align(1) utf8("def\u0000") : buffer
   %14 = index.constant 4 : offset
   buffer.copy %12[%nested_storage_byte_offset], %nested_storage[%nested_storage_byte_offset], %14
-  %54 = index.constant 4 : index
+  %46 = index.constant 4 : index
   %17 = buffer.constant align(1) utf8("ghi\u0000") : buffer
-  buffer.copy %17[%nested_storage_byte_offset], %nested_storage[%54], %14
+  buffer.copy %17[%nested_storage_byte_offset], %nested_storage[%46], %14
   %20 = scalar.constant 3 : i32
   %21 = scalar.andi %position, %20 : i32
-  %22 = scalar.constant 2 : i32
-  %23 = scalar.cmpi ult, %21, %22 : i32
-  %25 = scalar.constant 0 : i32
-  %26 = scalar.cmpi eq, %21, %25 : i32
-  %29 = scalar.cmpi eq, %21, %22 : i32
-  %62 = scf.select %23, %26, %29 : i1
-  %63 = scf.select %23, %record_label_0, %record_label_2 : i8
-  %64 = scf.select %23, %record_label_1, %record_label_3 : i8
-  %61 = scf.select %62, %63, %64 : i8
-  %31 = scalar.extui %61 : i8 to i32
-  %32 = scalar.constant 1 : i32
-  %33 = scalar.andi %row, %32 : i32
-  %34 = scalar.extui %33 : i32 to i64
+  %22 = index.cast %21 : i32 to index
+  %23 = scf.lookup %22 {
+    0 = (%record_label_0),
+    1 = (%record_label_1),
+    2 = (%record_label_2)
+  } default(%record_label_3) : i8
+  %24 = scalar.extui %23 : i8 to i32
+  %25 = scalar.constant 1 : i32
+  %26 = scalar.andi %row, %25 : i32
+  %27 = scalar.extui %26 : i32 to i64
+  %28 = index.cast %27 : i64 to index
+  %34 = scalar.extui %21 : i32 to i64
   %35 = index.cast %34 : i64 to index
-  %41 = scalar.extui %21 : i32 to i64
-  %42 = index.cast %41 : i64 to index
-  %57 = index.madd %35, %54, %42 : index
-  %46 = index.assume %57 [range(%57, 0, 7)] : index
-  %47 = buffer.view %nested_storage[%46] : buffer -> view<1xi8>
-  %48 = view.load %47[0] : view<1xi8> -> i8
-  %49 = scalar.extui %48 : i8 to i32
-  %50 = scalar.addi %31, %49 : i32
-  %51 = scalar.addi %50, %record_value : i32
-  func.return %51 : i32
+  %45 = index.madd %28, %46, %35 : index
+  %39 = index.assume %45 [range(%45, 0, 7)] : index
+  %40 = buffer.view %nested_storage[%39] : buffer -> view<1xi8>
+  %41 = view.load %40[0] : view<1xi8> -> i8
+  %42 = scalar.extui %41 : i8 to i32
+  %43 = scalar.addi %24, %42 : i32
+  %44 = scalar.addi %43, %record_value : i32
+  func.return %44 : i32
 }
 
 // ====

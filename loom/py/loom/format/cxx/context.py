@@ -17,14 +17,12 @@ from typing import TYPE_CHECKING, Any
 
 from loom.dsl import Op, TargetLikeInterface
 from loom.fields import compute_layout, resolve_fields
-from loom.format.cxx.buffer_access import BufferAccessPlan, BufferProjection
 from loom.format.cxx.errors import CxxRenderError
 from loom.format.cxx.naming import clean_identifier
 from loom.format.cxx.printer import CxxWriter
 from loom.format.cxx.registry import source_ops
 from loom.format.cxx.translation_unit import TargetInfo
 from loom.format.cxx.types import CxxTypes
-from loom.format.cxx.view_access import ViewAccessPlan
 from loom.ir import (
     Block,
     BufferType,
@@ -45,7 +43,9 @@ from loom.ir import (
 )
 
 if TYPE_CHECKING:
+    from loom.format.cxx.buffer_access import BufferAccessPlan, BufferProjection
     from loom.format.cxx.commands import SourceParameter
+    from loom.format.cxx.view_access import ViewAccessPlan
 
 _OPS: tuple[Op, ...] = source_ops()
 _OP_BY_NAME = {operation.name: operation for operation in _OPS}

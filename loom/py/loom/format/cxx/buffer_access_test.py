@@ -69,20 +69,27 @@ func.def public @run() {
         render_module(load_module(source.encode()))
 
 
-@pytest.mark.parametrize("literal_region", [0, 1, 2])
-def test_rejects_writing_immutable_storage_selected_by_switch(
-    literal_region: int,
+@pytest.mark.parametrize("literal_row", [0, 1, 2])
+@pytest.mark.parametrize("operation", ["switch", "lookup"])
+def test_rejects_writing_immutable_storage_selected_by_key(
+    literal_row: int, operation: str
 ) -> None:
     yielded = ["%mutable"] * 3
-    yielded[literal_region] = "%literal"
-    source = f"""\
-func.def public @write(%selector: index, %mutable: buffer) {{
-  %literal = buffer.constant bytes("0b") : buffer
-  %selected = scf.switch %selector -> (buffer) {{
+    yielded[literal_row] = "%literal"
+    if operation == "switch":
+        selection = f"""scf.switch %selector -> (buffer) {{
     case 0 {{ scf.yield {yielded[0]} : buffer }}
     case 1 {{ scf.yield {yielded[1]} : buffer }}
     default {{ scf.yield {yielded[2]} : buffer }}
-  }}
+  }}"""
+    else:
+        selection = f"""scf.lookup %selector {{
+    0 = ({yielded[0]}), 1 = ({yielded[1]})
+  }} default({yielded[2]}) : buffer"""
+    source = f"""\
+func.def public @write(%selector: index, %mutable: buffer) {{
+  %literal = buffer.constant bytes("0b") : buffer
+  %selected = {selection}
   %zero = index.constant 0 : offset
   %view = buffer.view %selected[%zero] : buffer -> view<1xi8>
   %value = scalar.constant 1 : i8

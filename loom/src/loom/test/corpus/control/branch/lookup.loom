@@ -1,0 +1,86 @@
+// Each lane selects two fields from the same signed key. Odd keys in [-5, 7]
+// are present. Lanes below, between, and above the keys take the default row.
+kernel.def @keyed_rows() {
+  %c1 = index.constant 1 : index
+  %width = kernel.subgroup.size : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%width, %c1, %c1) : index
+} launch(%seed: i32, %keys: buffer, %values: buffer) {
+  %first_lane = kernel.subgroup.lane.id : index
+  %stride = kernel.subgroup.size : index
+  %end = index.constant 32 : index
+  scf.for %lane = [%first_lane to %end step %stride] {
+    %bias = index.constant 9 : index
+    %key = index.sub %lane, %bias : index
+    %a = scalar.constant -5 : i32
+    %b = scalar.constant -3 : i32
+    %c = scalar.constant -1 : i32
+    %d = scalar.constant 1 : i32
+    %e = scalar.constant 3 : i32
+    %f = scalar.constant 5 : i32
+    %g = scalar.constant 7 : i32
+    %missing = scalar.constant -99 : i32
+    %other = scalar.addi %seed, %d : i32
+    %tag, %value = scf.lookup %key {
+      -5 = (%a, %other),
+      -3 = (%b, %seed),
+      -1 = (%c, %other),
+      1 = (%d, %seed),
+      3 = (%e, %other),
+      5 = (%f, %seed),
+      7 = (%g, %other)
+    } default(%missing, %missing) : i32, i32
+    %base = index.constant 0 : offset
+    %tags = buffer.view %keys[%base] : buffer -> view<32xi32>
+    %rows = buffer.view %values[%base] : buffer -> view<32xi32>
+    view.store %tag, %tags[%lane] : i32, view<32xi32>
+    view.store %value, %rows[%lane] : i32, view<32xi32>
+  }
+  kernel.return
+}
+
+func.def @keyed_rows_oracle(%seed: i32, %keys: buffer, %values: buffer) {
+  %base = index.constant 0 : offset
+  %tags = buffer.view %keys[%base] : buffer -> view<32xi32>
+  %rows = buffer.view %values[%base] : buffer -> view<32xi32>
+  %start = index.constant 0 : index
+  %end = index.constant 32 : index
+  %step = index.constant 1 : index
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %bias = scalar.constant 9 : i32
+  %first = scalar.constant -5 : i32
+  %last = scalar.constant 7 : i32
+  %missing = scalar.constant -99 : i32
+  scf.for %lane = [%start to %end step %step] {
+    %ordinal = index.cast %lane : index to i32
+    %key = scalar.subi %ordinal, %bias : i32
+    %low = scalar.cmpi sge, %key, %first : i32
+    %high = scalar.cmpi sle, %key, %last : i32
+    %bit = scalar.andi %key, %c1 : i32
+    %odd = scalar.cmpi ne, %bit, %c0 : i32
+    %inside = scalar.andi %low, %high : i1
+    %present = scalar.andi %inside, %odd : i1
+    %second_bit = scalar.andi %key, %c2 : i32
+    %increment = scalar.shrui %second_bit, %c1 : i32
+    %field = scalar.addi %seed, %increment : i32
+    %tag = scf.select %present, %key, %missing : i32
+    %value = scf.select %present, %field, %missing : i32
+    view.store %tag, %tags[%lane] : i32, view<32xi32>
+    view.store %value, %rows[%lane] : i32, view<32xi32>
+  }
+  func.return
+}
+
+check.scenario @keyed_row_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %seed = check.literal value(123) : i32
+    %keys = check.generate.fill value(0) : tensor<32xi32>
+    %values = check.generate.fill value(0) : tensor<32xi32>
+    check.compare<@keyed_rows, @keyed_rows_oracle>(%seed, %keys, %values) : (i32, tensor<32xi32>, tensor<32xi32>) -> () {
+      check.expect.bitwise actual(%keys) expected(%keys) : tensor<32xi32>
+      check.expect.bitwise actual(%values) expected(%values) : tensor<32xi32>
+    }
+  }
+  check.return
+}

@@ -867,6 +867,13 @@ chooses between two whole values under one scalar condition. `scf.lookup`
 selects a value tuple from a keyed table, and `scf.switch` owns multi-region
 control flow when cases perform different work.
 
+A lookup can carry several fields, including values computed at runtime. A
+constant selector forwards the entire chosen row during specialization. For
+a live selector, the compiler can share range branches across columns on a
+scalar core or when every lane in a subgroup takes the same branch. Lanes
+that may choose different rows select their fields under predicates. Missing
+keys select the declared default in every case.
+
 Use the smallest construct that preserves the program distinction:
 
 - `scf.select` for two already-computed values;

@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from loom.dialect.func.defs import ArgumentAccess
+from loom.format.cxx.value_transport import lookup_columns
 from loom.ir import BufferType, Module, Operation
 
 # Other origins are formal buffer parameter value IDs in the owning callable.
@@ -131,6 +132,11 @@ class BufferAccessPlan:
             for region in operation.regions:
                 connect(operation.results, region.blocks[0].ops[-1].operands)
 
+        def lookup(operation: Operation, resolved: Any, owner: str | None) -> None:
+            for result, alternatives in lookup_columns(operation):
+                if result in self._origins:
+                    flows.append(_Flow(result, tuple(alternatives)))
+
         def counted_loop(
             operation: Operation, resolved: Any, owner: str | None
         ) -> None:
@@ -181,6 +187,7 @@ class BufferAccessPlan:
             "scf.select": select,
             "scf.if": branch,
             "scf.switch": branch,
+            "scf.lookup": lookup,
             "scf.for": counted_loop,
             "scf.while": conditional_loop,
             "func.return": return_values,

@@ -56,24 +56,29 @@ unsigned update(loom::type::buffer<unsigned char> output, loom::type::index outp
     state_box_lower_0 = v14;
   }
   unsigned v23 = element(output, output_byte_offset, state_box_lower_0, 2u, state_box_upper_0_1, 4u, upper, 0u);
-  unsigned v26{};
-  if (v23 < 2u) {
-    if (v23 == 0u) {
-      v26 = state_box_upper_0_1;
-    } else {
-      v26 = 4u;
+  unsigned v25{};
+  switch (static_cast<long long>(loom::index::cast(static_cast<int>(v23)))) {
+    case 0ll: {
+      v25 = state_box_upper_0_1;
+      break;
     }
-  } else {
-    if (v23 == 2u) {
-      v26 = state_box_lower_0;
-    } else {
-      v26 = 2u;
+    case 1ll: {
+      v25 = 4u;
+      break;
+    }
+    case 2ll: {
+      v25 = state_box_lower_0;
+      break;
+    }
+    default: {
+      v25 = 2u;
+      break;
     }
   }
-  unsigned v33 = v26 + 9u;
+  unsigned v26 = v25 + 9u;
   unsigned state_box_upper_0_2{};
   if (v23 == 0u) {
-    state_box_upper_0_2 = v33;
+    state_box_upper_0_2 = v26;
   } else {
     state_box_upper_0_2 = state_box_upper_0_1;
   }
@@ -81,7 +86,7 @@ unsigned update(loom::type::buffer<unsigned char> output, loom::type::index outp
   }
   unsigned state_box_lower_0_1{};
   if (v23 == 2u) {
-    state_box_lower_0_1 = v33;
+    state_box_lower_0_1 = v26;
   } else {
     state_box_lower_0_1 = state_box_lower_0;
   }
@@ -93,19 +98,19 @@ unsigned update(loom::type::buffer<unsigned char> output, loom::type::index outp
 
 [[loom::symbol("Box__data_value")]]
 static unsigned Box__data_value(unsigned this_lower_0, unsigned this_lower_1, unsigned this_upper_0, unsigned this_upper_1, bool upper) {
-  unsigned v62{};
+  unsigned v55{};
   if (upper) {
-    v62 = 0u;
+    v55 = 0u;
   } else {
-    v62 = 1u;
+    v55 = 1u;
   }
-  return v62;
+  return v55;
 }
 
 [[loom::symbol("element")]]
 static unsigned element(loom::type::buffer<unsigned char> state_output, loom::type::index state_output_byte_offset, unsigned state_box_lower_0, unsigned state_box_lower_1, unsigned state_box_upper_0, unsigned state_box_upper_1, bool upper, unsigned index) {
-  unsigned v74 = Box__data_value(state_box_lower_0, state_box_lower_1, state_box_upper_0, state_box_upper_1, upper);
-  return ((v74 * 2u) + index);
+  unsigned v67 = Box__data_value(state_box_lower_0, state_box_lower_1, state_box_upper_0, state_box_upper_1, upper);
+  return ((v67 * 2u) + index);
 }
 
 // ====

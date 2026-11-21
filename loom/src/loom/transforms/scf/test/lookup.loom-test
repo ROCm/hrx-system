@@ -1,0 +1,127 @@
+// RUN: pass target-legalize{mode=complete},dce
+
+test.target<low_core> @scalar {subgroup_size = 1}
+
+// The lower interval [0, 2) needs one equality. Negative selectors follow
+// the unsigned upper arm, which retains the original default.
+func.def target(@scalar) @dense(%key: index, %a: i32, %b: i32, %c: i32, %d: i32, %other: i32) -> (i32) {
+  %value = scf.lookup %key {
+    0 = (%a),
+    1 = (%b),
+    2 = (%c),
+    3 = (%d)
+  } default(%other) : i32
+  func.return %value : i32
+}
+
+// ----
+test.target<low_core> @scalar {subgroup_size = 1}
+
+func.def target(@scalar) @dense(%key: index, %a: i32, %b: i32, %c: i32, %d: i32, %other: i32) -> (i32) {
+  %8 = index.constant 2 : index
+  %9 = index.cmp ult, %key, %8 : index
+  %value = scf.if %9 -> (i32) {
+    %11 = index.constant 0 : index
+    %12 = index.cmp eq, %key, %11 : index
+    %13 = scf.select %12, %a, %b : i32
+    scf.yield %13 : i32
+  } else {
+    %14 = index.constant 3 : index
+    %15 = index.cmp eq, %key, %14 : index
+    %16 = scf.select %15, %d, %other : i32
+    %17 = index.constant 2 : index
+    %18 = index.cmp eq, %key, %17 : index
+    %19 = scf.select %18, %c, %16 : i32
+    scf.yield %19 : i32
+  }
+  func.return %value : i32
+}
+
+// ====
+// RUN: pass target-legalize{mode=complete}
+
+test.target<low_core> @wave {subgroup_size = 32}
+
+// A callable argument can vary between lanes. Splitting those lanes onto
+// opposite paths would require additional execution-mask instructions.
+func.def target(@wave) @per_lane(%key: index, %a: i32, %b: i32, %other: i32) -> (i32) {
+  %value = scf.lookup %key {
+    -5 = (%b),
+    -3 = (%a),
+    1 = (%b),
+    9 = (%a)
+  } default(%other) : i32
+  func.return %value : i32
+}
+
+// ----
+test.target<low_core> @wave {subgroup_size = 32}
+
+func.def target(@wave) @per_lane(%key: index, %a: i32, %b: i32, %other: i32) -> (i32) {
+  %value = scf.lookup %key {
+    -5 = (%b),
+    -3 = (%a),
+    1 = (%b),
+    9 = (%a)
+  } default(%other) : i32
+  func.return %value : i32
+}
+
+// ====
+// RUN: pass target-legalize{mode=complete}
+
+test.target<low_core> @wave {subgroup_size = 32}
+
+// All lanes receive the same launch argument, so the subgroup can branch
+// once. Gaps on both sides of the partition still use the default row.
+kernel.def target(@wave) @broadcast_key() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%key: index, %a: i32, %b: i32, %other: i32, %output: buffer) {
+  %value = scf.lookup %key {
+    -5 = (%a),
+    -3 = (%b),
+    1 = (%b),
+    9 = (%a)
+  } default(%other) : i32
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %rows = buffer.view %output[%base] : buffer -> view<32xi32>
+  view.store %value, %rows[%lane] : i32, view<32xi32>
+  kernel.return
+}
+
+// ----
+test.target<low_core> @wave {subgroup_size = 32}
+
+kernel.def target(@wave) @broadcast_key() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%key: index, %a: i32, %b: i32, %other: i32, %output: buffer) {
+  %11 = index.constant 1 : index
+  %12 = index.cmp slt, %key, %11 : index
+  %value = scf.if %12 -> (i32) {
+    %14 = index.constant -3 : index
+    %15 = index.cmp eq, %key, %14 : index
+    %16 = scf.select %15, %b, %other : i32
+    %17 = index.constant -5 : index
+    %18 = index.cmp eq, %key, %17 : index
+    %19 = scf.select %18, %a, %16 : i32
+    scf.yield %19 : i32
+  } else {
+    %20 = index.constant 9 : index
+    %21 = index.cmp eq, %key, %20 : index
+    %22 = scf.select %21, %a, %other : i32
+    %23 = index.constant 1 : index
+    %24 = index.cmp eq, %key, %23 : index
+    %25 = scf.select %24, %b, %22 : i32
+    scf.yield %25 : i32
+  }
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %rows = buffer.view %output[%base] : buffer -> view<32xi32>
+  view.store %value, %rows[%lane] : i32, view<32xi32>
+  kernel.return
+}
