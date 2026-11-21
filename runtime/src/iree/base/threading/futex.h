@@ -71,19 +71,20 @@
 #elif defined(IREE_PLATFORM_ANDROID) || defined(IREE_PLATFORM_LINUX)
 #include <errno.h>
 #include <linux/futex.h>
+#include <linux/types.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
-#if defined(IREE_ARCH_RISCV_32) && defined(__NR_futex_time64) && \
-    !defined(__NR_futex)
-// RV32 uses 64-bit times by default (unlike other 32-bit archs).
-#define __NR_futex __NR_futex_time64
-#endif  // IREE_ARCH_RISCV_32
+// The raw syscall takes kernel words, independent of libc's time_t width.
+// Some 32-bit ABIs (including RV32) expose only the time64 syscall.
+#if !defined(__NR_futex) && defined(__NR_futex_time64)
+#define IREE_LINUX_FUTEX_SYSCALL __NR_futex_time64
+typedef int64_t iree_futex_time_word_t;
+#else
+#define IREE_LINUX_FUTEX_SYSCALL __NR_futex
+typedef __kernel_long_t iree_futex_time_word_t;
+#endif
 
-// Oh Android...
-#ifndef SYS_futex
-#define SYS_futex __NR_futex
-#endif  // !SYS_futex
 #ifndef FUTEX_PRIVATE_FLAG
 #define FUTEX_PRIVATE_FLAG 128
 #endif  // !FUTEX_PRIVATE_FLAG
@@ -102,9 +103,6 @@ extern "C" {
 
 // Sentinel value to wake all waiters.
 #define IREE_ALL_WAITERS INT32_MAX
-
-// Infinite timeout value in milliseconds for internal use.
-#define IREE_INFINITE_TIMEOUT_MS UINT32_MAX
 
 //===----------------------------------------------------------------------===//
 // Futex API
@@ -252,28 +250,60 @@ static inline void iree_futex_wake_shared(void* address, int32_t count) {
 
 #elif defined(IREE_PLATFORM_ANDROID) || defined(IREE_PLATFORM_LINUX)
 
-static inline iree_status_code_t iree_futex_wait(void* address,
-                                                 uint32_t expected_value,
-                                                 iree_time_t deadline_ns) {
-  uint32_t timeout_ms = iree_absolute_deadline_to_timeout_ms(deadline_ns);
-  struct timespec timeout = {
-      /*.tv_sec=*/timeout_ms / 1000,
-      /*.tv_nsec=*/(timeout_ms % 1000) * 1000000,
-  };
-  int rc = syscall(
-      SYS_futex, address, FUTEX_WAIT | FUTEX_PRIVATE_FLAG, expected_value,
-      timeout_ms == IREE_INFINITE_TIMEOUT_MS ? NULL : &timeout, NULL, 0);
+typedef struct iree_futex_timespec_t {
+  // Whole seconds in the kernel's relative timeout.
+  iree_futex_time_word_t tv_sec;
+  // Remaining nanoseconds within the second.
+  iree_futex_time_word_t tv_nsec;
+} iree_futex_timespec_t;
+
+// Encodes a finite, nonnegative duration. Returns false if a time32 syscall
+// can cover only part of the interval. Its expiry is then a spurious wake.
+static inline bool iree_futex_timespec_from_duration(
+    iree_duration_t duration_ns, iree_futex_timespec_t* out_timeout) {
+  const int64_t seconds = duration_ns / 1000000000;
+  if (sizeof(out_timeout->tv_sec) == 4 && seconds > INT32_MAX) {
+    out_timeout->tv_sec = INT32_MAX;
+    out_timeout->tv_nsec = 999999999;
+    return false;
+  }
+  out_timeout->tv_sec = (iree_futex_time_word_t)seconds;
+  out_timeout->tv_nsec = (iree_futex_time_word_t)(duration_ns % 1000000000);
+  return true;
+}
+
+static inline iree_status_code_t iree_futex_wait_linux(void* address,
+                                                       uint32_t expected_value,
+                                                       iree_time_t deadline_ns,
+                                                       int operation) {
+  iree_futex_timespec_t timeout;
+  const iree_futex_timespec_t* timeout_ptr = NULL;
+  bool covers_deadline = true;
+  if (deadline_ns != IREE_TIME_INFINITE_FUTURE) {
+    covers_deadline = iree_futex_timespec_from_duration(
+        iree_absolute_deadline_to_timeout_ns(deadline_ns), &timeout);
+    timeout_ptr = &timeout;
+  }
+  int rc = syscall(IREE_LINUX_FUTEX_SYSCALL, address, operation, expected_value,
+                   timeout_ptr, NULL, 0);
   if (IREE_LIKELY(rc == 0) || errno == EAGAIN || errno == EINTR) {
     return IREE_STATUS_OK;
   } else if (errno == ETIMEDOUT) {
-    return IREE_STATUS_DEADLINE_EXCEEDED;
+    return covers_deadline ? IREE_STATUS_DEADLINE_EXCEEDED : IREE_STATUS_OK;
   }
   return IREE_STATUS_UNAVAILABLE;
 }
 
+static inline iree_status_code_t iree_futex_wait(void* address,
+                                                 uint32_t expected_value,
+                                                 iree_time_t deadline_ns) {
+  return iree_futex_wait_linux(address, expected_value, deadline_ns,
+                               FUTEX_WAIT | FUTEX_PRIVATE_FLAG);
+}
+
 static inline void iree_futex_wake(void* address, int32_t count) {
-  syscall(SYS_futex, address, FUTEX_WAKE | FUTEX_PRIVATE_FLAG, count, NULL,
-          NULL, 0);
+  syscall(IREE_LINUX_FUTEX_SYSCALL, address, FUTEX_WAKE | FUTEX_PRIVATE_FLAG,
+          count, NULL, NULL, 0);
 }
 
 // Cross-process variants: omit FUTEX_PRIVATE_FLAG so the kernel hashes by
@@ -281,24 +311,12 @@ static inline void iree_futex_wake(void* address, int32_t count) {
 // across processes sharing the same physical page via mmap MAP_SHARED.
 static inline iree_status_code_t iree_futex_wait_shared(
     void* address, uint32_t expected_value, iree_time_t deadline_ns) {
-  uint32_t timeout_ms = iree_absolute_deadline_to_timeout_ms(deadline_ns);
-  struct timespec timeout = {
-      /*.tv_sec=*/timeout_ms / 1000,
-      /*.tv_nsec=*/(timeout_ms % 1000) * 1000000,
-  };
-  int rc = syscall(SYS_futex, address, FUTEX_WAIT, expected_value,
-                   timeout_ms == IREE_INFINITE_TIMEOUT_MS ? NULL : &timeout,
-                   NULL, 0);
-  if (IREE_LIKELY(rc == 0) || errno == EAGAIN || errno == EINTR) {
-    return IREE_STATUS_OK;
-  } else if (errno == ETIMEDOUT) {
-    return IREE_STATUS_DEADLINE_EXCEEDED;
-  }
-  return IREE_STATUS_UNAVAILABLE;
+  return iree_futex_wait_linux(address, expected_value, deadline_ns,
+                               FUTEX_WAIT);
 }
 
 static inline void iree_futex_wake_shared(void* address, int32_t count) {
-  syscall(SYS_futex, address, FUTEX_WAKE, count, NULL, NULL, 0);
+  syscall(IREE_LINUX_FUTEX_SYSCALL, address, FUTEX_WAKE, count, NULL, NULL, 0);
 }
 
 #endif  // IREE_PLATFORM_*
