@@ -13,6 +13,7 @@ import hashlib
 import json
 import re
 import stat
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile, ZipInfo
@@ -44,6 +45,12 @@ class Identity:
     @property
     def tag(self) -> str:
         return "v" + self.version
+
+    def wheel_version(self, profile: str) -> str:
+        return self.version if profile == "release" else f"{self.version}+{profile}"
+
+    def server_stamp(self, commit: str, profile: str = "release") -> list[str]:
+        return ["--stamp", f"--embed_label={self.wheel_version(profile)}@{commit}"]
 
     @property
     def release_channel(self) -> ReleaseChannel:
@@ -89,6 +96,12 @@ def parse_identity(document: object) -> Identity:
 
 def read_identity(path: Path) -> Identity:
     return parse_identity(json.loads(path.read_text(encoding="utf-8")))
+
+
+def checkout_commit(root: Path) -> str:
+    return subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=root, text=True
+    ).strip()
 
 
 def advance_development_identity(identity: Identity, released_tag: str) -> Identity:
@@ -165,10 +178,7 @@ ReleaseArtifact = Wheel | StandaloneArchive
 
 
 def inspect_wheel(path: Path, identity: Identity, description: str) -> Wheel:
-    versions = {
-        identity.version + ("" if profile == "release" else "+" + profile): profile
-        for profile in PROFILES
-    }
+    versions = {identity.wheel_version(profile): profile for profile in PROFILES}
     parts = path.name.removesuffix(".whl").split("-")
     if (
         path.suffix != ".whl"

@@ -73,6 +73,7 @@ def main(
     version_file,
     readme,
     expected_drivers=None,
+    expected_commit=None,
 ):
     wheel = Path(wheel).absolute()
     associated_wheel = Path(associated_wheel).absolute()
@@ -80,6 +81,7 @@ def main(
     elf_inspector = Path(elf_inspector).absolute()
     identity = read_identity(Path(version_file))
     artifact = inspect_wheel(wheel, identity, Path(readme).read_text(encoding="utf-8"))
+    distribution_version = wheel.name.split("-")[1]
     environment = {
         key: value
         for key, value in os.environ.items()
@@ -141,6 +143,15 @@ def main(
             )
 
         install(wheel)
+        # The release qualifier supplies its own checkout revision. Developer
+        # builds can run this same install test with an unstamped executable.
+        if expected_commit is not None:
+            expected = f"loom-serve {distribution_version} (commit {expected_commit})"
+            actual = run("loom-serve", "--version").strip()
+            if actual != expected:
+                raise ValueError(
+                    f"Installed server reported {actual!r}, expected {expected!r}"
+                )
         assert shutil.which("bazel", path=environment["PATH"]) is None
         assert shutil.which("bazelisk", path=environment["PATH"]) is None
         with ZipFile(wheel) as archive:
@@ -267,7 +278,7 @@ for name in ('model-card', 'model-lock', 'model-catalog'):
     schema = json.loads(files('loom.model').joinpath(name + '.v1.schema.json').read_text())
     assert schema['$schema'] == 'https://json-schema.org/draft/2020-12/schema'
 """,
-            wheel.name.split("-")[1],
+            distribution_version,
             json.dumps(identity.catalog),
         )
         assert "--offline" in run(fetch, "--help")

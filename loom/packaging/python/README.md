@@ -14,6 +14,10 @@ headers, so it works without a separate compiler or source checkout.
 Linux wheel packaging gives each native file an adjacent-library search path;
 installed commands load their matching companions without Bazel build paths.
 
+In a published wheel, `loom-serve --version` identifies the installed SDK
+version and source commit. Instrumented wheels include their profile in the
+version, such as `+asan`.
+
 `amdf-info` reports native AMD GPUs, NPUs, memory pools, and capabilities without
 ROCr or XRT. Use `amdf-info --format=json` for automation or
 `amdf-info --device=xdna --activate` to check native device acquisition and
@@ -107,14 +111,15 @@ runs separately on the destination operating system and exports the wheel only
 after the installed test succeeds:
 
 ```sh
-python -m build_tools.ci.loom_wheel build --profile=release --output=wheel-inputs
+python -m build_tools.ci.loom_wheel build --profile=release --platform=manylinux_2_39_x86_64 --output=wheel-inputs
 python -m build_tools.ci.loom_wheel test --inputs=wheel-inputs --output=wheel-artifact
 ```
 
 Run both commands from the same repository revision. The build needs Bazelisk
 and a compiler toolchain on PATH; optional Bazel flags follow `--`. The test
 needs Python 3.12 or newer and, on Linux, `patchelf`. It invokes no build tool.
-For a Windows cross-build, add `-- --config=windows-x86_64` to the build command,
+For a Windows cross-build, use `--platform=win_amd64` and append
+`-- --config=windows-x86_64` to the build command,
 transfer `wheel-inputs` to Windows, and run the test there. The final output
 directory receives one qualified wheel; existing files are never replaced.
 PR and manual build jobs have read permissions and publish no release.
