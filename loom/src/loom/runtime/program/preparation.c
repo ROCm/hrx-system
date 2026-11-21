@@ -1291,6 +1291,29 @@ iree_host_size_t loom_runtime_preparation_stage_count(
   return preparation->stage_count;
 }
 
+iree_status_t loom_runtime_preparation_device_buffer_argument(
+    const loom_runtime_preparation_t* preparation,
+    const iree_vm_module_t* module, iree_string_view_t role,
+    iree_vm_ref_type_t buffer_type, iree_vm_signature_type_t* out_argument) {
+  iree_vm_module_signature_t signature = {0};
+  IREE_RETURN_IF_ERROR(loom_runtime_program_service_signature(
+      module, preparation->card, preparation->component, role,
+      preparation->host_allocator, &signature));
+  *out_argument = (iree_vm_signature_type_t){
+      .kind = IREE_VM_SIGNATURE_TYPE_KIND_PTR, .value.ref = buffer_type};
+  for (uint16_t i = 0; i < signature.arguments.count; ++i) {
+    const iree_vm_module_signature_type_t field = signature.arguments.data[i];
+    if (iree_vm_module_signature_type_kind_is_ref(field.kind) &&
+        module->descriptor->ref_types.data[field.type_ordinal] == buffer_type) {
+      if (field.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF) {
+        out_argument->kind = IREE_VM_SIGNATURE_TYPE_KIND_REF;
+      }
+      break;
+    }
+  }
+  return iree_ok_status();
+}
+
 loom_model_card_t* loom_runtime_preparation_card(
     const loom_runtime_preparation_t* preparation) {
   return preparation->card;

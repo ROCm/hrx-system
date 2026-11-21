@@ -223,7 +223,7 @@ class ExecutablesTest : public loom_runtime::testing::WeightsTest {
     IREE_RETURN_IF_ERROR(loom_runtime_parameters_module_create(
         environment_, &hal_types_,
         loom_runtime_device_transfer_queue(device_owner_), parameter_sources_,
-        host_allocator_, &parameters_));
+        /*owned_hal_arguments=*/false, host_allocator_, &parameters_));
     options.parameter_module = parameters_;
     IREE_RETURN_IF_ERROR(loom_service_executables_allocate(
         &options, host_allocator_, &executables_));

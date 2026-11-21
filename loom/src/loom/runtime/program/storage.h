@@ -51,6 +51,9 @@ void loom_runtime_storage_deinitialize(loom_runtime_storage_t* storage,
                                        iree_allocator_t host_allocator);
 
 typedef struct loom_runtime_storage_module_options_t {
+  // Released service modules declare owning HAL arguments. Both conventions
+  // use the same synchronous operations and preserve queue ownership.
+  bool owned_hal_arguments;
   // Execution owner for ordered device copies and fills.
   loom_runtime_execution_t* execution;
   // Stable model-owned roots; the table and its references outlive the module.

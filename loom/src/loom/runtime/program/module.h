@@ -31,6 +31,9 @@ typedef struct loom_runtime_stage_t {
 
 // Cold capabilities shared by every invocation of one model program.
 typedef struct loom_runtime_module_options_t {
+  // Released service modules declare owning HAL arguments. Both conventions
+  // use the same synchronous operations and preserve queue ownership.
+  bool owned_hal_arguments;
   // Largest typed execute_N import exposed, independent of loaded stage count.
   // Every arity from zero through this value is available, including branches
   // whose stages are not loaded. UINT16_MAX is not a valid capacity.

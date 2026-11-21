@@ -384,6 +384,12 @@ static iree_status_t loom_serve_image_check_layouts(
 
 static iree_status_t loom_serve_image_create_control(
     loom_serve_image_model_t* model, iree_vm_module_t* module) {
+  iree_vm_signature_type_t device_buffer = {0};
+  IREE_RETURN_IF_ERROR(loom_runtime_preparation_device_buffer_argument(
+      model->preparation, module, IREE_SV("generate"),
+      model->control.hal_types.buffer, &device_buffer));
+  const bool owned_hal_arguments =
+      device_buffer.kind == IREE_VM_SIGNATURE_TYPE_KIND_REF;
   const iree_allocator_t host_allocator = model->host_allocator;
   IREE_RETURN_IF_ERROR(iree_vm_buffer_create(
       model->stages.count * sizeof(int64_t), iree_alignof(int64_t),
@@ -398,6 +404,7 @@ static iree_status_t loom_serve_image_create_control(
         (uint64_t)loom_runtime_preparation_stage(model->preparation, i)->tag);
   }
   const loom_runtime_module_options_t options = {
+      .owned_hal_arguments = owned_hal_arguments,
       .binding_capacity = 3,
       .stages = {model->stages.table->part_count, model->stages.table->parts},
       .feedback = {1, &model->output},
@@ -441,7 +448,8 @@ static iree_status_t loom_serve_image_create_control(
     status = loom_runtime_parameters_module_create(
         model->control.environment, &model->control.hal_types,
         loom_runtime_device_transfer_queue(model->owner),
-        model->parameter_sources, host_allocator, &native_modules[4]);
+        model->parameter_sources, owned_hal_arguments, host_allocator,
+        &native_modules[4]);
     model->control.parameters = native_modules[4];
     iree_vm_module_retain(model->control.parameters);
   }
@@ -461,9 +469,6 @@ static iree_status_t loom_serve_image_create_control(
   const iree_vm_signature_type_t buffer = {
       .kind = IREE_VM_SIGNATURE_TYPE_KIND_REF,
       .value.ref = model->control.vm_types.buffer};
-  const iree_vm_signature_type_t device_buffer = {
-      .kind = IREE_VM_SIGNATURE_TYPE_KIND_PTR,
-      .value.ref = model->control.hal_types.buffer};
   const iree_vm_signature_type_t i32 = {
       .kind = IREE_VM_SIGNATURE_TYPE_KIND_SCALAR,
       .value.scalar = IREE_VM_SCALAR_TYPE_I32};

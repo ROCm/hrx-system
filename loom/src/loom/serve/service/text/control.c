@@ -95,12 +95,19 @@ iree_status_t loom_serve_text_control_initialize(
            state->storage.bytes[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS].data,
            control->host.bytes[TEXT_HOST_STATE_ORIGINS].data_length);
   }
+  iree_vm_signature_type_t device_buffer = {0};
+  IREE_RETURN_IF_ERROR(loom_runtime_preparation_device_buffer_argument(
+      source->preparation, source->module, IREE_SV("epoch"),
+      source->types.buffer, &device_buffer));
+  const bool owned_hal_arguments =
+      device_buffer.kind == IREE_VM_SIGNATURE_TYPE_KIND_REF;
   const iree_byte_span_t feedback[] = {
       control->host.bytes[TEXT_HOST_OUTPUTS],
       control->host.bytes[TEXT_HOST_RESULTS],
       control->host.bytes[TEXT_HOST_NEXT_RESULTS],
   };
   const loom_runtime_module_options_t options = {
+      .owned_hal_arguments = owned_hal_arguments,
       .binding_capacity = 7,
       .stages = {stage_count, stages},
       .feedback = {IREE_ARRAYSIZE(feedback), feedback},
@@ -121,7 +128,8 @@ iree_status_t loom_serve_text_control_initialize(
   if (iree_status_is_ok(status)) {
     status = loom_runtime_parameters_module_create(
         source->environment, &source->types, transfer,
-        source->parameter_sources, host_allocator, &libraries[3]);
+        source->parameter_sources, owned_hal_arguments, host_allocator,
+        &libraries[3]);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_vm_file_module_create(&source->types, transfer,
@@ -135,6 +143,7 @@ iree_status_t loom_serve_text_control_initialize(
     status = loom_runtime_storage_module_create(
         &source->types, &source->vm_types,
         (loom_runtime_storage_module_options_t){
+            .owned_hal_arguments = owned_hal_arguments,
             .execution = execution,
             .buffers = {state->declared_storage.count,
                         state->declared_storage.buffers}},
@@ -161,9 +170,6 @@ iree_status_t loom_serve_text_control_initialize(
   const iree_vm_signature_type_t buffer = {
       .kind = IREE_VM_SIGNATURE_TYPE_KIND_REF,
       .value.ref = source->vm_types.buffer};
-  const iree_vm_signature_type_t device_buffer = {
-      .kind = IREE_VM_SIGNATURE_TYPE_KIND_PTR,
-      .value.ref = source->types.buffer};
   const iree_vm_signature_type_t i32 = {
       .kind = IREE_VM_SIGNATURE_TYPE_KIND_SCALAR,
       .value.scalar = IREE_VM_SCALAR_TYPE_I32};

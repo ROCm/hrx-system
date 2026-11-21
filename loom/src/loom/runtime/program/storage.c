@@ -266,10 +266,21 @@ static const iree_vm_module_signature_type_t fill_arguments[] = {
     {IREE_VM_SCALAR_TYPE_I64, 0},
     {IREE_VM_SCALAR_TYPE_I64, 0},
     {IREE_VM_SCALAR_TYPE_I32, 0}};
+static const iree_vm_module_signature_type_t fill_arguments_v1[] = {
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
+    {IREE_VM_SCALAR_TYPE_I64, 0},
+    {IREE_VM_SCALAR_TYPE_I64, 0},
+    {IREE_VM_SCALAR_TYPE_I32, 0}};
 static const iree_vm_module_signature_type_t copy_arguments[] = {
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 0},
     {IREE_VM_SCALAR_TYPE_I64, 0},
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 0},
+    {IREE_VM_SCALAR_TYPE_I64, 0},
+    {IREE_VM_SCALAR_TYPE_I64, 0}};
+static const iree_vm_module_signature_type_t copy_arguments_v1[] = {
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
+    {IREE_VM_SCALAR_TYPE_I64, 0},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
     {IREE_VM_SCALAR_TYPE_I64, 0},
     {IREE_VM_SCALAR_TYPE_I64, 0}};
 
@@ -313,6 +324,15 @@ static void loom_runtime_storage_module_query_callable(
     const iree_vm_module_t* base, iree_host_size_t ordinal,
     iree_vm_module_callable_type_declaration_t* out_value) {
   *out_value = storage_callables[ordinal];
+  const loom_runtime_storage_module_t* module =
+      (const loom_runtime_storage_module_t*)base;
+  if (module->options.owned_hal_arguments) {
+    if (ordinal == STORAGE_COPY) {
+      out_value->signature.arguments.data = copy_arguments_v1;
+    } else if (ordinal == STORAGE_FILL) {
+      out_value->signature.arguments.data = fill_arguments_v1;
+    }
+  }
 }
 static void loom_runtime_storage_module_query_import_group(
     const iree_vm_module_t* base, iree_host_size_t ordinal,

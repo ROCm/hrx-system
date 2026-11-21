@@ -9,6 +9,7 @@
 
 #include "iree/vm/environment.h"
 #include "iree/vm/program.h"
+#include "iree/vm/reflection.h"
 #include "iree/vm/variant.h"
 #include "loom/runtime/command/program.h"
 #include "loom/runtime/program/compilation.h"
@@ -111,6 +112,15 @@ iree_host_size_t loom_runtime_preparation_feedback_count(
     const loom_runtime_preparation_t* preparation);
 uint64_t loom_runtime_preparation_feedback_capacity(
     const loom_runtime_preparation_t* preparation, iree_host_size_t ordinal);
+
+// Selects the published HAL input convention from a compiled submission role.
+// Releases using the same service version shipped both owning and borrowed
+// handles. Native libraries and host bindings use the same exact convention.
+// The normal binder validates the entire signature, including object identity.
+iree_status_t loom_runtime_preparation_device_buffer_argument(
+    const loom_runtime_preparation_t* preparation,
+    const iree_vm_module_t* module, iree_string_view_t role,
+    iree_vm_ref_type_t buffer_type, iree_vm_signature_type_t* out_argument);
 
 // Borrowed selected model facts retained independently by these declarations.
 // NULL for direct program callers without a card.

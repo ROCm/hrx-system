@@ -429,7 +429,9 @@ iree_status_t loom_runtime_module_create(const iree_hal_vm_types_t* types,
         (iree_vm_module_signature_type_t){IREE_VM_SCALAR_TYPE_I32, 0};
     for (uint32_t i = 1; i <= options.binding_capacity; ++i) {
       module->arguments[i] = (iree_vm_module_signature_type_t){
-          IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 0};
+          options.owned_hal_arguments ? IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF
+                                      : IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR,
+          0};
     }
     // Signatures sort by argument count, then type. The clock query has no
     // arguments; execute_0, fence, and join have one. Timestamp follows
@@ -461,10 +463,18 @@ iree_status_t loom_runtime_module_create(const iree_hal_vm_types_t* types,
         {IREE_VM_SCALAR_TYPE_I64, 0},
         {IREE_VM_SCALAR_TYPE_I64, 0},
     };
+    static const iree_vm_module_signature_type_t feedback_arguments_v1[] = {
+        {IREE_VM_SCALAR_TYPE_I32, 0},
+        {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
+        {IREE_VM_SCALAR_TYPE_I64, 0},
+        {IREE_VM_SCALAR_TYPE_I64, 0},
+    };
     const iree_host_size_t ordinal = options.binding_capacity + 1;
     module->callables[feedback_ordinal].signature =
         (iree_vm_module_signature_t){
-            .arguments = {feedback_arguments, 4, 3, 1, 0},
+            .arguments = {options.owned_hal_arguments ? feedback_arguments_v1
+                                                      : feedback_arguments,
+                          4, 3, 1, 0},
             .results = {&loom_runtime_module_result, 1, 1, 0, 0},
         };
     module->descriptor.counts.callable_fields.ref_count += 1;
@@ -483,7 +493,9 @@ iree_status_t loom_runtime_module_create(const iree_hal_vm_types_t* types,
     static const iree_vm_module_signature_type_t fence_argument = {
         IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 1};
     module->callables[3].signature = (iree_vm_module_signature_t){
-        .arguments = {&fence_argument, 1, 0, 1, 0},
+        .arguments = {options.owned_hal_arguments ? &fence_result
+                                                  : &fence_argument,
+                      1, 0, 1, 0},
     };
     module->descriptor.counts.callable_fields.value_count += 1;
     module->descriptor.counts.callable_fields.ref_count += 2;
@@ -501,9 +513,15 @@ iree_status_t loom_runtime_module_create(const iree_hal_vm_types_t* types,
         {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 0},
         {IREE_VM_SCALAR_TYPE_I64, 0},
     };
+    static const iree_vm_module_signature_type_t timestamp_arguments_v1[] = {
+        {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
+        {IREE_VM_SCALAR_TYPE_I64, 0},
+    };
     module->callables[timestamp_ordinal].signature =
         (iree_vm_module_signature_t){
-            .arguments = {timestamp_arguments, 2, 1, 1, 0},
+            .arguments = {options.owned_hal_arguments ? timestamp_arguments_v1
+                                                      : timestamp_arguments,
+                          2, 1, 1, 0},
             .results = {&loom_runtime_module_result, 1, 1, 0, 0},
         };
     module->descriptor.counts.callable_fields.ref_count += 1;
