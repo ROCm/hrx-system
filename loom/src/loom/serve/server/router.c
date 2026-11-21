@@ -798,9 +798,8 @@ static iree_status_t loom_serve_router_logs(
       }
     }
     if (!service) {
-      return loom_serve_http_response_error(
-          router->server, connection, loom_serve_http_model_not_found(name),
-          &router->output);
+      return loom_serve_http_response_model_not_found(
+          router->server, connection, name, &router->output);
     }
     if (!service->telemetry.stream) {
       return loom_serve_http_response_reject(
@@ -1196,9 +1195,8 @@ static iree_status_t loom_serve_router_inspect(
     }
   }
   if (!model) {
-    return loom_serve_http_response_error(router->server, connection,
-                                          loom_serve_http_model_not_found(name),
-                                          &router->output);
+    return loom_serve_http_response_model_not_found(router->server, connection,
+                                                    name, &router->output);
   }
   if (model->phase != LOOM_SERVE_REGISTRATION_READY) {
     return loom_serve_http_response_reject(
@@ -1628,9 +1626,8 @@ static iree_status_t loom_serve_router_accept(
       return loom_serve_router_admit(router, i, connection, request);
     }
   }
-  return loom_serve_http_response_error(router->server, connection,
-                                        loom_serve_http_model_not_found(name),
-                                        output);
+  return loom_serve_http_response_model_not_found(router->server, connection,
+                                                  name, output);
 }
 
 static iree_status_t loom_serve_router_observe_model(void* self,

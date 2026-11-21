@@ -55,6 +55,10 @@ the first body bytes. It routes the request after the complete body arrives.
 | `GET /logz`, `GET /logz/stream` | Bounded JSONL polling or SSE with independent cursors. |
 | `GET /v1/requests`, `GET /v1/sessions` | Bounded live owner inspection; sessions require a retained-text service. |
 
+When a request selects a model by ID and the registry has no match, the server
+returns HTTP 404 with `error.code` set to `model_not_found`. A client can
+refresh `GET /v1/models` to choose an available deployment.
+
 Prepared but drained or weight-evicted models remain discoverable.
 Clients can select a deployment through `architecture.input_modalities` and
 `architecture.output_modalities`. These report the same capabilities as the
