@@ -183,6 +183,106 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
                       IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT));
 
+TEST_F(GpuNativeRecordingTest, PrimaryAcquisitionCoversOnlyLeadingVisibility) {
+  using iree::hal::cts::Ref;
+  Ref<iree_hal_buffer_t> output;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(4, 4),
+      iree_infinite_timeout(), output.out()));
+  Ref<iree_hal_semaphore_t> done;
+  CreateSemaphore(done.out());
+  auto* timeline = done.get();
+  uint64_t epoch = 0;
+  using Case = std::tuple<iree_hal_execution_stage_t, iree_hal_barrier_flags_t,
+                          bool, std::vector<uint32_t>>;
+  for (auto mode : {IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                    IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT}) {
+    for (const auto& [source, flags, preceding_fill, expected] : {
+             Case{IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+                  IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
+                  false,
+                  {0x37}},
+             Case{IREE_HAL_EXECUTION_STAGE_DISPATCH,
+                  IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
+                  false,
+                  {0x46, 0x58, 0x37}},
+             Case{IREE_HAL_EXECUTION_STAGE_DISPATCH,
+                  IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+                  false,
+                  {0x46, 0x58, 0x37}},
+             Case{IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+                  IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
+                  true,
+                  {0x37, 0x58, 0x37}},
+         }) {
+      SCOPED_TRACE(::testing::Message() << mode << "/" << source << "/" << flags
+                                        << "/" << preceding_fill);
+      Ref<iree_hal_command_buffer_t> recording;
+      IREE_ASSERT_OK(iree_hal_command_buffer_create(
+          iree_hal_queue_family(queues_[0]), mode,
+          IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0, recording.out()));
+      IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+      const auto reference = iree_hal_make_buffer_ref(output, 0, 4);
+      uint32_t pattern = 0;
+      if (preceding_fill) {
+        IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
+            recording, reference, &pattern, sizeof(pattern), 0));
+      }
+      const iree_hal_barrier_t barrier = {
+          .source_stage_mask = source,
+          .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+          .flags = flags,
+      };
+      IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &barrier));
+      pattern = static_cast<uint32_t>(epoch + 1);
+      IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer_linear(
+          recording, reference, &pattern, sizeof(pattern), 0));
+      IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+
+      iree_hal_amd_gpu_pm4_command_invocation_t invocation;
+      IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_command_invocation_initialize(
+          recording, {}, nullptr, 0, &invocation));
+      const auto& program = *invocation.program;
+      EXPECT_EQ(program.operation_count, preceding_fill ? 3u : 2u);
+      std::array<uint32_t, IREE_HAL_AMD_GPU_PM4_INLINE_BYTE_CAPACITY / 4>
+          inline_words;
+      const uint32_t* words = nullptr;
+      if (program.inline_program) {
+        // Immediate fills contain no private argument data.
+        EXPECT_EQ(program.argument_length, 0u);
+        IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_command_invocation_inline(
+            &invocation, 0, 0, 0, 0, 0, nullptr, inline_words.data()));
+        words = inline_words.data();
+      } else {
+        words = reinterpret_cast<const uint32_t*>(
+            program.resident.contents.data + program.entry.offset);
+      }
+      std::vector<uint32_t> opcodes;
+      for (uint32_t offset = 0; offset < program.entry.word_count;) {
+        const uint32_t header = words[offset];
+        const uint32_t opcode = (header >> 8) & 0xff;
+        if (opcode != 0x10 && opcode != 0x3f) {
+          opcodes.push_back(opcode);
+        }
+        offset += ((header >> 16) & 0x3fff) + 2;
+      }
+      EXPECT_EQ(opcodes, expected);
+      iree_hal_amd_gpu_pm4_command_invocation_deinitialize(&invocation);
+
+      uint64_t executed = ++epoch, downloaded = ++epoch;
+      IREE_ASSERT_OK(iree_hal_queue_execute(
+          queues_[0], {}, {1, &timeline, &executed}, recording, {}, 0));
+      uint32_t actual = 0;
+      IREE_ASSERT_OK(iree_hal_queue_download_linear(
+          queues_[0], {1, &timeline, &executed}, {1, &timeline, &downloaded},
+          output, 0, &actual, sizeof(actual), nullptr));
+      IREE_ASSERT_OK(iree_hal_semaphore_wait(done, downloaded,
+                                             iree_infinite_timeout(), 0));
+      EXPECT_EQ(actual, pattern);
+    }
+  }
+}
+
 TEST_F(GpuNativeRecordingTest, PrimarySubmissionBoundsPacketBytesAndFixups) {
   using iree::hal::cts::Ref;
   Ref<iree_hal_buffer_t> output;
