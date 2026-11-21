@@ -135,3 +135,49 @@ func.def @native_reduce(%first: bf16, %second: bf16, %source: buffer, %initial: 
   %result = scalar.addf<reassoc> %107, %114 : f32
   func.return %result : f32
 }
+
+// ====
+
+// Each comparison splits into two packets. The native 64-lane predicate AND
+// consumes both comparisons before their numeric input is reused by select.
+func.def @native_mask_between_packet_operations(%high: vector<64xi16>, %shift: vector<64xi16>) -> (vector<64xi16>) {
+  %adjusted = vector.addi %high, %shift : vector<64xi16>
+  %c0 = vector.splati 0 : vector<64xi16>
+  %minimum = vector.splati 128 : vector<64xi16>
+  %live = vector.cmpi ne, %high, %c0 : vector<64xi16> -> vector<64xi1>
+  %normal = vector.cmpi sge, %adjusted, %minimum : vector<64xi16> -> vector<64xi1>
+  %keep = vector.andi %live, %normal : vector<64xi1>
+  %result = vector.select %keep, %adjusted, %c0 : vector<64xi16>
+  func.return %result : vector<64xi16>
+}
+
+// ----
+func.def @native_mask_between_packet_operations(%high: vector<64xi16>, %shift: vector<64xi16>) -> (vector<64xi16>) {
+  %10 = vector.slice %high[0] : vector<64xi16> -> vector<32xi16>
+  %41 = vector.splati 0 : vector<32xi16>
+  %12 = vector.cmpi ne, %10, %41 : vector<32xi16> -> vector<32xi1>
+  %13 = vector.slice %high[32] : vector<64xi16> -> vector<32xi16>
+  %40 = vector.splati 0 : vector<32xi16>
+  %15 = vector.cmpi ne, %13, %40 : vector<32xi16> -> vector<32xi1>
+  %live = vector.concat<0> %12, %15 : vector<32xi1>, vector<32xi1> -> vector<64xi1>
+  %17 = vector.slice %high[0] : vector<64xi16> -> vector<32xi16>
+  %18 = vector.slice %shift[0] : vector<64xi16> -> vector<32xi16>
+  %19 = vector.addi %17, %18 : vector<32xi16>
+  %39 = vector.splati 128 : vector<32xi16>
+  %21 = vector.cmpi sge, %19, %39 : vector<32xi16> -> vector<32xi1>
+  %22 = vector.slice %high[32] : vector<64xi16> -> vector<32xi16>
+  %23 = vector.slice %shift[32] : vector<64xi16> -> vector<32xi16>
+  %24 = vector.addi %22, %23 : vector<32xi16>
+  %38 = vector.splati 128 : vector<32xi16>
+  %26 = vector.cmpi sge, %24, %38 : vector<32xi16> -> vector<32xi1>
+  %normal = vector.concat<0> %21, %26 : vector<32xi1>, vector<32xi1> -> vector<64xi1>
+  %keep = vector.andi %live, %normal : vector<64xi1>
+  %29 = vector.slice %keep[0] : vector<64xi1> -> vector<32xi1>
+  %37 = vector.splati 0 : vector<32xi16>
+  %31 = vector.select %29, %19, %37 : vector<32xi16>
+  %32 = vector.slice %keep[32] : vector<64xi1> -> vector<32xi1>
+  %36 = vector.splati 0 : vector<32xi16>
+  %34 = vector.select %32, %24, %36 : vector<32xi16>
+  %result = vector.concat<0> %31, %34 : vector<32xi16>, vector<32xi16> -> vector<64xi16>
+  func.return %result : vector<64xi16>
+}
