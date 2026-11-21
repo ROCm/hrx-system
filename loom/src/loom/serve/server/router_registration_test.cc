@@ -1031,8 +1031,19 @@ TEST_P(HttpRouterRegistrationTest, LocalPreparationFailureKeepsPeersServing) {
         loom_serve_test_registration_preparation_failure_t::kLocal;
   }
   Declare();
+  const auto request = [this]() {
+    return Send("POST", "/v1/embeddings",
+                R"({"model":"dynamic","input":"hi"})");
+  };
+  const int waiting = request();
+  WaitHeld("dynamic", 1);
   EXPECT_EQ(Control("undrain", "dynamic").find("HTTP/1.1 200"), 0u);
   managed_.WaitRetiring();
+  for (const auto& response : {Read(waiting), Read(request())}) {
+    EXPECT_EQ(response.find("HTTP/1.1 503"), 0u);
+    EXPECT_NE(response.find(R"("message":"model prepare failed")"),
+              std::string::npos);
+  }
   const auto failed = Read(Send("GET", "/v1/status"));
   EXPECT_NE(failed.find("model prepare failed"), std::string::npos);
   const auto duration = PreparationDuration(failed);
