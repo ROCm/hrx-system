@@ -505,6 +505,103 @@ function updateResourceLinks() {
   }
 }
 
+function slabState(slab) {
+  if (!slab) return "returned";
+  if (slab.state !== "ready") return slab.state;
+  if (!slab.leased) return "reusable";
+  return slab.leased === slab.pages ? "leased" : "mixed";
+}
+
+function createSlabMap(card, poolIndex) {
+  const map = element("div", "slab-map");
+  const overview = element("div");
+  const detail = element("div");
+  const heading = element("strong");
+  const selection = element("strong");
+  const slabs = element("div", "tiles");
+  slabs.setAttribute("role", "radiogroup");
+  slabs.ariaLabel = "Select a physical slab";
+  const pages = element("div", "tiles");
+  const caption = element("div");
+  const legend = element("div", "tile-legend");
+  for (const state of ["leased", "mixed", "reusable", "returned"]) {
+    const key = element("span", "", state);
+    key.dataset.slab = state;
+    legend.append(key);
+  }
+  overview.append(heading, slabs, legend);
+  detail.append(selection, pages, caption);
+  map.append(overview, detail);
+  card.append(map);
+  // Keep the selection on its slab serial when the observation window moves.
+  let source, selected, detailKey;
+
+  function showPages() {
+    const slab = source.slabs[selected - source.first_slab];
+    const key = selected + "/" + JSON.stringify(slab);
+    if (key === detailKey) return;
+    detailKey = key;
+    const state = slabState(slab);
+    selection.textContent = `Slab #${selected} · ${state}`;
+    pages.replaceChildren();
+    caption.textContent = "";
+    if (!slab) return;
+    const count = Math.min(64, slab.pages - slab.offset);
+    const free = BigInt("0x" + slab.free);
+    for (let i = 0; i < count; ++i) {
+      const cell = element("i");
+      cell.dataset.slab = slab.state === "ready"
+        ? (free & (1n << BigInt(i)) ? "reusable" : "leased")
+        : slab.state;
+      cell.title = `Page ${slab.offset + i} · ${cell.dataset.slab}`;
+      pages.append(cell);
+    }
+    caption.textContent = `${slab.leased}/${slab.pages} pages leased · ${bytes(slab.page_bytes)}/page · showing ${slab.offset}–${slab.offset + count - 1}`;
+  }
+
+  slabs.onchange = event => {
+    selected = Number(event.target.value);
+    showPages();
+  };
+  return next => {
+    const list = next.slabs;
+    detail.hidden = legend.hidden = !list.length;
+    const moved = source?.first_slab !== next.first_slab;
+    source = next;
+    const first = next.first_slab;
+    const last = first + list.length - 1;
+    heading.textContent = list.length
+      ? `Recent physical slabs · #${first}–${last}`
+      : "No physical slabs allocated";
+    if (!list.length) return;
+    if (!(selected >= first && selected <= last)) {
+      const mixed = list.findIndex(slab => slabState(slab) === "mixed");
+      selected = first + (mixed < 0 ? Math.max(0, list.findLastIndex(Boolean)) : mixed);
+    }
+    for (let i = 0; i < list.length; ++i) {
+      let cell = slabs.children[i];
+      if (!cell) {
+        cell = element("input");
+        cell.type = "radio";
+        cell.name = "slab-" + poolIndex;
+        slabs.append(cell);
+      }
+      const serial = first + i;
+      const state = slabState(list[i]);
+      if (cell.value !== String(serial) || cell.dataset.slab !== state) {
+        cell.value = serial;
+        cell.dataset.slab = state;
+        cell.title = `Slab #${serial} · ${state}`;
+        cell.ariaLabel = cell.title;
+      }
+      cell.checked = serial === selected;
+    }
+    if (moved && slabs.contains(document.activeElement))
+      slabs.children[selected - first].focus({preventScroll: true});
+    showPages();
+  };
+}
+
 function createPool(source) {
   const card = element("article", "panel memory-pool");
   card.id = `pool-${source.index}`;
@@ -519,21 +616,21 @@ function createPool(source) {
   const committed = element("strong", "pool-value", "—");
   const peak = element("span", "muted");
   peak.title = "Highest commitment observed in this page session.";
-  total.append(committed, peak);
+  total.append(committed, element("span", "muted", "committed"));
   const canvas = element("canvas");
   canvas.setAttribute(
     "aria-label",
     `${poolLabel(source)} committed bytes`,
   );
   const budget = element("div", "model-facts");
-  const reservations = element("div", "model-facts");
-  const workspace = element("div", "model-facts");
-  workspace.title =
-    "Workspace is backed by this pool. It is not additional physical usage; atomic samples need not agree at the same instant.";
+  const breakdown = element("div", "model-facts");
   const details = element("details");
   const table = element("table");
   details.append(element("summary", "", "All pool counters"), table);
-  card.append(heading, total, canvas, budget, reservations, workspace, details);
+  total.append(canvas, peak);
+  card.append(heading, total, budget, breakdown);
+  const updateSlabs = source.slabs && createSlabMap(card, source.index);
+  card.append(details);
   $("pool-grid").append(card);
   return {
     source,
@@ -543,8 +640,8 @@ function createPool(source) {
     peak,
     canvas,
     budget,
-    reservations,
-    workspace,
+    breakdown,
+    updateSlabs,
     table,
     cells: new Map(),
     ring: new Ring(),
@@ -588,31 +685,24 @@ function updatePool(source, time, recordHistory) {
     pools.set(source.index, pool);
     updateResourceLinks();
   }
+  pool.updateSlabs?.(source);
   const fields = updateTopicFields(source.topics, pool);
-  const value = (topic, name) =>
-    fields.has(`${topic}.${name}`)
-      ? Number(fields.get(`${topic}.${name}`).value)
-      : NaN;
+  const value = (topic, name) => Number(fields.get(`${topic}.${name}`)?.value);
   const elastic = source.backing === "elastic";
-  const storageBytes = value("storage", "committed_bytes");
-  const elasticBytes = elastic ? value("elastic", "committed_bytes") : 0;
-  // Allocator breakdowns are included in the physical owner's total.
-  const committed = elastic ? elasticBytes : storageBytes;
+  const owner = elastic ? "elastic" : "storage";
+  const committed = value(owner, "committed_bytes");
   pool.committed.textContent = bytes(committed);
   if (recordHistory) {
     pool.ring.push(time, committed);
     pendingPlots.add(pool);
   }
   pool.peak.textContent = `peak ${bytes(pool.ring.peak)}`;
-  const limit = elastic ? value("elastic", "budget_limit") : 0;
+  const limit = value(owner, "budget_limit");
   pool.budget.textContent = elastic
-    ? `${bytes(elasticBytes)} elastic · ${bytes(limit)} budget · ${bytes(storageBytes)} persistent allocator (included)`
-    : "Native storage · no pool budget";
-  pool.reservations.textContent = elastic
-    ? `${bytes(value("elastic", "reserved_bytes"))} virtual reserved · ${bytes(value("elastic", "cached_bytes"))} reusable`
-    : `${bytes(value("storage", "reserved_bytes"))} charged · ${bytes(value("storage", "free_bytes"))} reusable`;
-  pool.workspace.textContent =
-    `Workspace: ${bytes(value("workspace", "reserved_bytes"))} charged · ${bytes(value("workspace", "committed_bytes"))} retained (included)`;
+    ? `${Math.round(100 * committed / limit)}% of ${bytes(limit)} physical budget · ${bytes(value(owner, "reserved_bytes"))} virtual reserved`
+    : `Native storage · ${bytes(value(owner, "reserved_bytes"))} charged`;
+  const reusable = value(owner, elastic ? "cached_bytes" : "free_bytes");
+  pool.breakdown.textContent = `${bytes(reusable)} reusable · ${bytes(value("workspace", "committed_bytes"))} workspace retained`;
   $("pool-count").textContent = pools.size;
   summarizeDevices();
 }
@@ -740,8 +830,7 @@ function updateModel(model, time, timeNs, version, recordHistory) {
     models.set(model.slot, state);
   }
   const fields = updateTopicFields(model.topics, state);
-  const value = (key) =>
-    fields.has(key) ? Number(fields.get(key).value) : NaN;
+  const value = (key) => Number(fields.get(key)?.value);
   const imageTotal = fields.get("image.generated_images")?.value;
   const workTotal =
     model.kind === "image"

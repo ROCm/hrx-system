@@ -360,10 +360,82 @@ h2 {
   margin-top: 12px;
 }
 .memory-pool canvas {
+  width: min(22%, 100px);
+  height: 22px;
+  margin-right: auto;
+}
+.slab-map {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  margin: 10px 0;
+  font: 10px/1.5 ui-monospace, monospace;
+  color: var(--muted);
+}
+.slab-map > div {
+  width: min(100%, 302px);
+}
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(16, 1fr);
+  gap: 3px;
+  margin: 5px 0;
+}
+.tiles:empty, .tile-legend[hidden] {
+  display: none;
+}
+.tiles > *, .tile-legend span::before {
+  appearance: none;
+  background: var(--tile);
+  height: 12px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+.tiles input {
+  cursor: pointer;
   width: 100%;
-  height: 32px;
-  display: block;
-  margin-top: 4px;
+}
+.tiles input:checked {
+  outline: 1px solid var(--orange);
+  outline-offset: 1px;
+}
+.tiles input:focus-visible {
+  outline: 2px solid var(--orange);
+}
+.tile-legend {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.tile-legend span::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+}
+[data-slab=leased] {
+  --tile: var(--green);
+}
+[data-slab=reusable] {
+  --tile: var(--line);
+}
+[data-slab=mixed] {
+  --tile: repeating-linear-gradient(135deg, var(--green) 0 3px, var(--line) 3px 6px);
+}
+[data-slab=returned] {
+  --tile: transparent;
+  border-style: dashed;
+}
+[data-slab=acquiring] {
+  --tile: var(--orange);
+}
+[data-slab=retiring] {
+  --tile: var(--violet);
+}
+[data-slab=failed] {
+  --tile: #ee8980;
 }
 .memory-pool .pool-value {
   font:
