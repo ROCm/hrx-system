@@ -42,12 +42,14 @@ JSON framing is a separate projection, not the source's numeric interface.
 budget. `storage` and `workspace` are its persistent and command allocator
 breakdowns. With fixed backing, `storage` is the native total and `workspace`
 is its child view.
-Pool identity is its independent inventory index; models and consumer devices
-link to that owner rather than duplicating its totals. The browser plots managed
-commitment once per pool, selecting the elastic total when present or the fixed
-storage total otherwise. Allocator breakdowns are included, never
-added. The elastic allowance includes permanent model buffers as well as
-parameters, sparse state, and command allocations.
+Models and consumer devices link to their pool by inventory index. Each pool's
+capacity strip groups bytes by state. Held and reusable bytes together cover
+the current commitment. A finite budget adds a segment for uncommitted bytes.
+Elastic pools use the physical owner's commitment and ready page cache. Fixed
+pools use native storage commitment and free bytes. The sparkline and observed
+peak track changes in reusable backing. Workspace shows its retained bytes,
+lifetime reservation outcomes, and the increase in reservations since the
+first sample for this pool. Its backing overlaps the pool total.
 The elastic budget is the physical source capacity or a tighter explicit limit.
 Virtual reserved bytes are address extent, not committed RAM. Pending, releasing,
 abandoned, reusable, and atomic workspace samples do not form a disjoint
@@ -68,8 +70,10 @@ retiring, or failed), `page_bytes`, total `pages`, and `leased` pages.
 The 16-digit hexadecimal `free` word contains exact unleased page bits,
 least significant first, beginning at the zero-based page `offset`. A partial
 slab shows the word containing its first free page. Full and idle slabs show
-their first word. A ready slab can reuse its unleased pages. Fixed pools expose
-their native counters and omit the slab window.
+their first word. The dashboard opens the physical inspector on a mixed slab
+when one is present. It draws the exact page word for mixed slabs and
+summarizes uniform slabs by count. A manual selection follows its serial
+while it stays in the window. Fixed pools expose their native counters.
 
 The HTTP adapter schedules sampling at four hertz while readers exist. Sources
 are sampled/formatted once per sweep, independently of reader count. A shared

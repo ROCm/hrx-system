@@ -400,6 +400,14 @@ function element(tag, className, text) {
   return node;
 }
 
+function counterTable(card, title) {
+  const details = element("details");
+  const table = element("table");
+  details.append(element("summary", "", title), table);
+  card.append(details);
+  return table;
+}
+
 function updateTopicFields(topics, state) {
   const fields = new Map();
   for (const topic of topics)
@@ -512,93 +520,69 @@ function slabState(slab) {
   return slab.leased === slab.pages ? "leased" : "mixed";
 }
 
-function createSlabMap(card, poolIndex) {
-  const map = element("div", "slab-map");
-  const overview = element("div");
-  const detail = element("div");
-  const heading = element("strong");
-  const selection = element("strong");
-  const slabs = element("div", "tiles");
-  slabs.setAttribute("role", "radiogroup");
-  slabs.ariaLabel = "Select a physical slab";
+// Only an open inspector materializes the latest observation's options and bits.
+function createSlabMap(card) {
+  const details = element("details", "slab-map");
+  const summary = element("summary");
+  const select = element("select");
+  select.ariaLabel = "Physical slab";
   const pages = element("div", "tiles");
-  const caption = element("div");
-  const legend = element("div", "tile-legend");
-  for (const state of ["leased", "mixed", "reusable", "returned"]) {
-    const key = element("span", "", state);
-    key.dataset.slab = state;
-    legend.append(key);
-  }
-  overview.append(heading, slabs, legend);
-  detail.append(selection, pages, caption);
-  map.append(overview, detail);
-  card.append(map);
-  // Keep the selection on its slab serial when the observation window moves.
-  let source, selected, detailKey;
+  const caption = element("div", "model-facts");
+  details.append(summary, select, caption, pages);
+  card.append(details);
+  let source, selected, choiceKey, pageKey;
 
   function showPages() {
-    const slab = source.slabs[selected - source.first_slab];
-    const key = selected + "/" + JSON.stringify(slab);
-    if (key === detailKey) return;
-    detailKey = key;
-    const state = slabState(slab);
-    selection.textContent = `Slab #${selected} · ${state}`;
+    const slab = source.slabs[select.selectedIndex];
+    const key = (source.first_slab + select.selectedIndex) + "/" + JSON.stringify(slab);
+    if (key === pageKey) return;
+    pageKey = key;
     pages.replaceChildren();
-    caption.textContent = "";
-    if (!slab) return;
+    if (!slab) {
+      caption.textContent = "Slab has left the pool";
+      return;
+    }
+    caption.textContent = `${integer(slab.leased)}/${integer(slab.pages)} pages leased · ${bytes(slab.page_bytes)} per page`;
+    if (slabState(slab) !== "mixed") return;
     const count = Math.min(64, slab.pages - slab.offset);
     const free = BigInt("0x" + slab.free);
     for (let i = 0; i < count; ++i) {
       const cell = element("i");
-      cell.dataset.slab = slab.state === "ready"
-        ? (free & (1n << BigInt(i)) ? "reusable" : "leased")
-        : slab.state;
-      cell.title = `Page ${slab.offset + i} · ${cell.dataset.slab}`;
+      cell.dataset.state = free & (1n << BigInt(i)) ? "reusable" : "leased";
+      cell.title = `Page ${slab.offset + i} · ${cell.dataset.state}`;
       pages.append(cell);
     }
-    caption.textContent = `${integer(slab.leased)}/${integer(slab.pages)} leased · ${bytes(slab.page_bytes)} pages · #${integer(slab.offset)}–${integer(slab.offset + count - 1)}`;
+    caption.textContent += ` · showing #${integer(slab.offset)}–${integer(slab.offset + count - 1)}`;
   }
 
-  slabs.onchange = event => {
-    selected = Number(event.target.value);
+  function inspect() {
+    if (!details.open || !source.slabs.length) return;
+    const first = source.first_slab;
+    const states = source.slabs.map(slabState);
+    const key = first + "/" + states.join();
+    if (key !== choiceKey) {
+      choiceKey = key;
+      select.replaceChildren(...states.map((state, i) => new Option(`#${first + i} · ${state}`)));
+    }
+    let index = selected - first;
+    if (!(index >= 0 && index < states.length)) {
+      index = states.indexOf("mixed");
+      if (index < 0) index = Math.max(0, source.slabs.findLastIndex(Boolean));
+    }
+    select.selectedIndex = index;
+    showPages();
+  }
+
+  details.ontoggle = inspect;
+  select.onchange = () => {
+    selected = source.first_slab + select.selectedIndex;
     showPages();
   };
   return next => {
-    const list = next.slabs;
-    detail.hidden = legend.hidden = !list.length;
-    const moved = source?.first_slab !== next.first_slab;
     source = next;
-    const first = next.first_slab;
-    const last = first + list.length - 1;
-    heading.textContent = list.length
-      ? `Recent physical slabs · #${first}–${last}`
-      : "No physical slabs allocated";
-    if (!list.length) return;
-    if (!(selected >= first && selected <= last)) {
-      const mixed = list.findIndex(slab => slabState(slab) === "mixed");
-      selected = first + (mixed < 0 ? Math.max(0, list.findLastIndex(Boolean)) : mixed);
-    }
-    for (let i = 0; i < list.length; ++i) {
-      let cell = slabs.children[i];
-      if (!cell) {
-        cell = element("input");
-        cell.type = "radio";
-        cell.name = "slab-" + poolIndex;
-        slabs.append(cell);
-      }
-      const serial = first + i;
-      const state = slabState(list[i]);
-      if (cell.value !== String(serial) || cell.dataset.slab !== state) {
-        cell.value = serial;
-        cell.dataset.slab = state;
-        cell.title = `Slab #${serial} · ${state}`;
-        cell.ariaLabel = cell.title;
-      }
-      cell.checked = serial === selected;
-    }
-    if (moved && slabs.contains(document.activeElement))
-      slabs.children[selected - first].focus({preventScroll: true});
-    showPages();
+    details.hidden = !next.slabs.length;
+    summary.textContent = `Recent physical slabs · #${next.first_slab}–${next.first_slab + next.slabs.length - 1}`;
+    inspect();
   };
 }
 
@@ -613,24 +597,29 @@ function createPool(source) {
     links,
   );
   const total = element("div", "pool-total");
-  const committed = element("strong", "pool-value", "—");
-  const peak = element("span", "muted");
-  peak.title = "Highest commitment observed in this page session.";
-  total.append(committed, element("span", "muted", "committed"));
+  const committed = element("strong", "pool-value");
+  const budget = element("span", "muted");
+  total.append(committed, budget);
+  const capacity = element("div", "capacity");
+  capacity.title = "Physical bytes grouped by state";
+  const legend = element("div", "capacity-key");
+  const parts = ["held", "reusable", "uncommitted"].map(state => {
+    const segment = element("i");
+    const label = element("span");
+    segment.dataset.state = label.dataset.state = state;
+    capacity.append(segment);
+    legend.append(label);
+    return {segment, label, state};
+  });
+  const trend = element("div", "pool-trend");
   const canvas = element("canvas");
-  canvas.setAttribute(
-    "aria-label",
-    `${poolLabel(source)} committed bytes`,
-  );
-  const budget = element("div", "model-facts");
-  const breakdown = element("div", "model-facts");
-  const details = element("details");
-  const table = element("table");
-  details.append(element("summary", "", "All pool counters"), table);
-  total.append(canvas, peak);
-  card.append(heading, total, budget, breakdown);
-  const updateSlabs = source.slabs && createSlabMap(card, source.index);
-  card.append(details);
+  canvas.ariaLabel = "Reusable backing history";
+  const peak = element("span");
+  peak.title = "Highest reusable backing observed in this tab";
+  trend.append(element("span", "", "Reusable backing"), canvas, peak);
+  const workspace = element("div", "model-facts");
+  card.append(heading, total, capacity, legend, trend, workspace);
+  const updateSlabs = source.slabs && createSlabMap(card);
   $("pool-grid").append(card);
   return {
     source,
@@ -640,9 +629,10 @@ function createPool(source) {
     peak,
     canvas,
     budget,
-    breakdown,
+    parts,
+    workspace,
     updateSlabs,
-    table,
+    table: counterTable(card, "All pool counters"),
     cells: new Map(),
     ring: new Ring(),
     color: COLORS.memory,
@@ -677,13 +667,15 @@ function updateDevice(device) {
   summarizeDevices();
 }
 
-function updatePool(source, time, recordHistory) {
+function updatePool(source, time) {
   let pool = pools.get(source.index);
   if (!pool) {
     if (!pools.size) $("pool-grid").replaceChildren();
     pool = createPool(source);
     pools.set(source.index, pool);
     updateResourceLinks();
+    $("pool-count").textContent = pools.size;
+    summarizeDevices();
   }
   pool.updateSlabs?.(source);
   const fields = updateTopicFields(source.topics, pool);
@@ -691,20 +683,31 @@ function updatePool(source, time, recordHistory) {
   const elastic = source.backing === "elastic";
   const owner = elastic ? "elastic" : "storage";
   const committed = value(owner, "committed_bytes");
-  pool.committed.textContent = bytes(committed);
-  if (recordHistory) {
-    pool.ring.push(time, committed);
-    pendingPlots.add(pool);
-  }
-  pool.peak.textContent = `peak ${bytes(pool.ring.peak)}`;
   const limit = value(owner, "budget_limit");
-  pool.budget.textContent = elastic
-    ? `${Math.round(100 * committed / limit)}% of ${bytes(limit)} physical budget · ${bytes(value(owner, "reserved_bytes"))} virtual reserved`
-    : `Native storage · ${bytes(value(owner, "reserved_bytes"))} charged`;
   const reusable = value(owner, elastic ? "cached_bytes" : "free_bytes");
-  pool.breakdown.textContent = `${bytes(reusable)} reusable · ${bytes(value("workspace", "committed_bytes"))} workspace retained`;
-  $("pool-count").textContent = pools.size;
-  summarizeDevices();
+  pool.committed.textContent = bytes(committed);
+  pool.budget.textContent = limit
+    ? `committed of ${bytes(limit)} budget`
+    : "committed";
+  // Ready backing is a subset of commitment. Workspace has its own view of
+  // these bytes and its counters never enter this partition.
+  const scale = Math.max(limit, committed);
+  const amounts = [committed - reusable, reusable, Math.max(0, limit - committed)];
+  for (const [i, {segment, label, state}] of pool.parts.entries()) {
+    segment.style.width = (scale ? 100 * amounts[i] / scale : 0) + "%";
+    label.hidden = i === 2 && !limit;
+    label.textContent = `${bytes(amounts[i])} ${state}`;
+  }
+  pool.ring.push(time, reusable);
+  pendingPlots.add(pool);
+  pool.peak.textContent = `peak ${bytes(pool.ring.peak)}`;
+  const count = name => BigInt(fields.get("workspace." + name + "_count").value);
+  const reserves = count("reserve");
+  pool.initialReserves ??= reserves;
+  const waits = count("wait");
+  pool.workspace.textContent = `Workspace · ${bytes(value("workspace", "committed_bytes"))} retained · ${integer(count("reuse"))} reused · ${integer(count("fresh"))} fresh`
+    + (waits ? ` · ${integer(waits)} waited` : "")
+    + ` · +${integer(reserves - pool.initialReserves)} reservations since opening`;
 }
 
 function createModel(model) {
@@ -776,10 +779,7 @@ function createModel(model) {
   pool.hidden = true;
   const cache = element("div", "model-facts");
   const outcomes = element("div", "model-facts");
-  const details = element("details");
-  const table = element("table");
-  details.append(element("summary", "", "All source counters"), table);
-  card.append(heading, metrics, canvas, pool, cache, outcomes, details);
+  card.append(heading, metrics, canvas, pool, cache, outcomes);
   $("model-grid").append(card);
   return {
     id: model.incarnation,
@@ -799,7 +799,7 @@ function createModel(model) {
     reserved,
     cache,
     outcomes,
-    table,
+    table: counterTable(card, "All source counters"),
     cells: new Map(),
     ring: new Ring(),
     requestRate: new CounterRate(),
@@ -1126,7 +1126,7 @@ function apply(frame) {
   } else if (page.type === "device") {
     updateDevice(page);
   } else if (page.type === "pool") {
-    updatePool(page, time, recordHistory);
+    updatePool(page, time);
   } else if (page.type === "models") {
     // A live page establishes absence only for its explicitly scanned slots.
     for (let slot = page.first; slot < page.next; ++slot) {

@@ -44,16 +44,16 @@ Model badges link to their execution device and storage pool. The Devices sectio
 request activity by that placement; these counts are not hardware utilization or
 native queue depth. Device and pool cards remain when models are unregistered.
 
-Each named pool appears once, even when multiple devices consume it. Its card
-shows committed serving allocations, observed peaks, reusable backing, and
-commitment histories, with links to the permitted devices. An elastic pool's
-retained backing is its complete managed physical total, including permanent
-storage and workspace. A fixed pool reports that total under native storage.
-The component counters describe included allocations. Elastic virtual
-reservations are address space, not physical RAM. These views exclude driver
-allocations and other processes; overlapping component counters cannot establish
-an exclusive weights/KV/workspace partition. Expand a pool to inspect its source
-counters.
+Each named pool appears once, even when multiple devices consume it. Read its
+capacity strip from left to right as held bytes, backing ready for reuse, and
+the uncommitted portion of a finite budget. The sparkline records the reusable
+bytes observed during the selected time window. Workspace counts show how many
+reservations reused a range, took fresh space, or waited, and how many occurred
+since you opened Telemetry. Workspace draws from the same pool. Virtual
+reservations measure address space separately in **All pool counters**.
+Expand **Recent physical slabs** on an elastic pool to inspect a particular
+slab. A partially leased slab shows individual pages around its first free
+page. Hover over a page for its index and state.
 
 Unchanged snapshots stay off the wire. A small heartbeat settles the rate window,
 then backs off to once per minute while idle. New activity still appears at the
