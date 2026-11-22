@@ -254,18 +254,19 @@ such as `include_obfuscation` are ignored. Both modes use the same generation
 and retained-session path.
 
 `max_completion_tokens` sets the output limit. If it is absent or null,
-`max_tokens` applies; if both are absent or null, the deployment default applies.
+`max_tokens` applies. If both are absent or null, the server uses the smaller of
+the deployment default and the output that fits after the complete input,
+including retained history.
 When both have values, `max_completion_tokens` takes precedence. The selected
 limit must be an integer from 1 through 2147483647 and fit the deployment's
 context and output allowance.
 The limit counts selected tokens, including terminal EOS when generated, so
 completion-token usage can exceed the number of visibly decoded tokens.
-Input and reserved output must fit the deployment's context. Overflow rejects
-with HTTP 400 instead of silently trimming history or reducing the output
-budget. The combined-budget diagnostic reports input tokens, `max_tokens`,
-required stored tokens, and capacity; the last selected output token does not
-need another stored position. A source input check may reject earlier, before
-the full input count is available.
+An oversized prompt or an explicit output limit that exceeds the remaining
+context returns HTTP 400. The combined-budget diagnostic reports input tokens,
+`max_tokens`, required stored tokens, and capacity. The last selected output
+token does not need another stored position. A source input check may reject
+earlier, before the full input count is available.
 
 `temperature`, `top_p`, `top_k` and `seed` are numeric request fields interpreted
 by the model's source policy. Omission uses source-defined deployment defaults;

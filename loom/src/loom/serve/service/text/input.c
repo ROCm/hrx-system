@@ -60,16 +60,35 @@ iree_status_t loom_serve_text_input_prepare(
       context_capacity - prefix_count, prefix_count, host_allocator, &tokens,
       &count, &media_spans, &media_span_count));
   count += prefix_count;
-  if (count + chat->max_tokens - 1 > context_capacity - retained_count) {
+  const iree_host_size_t prompt_count = retained_count + count;
+  // The final selected output token does not need a stored KV position.
+  const iree_host_size_t available =
+      prompt_count > context_capacity
+          ? 0
+          : context_capacity - iree_max(prompt_count, 1) + 1;
+  const iree_host_size_t max_tokens =
+      iree_any_bit_set(chat->flags,
+                       LOOM_SERVE_TEXT_CHAT_FLAG_EXPLICIT_MAX_TOKENS)
+          ? chat->max_tokens
+          : iree_min(chat->max_tokens, available);
+  if (!available || max_tokens > available) {
     iree_vm_buffer_release(tokens);
     iree_allocator_free(host_allocator, media_spans);
+    if (!available) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "%zu input tokens exceed the available context "
+                              "size of %zu tokens; compact history or shorten "
+                              "the prompt",
+                              prompt_count, context_capacity);
+    }
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "request exceeds the available context size of %zu tokens: %zu input "
-        "tokens and max_tokens=%zu require %zu stored tokens; compact history "
+        "tokens and max_tokens=%zu require %" PRIu64
+        " stored tokens; compact history "
         "or lower max_tokens",
-        context_capacity, retained_count + count, chat->max_tokens,
-        retained_count + count + chat->max_tokens - 1);
+        context_capacity, prompt_count, max_tokens,
+        (uint64_t)prompt_count + max_tokens - 1);
   }
   if (retained) {
     ((int32_t*)iree_vm_buffer_data(tokens))[0] = prefix.token;
@@ -83,6 +102,7 @@ iree_status_t loom_serve_text_input_prepare(
                                 .media_spans = media_spans,
                                 .media_span_count = media_span_count,
                                 .history = history,
-                                .retained_count = retained_count};
+                                .retained_count = retained_count,
+                                .max_tokens = max_tokens};
   return iree_ok_status();
 }

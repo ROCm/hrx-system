@@ -37,7 +37,7 @@ iree_status_t loom_serve_text_pending_request_prepare(
       &request->input, host_allocator));
   const iree_host_size_t reservation = loom_serve_text_request_reservation(
       capacity, request->input.retained_count + request->input.count,
-      request->chat.max_tokens, loom_serve_text_model_draft_depth(model),
+      request->input.max_tokens, loom_serve_text_model_draft_depth(model),
       geometry->block_size);
   if (geometry->capacity && reservation > geometry->capacity) {
     return iree_make_status(

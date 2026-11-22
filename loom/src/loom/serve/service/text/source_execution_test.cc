@@ -79,6 +79,39 @@ TEST_F(RegisteredSourceTextServiceTest,
   EXPECT_EQ(Content(response), Oracle::Complete("abxa", 4));
 }
 
+TEST_F(SourceTextServiceTest, DefaultOutputFitsRemainingContext) {
+  Start();
+  const std::string first = Content(Read(
+      Send(Request(Message("user", "abxa"), 2), "X-Loom-Session: root\r\n")));
+  ASSERT_EQ(first, Oracle::Complete("abxa", 2));
+  // The rendered history occupies seven positions including its delimiter.
+  // With 95 input tokens, the 96-position model can select two more.
+  const std::string suffix(88, 'b');
+  const std::string messages = Message("user", "abxa") + "," +
+                               Message("assistant", first) + "," +
+                               Message("user", suffix);
+  const std::string body =
+      R"({"model":"fixture-text","stream":true,)"
+      R"("stream_options":{"include_usage":true},"messages":[)" +
+      messages + "]}";
+  for (const bool retained : {true, false}) {
+    const auto response =
+        Read(Send(body, retained ? "X-Loom-Session: root\r\n" : ""));
+    EXPECT_EQ(Content(response),
+              Oracle::Complete("abxa" + first + "#" + suffix, 2));
+    EXPECT_NE(response.find(R"("finish_reason":"length")"), std::string::npos);
+    EXPECT_NE(response.find(R"("prompt_tokens":95)"), std::string::npos);
+    EXPECT_NE(response.find(R"("completion_tokens":2)"), std::string::npos);
+    if (retained) {
+      EXPECT_NE(response.find(R"("cached_tokens":5)"), std::string::npos);
+    }
+  }
+  const auto rejected = Read(Send(Request(messages, 3)));
+  EXPECT_NE(rejected.find("95 input tokens and max_tokens=3 require 97"),
+            std::string::npos)
+      << rejected;
+}
+
 TEST_F(SourceTextServiceTest, PreparationActivatesWeightsWhenDemandArrives) {
   // Move arrival across owner turns, including turns after weight preparation
   // while recording or state initialization still owns the load. The final
