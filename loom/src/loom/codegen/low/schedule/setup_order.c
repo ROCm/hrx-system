@@ -15,16 +15,14 @@
 iree_status_t loom_low_schedule_setup_order_initialize(
     uint32_t node_count, iree_arena_allocator_t* arena,
     loom_low_schedule_setup_order_t* out_order) {
-  if (out_order->has_members) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, node_count, sizeof(*out_order->completion_nodes),
-        (void**)&out_order->completion_nodes));
-    memset(out_order->completion_nodes, 0xFF,
-           node_count * sizeof(*out_order->completion_nodes));
-  }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, node_count, sizeof(*out_order->completion_nodes),
+      (void**)&out_order->completion_nodes));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, node_count, sizeof(*out_order->entry_nodes),
       (void**)&out_order->entry_nodes));
+  memset(out_order->completion_nodes, 0xFF,
+         node_count * sizeof(*out_order->completion_nodes));
   memset(out_order->entry_nodes, 0xFF,
          node_count * sizeof(*out_order->entry_nodes));
   return iree_ok_status();
@@ -320,6 +318,39 @@ static iree_status_t loom_low_schedule_setup_order_append(
       state->dependency_arena);
 }
 
+// Repair-owned setup follows its preceding call. For a register-required
+// result, consuming it after the next call would also make its short-lived
+// carrier span that call, even when the reader's destination is preserved.
+static iree_status_t loom_low_schedule_setup_order_call_interval(
+    loom_low_schedule_build_state_t* state, uint32_t begin, uint32_t end,
+    uint32_t previous_call, uint32_t next_call) {
+  iree_status_t status = iree_ok_status();
+  for (uint32_t producer = begin; producer < end && iree_status_is_ok(status);
+       ++producer) {
+    bool requires_register = false;
+    if (!loom_low_schedule_setup_order_has_per_user_placement(
+            state, &state->nodes[producer], &requires_register)) {
+      continue;
+    }
+    if (previous_call != LOOM_LOW_SCHEDULE_NODE_NONE) {
+      loom_low_schedule_setup_order_record_dependency(
+          &state->setup_order, previous_call, producer, false);
+      status =
+          loom_low_schedule_setup_order_append(state, previous_call, producer);
+    }
+    if (requires_register && next_call != LOOM_LOW_SCHEDULE_NODE_NONE &&
+        iree_status_is_ok(status)) {
+      const uint32_t user = state->setup_order.entry_nodes[producer];
+      if (producer < user && user < next_call) {
+        loom_low_schedule_setup_order_record_dependency(&state->setup_order,
+                                                        user, next_call, false);
+        status = loom_low_schedule_setup_order_append(state, user, next_call);
+      }
+    }
+  }
+  return status;
+}
+
 static iree_status_t loom_low_schedule_setup_order_retain_call_boundaries(
     loom_low_schedule_build_state_t* state) {
   if (state->options->per_user_placement_values.bit_count == 0) {
@@ -331,46 +362,21 @@ static iree_status_t loom_low_schedule_setup_order_retain_call_boundaries(
     const uint32_t call = state->call_node_indices[i];
     const loom_low_schedule_block_t* block =
         &state->blocks[state->nodes[call].block_index];
-    uint32_t begin = block->node_start;
-    if (i != 0) {
-      begin = iree_max(begin, state->call_node_indices[i - 1] + 1);
+    // Only the first call owns a leading interval. Adjacent calls share one
+    // scan of the interval between them.
+    if (state->options->required_register_values.bit_count != 0 &&
+        (i == 0 || state->call_node_indices[i - 1] < block->node_start)) {
+      status = loom_low_schedule_setup_order_call_interval(
+          state, block->node_start, call, LOOM_LOW_SCHEDULE_NODE_NONE, call);
     }
-    // A private reload's reader may have a different register class. Moving
-    // that reader below the call makes the reload's short-lived carrier span
-    // the call instead. Keep its consumption inside the original call scope.
-    if (state->options->required_register_values.bit_count != 0) {
-      for (uint32_t producer = begin;
-           producer < call && iree_status_is_ok(status); ++producer) {
-        const uint32_t user = state->setup_order.entry_nodes[producer];
-        bool requires_register = false;
-        if (producer < user && user < call &&
-            loom_low_schedule_setup_order_has_per_user_placement(
-                state, &state->nodes[producer], &requires_register) &&
-            requires_register) {
-          loom_low_schedule_setup_order_record_dependency(&state->setup_order,
-                                                          user, call, false);
-          status = loom_low_schedule_setup_order_append(state, user, call);
-        }
-      }
-    }
-    uint32_t end = block->node_start + block->node_count;
-    if (i + 1 < state->call_node_count) {
-      end = iree_min(end, state->call_node_indices[i + 1]);
-    }
-    // The collected call index partitions disjoint ranges within each block.
-    // Repair-owned setup stays after its nearest call, even when an input-free
-    // producer does not belong to an ordered setup chain. Hoisting it again
-    // would recreate the preserved-register pressure that repair removed.
-    for (uint32_t node_index = call + 1;
-         node_index < end && iree_status_is_ok(status); ++node_index) {
-      bool requires_register = false;
-      if (!loom_low_schedule_setup_order_has_per_user_placement(
-              state, &state->nodes[node_index], &requires_register)) {
-        continue;
-      }
-      loom_low_schedule_setup_order_record_dependency(&state->setup_order, call,
-                                                      node_index, false);
-      status = loom_low_schedule_setup_order_append(state, call, node_index);
+    const uint32_t end = block->node_start + block->node_count;
+    const uint32_t next = i + 1 < state->call_node_count
+                              ? state->call_node_indices[i + 1]
+                              : LOOM_LOW_SCHEDULE_NODE_NONE;
+    if (iree_status_is_ok(status)) {
+      status = loom_low_schedule_setup_order_call_interval(
+          state, call + 1, iree_min(next, end), call,
+          next < end ? next : LOOM_LOW_SCHEDULE_NODE_NONE);
     }
   }
   return status;
@@ -447,7 +453,7 @@ iree_status_t loom_low_schedule_setup_order_finish(
   IREE_RETURN_IF_ERROR(
       loom_low_schedule_setup_order_retain_call_boundaries(state));
   loom_low_schedule_setup_order_t* order = &state->setup_order;
-  if (order->completion_nodes == NULL) {
+  if (!order->has_members) {
     return iree_ok_status();
   }
   const uint32_t dependency_count = (uint32_t)state->dependencies.count;

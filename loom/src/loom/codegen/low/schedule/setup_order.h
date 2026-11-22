@@ -22,7 +22,7 @@ typedef struct loom_low_schedule_setup_order_t {
   bool has_members;
   // During graph construction, the sole complete successor, UINT32_MAX for
   // none, or the producer itself for fan-out. Finish replaces these facts
-  // with transitive setup completion nodes. NULL disables setup ordering.
+  // with transitive setup completion nodes. NULL disables successor tracking.
   uint32_t* completion_nodes;
   // During construction, the sole local SSA successor, UINT32_MAX for none,
   // or the producer itself for fan-out. Register repair uses these identities
@@ -30,8 +30,7 @@ typedef struct loom_low_schedule_setup_order_t {
   uint32_t* entry_nodes;
 } loom_low_schedule_setup_order_t;
 
-// Retains SSA users for call boundaries or setup closure. Only closure needs
-// the additional complete-successor index.
+// Retains successors used by call boundaries and setup closure.
 iree_status_t loom_low_schedule_setup_order_initialize(
     uint32_t node_count, iree_arena_allocator_t* arena,
     loom_low_schedule_setup_order_t* out_order);
@@ -40,7 +39,7 @@ iree_status_t loom_low_schedule_setup_order_initialize(
 static inline void loom_low_schedule_setup_order_record_dependency(
     loom_low_schedule_setup_order_t* order, uint32_t producer,
     uint32_t consumer, bool is_value_dependency) {
-  if (order->entry_nodes == NULL) {
+  if (order->completion_nodes == NULL) {
     return;
   }
   if (is_value_dependency) {
@@ -50,9 +49,6 @@ static inline void loom_low_schedule_setup_order_record_dependency(
     } else if (*value_successor != consumer) {
       *value_successor = producer;
     }
-  }
-  if (order->completion_nodes == NULL) {
-    return;
   }
   uint32_t* completion = &order->completion_nodes[producer];
   if (*completion == UINT32_MAX) {
