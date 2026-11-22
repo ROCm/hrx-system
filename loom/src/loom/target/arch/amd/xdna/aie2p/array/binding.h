@@ -22,8 +22,9 @@ extern "C" {
 // Logical topology validation has proved the trailing record rank and sequence
 // count. This consumes exact coordinates; it does not resolve source IR or
 // facts. A scalar wider than one DMA word transfers every word in order.
-// Singleton axes consume no address dimension. Returns false with a static
-// reason when native DMA cannot express the layout.
+// Singleton axes consume no address dimension. Adjacent axes with a common
+// address progression share an iterator when its wrap fits. Returns false
+// with a static reason when native DMA cannot express the layout.
 bool loom_aie2p_array_resolve_binding_transfer(
     const loom_storage_geometry_t* geometry, uint8_t record_rank,
     const loom_xdna_array_family_t* family, uint64_t binding_view_byte_offset,

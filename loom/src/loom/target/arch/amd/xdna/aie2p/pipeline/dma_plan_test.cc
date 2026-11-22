@@ -24,7 +24,7 @@ const loom_storage_geometry_t kThreeDimensionRecord = {
     .layout_kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
     .element_bit_count = 32,
     .rank = 3,
-    .axes = {{2, 8}, {2, 4}, {2, 1}},
+    .axes = {{2, 9}, {2, 4}, {2, 1}},
 };
 
 void ExpectIngress(const loom_storage_geometry_t& geometry,
@@ -57,8 +57,8 @@ TEST(Aie2pDmaPlanTest, DenseSequenceUsesOneTransfer) {
 
 TEST(Aie2pDmaPlanTest, StridedSequenceAddsAnAddressDimension) {
   ExpectIngress(
-      kStridedRecord, 16, 32, 3361, 3361, 1,
-      {13444, 0, 0, 0x00200000, 0xc0200003, 0x02000007, 0, 0x02000000});
+      kStridedRecord, 16, 36, 3361, 3361, 1,
+      {13444, 0, 0, 0x00200000, 0xc0200003, 0x02000008, 0, 0x02000000});
 }
 
 TEST(Aie2pDmaPlanTest, FixedSourceKeepsRecordGeometryAndTaskRepetition) {
@@ -69,7 +69,7 @@ TEST(Aie2pDmaPlanTest, FixedSourceKeepsRecordGeometryAndTaskRepetition) {
 TEST(Aie2pDmaPlanTest, ThreeDimensionsRetainTheIndependentIterator) {
   ExpectIngress(
       kThreeDimensionRecord, 32, 64, 64, 64, 64,
-      {8, 0, 0, 0x00200000, 0xc0200003, 0x02000007, 0x03f0000f, 0x02000000});
+      {8, 0, 0, 0x00200000, 0xc0200003, 0x02000008, 0x03f0000f, 0x02000000});
 }
 
 TEST(Aie2pDmaPlanTest, UnrepresentableSequenceCannotTruncateItsIterator) {
@@ -87,7 +87,7 @@ TEST(Aie2pDmaPlanTest, UnrepresentableSequenceCannotTruncateItsIterator) {
 
 TEST(Aie2pDmaPlanTest, RepeatedPeriodsRestartTheCompleteTransferGeometry) {
   ExpectIngress(kStridedRecord, 16, 32, 40, 8, 5,
-                {32, 0, 0, 0x00200000, 0xc0200003, 0x02000007, 0, 0x02000000});
+                {32, 0, 0, 0x00200000, 0xc0000003, 0x02000000, 0, 0x02000000});
 }
 
 TEST(Aie2pDmaPlanTest, SingleAddressPeriodUsesFixedSourceRepetition) {
@@ -146,15 +146,18 @@ TEST(Aie2pDmaPlanTest, EveryAddressWrapFieldRejectsTruncation) {
     SCOPED_TRACE(::testing::Message()
                  << "tile=" << entry.kind << " dimension=" << +entry.dimension);
     const auto* dma = &loom_xdna_array_tile_kind_facts(family, entry.kind)->dma;
+    // A gap between each two-position axis keeps every wrap field live.
+    const uint64_t wrap_stride = UINT64_C(1) << (2 * entry.dimension);
     loom_storage_geometry_t geometry = {
         .layout_kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
         .element_bit_count = 32,
         .rank = static_cast<uint8_t>(entry.dimension + 2),
-        .axes = {{2, UINT64_C(2064) << entry.dimension},
-                 {entry.maximum, UINT64_C(1) << entry.dimension}},
+        .axes = {{2, (entry.maximum + 2) * wrap_stride},
+                 {entry.maximum, wrap_stride}},
     };
     for (uint8_t axis = 2; axis < geometry.rank; ++axis) {
-      geometry.axes[axis] = {2, UINT64_C(1) << (geometry.rank - axis - 1)};
+      geometry.axes[axis] = {2, UINT64_C(1)
+                                    << (2 * (geometry.rank - axis - 1))};
     }
     const uint32_t bytes_per_wrap = (2u << entry.dimension) * sizeof(uint32_t);
     uint32_t words[8] = {};
