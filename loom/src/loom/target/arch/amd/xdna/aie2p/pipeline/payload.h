@@ -71,6 +71,8 @@ typedef struct loom_aie2p_native_payload_source_t {
   loom_aie2p_array_route_tree_t tree;
   // Packet framing is required by any source use or receiver fan-in.
   bool framed;
+  // A shim sender reaches only individual DMA queues in its own column.
+  bool column_ingress;
 } loom_aie2p_native_payload_source_t;
 
 // Interns physical source/destination identities from formed native demand.
