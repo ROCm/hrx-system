@@ -70,8 +70,10 @@ architecture object and `"decision"` in the top-level array.
 role, HTTP inference route, and loaded tokenizer. Native-only activity models
 omit `loom.endpoint`; HTTP inference requests to them return 404. Management and
 tokenizer utilities remain available according to their normal capabilities.
-Text also reports configured `context_length` and
-`limits.max_output_tokens`, not training context or total cache-pool capacity.
+Text also reports the deployed `context_length`, the largest selectable output
+budget in `limits.max_output_tokens`, and the preset in
+`limits.default_output_tokens`. The input and the generated reply share the
+context window.
 `loom.input_tokens:true` advertises exact prepared-chat input counting.
 Capabilities do not establish learned quality or support for every optional field.
 

@@ -652,8 +652,14 @@ static iree_status_t loom_serve_router_describe_service(
   }
   if (service->capabilities.max_output_tokens) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        output, ",\"limits\":{\"max_output_tokens\":%zu}",
+        output, ",\"limits\":{\"max_output_tokens\":%zu",
         service->capabilities.max_output_tokens));
+    if (service->capabilities.default_output_tokens) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          output, ",\"default_output_tokens\":%zu",
+          service->capabilities.default_output_tokens));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "}"));
   }
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(output, ",\"loom\":{\"kind\":"));
