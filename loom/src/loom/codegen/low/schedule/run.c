@@ -1822,7 +1822,10 @@ static iree_status_t loom_low_schedule_build(
         loom_liveness_order_empty(), arena, &liveness);
   }
   if (iree_status_is_ok(status)) {
-    if (state.setup_order.has_members) {
+    if (state.setup_order.has_members ||
+        (state.call_node_count != 0 &&
+         options->per_user_placement_values.bit_count != 0 &&
+         options->required_register_values.bit_count != 0)) {
       status = loom_low_schedule_setup_order_initialize(
           (uint32_t)node_count, scratch_arena, &state.setup_order);
     }
