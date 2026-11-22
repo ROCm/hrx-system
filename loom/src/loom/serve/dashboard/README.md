@@ -168,6 +168,7 @@ Serving mix groups recent successful-request rates by modality, independently
 of current active/queued gauges. Short requests can finish between gauge samples;
 a zero current count does not imply zero work over the rate window. Logical KV
 occupancy is token-position accounting, not whole-device or process memory.
-Missing observations produce gaps rather than interpolated work. Rendering
-is sample-driven, pixel ratio is capped at two, and hiding the page releases
-its subscription.
+Missing observations produce gaps rather than interpolated work. An open
+background tab continues applying and acknowledging samples in the same
+bounded rings. Canvas drawing resumes on visibility with the retained
+history. Pause and navigation release the subscription.

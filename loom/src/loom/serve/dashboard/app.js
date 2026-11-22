@@ -226,7 +226,6 @@ let receivedAt = 0;
 let sequence = 0n;
 let receivedBytes = 0;
 let receivedFrames = 0;
-let dirty = false;
 let framePending = false;
 
 function chartTime(now = performance.now()) {
@@ -350,7 +349,6 @@ function draw(canvas, series, now, grid = false) {
 }
 
 function redraw(all = false) {
-  dirty = true;
   if (all) {
     for (const model of models.values()) pendingPlots.add(model);
     for (const pool of pools.values()) pendingPlots.add(pool);
@@ -359,8 +357,7 @@ function redraw(all = false) {
   framePending = true;
   requestAnimationFrame(() => {
     framePending = false;
-    if (!dirty) return;
-    dirty = false;
+    if (document.hidden) return;
     const now = chartTime();
     draw(
       $("flow"),
@@ -714,7 +711,7 @@ function createModel(model) {
     outcomes,
     table,
     cells: new Map(),
-    ring: new Ring(512),
+    ring: new Ring(),
     requestRate: new CounterRate(),
     workRate: new CounterRate(),
     color: model.kind === "image" ? COLORS.input : COLORS.output,
@@ -1083,9 +1080,18 @@ function state(label, live = false) {
   $("connection-dot").classList.toggle("live", live);
 }
 
-function connect() {
-  if (paused || document.hidden) return;
+function disconnect() {
   clearTimeout(retry);
+  if (!socket) return;
+  socket.close();
+  socket = undefined;
+  for (const ring of Object.values(history)) ring.push(latestTime, NaN);
+  for (const model of models.values()) model.ring.push(latestTime, NaN);
+  for (const pool of pools.values()) pool.ring.push(latestTime, NaN);
+}
+
+function connect() {
+  if (paused || socket) return;
   for (const rate of Object.values(serverRates)) rate.reset();
   for (const bucket of Object.values(serverBuckets)) bucket.reset();
   for (const model of models.values()) {
@@ -1123,11 +1129,9 @@ function connect() {
   };
   peer.onclose = () => {
     if (socket !== peer) return;
-    for (const ring of Object.values(history)) ring.push(latestTime, NaN);
-    for (const model of models.values()) model.ring.push(latestTime, NaN);
-    for (const pool of pools.values()) pool.ring.push(latestTime, NaN);
+    disconnect();
     state(paused ? "Paused" : "Disconnected");
-    if (!paused && !document.hidden) {
+    if (!paused) {
       $("notice").textContent =
         "Live feed disconnected. Relays must forward WebSocket upgrades and preserve the public origin. Reconnecting…";
       $("notice").hidden = false;
@@ -1141,10 +1145,9 @@ $("pause").onclick = () => {
   pausedTime = chartTime();
   paused = !paused;
   $("pause").textContent = paused ? "Resume" : "Pause";
-  clearTimeout(retry);
   if (paused) {
     state("Paused");
-    socket?.close(1000, "Viewer paused");
+    disconnect();
   } else connect();
 };
 $("scroll").onclick = () => {
@@ -1172,13 +1175,10 @@ $("window").onclick = () => {
   redraw(true);
 };
 document.addEventListener("visibilitychange", () => {
-  clearTimeout(retry);
-  if (document.hidden) socket?.close(1000, "Viewer hidden");
-  else if (!paused) {
-    connect();
-    redraw();
-  }
+  if (!document.hidden) redraw(true);
 });
+window.addEventListener("pagehide", disconnect);
+window.addEventListener("pageshow", connect);
 new ResizeObserver(() => redraw(true)).observe(document.querySelector("main"));
 setInterval(() => {
   if (document.hidden) return;
@@ -1190,4 +1190,3 @@ setInterval(() => {
       `Last sample ${((performance.now() - receivedAt) / 1000).toFixed(1)}s ago`;
   if (scrolling && !paused && receivedAt) redraw(true);
 }, 1000);
-connect();

@@ -71,9 +71,10 @@ browser clock, even when the feed is quiet; a dotted tail marks the last receive
 value, not new samples. **Scroll off** keeps the last activity window visible
 while counters and peaks continue updating. Neither mode adds network traffic.
 The time-range button switches between 30 seconds and two minutes.
-Pause or a hidden tab releases the live connection. Resuming reads current
-state; rolling rates and activity buckets do not replay work that happened while
-disconnected. Lifetime averages still include that work and elapsed time.
+Leave Telemetry open in another tab to collect up to 512 samples per chart
+while you use the server. Switching back draws the accumulated history.
+**Pause** or leaving the page releases the connection. Resuming starts a fresh
+rate window. Lifetime averages include work completed while disconnected.
 
 No dashboard flag is needed for same-origin access through `localhost`, a
 numeric IP address, or an SSH tunnel. The browser-visible port may differ from
