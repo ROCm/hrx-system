@@ -389,7 +389,7 @@ h2 {
   background: var(--tile);
   height: 12px;
   margin: 0;
-  border: 1px solid var(--line);
+  border: 1px var(--edge, solid) var(--line);
   border-radius: 2px;
 }
 .tiles input {
@@ -426,7 +426,7 @@ h2 {
 }
 [data-slab=returned] {
   --tile: transparent;
-  border-style: dashed;
+  --edge: dashed;
 }
 [data-slab=acquiring] {
   --tile: var(--orange);

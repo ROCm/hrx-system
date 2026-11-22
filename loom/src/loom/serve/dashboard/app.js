@@ -556,7 +556,7 @@ function createSlabMap(card, poolIndex) {
       cell.title = `Page ${slab.offset + i} · ${cell.dataset.slab}`;
       pages.append(cell);
     }
-    caption.textContent = `${slab.leased}/${slab.pages} pages leased · ${bytes(slab.page_bytes)}/page · showing ${slab.offset}–${slab.offset + count - 1}`;
+    caption.textContent = `${integer(slab.leased)}/${integer(slab.pages)} leased · ${bytes(slab.page_bytes)} pages · #${integer(slab.offset)}–${integer(slab.offset + count - 1)}`;
   }
 
   slabs.onchange = event => {
