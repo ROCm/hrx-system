@@ -359,6 +359,14 @@ when `incarnation` or telemetry `identity` changes keeps a client from confusing
 two registration lifetimes. Router-held and tokenizer requests are reported
 separately from model-admitted entries.
 
+An admitted text request includes a `prompt` object. `total_tokens` is the
+prepared prompt length and `cached_tokens` counts positions reused at admission.
+`processed_tokens` advances as fresh prompt positions finish prefill. Prompt
+progress is `cached_tokens + processed_tokens` out of `total_tokens`. Sampling
+`processed_tokens` gives the fresh input rate and sampling
+`counters.output_tokens` gives the generation rate. Queued requests acquire
+these prompt fields when the text service assigns a session.
+
 Session IDs survive movement between `storage:"row"` and `storage:"cache"`.
 `request:null` indicates idle retained history. Positions describe completed,
 owner-published work rather than in-flight device writes. Referenced resident

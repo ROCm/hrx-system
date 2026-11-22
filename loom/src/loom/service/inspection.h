@@ -38,6 +38,15 @@ typedef struct loom_service_request_snapshot_t {
   iree_time_t arrival_time;
   // Completed work published by the owner, never read from in-flight outputs.
   loom_service_telemetry_counters_t counters;
+  // Prompt progress for an assigned text session, sampled with its counters.
+  struct {
+    // Prepared prompt positions, including any retained prefix.
+    iree_host_size_t total_tokens;
+    // Prompt positions supplied by the retained prefix at admission.
+    iree_host_size_t cached_tokens;
+    // Fresh prompt positions consumed by completed prefill epochs.
+    iree_host_size_t processed_tokens;
+  } prompt;
 } loom_service_request_snapshot_t;
 
 typedef struct loom_service_session_snapshot_t {

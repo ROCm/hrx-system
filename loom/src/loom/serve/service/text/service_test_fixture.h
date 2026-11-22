@@ -433,6 +433,11 @@ class SourceTextServiceTest : public ::testing::Test {
               std::string::npos)
         << active;
     EXPECT_NE(active.find(R"("output_tokens":1,)"), std::string::npos);
+    EXPECT_NE(
+        active.find(
+            R"("prompt":{"total_tokens":4,"cached_tokens":0,"processed_tokens":4})"),
+        std::string::npos)
+        << active;
     const auto sessions =
         Read(Send("", "X-Loom-Model: fixture-text\r\n", "/v1/sessions", "GET"));
     EXPECT_NE(sessions.find(R"("name":"stalled","request":1,"storage":"row",)"),
@@ -558,6 +563,9 @@ class SourceTextServiceTest : public ::testing::Test {
       EXPECT_EQ(snapshot.id, 1u);
       EXPECT_EQ(snapshot.session, 1u);
       EXPECT_EQ(snapshot.counters.batches, 0u);
+      EXPECT_EQ(snapshot.prompt.total_tokens, first_prompt.size());
+      EXPECT_EQ(snapshot.prompt.cached_tokens, 0u);
+      EXPECT_EQ(snapshot.prompt.processed_tokens, 0u);
     }
     EXPECT_EQ(active_requests, 1u);
     if (action == OverlapAction::kDisconnect) {
