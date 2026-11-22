@@ -15,14 +15,16 @@
 iree_status_t loom_low_schedule_setup_order_initialize(
     uint32_t node_count, iree_arena_allocator_t* arena,
     loom_low_schedule_setup_order_t* out_order) {
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, node_count, sizeof(*out_order->completion_nodes),
-      (void**)&out_order->completion_nodes));
+  if (out_order->has_members) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, node_count, sizeof(*out_order->completion_nodes),
+        (void**)&out_order->completion_nodes));
+    memset(out_order->completion_nodes, 0xFF,
+           node_count * sizeof(*out_order->completion_nodes));
+  }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, node_count, sizeof(*out_order->entry_nodes),
       (void**)&out_order->entry_nodes));
-  memset(out_order->completion_nodes, 0xFF,
-         node_count * sizeof(*out_order->completion_nodes));
   memset(out_order->entry_nodes, 0xFF,
          node_count * sizeof(*out_order->entry_nodes));
   return iree_ok_status();
@@ -329,6 +331,28 @@ static iree_status_t loom_low_schedule_setup_order_retain_call_boundaries(
     const uint32_t call = state->call_node_indices[i];
     const loom_low_schedule_block_t* block =
         &state->blocks[state->nodes[call].block_index];
+    uint32_t begin = block->node_start;
+    if (i != 0) {
+      begin = iree_max(begin, state->call_node_indices[i - 1] + 1);
+    }
+    // A private reload's reader may have a different register class. Moving
+    // that reader below the call makes the reload's short-lived carrier span
+    // the call instead. Keep its consumption inside the original call scope.
+    if (state->options->required_register_values.bit_count != 0) {
+      for (uint32_t producer = begin;
+           producer < call && iree_status_is_ok(status); ++producer) {
+        const uint32_t user = state->setup_order.entry_nodes[producer];
+        bool requires_register = false;
+        if (producer < user && user < call &&
+            loom_low_schedule_setup_order_has_per_user_placement(
+                state, &state->nodes[producer], &requires_register) &&
+            requires_register) {
+          loom_low_schedule_setup_order_record_dependency(&state->setup_order,
+                                                          user, call, false);
+          status = loom_low_schedule_setup_order_append(state, user, call);
+        }
+      }
+    }
     uint32_t end = block->node_start + block->node_count;
     if (i + 1 < state->call_node_count) {
       end = iree_min(end, state->call_node_indices[i + 1]);

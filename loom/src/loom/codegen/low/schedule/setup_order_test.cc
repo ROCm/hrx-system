@@ -385,7 +385,8 @@ class SetupOrderTest : public ::testing::Test {
     iree_arena_block_pool_deinitialize(&pool_);
   }
 
-  void Initialize(std::initializer_list<uint32_t> block_sizes) {
+  void Initialize(std::initializer_list<uint32_t> block_sizes,
+                  bool has_setup_chains = true) {
     nodes_.clear();
     blocks_.clear();
     for (uint32_t size : block_sizes) {
@@ -404,6 +405,7 @@ class SetupOrderTest : public ::testing::Test {
         .nodes = nodes_.data(),
         .dependency_arena = &arena_,
     };
+    state_.setup_order.has_members = has_setup_chains;
     loom_low_schedule_dependency_graph_initialize(&state_.dependencies);
     IREE_ASSERT_OK(loom_low_schedule_setup_order_initialize(
         static_cast<uint32_t>(nodes_.size()), &arena_, &state_.setup_order));
@@ -516,6 +518,45 @@ TEST_F(SetupOrderTest, PrivatePlacementRetainsOnlyItsNearestLocalCall) {
         ExpectAddedOrder({});
       }
     }
+  }
+}
+
+TEST_F(SetupOrderTest, APrivateReloadIsConsumedInsideItsCallScope) {
+  for (bool has_setup_chains : {false, true}) {
+    SCOPED_TRACE(has_setup_chains);
+    Initialize({10, 2}, has_setup_chains);
+    loom_value_id_t value_ids[12];
+    for (uint32_t i = 0; i < nodes_.size(); ++i) {
+      value_ids[i] = i + 20;
+      nodes_[i].result_count = 1;
+      nodes_[i].value_ordinals.inline_value_ordinals[0] = i;
+    }
+    const loom_local_value_domain_t domain = {
+        .value_ids = value_ids,
+        .value_count = IREE_ARRAYSIZE(value_ids),
+    };
+    state_.value_domain = &domain;
+    uint32_t calls[] = {4, 8, 10};
+    state_.call_node_indices = calls;
+    state_.call_node_count = IREE_ARRAYSIZE(calls);
+    uint64_t placements = 0;
+    uint64_t registers = 0;
+    options_.per_user_placement_values = {64, &placements};
+    options_.required_register_values = {64, &registers};
+    for (uint32_t producer : {0u, 2u, 3u, 5u, 9u}) {
+      iree_bitmap_set(options_.per_user_placement_values, value_ids[producer]);
+    }
+    for (uint32_t producer : {0u, 3u, 5u, 6u, 9u}) {
+      iree_bitmap_set(options_.required_register_values, value_ids[producer]);
+    }
+    Append(0, 1);  // Reload consumed by a register-class conversion.
+    Append(0, 1);  // A second operand of that same consumer.
+    Append(2, 3);  // Private rematerialization with a spillable result.
+    Append(3, 4);  // Reload consumed by the call itself.
+    Append(5, 7);  // Reload and reader between two calls.
+    Append(6, 7);  // Register required without private placement.
+    // The reader of 9 is in the next block and contributes no local SSA edge.
+    ExpectAddedOrder({{1, 4}, {4, 5}, {7, 8}, {8, 9}});
   }
 }
 
