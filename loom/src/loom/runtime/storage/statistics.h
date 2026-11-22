@@ -59,6 +59,30 @@ typedef struct loom_runtime_storage_statistics_t {
   uint64_t released_bytes;
 } loom_runtime_storage_statistics_t;
 
+typedef enum loom_runtime_slab_state_e {
+  LOOM_RUNTIME_SLAB_ACQUIRING = 0,
+  LOOM_RUNTIME_SLAB_READY,
+  LOOM_RUNTIME_SLAB_RETIRING,
+  LOOM_RUNTIME_SLAB_FAILED,
+} loom_runtime_slab_state_t;
+
+// Copied physical lease inventory for one allocator-owned slab.
+typedef struct loom_runtime_slab_layout_t {
+  // Physical acquisition/disposal state while page_count is nonzero.
+  loom_runtime_slab_state_t state;
+  // Payload bytes per independently leasable slot, excluding native padding.
+  iree_device_size_t page_bytes;
+  // Total slots, or zero when the slab has left the owner's inventory.
+  iree_host_size_t page_count;
+  // Slots held by leases, including those awaiting checked native unmap.
+  iree_host_size_t leased_count;
+  // First slot in the captured 64-slot word. A partial slab's window contains
+  // its first free slot. Full and empty slabs start at zero.
+  iree_host_size_t page_offset;
+  // Set bits are unleased slots in that word. Only ready slabs can be reused.
+  uint64_t free_mask;
+} loom_runtime_slab_layout_t;
+
 typedef struct loom_runtime_storage_shared_memory_record_t {
   // Entire shared device owner's retained backing, not this model's charge.
   uint64_t retained_committed_bytes;

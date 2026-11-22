@@ -63,6 +63,8 @@ struct loom_runtime_backing_pages_t {
   uint8_t weight_class;
   // All retained parents, including failed or retiring acquisitions.
   loom_runtime_backing_parent_t* parents;
+  // Last issued slab serial. The ownership list is newest first.
+  uint64_t last_serial;
   // Accepted source callbacks awaiting serialized publication.
   iree_atomic_slist_t completed;
   // Physical cost retained by this inventory rather than native retirement.
@@ -80,6 +82,8 @@ struct loom_runtime_backing_pages_t {
 struct loom_runtime_backing_parent_t {
   // Serialized inventory owning this parent through native publication.
   loom_runtime_backing_pages_t* pages;
+  // Stable allocator-local identity until this parent leaves the inventory.
+  uint64_t serial;
   // Reusable physical class, or NULL for a dedicated extent.
   loom_runtime_backing_class_t* category;
   // Intrusive ownership list.
@@ -377,6 +381,7 @@ static iree_status_t loom_runtime_backing_parent_allocate(
   pages->retained_bytes += cost;
   parent->growth_next = growth->parents;
   growth->parents = parent;
+  parent->serial = ++pages->last_serial;
   loom_runtime_backing_link(parent, &pages->parents,
                             offsetof(loom_runtime_backing_parent_t, all));
   if (category) {
@@ -404,16 +409,22 @@ iree_status_t loom_runtime_backing_pages_prepare_packed(
   return status;
 }
 
-// Takes the first contiguous prefix of free slots from the chosen parent.
-// Empty leaf words clear their summary bit once, regardless of run length.
-static iree_host_size_t loom_runtime_backing_parent_claim_packed(
-    loom_runtime_backing_parent_t* parent, iree_host_size_t maximum_count,
-    iree_host_size_t* out_index) {
+static iree_host_size_t loom_runtime_backing_first_free(
+    loom_runtime_backing_parent_t* parent) {
   iree_host_size_t index = 0;
   for (iree_host_size_t level = parent->level_count; level-- > 0;) {
     index = index * 64 + iree_math_count_trailing_zeros_u64(
                              loom_runtime_backing_words(parent, level)[index]);
   }
+  return index;
+}
+
+// Takes the first contiguous prefix of free slots from the chosen parent.
+// Empty leaf words clear their summary bit once, regardless of run length.
+static iree_host_size_t loom_runtime_backing_parent_claim_packed(
+    loom_runtime_backing_parent_t* parent, iree_host_size_t maximum_count,
+    iree_host_size_t* out_index) {
+  const iree_host_size_t index = loom_runtime_backing_first_free(parent);
   *out_index = index;
   const iree_host_size_t limit =
       iree_min(maximum_count, parent->slot_count - index);
@@ -726,6 +737,39 @@ void loom_runtime_backing_pages_trim(loom_runtime_backing_pages_t* pages,
       native_bytes_to_return -= iree_min(native_bytes_to_return, cost);
     }
   }
+}
+
+uint64_t loom_runtime_backing_pages_query_slabs(
+    const loom_runtime_backing_pages_t* pages, iree_host_size_t capacity,
+    loom_runtime_slab_layout_t* out_slabs) {
+  const iree_host_size_t count = iree_min(capacity, pages->last_serial);
+  const uint64_t before = pages->last_serial - count;
+  if (count) {
+    memset(out_slabs, 0, count * sizeof(*out_slabs));
+  }
+  for (loom_runtime_backing_parent_t* parent = pages->parents;
+       parent && parent->serial > before; parent = parent->all.next) {
+    loom_runtime_slab_layout_t* slab = &out_slabs[parent->serial - before - 1];
+    slab->state = parent->state == LOOM_RUNTIME_BACKING_FAILED
+                      ? LOOM_RUNTIME_SLAB_FAILED
+                  : parent->retiring ? LOOM_RUNTIME_SLAB_RETIRING
+                  : parent->state == LOOM_RUNTIME_BACKING_READY
+                      ? LOOM_RUNTIME_SLAB_READY
+                      : LOOM_RUNTIME_SLAB_ACQUIRING;
+    slab->page_bytes = parent->category ? parent->category->slot_size
+                                        : parent->request.allocation_size;
+    slab->page_count = parent->slot_count;
+    slab->leased_count = parent->occupied;
+    if (parent->occupied < parent->slot_count) {
+      const iree_host_size_t word =
+          parent->occupied && parent->slot_count > 64
+              ? loom_runtime_backing_first_free(parent) / 64
+              : 0;
+      slab->page_offset = word * 64;
+      slab->free_mask = loom_runtime_backing_words(parent, 0)[word];
+    }
+  }
+  return pages->last_serial;
 }
 
 uint64_t loom_runtime_backing_pages_retained(

@@ -56,6 +56,21 @@ weights/KV/other split, physical addresses, or shared hardware capacity from
 these aggregate observations. Device request activity is explicitly distinct
 from hardware utilization and native queue depth.
 
+Elastic pool observation pages also carry a physical slab window. `first_slab`
+is the one-based acquisition serial of the first position in `slabs`. The
+window covers the most recent 64 issued serials in increasing order. A null
+entry means the slab has left the allocator inventory. Serials persist across
+reuse and belong to one pool for its lifetime. They convey allocation order
+and expose no device addresses.
+
+Each retained slab carries its acquisition `state` (acquiring, ready,
+retiring, or failed), `page_bytes`, total `pages`, and `leased` pages.
+The 16-digit hexadecimal `free` word contains exact unleased page bits,
+least significant first, beginning at the zero-based page `offset`. A partial
+slab shows the word containing its first free page. Full and idle slabs show
+their first word. A ready slab can reuse its unleased pages. Fixed pools expose
+their native counters and omit the slab window.
+
 The HTTP adapter schedules sampling at four hertz while readers exist. Sources
 are sampled/formatted once per sweep, independently of reader count. A shared
 latest-state cache retains one copied payload per source; exact byte comparison

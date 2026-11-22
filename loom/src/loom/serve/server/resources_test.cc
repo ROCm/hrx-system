@@ -47,7 +47,8 @@ class ResourcesTest : public ::testing::Test {
   iree_status_t CreateCpuGroup(
       loom_runtime_pool_backing_t backing = LOOM_RUNTIME_POOL_BACKING_FIXED,
       iree_string_view_t first_name = IREE_SV("first"),
-      iree_string_view_t second_name = IREE_SV("second")) {
+      iree_string_view_t second_name = IREE_SV("second"),
+      uint64_t prewarm_bytes = 0) {
     IREE_RETURN_IF_ERROR(loom_runtime_host_create(
         1, nullptr, nullptr, iree_allocator_system(), &host_));
     const loom_runtime_device_options_t options[] = {
@@ -70,8 +71,10 @@ class ResourcesTest : public ::testing::Test {
             backing == LOOM_RUNTIME_POOL_BACKING_ELASTIC ? 65536u : 0u,
         .state_slab_size =
             backing == LOOM_RUNTIME_POOL_BACKING_ELASTIC ? 65536u : 0u,
-        .memory_limit =
-            backing == LOOM_RUNTIME_POOL_BACKING_ELASTIC ? 1048576u : 0u,
+        .memory_limit = backing == LOOM_RUNTIME_POOL_BACKING_ELASTIC
+                            ? iree_max(UINT64_C(1048576), prewarm_bytes)
+                            : 0u,
+        .memory_prewarm_bytes = prewarm_bytes,
     };
     loom_runtime_pool_t* pool = nullptr;
     IREE_RETURN_IF_ERROR(loom_runtime_device_group_create_pool(
@@ -178,6 +181,10 @@ TEST_F(ResourcesTest, ElasticBackingHasAnIndependentBudgetAndStorageOwner) {
   IREE_ASSERT_OK(CreateCpuGroup(LOOM_RUNTIME_POOL_BACKING_ELASTIC));
   const auto values = Observe(0);
   EXPECT_EQ(values.size(), 43u);
+  iree_string_view_t slabs;
+  IREE_ASSERT_OK(iree_json_lookup_object_value(
+      iree_string_builder_view(&output_), IREE_SV("slabs"), &slabs));
+  EXPECT_EQ(std::string(slabs.data, slabs.size), "[]");
   EXPECT_EQ(values.at("elastic.budget_limit"), 1048576u);
   EXPECT_EQ(values.at("elastic.committed_bytes"), 0u);
   EXPECT_EQ(values.at("storage.committed_bytes"), 0u);
@@ -185,6 +192,39 @@ TEST_F(ResourcesTest, ElasticBackingHasAnIndependentBudgetAndStorageOwner) {
   EXPECT_EQ(values.at("workspace.committed_bytes"), 0u);
   const auto fixed = Observe(1);
   EXPECT_EQ(fixed.count("elastic.budget_limit"), 0u);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_NOT_FOUND,
+      iree_json_lookup_object_value(iree_string_builder_view(&output_),
+                                    IREE_SV("slabs"), &slabs));
+}
+
+TEST_F(ResourcesTest, PhysicalSlabWindowFitsOneFrameAndKeepsReturnedSlots) {
+  IREE_ASSERT_OK(CreateCpuGroup(LOOM_RUNTIME_POOL_BACKING_ELASTIC,
+                                IREE_SV("first"), IREE_SV("second"),
+                                65 * 65536));
+  Observe(0);
+  auto json = iree_string_builder_view(&output_);
+  EXPECT_LT(json.size, 16368u);
+  iree_string_view_t first, slabs, slab, state;
+  IREE_ASSERT_OK(
+      iree_json_lookup_object_value(json, IREE_SV("first_slab"), &first));
+  EXPECT_EQ(std::string(first.data, first.size), "2");
+  IREE_ASSERT_OK(iree_json_lookup_object_value(json, IREE_SV("slabs"), &slabs));
+  iree_host_size_t count = 0;
+  IREE_ASSERT_OK(iree_json_array_length(slabs, &count));
+  ASSERT_EQ(count, 64u);
+  IREE_ASSERT_OK(iree_json_array_get(slabs, count - 1, &slab));
+  IREE_ASSERT_OK(iree_json_lookup_object_value(slab, IREE_SV("state"), &state));
+  EXPECT_EQ(std::string(state.data, state.size), "ready");
+  IREE_ASSERT_OK(
+      loom_runtime_pool_trim(loom_runtime_device_group_pool_at(group_, 0), 0));
+  Observe(0);
+  IREE_ASSERT_OK(iree_json_lookup_object_value(
+      iree_string_builder_view(&output_), IREE_SV("slabs"), &slabs));
+  IREE_ASSERT_OK(iree_json_array_length(slabs, &count));
+  ASSERT_EQ(count, 64u);
+  IREE_ASSERT_OK(iree_json_array_get(slabs, count - 1, &slab));
+  EXPECT_EQ(std::string(slab.data, slab.size), "null");
 }
 
 TEST_F(ResourcesTest, TruncatedDisplayKeysDoNotMergePoolIdentities) {

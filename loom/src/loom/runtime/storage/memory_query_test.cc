@@ -13,6 +13,52 @@ namespace {
 
 using loom_runtime::testing::memory::MemoryTest;
 
+TEST_F(MemoryTest, SlabLayoutFollowsPhysicalLeasesAcrossReuseAndDisposal) {
+  const auto weight = loom_runtime_pool_weight_geometry(storage_owner);
+  const auto state = loom_runtime_pool_state_geometry(storage_owner);
+  loom_runtime_slab_layout_t slabs[2];
+  ASSERT_EQ(loom_runtime_memory_pool_query_slabs(pool, 2, slabs), 0u);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool, weight, 2 * kSlabSize, 256, &statistics[0], &first));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, 2 * kSlabSize));
+  ASSERT_EQ(loom_runtime_memory_pool_query_slabs(pool, 2, slabs), 2u);
+  EXPECT_EQ(slabs[0].state, LOOM_RUNTIME_SLAB_READY);
+  EXPECT_EQ(slabs[0].leased_count, slabs[0].page_count);
+  EXPECT_EQ(slabs[0].free_mask, 0u);
+  IREE_ASSERT_OK(Trim(first));
+  loom_runtime_memory_pool_trim(pool, kSlabSize);
+  IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
+  ASSERT_EQ(loom_runtime_memory_pool_query_slabs(pool, 2, slabs), 2u);
+  ASSERT_NE(slabs[0].page_count == 0, slabs[1].page_count == 0);
+  const size_t live = slabs[0].page_count ? 0 : 1;
+  const auto& slab = slabs[live];
+  EXPECT_EQ(slab.page_bytes, state.mapping_size);
+  ASSERT_EQ(slab.page_count, kSlabSize / state.mapping_size);
+  EXPECT_EQ(slab.leased_count, 0u);
+  loom_runtime_slab_layout_t latest;
+  ASSERT_EQ(loom_runtime_memory_pool_query_slabs(pool, 1, &latest), 2u);
+  EXPECT_EQ(latest.page_count, slabs[1].page_count);
+
+  // Reuse this same physical slab for a different virtual root. Crossing a
+  // leaf boundary moves the window; punching a hole moves it back.
+  const size_t count = std::min<size_t>(65, slab.page_count);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool, state, count * state.mapping_size, 256, &statistics[1], &second));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(
+      second, 0, count * state.mapping_size));
+  ASSERT_EQ(loom_runtime_memory_pool_query_slabs(pool, 2, slabs), 2u);
+  EXPECT_EQ(slab.leased_count, count);
+  EXPECT_EQ(slab.page_offset, count < slab.page_count ? count / 64 * 64 : 0u);
+  const size_t hole = count / 2;
+  IREE_ASSERT_OK(Trim(second, hole * state.mapping_size, state.mapping_size));
+  ASSERT_EQ(loom_runtime_memory_pool_query_slabs(pool, 2, slabs), 2u);
+  EXPECT_EQ(slab.leased_count, count - 1);
+  EXPECT_EQ(slab.page_offset, 0u);
+  // All other captured slots below count remain leased.
+  const uint64_t prefix = UINT64_MAX >> (64 - std::min<size_t>(64, count));
+  EXPECT_EQ(slab.free_mask & prefix, UINT64_C(1) << hole);
+}
+
 TEST_F(MemoryTest, PreparedCommitCanBeCancelledAndDeniedWithoutBacking) {
   const auto geometry = loom_runtime_pool_state_geometry(storage_owner);
   const uint64_t page = geometry.mapping_size;

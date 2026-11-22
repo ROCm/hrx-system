@@ -447,6 +447,13 @@ loom_runtime_storage_statistics_t loom_runtime_memory_pool_statistics(
   return statistics;
 }
 
+uint64_t loom_runtime_memory_pool_query_slabs(
+    const loom_runtime_memory_pool_t* pool, iree_host_size_t capacity,
+    loom_runtime_slab_layout_t* out_slabs) {
+  return loom_runtime_backing_pages_query_slabs(pool->pages, capacity,
+                                                out_slabs);
+}
+
 loom_runtime_storage_statistics_t loom_runtime_memory_pool_snapshot(
     const loom_runtime_memory_pool_t* pool) {
   return pool->statistics;

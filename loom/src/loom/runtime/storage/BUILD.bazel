@@ -54,6 +54,7 @@ loom_cc_library(
     hdrs = ["backing_pages.h"],
     visibility = ["//visibility:private"],
     deps = [
+        ":statistics",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:atomic_slist",

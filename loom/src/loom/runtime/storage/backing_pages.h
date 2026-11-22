@@ -9,6 +9,7 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
+#include "loom/runtime/storage/statistics.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -111,6 +112,10 @@ uint64_t loom_runtime_backing_pages_retained(
 // Logical payload currently available for reuse, excluding native padding.
 uint64_t loom_runtime_backing_pages_cached(
     const loom_runtime_backing_pages_t* pages);
+// Copies the tail of the physical inventory in ascending acquisition order.
+uint64_t loom_runtime_backing_pages_query_slabs(
+    const loom_runtime_backing_pages_t* pages, iree_host_size_t capacity,
+    loom_runtime_slab_layout_t* out_slabs);
 bool loom_runtime_backing_pages_is_pending(
     const loom_runtime_backing_pages_t* pages);
 // Outer-thread join. Publishes all pending parents and returns their status.
