@@ -1,4 +1,4 @@
-# Embedded live observations
+# Embedded serving dashboard
 
 The dashboard is part of the `loom-serve` executable. Edit the HTML, CSS, and
 JavaScript sources here. The `bundle` build target links ES modules, minifies
@@ -10,6 +10,12 @@ and its normal serving dependencies.
 Bazel provides the host-side build tools. When building the dashboard with
 CMake, install Node.js and pnpm or Corepack. Both builds use the tool versions
 in the same package lock and leave generated resources in the build tree.
+
+The [Conversation workflow](../../../../docs/src/serving/workflows/use-conversation.md)
+covers the workspace, tools, and session lifecycle. The wire tests exercise
+stream decoding and tool-call assembly directly through browser-standard
+Web Streams. Run them with `node --test loom/src/loom/serve/dashboard/test/wire_test.mjs`
+from the repository root or with the dashboard's Bazel tests.
 
 The [observation workflow](../../../../docs/src/serving/workflows/observe-model-server.md#watch-the-live-dashboard)
 owns the user-facing launch and relay instructions.

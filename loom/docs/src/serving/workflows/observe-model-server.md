@@ -20,8 +20,11 @@ loom-serve --device=task --pool_backing=fixed \
   --model=vectors/model.json
 ```
 
-The dashboard is embedded in the executable: no frontend installation,
-external assets, database, or second listener. Models appear as they register.
+**Telemetry** and **Conversation** share the server's listener and embedded
+browser assets. To send a request while watching the charts, open
+**Conversation** in another tab. [Use Conversation](use-conversation.md)
+
+Models appear in Telemetry as they register.
 Token and completion rates use a five-second rolling window, with the available
 observed duration during warm-up. Lifetime averages divide cumulative work by
 elapsed source lifetime, including idle time and work before the page opened.
