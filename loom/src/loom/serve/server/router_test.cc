@@ -353,6 +353,39 @@ TEST_P(HttpRouterTest, DashboardAssetsUseTheExistingCarrierAndRelativePaths) {
   EXPECT_EQ(Read(Send("GET", "/healthz")).find("HTTP/1.1 200"), 0u);
 }
 
+TEST_P(HttpRouterTest, DashboardValidatesTheSelectedGzipRepresentation) {
+  const auto first = Read(Send("GET", "/dashboard/"));
+  const auto header = first.find("\r\nETag: ");
+  ASSERT_NE(header, std::string::npos);
+  const auto start = header + 8;
+  const auto tag = first.substr(start, first.find("\r\n", start) - start);
+  ASSERT_EQ(tag.size(), 24u);
+  ASSERT_EQ(tag.front(), '"');
+  ASSERT_EQ(tag.back(), '"');
+  auto conditional = [&](const std::string& value, const char* path,
+                         const char* encoding = "gzip") {
+    return Read(Send("GET", path, "",
+                     std::string("Accept-Encoding: ") + encoding +
+                         "\r\nIf-None-Match: " + value + "\r\n"));
+  };
+  for (const auto& match :
+       {tag, "W/" + tag, "\"old,tag\", W/" + tag, std::string("*")}) {
+    const auto cached = conditional(match, "/dashboard/index.html");
+    EXPECT_EQ(cached.find("HTTP/1.1 304"), 0u);
+    EXPECT_NE(cached.find("\r\nETag: " + tag + "\r\n"), std::string::npos);
+    EXPECT_NE(cached.find("\r\nVary: Accept-Encoding\r\n"), std::string::npos);
+    EXPECT_NE(cached.find("\r\nCache-Control: no-cache\r\n"),
+              std::string::npos);
+    EXPECT_EQ(cached.find("\r\n\r\n") + 4, cached.size());
+  }
+  EXPECT_EQ(conditional(tag, "/dashboard/app.js").find("HTTP/1.1 200"), 0u);
+  EXPECT_EQ(conditional(tag + " invalid", "/dashboard/").find("HTTP/1.1 200"),
+            0u);
+  EXPECT_EQ(
+      conditional(tag, "/dashboard/", "gzip;q=0, *;q=1").find("HTTP/1.1 406"),
+      0u);
+}
+
 TEST_P(HttpRouterTest, DashboardNegotiatesItsCompressedRepresentation) {
   for (const auto& [value, accepted] : {
            std::pair{"gzip", true},

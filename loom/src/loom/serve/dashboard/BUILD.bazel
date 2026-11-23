@@ -26,8 +26,8 @@ loom_generated_source_family(
     ],
     generator = "//build_tools/serve_web:pack",
     inputs = _ASSETS,
-    output_flags = ["--output=" for asset in _ASSETS],
-    outputs = ["gzip/" + asset for asset in _ASSETS],
+    output_flags = ["--output=" for asset in _ASSETS] + ["--etags="],
+    outputs = ["gzip/" + asset for asset in _ASSETS] + ["etags.h"],
 )
 
 loom_py_test(
@@ -53,7 +53,10 @@ iree_c_embed_data(
 
 loom_cc_library(
     name = "assets",
-    srcs = ["assets.c"],
+    srcs = [
+        "assets.c",
+        ":etags.h",
+    ],
     hdrs = ["assets.h"],
     deps = [
         ":files",

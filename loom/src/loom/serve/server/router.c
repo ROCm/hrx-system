@@ -1393,8 +1393,8 @@ static iree_status_t loom_serve_router_accept(
   iree_string_builder_t* output = &router->output;
   const iree_string_view_t path = request->path;
   const bool get = iree_string_view_equal(request->method, IREE_SV("GET"));
-  if (get && loom_serve_dashboard_handles(path)) {
-    loom_serve_dashboard_send(router->server, connection, request);
+  if (get &&
+      loom_serve_dashboard_try_send(router->server, connection, request)) {
     return iree_ok_status();
   }
   if (get && iree_string_view_equal(path, IREE_SV("/v1/observe"))) {

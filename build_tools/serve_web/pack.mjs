@@ -1,6 +1,7 @@
 // Copyright 2026 The IREE Authors
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+import { createHash } from "node:crypto";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -12,7 +13,7 @@ import { minify as minifyJS } from "terser";
 
 const list = { type: "string", multiple: true, default: [] };
 const { values } = parseArgs({
-  options: { entry: list, page: list, style: list, output: list },
+  options: { entry: list, page: list, style: list, output: list, etags: { type: "string" } },
 });
 const assets = new Map();
 const bundle = await rollup({
@@ -55,6 +56,7 @@ assets.set("style.css", css.styles);
 
 // The output list is also the native server's resource table. A new or
 // missing module must change the declared inputs to the embed action.
+const etags = [];
 let total = 0;
 for (const file of values.output) {
   const name = path.basename(file);
@@ -62,9 +64,15 @@ for (const file of values.output) {
   const encoded = await zopfli.gzipAsync(Buffer.from(assets.get(name)), { numiterations: 15 });
   encoded[9] = 255; // OS-independent gzip header.
   total += encoded.length;
+  const digest = createHash("sha256").update(encoded).digest().subarray(0, 16);
+  etags.push(`  "${digest.toString("base64url")}",`);
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, encoded);
   assets.delete(name);
 }
 if (assets.size) throw new Error("Undeclared dashboard resources: " + [...assets.keys()].join(", "));
 if (total >= 50000) throw new Error(`Dashboard is ${total} gzip bytes. The budget is below 50,000.`);
+// The embed-data generator consumes the same ordered list of files.
+await writeFile(values.etags, [
+  "static const char loom_serve_dashboard_etags[][23] = {", ...etags, "};", "",
+].join("\n"));
