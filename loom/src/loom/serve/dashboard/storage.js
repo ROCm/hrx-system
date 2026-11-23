@@ -84,7 +84,7 @@ const previewRange = (id) => IDBKeyRange.bound([id], [id, []], false, true);
 const localProject = (id) => ({ id, name: "Local", settings: {} });
 export async function openWorkspace() {
   const prefix = new URL("../", document.baseURI).pathname;
-  const req = indexedDB.open("loom-conversations@" + prefix, 3);
+  const req = indexedDB.open("loom-conversations@" + prefix, 4);
   req.onupgradeneeded = (event) => {
     const db = req.result;
     if (event.oldVersion === 0) {
@@ -99,6 +99,8 @@ export async function openWorkspace() {
     if (event.oldVersion < 3)
       for (const name of ["previewSizes", "previewEdits"])
         db.createObjectStore(name, { keyPath: ["session", "key"] });
+    if (event.oldVersion < 4)
+      db.createObjectStore("mcp", { keyPath: "id" }).createIndex("url", "url", { unique: true });
   };
   const db = await result(req);
   db.onversionchange = () => db.close();
@@ -106,6 +108,18 @@ export async function openWorkspace() {
   return db;
 }
 export const projects = (db) => result(readStore(db, "projects").getAll());
+export function readMcp(db, id) {
+  const store = readStore(db, "mcp");
+  return result(id ? store.get(id) : store.getAll());
+}
+export function writeMcp(db, id, server) {
+  return write(db, "mcp", async ({ mcp: store }) => {
+    if (id && !(await result(store.getKey(id))))
+      throw Error("This MCP server was removed in another tab");
+    if (server) store.put(server);
+    else store.delete(id);
+  });
+}
 export function createProject(db, name) {
   const project = { id: identity(), name, settings: {} };
   return write(db, "projects", ({ projects }) => {

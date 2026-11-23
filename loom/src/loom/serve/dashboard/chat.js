@@ -20,6 +20,7 @@ import {
 } from "./wire.js";
 import { runJavaScript } from "./code.js";
 import { conversationDownload, conversationImport } from "./export.js";
+import { callMcp, loadMcp, manageMcp, mcpSettings, offeredMcp, restoreMcp } from "./mcp.js";
 import { drawTurns, metrics, savedReplyStats, watchReplyStats } from "./reply-stats.js";
 import {
   byId,
@@ -331,6 +332,7 @@ function executableTool(entry, call) {
   if (name === htmlTool.function.name && entry.offeredHTML) return htmlTool;
   if (name === imageTool.function.name && catalog.get(entry.imageModel)?.loom.endpoint === images)
     return imageTool;
+  return offeredMcp(entry.settings, name);
 }
 function drawToolCalls(row, entry, pending) {
   for (const call of entry.message?.tool_calls || []) {
@@ -349,8 +351,9 @@ function drawToolCalls(row, entry, pending) {
     if (pending.get(call.id) === call) {
       if (tool) {
         details.open = tool === codeTool;
-        const label =
-          tool === codeTool
+        const label = tool.server
+          ? "Run MCP · " + tool.name
+          : tool === codeTool
             ? "Run JavaScript"
             : tool === htmlTool
               ? "Show preview"
@@ -808,6 +811,19 @@ async function toolResult(call, content, display = {}) {
 }
 async function runTool(entry, call, tool, signal) {
   signal.throwIfAborted();
+  if (tool.server) {
+    notice("Calling MCP · " + tool.name + "…");
+    let result;
+    try {
+      result = await callMcp(tool, call.function.arguments, signal);
+    } catch (error) {
+      result = {
+        failed: true,
+        text: signal.aborted ? "Stopped waiting for MCP · " + tool.name : "MCP · " + error.message,
+      };
+    }
+    return toolResult(call, result.text, { failed: result.failed, verbatim: true });
+  }
   const display =
     tool === codeTool ? { verbatim: true } : tool === imageTool ? { model: entry.imageModel } : {};
   let content;
@@ -1124,7 +1140,7 @@ async function submitTurn(mode = "send", spoken) {
   if (!continuation && !input && !files.length) return;
   if (mode === "send" && !acceptsFiles(model))
     throw new Error("The selected model cannot accept these files");
-  const values = mode === "replay" ? thread.settings : settings();
+  const values = mode === "replay" ? { ...thread.settings, mcp: mcpSettings().mcp } : settings();
   const text = route === chat ? userText(input, values) : input;
   thread.settings = values;
   if (route === speech && !byId("voice").value.trim())
@@ -1204,7 +1220,8 @@ async function submitTurn(mode = "send", spoken) {
         for (const call of calls) {
           controller.signal.throwIfAborted();
           const tool = executableTool(entry, call);
-          if (tool) results.push(await runTool(entry, call, tool, controller.signal));
+          if (tool && (!tool.server || tool.auto))
+            results.push(await runTool(entry, call, tool, controller.signal));
         }
         controller.signal.throwIfAborted();
         if (results.length !== calls.length) break;
@@ -1410,6 +1427,15 @@ byId("compose").onsubmit = (event) => {
   guarded(() => (prompt.value.trim() === "/export" ? exportChat(true) : submitTurn()))();
 };
 byId("export-chat").onclick = guarded(() => exportChat());
+byId("mcp").onclick = workspaceAction(async () => {
+  const draft = await manageMcp();
+  if (!draft) return;
+  restoreMcp({ mcp: draft });
+  thread.settings = { ...thread.settings, mcp: mcpSettings().mcp };
+  await remember();
+  await historyMenu();
+  notice("MCP tools saved to chat");
+});
 byId("import-chat").onclick = () => byId("import-file").click();
 inspectorToggle.onclick = () => {
   const open = inspectorToggle.ariaExpanded !== "true";
@@ -1741,6 +1767,7 @@ guarded(async () => {
     if (kind === "project" && id && id !== project.id) missing = "project";
     thread ??= newThread();
   }
+  await loadMcp(database);
   await discover();
   selectThread(thread);
   await restoreChat();

@@ -109,11 +109,14 @@ export function offeredTools(values) {
   if (values.htmlTool) tools.push(htmlTool);
   if (values.codeTool) tools.push(codeTool);
   if (values.imageModel) tools.push(imageTool);
-  if (values.functions?.trim()) {
-    const extra = JSON.parse(values.functions);
+  if (values.mcp?.length || values.functions?.trim()) {
+    const extra = values.functions?.trim() ? JSON.parse(values.functions) : [];
     if (!Array.isArray(extra)) throw new Error("Function schemas must be a JSON array");
     const names = new Set(tools.map((tool) => tool.function.name));
-    for (const tool of extra) {
+    for (const tool of [
+      ...(values.mcp || []).map((b) => ({ type: "function", function: b.fn })),
+      ...extra,
+    ]) {
       const name = tool?.function?.name;
       if (tool?.type !== "function" || typeof name !== "string" || !name.trim())
         throw new Error("Each function schema needs a function name");

@@ -16,6 +16,7 @@ _ENTRIES = [
     "app.js",
     "capture.js",
     "chat.js",
+    "mcp-worker.js",
     "topbar.js",
 ]
 
@@ -31,7 +32,10 @@ _SCOPED = [
     "telemetry.css",
 ]
 
-_ASSETS = _ENTRIES + _PAGES + ["style.css"]
+_ASSETS = _ENTRIES + _PAGES + [
+    "events.js",
+    "style.css",
+]
 
 _WIRE = [
     "content.js",
@@ -57,6 +61,7 @@ loom_generated_source_family(
         "code.js",
         "dialog.js",
         "export.js",
+        "mcp.js",
         "reply-stats.js",
         "settings.js",
         "storage.js",

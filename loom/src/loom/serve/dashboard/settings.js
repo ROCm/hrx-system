@@ -1,6 +1,8 @@
 // Copyright 2026 The IREE Authors
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+import { mcpSettings, restoreMcp } from "./mcp.js";
+
 // Native control names are the persisted keys for projects, presets and exports.
 const fields = document.querySelectorAll("aside [name]");
 const numbers = [
@@ -29,7 +31,7 @@ export function importSettings(input = {}) {
   return values;
 }
 export function settings() {
-  const values = {};
+  const values = mcpSettings();
   for (const field of fields) {
     if (!field.checkValidity())
       throw new Error(field.labels[0].textContent.trim() + " · " + field.validationMessage);
@@ -46,6 +48,7 @@ export function settings() {
   return values;
 }
 export function restoreSettings(values) {
+  restoreMcp(values);
   for (const field of fields) {
     if (field.type === "checkbox") field.checked = values[field.name] ?? field.defaultChecked;
     else field.value = values[field.name] ?? "";

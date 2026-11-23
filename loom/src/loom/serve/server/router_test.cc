@@ -403,6 +403,10 @@ TEST_P(HttpRouterTest, ConversationConfinesExecutableToolContent) {
   EXPECT_NE(chat.find("connect-src 'self';"), std::string::npos);
   EXPECT_NE(chat.find("frame-src 'self';"), std::string::npos);
   EXPECT_EQ(chat.find("'unsafe-"), std::string::npos);
+  const auto mcp = policy("/dashboard/mcp-worker.js");
+  EXPECT_NE(mcp.find("connect-src https: http:"), std::string::npos);
+  EXPECT_NE(mcp.find("script-src 'self';"), std::string::npos);
+  EXPECT_EQ(mcp.find("'unsafe-"), std::string::npos);
   const auto code = policy("/dashboard/code.html");
   EXPECT_NE(code.find("sandbox allow-scripts;"), std::string::npos);
   EXPECT_NE(code.find("worker-src blob:;"), std::string::npos);

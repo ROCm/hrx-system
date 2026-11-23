@@ -57,7 +57,7 @@ for (const file of values.page) {
     removeAttributeQuotes: true,
     removeOptionalTags: true,
     removeComments: true,
-    ignoreCustomComments: [/copyright|SPDX|@license/i],
+    ignoreCustomComments: [/^!/],
   });
   assets.set(path.basename(file), html);
 }

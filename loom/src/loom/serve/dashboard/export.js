@@ -206,8 +206,20 @@ async function embeddedFile(file, signal) {
   return { name: file.name, type: file.type, data: await fileURL(file, signal) };
 }
 
+function portableSettings(values, history) {
+  if (!values?.mcp) return values;
+  const { mcp, ...settings } = values;
+  if (history)
+    settings.functions = JSON.stringify([
+      ...mcp.map((b) => ({ type: "function", function: b.fn })),
+      ...JSON.parse(settings.functions?.trim() || "[]"),
+    ]);
+  return settings;
+}
+
 async function exportedEntry(entry, signal) {
   const result = { ...entry };
+  if (entry.settings) result.settings = portableSettings(entry.settings, true);
   if (entry.image) result.image = await embeddedFile(entry.image, signal);
   if (Array.isArray(entry.message?.content)) {
     const content = [];
@@ -230,7 +242,7 @@ export async function conversationDownload(session, signal) {
         id,
         title,
         model,
-        settings,
+        settings: portableSettings(settings, false),
         parent,
         previewSizes: previewSizes && Object.keys(previewSizes).length ? previewSizes : undefined,
       },

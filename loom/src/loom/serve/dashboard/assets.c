@@ -126,6 +126,9 @@ static bool loom_serve_dashboard_matches(
 // Only the offline tool documents can execute model-authored content. The
 // conversation itself communicates with the serving origin.
 static const char* loom_serve_dashboard_policy(iree_string_view_t path) {
+  if (iree_string_view_equal(path, IREE_SV("/dashboard/mcp-worker.js"))) {
+    return "default-src 'none'; script-src 'self'; connect-src https: http:";
+  }
   if (iree_string_view_equal(path, IREE_SV("/dashboard/code.html"))) {
     return "sandbox allow-scripts; default-src 'none'; worker-src blob:; "
            "script-src 'unsafe-inline' 'unsafe-eval'; base-uri 'none'; "

@@ -129,6 +129,11 @@ dialog::backdrop { background: #0009; }
 dialog h2 { font-family: inherit; font-size: 1.1rem; }
 dialog label { display: grid; gap: .25rem; margin: .65rem 0; }
 .dialog-actions { margin-top: .8rem; justify-content: end; }
+.mcp-controls { min-width: 0; border: 0; margin: 0; padding: 0; }
+.mcp-controls output { display: block; margin: .4rem 0; color: var(--dim); }
+.mcp-tool { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: start; gap: .55rem; border-top: 1px solid var(--rule); padding: .5rem 0; }
+.mcp-tool details { margin: 0; }
+.mcp-tool pre { white-space: pre-wrap; font-size: .8rem; }
 .search-results { max-height: 45dvh; overflow: auto; }
 .search-results button { display: block; width: 100%; text-align: left; margin: .15rem 0; }
 #delete-dialog form > div { display: flex; justify-content: flex-end; gap: .6rem; }
