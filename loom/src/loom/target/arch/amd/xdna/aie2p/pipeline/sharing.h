@@ -34,6 +34,8 @@ typedef struct loom_aie2p_native_delivery_t {
     loom_xdna_stream_port_t port;
     // Channel within the terminal port.
     uint8_t channel;
+    // Path of a complete register command, retained after payload sharing.
+    struct loom_aie2p_native_command_suffix_t* command;
   } packets[32];
 } loom_aie2p_native_delivery_t;
 
