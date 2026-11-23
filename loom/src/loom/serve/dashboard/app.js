@@ -671,10 +671,10 @@ function createModel(model) {
     const field = state[key] = { value: element("strong", "", "—") };
     item.append(element("label", "", label), field.value);
     if (kind) field.peak = note(item, "peak",
-      "Observed peak in this page session; rates require a full five-second window.");
+      "Peak this session. Rates use full 5s windows.");
     if (kind === "rate") {
       field.average = note(item, "average",
-        "Lifetime average, including idle time; independent of this page session.");
+        "Lifetime rate including idle time.");
       field.rate = new CounterRate();
     }
     state.metrics.append(item);
@@ -1036,7 +1036,7 @@ function connect() {
     state(paused ? "Paused" : "Disconnected");
     if (!paused) {
       $("notice").textContent =
-        "Live feed disconnected. Relays must forward WebSocket upgrades and preserve the public origin. Reconnecting…";
+        "Reconnecting… Relays must forward WebSocket upgrades and preserve the public origin.";
       $("notice").hidden = false;
       retry = setTimeout(connect, retryDelay);
       retryDelay = Math.min(retryDelay * 2, 30000);

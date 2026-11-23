@@ -21,7 +21,7 @@
             id="scroll"
             type="button"
             aria-pressed="true"
-            title="Advance charts with time. Turn off to retain the last activity window; counters stay live."
+            title="Follow time or freeze at the last activity. Counters stay live."
           >
             Scroll on
           </button>
@@ -42,10 +42,10 @@
       <template id="rate-summary">
         <span
           class="peak"
-          title="Highest full five-second average observed in this page session."
+          title="Peak full 5s rate this session."
           >peak <b>—</b><br /><span
             class="average"
-            title="Lifetime average, including idle time; independent of this page session."
+            title="Lifetime rate including idle time."
             >avg <b>—</b></span
           ></span
         >
@@ -65,7 +65,7 @@
         </article>
         <article
           class="stat" data-rate="input_tokens"
-          title="Tokens consumed by completed model work, including decode input; not only prompt tokens."
+          title="Input tokens processed by completed work, including decode."
         >
           <div class="stat-label">Input work <span>5s avg</span></div>
           <div class="stat-value series-input">
@@ -95,7 +95,7 @@
         </article>
         <article
           class="stat"
-          title="Arrivals counted between observations, including requests that finish between samples. Buckets close after at least one second; this is work, not peak concurrency."
+          title="All arrivals per observation bucket (at least 1s), including requests that finished between samples."
         >
           <div class="stat-label">
             Requests received <span id="activity-span">~1s bucket</span>
@@ -104,7 +104,7 @@
             <strong id="activity">—</strong><span>requests</span>
             <span
               class="peak"
-              title="Largest observed arrival bucket in this page session, not peak concurrency."
+              title="Most arrivals in one bucket this session."
               >peak <b id="activity-peak">—</b></span
             >
           </div>
@@ -116,7 +116,7 @@
           <small
             ><span id="active">—</span> active ·
             <span
-              title="Highest sampled concurrent active count; short requests may finish between samples."
+              title="Peak sampled concurrency. Short requests can finish between samples."
               >peak <span id="active-peak">—</span></span
             >
             · <span id="queued">—</span> queued ·
@@ -125,14 +125,14 @@
         </article>
         <article
           class="stat"
-          title="Resident logical token positions across observed text pools; not physical RAM usage."
+          title="Resident logical token positions across text pools."
         >
           <div class="stat-label">KV occupancy <span>now</span></div>
           <div class="stat-value series-memory">
             <strong id="kv">—</strong><span>% resident</span>
             <span
               class="peak"
-              title="Highest sampled logical KV occupancy percentage in this page session."
+              title="Peak sampled KV occupancy this session."
               >peak <b id="kv-peak">—</b></span
             >
           </div>
@@ -199,7 +199,7 @@
         </article>
         <article
           class="panel"
-          title="Exact differences of cumulative request counters over nonoverlapping, roughly one-second intervals. Finishes include success, rejection, cancellation, and failure. These are request counts, not concurrent activity."
+          title="Counter changes per ~1s bucket. Finished includes successful, rejected, cancelled, and failed requests."
         >
           <div class="panel-heading">
             <h2>Request activity</h2>
@@ -325,7 +325,7 @@
         <div class="pool-trend">
           <span>Reusable backing</span>
           <canvas aria-label="Reusable backing history" data-field="canvas"></canvas>
-          <span data-field="peak" title="Highest reusable backing observed in this tab"></span>
+          <span data-field="peak" title="Peak reusable backing this session"></span>
         </div>
         <div class="model-facts" data-field="workspace"></div>
         <details class="slab-map" data-field="slabs">

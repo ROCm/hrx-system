@@ -62,7 +62,7 @@ function resizeGrip(box, layout) {
   box.tabIndex = 0;
   box.setAttribute("role", "group");
   box.title =
-    "Drag the lower-right corner or use arrow keys to resize the HTML preview. Home resets the size.";
+    "Resize with the corner or arrow keys. Home resets the size.";
   box.setAttribute("aria-label", box.title);
   let previous = layout.size || {};
   const axes = ["width", "height"];
