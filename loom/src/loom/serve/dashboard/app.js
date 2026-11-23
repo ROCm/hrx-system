@@ -385,12 +385,18 @@ function element(tag, className, text) {
   return node;
 }
 
-function counterTable(card, title) {
-  const details = element("details");
-  const table = element("table");
-  details.append(element("summary", "", title), table);
-  card.append(details);
-  return table;
+// Clone trusted page markup once per inventory card. Observation strings only
+// enter text nodes. The bound fields survive every subsequent observation.
+function mountCard(kind, inventory) {
+  const card = $(kind + "-card").content.firstElementChild.cloneNode(true);
+  const grid = $(kind + "-grid");
+  if (!inventory.size) grid.replaceChildren();
+  grid.append(card);
+  const state = { card };
+  for (const node of card.querySelectorAll("[data-field]")) {
+    state[node.dataset.field] = node;
+  }
+  return state;
 }
 
 function updateTopicFields(topics, state) {
@@ -424,29 +430,25 @@ function updateTopicFields(topics, state) {
   return fields;
 }
 
-function deviceLabel(device) {
-  return device.key + (device.key_truncated ? "…" : "");
+function resourceName(source) {
+  return source.key + (source.key_truncated ? "…" : "");
 }
 
-function updatePlacement(state) {
-  const index = state.model.device;
-  const device = devices.get(index);
-  state.placement.textContent = device
-    ? deviceLabel(device.source)
-    : index === null || index === undefined
-      ? "unassigned"
-      : `device ${index}`;
-  if (device) state.placement.setAttribute("href", `#device-${index}`);
-  else state.placement.removeAttribute("href");
-  const poolIndex = state.model.pool;
-  const pool = pools.get(poolIndex);
-  state.poolPlacement.textContent = pool
-    ? poolLabel(pool.source)
-    : poolIndex === null || poolIndex === undefined
-      ? "unassigned pool"
-      : `pool ${poolIndex}`;
-  if (pool) state.poolPlacement.setAttribute("href", `#pool-${poolIndex}`);
-  else state.poolPlacement.removeAttribute("href");
+function mountResource(kind, inventory, source) {
+  const state = mountCard(kind, inventory);
+  state.source = source;
+  state.card.id = `${kind}-${source.index}`;
+  state.name.textContent = resourceName(source);
+  return state;
+}
+
+function place(link, kind, index, inventory, unassigned) {
+  const resource = inventory.get(index);
+  link.textContent = resource
+    ? resourceName(resource.source)
+    : index == null ? unassigned : `${kind} ${index}`;
+  if (resource) link.href = `#${kind}-${index}`;
+  else link.removeAttribute("href");
 }
 
 function summarizeDevices() {
@@ -457,7 +459,8 @@ function summarizeDevices() {
     ]),
   );
   for (const state of models.values()) {
-    updatePlacement(state);
+    place(state.placement, "device", state.model.device, devices, "unassigned");
+    place(state.poolPlacement, "pool", state.model.pool, pools, "unassigned pool");
     const totals = activity.get(state.model.device);
     if (!totals) continue;
     ++totals.models;
@@ -471,10 +474,6 @@ function summarizeDevices() {
   }
 }
 
-function poolLabel(pool) {
-  return pool.key + (pool.key_truncated ? "…" : "");
-}
-
 // Immutable inventory edges are rebuilt only when a new resource arrives.
 // This also handles a reader receiving the pool before a referenced device.
 function updateResourceLinks() {
@@ -485,12 +484,12 @@ function updateResourceLinks() {
       const device = devices.get(index);
       const link = element(
         "a", "device-link",
-        device ? deviceLabel(device.source) : `device ${index}`,
+        device ? resourceName(device.source) : `device ${index}`,
       );
       link.href = `#device-${index}`;
       pool.links.append(link);
       if (device) {
-        const owner = element("a", "device-link", poolLabel(pool.source));
+        const owner = element("a", "device-link", resourceName(pool.source));
         owner.href = `#pool-${pool.source.index}`;
         device.links.append(owner);
       }
@@ -506,15 +505,11 @@ function slabState(slab) {
 }
 
 // Only an open inspector materializes the latest observation's options and bits.
-function createSlabMap(card) {
-  const details = element("details", "slab-map");
-  const summary = element("summary");
-  const select = element("select");
-  select.ariaLabel = "Physical slab";
-  const pages = element("div", "tiles");
-  const caption = element("div", "model-facts");
-  details.append(summary, select, caption, pages);
-  card.append(details);
+function createSlabMap(details) {
+  const summary = details.querySelector("summary");
+  const select = details.querySelector("select");
+  const pages = details.querySelector(".tiles");
+  const caption = details.querySelector(".model-facts");
   let source, selected, choiceKey, pageKey;
 
   function showPages() {
@@ -572,78 +567,27 @@ function createSlabMap(card) {
 }
 
 function createPool(source) {
-  const card = element("article", "panel memory-pool");
-  card.id = `pool-${source.index}`;
-  const heading = element("div", "resource-head");
-  const links = element("div", "device-pools");
-  heading.append(
-    element("h3", "", poolLabel(source)),
-    element("span", "muted", source.backing),
-    links,
-  );
-  const total = element("div", "pool-total");
-  const committed = element("strong", "pool-value");
-  const budget = element("span", "muted");
-  total.append(committed, budget);
-  const capacity = element("div", "capacity");
-  capacity.title = "Physical bytes grouped by state";
-  const legend = element("div", "capacity-key");
-  const parts = ["held", "reusable", "uncommitted"].map(state => {
+  const pool = mountResource("pool", pools, source);
+  pool.backing.textContent = source.backing;
+  pool.cells = new Map();
+  pool.ring = new Ring(COLORS.memory);
+  pool.parts = ["held", "reusable", "uncommitted"].map((state) => {
     const segment = element("i");
     const label = element("span");
     segment.dataset.state = label.dataset.state = state;
-    capacity.append(segment);
-    legend.append(label);
-    return {segment, label, state};
+    pool.capacity.append(segment);
+    pool.legend.append(label);
+    return { segment, label, state };
   });
-  const trend = element("div", "pool-trend");
-  const canvas = element("canvas");
-  canvas.ariaLabel = "Reusable backing history";
-  const peak = element("span");
-  peak.title = "Highest reusable backing observed in this tab";
-  trend.append(element("span", "", "Reusable backing"), canvas, peak);
-  const workspace = element("div", "model-facts");
-  card.append(heading, total, capacity, legend, trend, workspace);
-  const updateSlabs = source.slabs && createSlabMap(card);
-  $("pool-grid").append(card);
-  return {
-    source,
-    links,
-    card,
-    committed,
-    peak,
-    canvas,
-    budget,
-    parts,
-    workspace,
-    updateSlabs,
-    table: counterTable(card, "All pool counters"),
-    cells: new Map(),
-    ring: new Ring(COLORS.memory),
-  };
+  if (source.slabs) pool.updateSlabs = createSlabMap(pool.slabs);
+  else pool.slabs.remove();
+  return pool;
 }
 
 function updateDevice(device) {
-  let state = devices.get(device.index);
-  if (!state) {
-    if (!devices.size) $("device-grid").replaceChildren();
-    const card = element("article", "panel device");
-    card.id = `device-${device.index}`;
-    const heading = element("div", "resource-head");
-    const identity = element(
-      "span",
-      "device-identity",
-      `${device.name} · ${device.driver} / ${device.backend}`,
-    );
-    heading.append(
-      element("h3", "", deviceLabel(device)),
-      identity,
-    );
-    const activity = element("div", "device-activity");
-    const links = element("div", "device-pools");
-    card.append(heading, activity, links);
-    $("device-grid").append(card);
-    state = { source: device, card, activity, links };
+  if (!devices.has(device.index)) {
+    const state = mountResource("device", devices, device);
+    state.identity.textContent = `${device.name} · ${device.driver} / ${device.backend}`;
     devices.set(device.index, state);
     updateResourceLinks();
   }
@@ -654,7 +598,6 @@ function updateDevice(device) {
 function updatePool(source, time) {
   let pool = pools.get(source.index);
   if (!pool) {
-    if (!pools.size) $("pool-grid").replaceChildren();
     pool = createPool(source);
     pools.set(source.index, pool);
     updateResourceLinks();
@@ -694,101 +637,76 @@ function updatePool(source, time) {
     + ` · +${integer(reserves - pool.initialReserves)} reservations since opening`;
 }
 
+const batchWork = {
+  unit: "Batches", color: COLORS.output, total: (model) => model.counters?.batches, facts: [],
+};
+const modelWork = new Map([
+  ["text", {
+    unit: "Tokens", color: COLORS.output, total: (model) => model.counters?.output_tokens,
+    facts: [["text.session_capacity", "rows"], ["text.session_cache_endpoints", "cached sessions"],
+      ["text.prefix_cache_endpoints", "cached prefixes"]],
+  }],
+  ["image", {
+    unit: "Images", color: COLORS.input, total: (_, fields) => fields.get("image.generated_images")?.value,
+    facts: [["image.generated_pixels", "pixels generated"]],
+  }],
+]);
+
 function createModel(model) {
-  if (!models.size) $("model-grid").replaceChildren();
-  const card = element("article", "panel model");
-  const heading = element("div", "model-head");
-  const name = element(
-    "h3",
-    "",
-    model.name + (model.name_truncated ? "…" : ""),
-  );
-  const identity = element("div");
-  const kind = element("div", "kind", model.kind);
-  const placement = element("a", "device-link");
-  const poolPlacement = element("a", "device-link");
-  kind.append(placement, poolPlacement);
-  identity.append(name, kind);
-  const phase = element("span", "phase", model.phase);
-  heading.append(identity, phase);
-  const metrics = element("div", "model-metrics");
-  const workUnit =
-    model.kind === "image"
-      ? "Images"
-      : model.kind === "text"
-        ? "Tokens"
-        : "Batches";
-  const numbers = {};
-  const peaks = {};
-  const averages = {};
-  for (const [key, label] of Object.entries({
-    active: "Active now",
-    queued: "Queued + held",
-    completed: "Completed",
-    requests: "Requests/s · 5s",
-    work: `${workUnit}/s · 5s`,
-    total: `${workUnit} total`,
-  })) {
-    const item = element("div");
-    const value = element("strong", "", "—");
-    item.append(element("label", "", label), value);
-    if (key !== "completed" && key !== "total") {
-      const peak = element("span", "peak", "peak —");
-      peak.title =
-        "Observed peak in this page session; rates require a full five-second window.";
-      item.append(peak);
-      peaks[key] = peak;
-    }
-    if (key === "work" || key === "requests") {
-      const average = element("span", "average", "avg —");
-      average.title =
-        "Lifetime average, including idle time; independent of this page session.";
-      item.append(average);
-      averages[key] = average;
-    }
-    metrics.append(item);
-    numbers[key] = value;
+  const state = mountCard("model", models);
+  state.name.textContent = model.name + (model.name_truncated ? "…" : "");
+  state.kind.prepend(model.kind);
+  state.canvas.ariaLabel = `${model.name} completed work rate`;
+  state.format = modelWork.get(model.kind) ?? batchWork;
+  function note(item, kind, title) {
+    const text = element("span", kind, kind === "peak" ? "peak " : "avg ");
+    const number = element("span", "", "—");
+    text.title = title;
+    text.append(number);
+    item.append(text);
+    return number;
   }
-  const canvas = element("canvas");
-  canvas.setAttribute("aria-label", `${model.name} completed work rate`);
-  const pool = element("div");
-  const poolHeading = element("div", "pool-heading");
-  const poolValue = element("span", "", "—");
-  poolHeading.append(element("span", "", "KV positions"), poolValue);
-  const bar = element("div", "bar");
-  const resident = element("span");
-  const reserved = element("span", "reserved");
-  bar.append(resident, reserved);
-  pool.append(poolHeading, bar);
-  pool.hidden = true;
-  const cache = element("div", "model-facts");
-  const outcomes = element("div", "model-facts");
-  card.append(heading, metrics, canvas, pool, cache, outcomes);
-  $("model-grid").append(card);
-  return {
-    id: model.incarnation,
-    card,
-    phase,
-    placement,
-    poolPlacement,
-    numbers,
-    peaks,
-    averages,
-    activePeak: 0,
-    queuedPeak: 0,
-    canvas,
-    pool,
-    poolValue,
-    resident,
-    reserved,
-    cache,
-    outcomes,
-    table: counterTable(card, "All source counters"),
-    cells: new Map(),
-    ring: new Ring(model.kind === "image" ? COLORS.input : COLORS.output),
-    requestRate: new CounterRate(),
-    workRate: new CounterRate(),
-  };
+  for (const [key, label, kind] of [
+    ["active", "Active now", "gauge"],
+    ["queued", "Queued + held", "gauge"],
+    ["completed", "Completed"],
+    ["requests", "Requests/s · 5s", "rate"],
+    ["work", `${state.format.unit}/s · 5s`, "rate"],
+    ["total", `${state.format.unit} total`],
+  ]) {
+    const item = element("div");
+    const field = state[key] = { value: element("strong", "", "—") };
+    item.append(element("label", "", label), field.value);
+    if (kind) field.peak = note(item, "peak",
+      "Observed peak in this page session; rates require a full five-second window.");
+    if (kind === "rate") {
+      field.average = note(item, "average",
+        "Lifetime average, including idle time; independent of this page session.");
+      field.rate = new CounterRate();
+    }
+    state.metrics.append(item);
+  }
+  state.requests.total = state.completed.value;
+  state.work.total = state.total.value;
+  state.id = model.incarnation;
+  state.cells = new Map();
+  state.ring = new Ring(state.format.color);
+  return state;
+}
+
+function updateGauge(field, value) {
+  field.maximum = Math.max(field.maximum || 0, value);
+  field.value.textContent = format(value);
+  field.peak.textContent = format(field.maximum);
+}
+
+function updateRate(field, total, timeNs, since, unchangedUntil) {
+  const rate = field.rate.push(timeNs, total, unchangedUntil);
+  field.value.textContent = format(rate);
+  field.peak.textContent = format(field.rate.peak);
+  field.average.textContent = formatAverage(lifetimeRate(timeNs, since, total));
+  field.total.textContent = total == null ? "—" : integer(total);
+  return rate;
 }
 
 // Only an exact revision match authorizes extending the last observed value.
@@ -814,18 +732,10 @@ function updateModel(model, time, timeNs, version, recordHistory) {
   }
   const fields = updateTopicFields(model.topics, state);
   const value = (key) => Number(fields.get(key)?.value);
-  const imageTotal = fields.get("image.generated_images")?.value;
-  const workTotal =
-    model.kind === "image"
-      ? imageTotal
-      : model.counters?.[model.kind === "text" ? "output_tokens" : "batches"];
+  const workTotal = state.format.total(model, fields);
   const unchangedUntil = unchangedBoundary(state.revision, version, timeNs);
-  const workRate = state.workRate.push(timeNs, workTotal, unchangedUntil);
-  state.requests = state.requestRate.push(
-    timeNs,
-    model.counters?.completed,
-    unchangedUntil,
-  );
+  const workRate = updateRate(state.work, workTotal, timeNs, model.since_ns, unchangedUntil);
+  updateRate(state.requests, model.counters?.completed, timeNs, model.since_ns, unchangedUntil);
   state.revision = version.revision;
   if (recordHistory) {
     state.ring.push(time, workRate);
@@ -834,26 +744,8 @@ function updateModel(model, time, timeNs, version, recordHistory) {
   state.model = model;
   state.fields = fields;
   state.phase.textContent = model.phase;
-  state.numbers.active.textContent = format(model.active);
-  state.numbers.queued.textContent = format(model.queued + model.held);
-  state.activePeak = Math.max(state.activePeak, model.active);
-  state.queuedPeak = Math.max(state.queuedPeak, model.queued + model.held);
-  for (const [key, value] of Object.entries({
-    active: state.activePeak,
-    queued: state.queuedPeak,
-    work: state.workRate.peak,
-    requests: state.requestRate.peak,
-  }))
-    state.peaks[key].textContent = `peak ${format(value)}`;
-  state.numbers.completed.textContent = model.counters
-    ? integer(model.counters.completed)
-    : "—";
-  state.numbers.requests.textContent = format(state.requests);
-  state.numbers.work.textContent = format(workRate);
-  state.averages.work.textContent = `avg ${formatAverage(lifetimeRate(timeNs, model.since_ns, workTotal))}`;
-  state.averages.requests.textContent = `avg ${formatAverage(lifetimeRate(timeNs, model.since_ns, model.counters?.completed))}`;
-  state.numbers.total.textContent =
-    workTotal === undefined ? "—" : integer(workTotal);
+  updateGauge(state.active, model.active);
+  updateGauge(state.queued, model.queued + model.held);
   const capacity = value("text.pool_capacity");
   state.pool.hidden = !(capacity > 0);
   if (capacity > 0) {
@@ -863,17 +755,7 @@ function updateModel(model, time, timeNs, version, recordHistory) {
     state.resident.style.width = `${(100 * resident) / capacity}%`;
     state.reserved.style.width = `${(100 * reserved) / capacity}%`;
   }
-  const facts =
-    model.kind === "text"
-      ? [
-          ["text.session_capacity", "rows"],
-          ["text.session_cache_endpoints", "cached sessions"],
-          ["text.prefix_cache_endpoints", "cached prefixes"],
-        ]
-      : model.kind === "image"
-        ? [["image.generated_pixels", "pixels generated"]]
-        : [];
-  state.cache.textContent = facts
+  state.cache.textContent = state.format.facts
     .filter(([key]) => fields.has(key))
     .map(([key, label]) => `${integer(fields.get(key).value)} ${label}`)
     .join(" · ");
@@ -909,8 +791,8 @@ function summarize(time, recordHistory) {
     };
     group.active += model.active;
     group.queued += model.queued + model.held;
-    if (Number.isFinite(state.requests)) {
-      group.rate += state.requests;
+    if (Number.isFinite(state.requests.rate.value)) {
+      group.rate += state.requests.rate.value;
       group.available = true;
     }
     if (model.counters) {
@@ -986,13 +868,8 @@ function updateServer(page, time, timeNs, version, recordHistory) {
   serverRevision = version.revision;
   serverSample = page;
   for (const field of serverRates) {
-    const total = page.counters?.[field.counter];
-    const rate = field.rate.push(timeNs, total, unchangedUntil);
-    if (recordHistory) field.ring.push(time, rate);
-    field.value.textContent = format(rate);
-    field.peak.textContent = format(field.rate.peak);
-    field.average.textContent = formatAverage(lifetimeRate(timeNs, page.since_ns, total));
-    field.total.textContent = page.counters ? integer(total) : "—";
+    const value = updateRate(field, page.counters?.[field.counter], timeNs, page.since_ns, unchangedUntil);
+    if (recordHistory) field.ring.push(time, value);
   }
   const finishes = page.counters
     ? ["completed", "rejected", "cancelled", "failed"].reduce(
@@ -1058,8 +935,8 @@ function apply(frame) {
     ) ||
     [...models.values()].some(
       (model) =>
-        (model.workRate.count && model.workRate.value !== 0) ||
-        (model.requestRate.count && model.requestRate.value !== 0),
+        (model.work.rate.count && model.work.rate.value !== 0) ||
+        (model.requests.rate.count && model.requests.rate.value !== 0),
     );
   if (recordHistory) historyTime = latestTime;
   if (page.type === "server") {
@@ -1129,8 +1006,8 @@ function connect() {
   for (const { rate } of serverRates) rate.reset();
   for (const bucket of Object.values(serverBuckets)) bucket.reset();
   for (const model of models.values()) {
-    model.requestRate.reset();
-    model.workRate.reset();
+    model.requests.rate.reset();
+    model.work.rate.reset();
   }
   const url = new URL("../v1/observe", location.href);
   url.protocol = location.protocol === "https:" ? "wss:" : "ws:";

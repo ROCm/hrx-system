@@ -274,5 +274,68 @@
         ><span id="delivery">—</span>
       </footer>
     </main>
+    <template id="model-card">
+      <article class="panel model">
+        <div class="model-head">
+          <div>
+            <h3 data-field="name"></h3>
+            <div class="kind" data-field="kind"><a class="device-link" data-field="placement"></a><a
+              class="device-link" data-field="poolPlacement"></a></div>
+          </div>
+          <span class="phase" data-field="phase"></span>
+        </div>
+        <div class="model-metrics" data-field="metrics"></div>
+        <canvas data-field="canvas"></canvas>
+        <div data-field="pool" hidden>
+          <div class="pool-heading">
+            <span>KV positions</span><span data-field="poolValue">—</span>
+          </div>
+          <div class="bar">
+            <span data-field="resident"></span><span class="reserved" data-field="reserved"></span>
+          </div>
+        </div>
+        <div class="model-facts" data-field="cache"></div>
+        <div class="model-facts" data-field="outcomes"></div>
+        <details><summary>All source counters</summary><table data-field="table"></table></details>
+      </article>
+    </template>
+    <template id="device-card">
+      <article class="panel device">
+        <div class="resource-head">
+          <h3 data-field="name"></h3>
+          <span class="device-identity" data-field="identity"></span>
+        </div>
+        <div class="device-activity" data-field="activity"></div>
+        <div class="device-pools" data-field="links"></div>
+      </article>
+    </template>
+    <template id="pool-card">
+      <article class="panel memory-pool">
+        <div class="resource-head">
+          <h3 data-field="name"></h3>
+          <span class="muted" data-field="backing"></span>
+          <div class="device-pools" data-field="links"></div>
+        </div>
+        <div class="pool-total">
+          <strong class="pool-value" data-field="committed"></strong>
+          <span class="muted" data-field="budget"></span>
+        </div>
+        <div class="capacity" data-field="capacity" title="Physical bytes grouped by state"></div>
+        <div class="capacity-key" data-field="legend"></div>
+        <div class="pool-trend">
+          <span>Reusable backing</span>
+          <canvas aria-label="Reusable backing history" data-field="canvas"></canvas>
+          <span data-field="peak" title="Highest reusable backing observed in this tab"></span>
+        </div>
+        <div class="model-facts" data-field="workspace"></div>
+        <details class="slab-map" data-field="slabs">
+          <summary></summary>
+          <select aria-label="Physical slab"></select>
+          <div class="model-facts"></div>
+          <div class="tiles"></div>
+        </details>
+        <details><summary>All pool counters</summary><table data-field="table"></table></details>
+      </article>
+    </template>
   </body>
 </html>
