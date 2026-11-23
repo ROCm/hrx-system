@@ -7,6 +7,7 @@ import {
   checked,
   checkpoint,
   codeTool,
+  compactionTool,
   endpoint,
   generateImage,
   htmlTool,
@@ -15,6 +16,7 @@ import {
   messages,
   offeredTools,
   post,
+  summaryPrompt,
   toolArgument,
   toolChange,
 } from "./wire.js";
@@ -63,6 +65,7 @@ const transcript = byId("transcript"),
   models = byId("model");
 const inspectorToggle = byId("inspector-toggle");
 const chat = "/v1/chat/completions";
+const compactTool = compactionTool({});
 const speech = "/v1/audio/speech",
   recognition = "/v1/audio/transcriptions";
 const modes = new Map([
@@ -204,12 +207,14 @@ function controls() {
   ))
     field.disabled = busy;
   models.disabled ||= waitingForTools || Boolean(thread.checkpoint && !thread.checkpoint.release);
-  draftChanged();
   byId("stop").hidden = !busy || active === workspaceBusy;
   const canSpeak = byId("reader").length > 0,
     canHear = byId("recognizer").length > 0;
-  for (const id of ["attach", "token-setting", "tools-setting", "sampling"])
+  for (const id of ["attach", "token-setting", "tools-setting", "compact-settings", "sampling"])
     byId(id).hidden = !isChat;
+  byId("compact").disabled = busy || !canCompact(model);
+  byId("compact-at").disabled = busy || !model?.loom.input_tokens || !model.context_length;
+  draftChanged();
   byId("effort-setting").hidden = !isChat || !model.supported_reasoning_levels?.length;
   byId("image-tool-setting").hidden = byId("image-tool").length <= 1;
   byId("size-setting").hidden = route !== images;
@@ -298,7 +303,13 @@ function drawEntry(entry, pending, position) {
     };
   };
   const message = entry.message;
-  const row = card(entry.toolUpdate && !message.content ? "tools" : message?.role || entry.role);
+  const row = card(
+    entry.compaction
+      ? "summary"
+      : entry.toolUpdate && !message.content
+        ? "tools"
+        : message?.role || entry.role,
+  );
   if (entry.model) row.firstChild.textContent += "  /  " + entry.model;
   if (entry.toolUpdate) row.append(element("div", entry.toolUpdate, "caption"));
   if (message?.reasoning_content)
@@ -328,6 +339,12 @@ function drawEntry(entry, pending, position) {
 }
 function executableTool(entry, call) {
   const name = call.function.name;
+  if (
+    name === compactTool.function.name &&
+    entry.settings?.compactTool &&
+    byId("compact-tool").checked
+  )
+    return compactTool;
   if (name === codeTool.function.name && entry.settings?.codeTool === true) return codeTool;
   if (name === htmlTool.function.name && entry.offeredHTML) return htmlTool;
   if (name === imageTool.function.name && catalog.get(entry.imageModel)?.loom.endpoint === images)
@@ -357,7 +374,9 @@ function drawToolCalls(row, entry, pending) {
             ? "Run JavaScript"
             : tool === htmlTool
               ? "Show preview"
-              : "Generate image · " + entry.imageModel;
+              : tool === compactTool
+                ? "Compact chat"
+                : "Generate image · " + entry.imageModel;
         box.append(
           button(
             label,
@@ -474,7 +493,7 @@ function redraw(follow = followingLatest()) {
   const heads = new Map();
   for (let i = thread.parent?.count || thread.importedCount || 0; i < thread.entries.length; ++i) {
     const entry = thread.entries[i];
-    if (entry.message?.role === "assistant") heads.set(entry.model, i);
+    if (entry.message?.role === "assistant" && !entry.compaction) heads.set(entry.model, i);
   }
   transcript.querySelector(".continue-tools")?.remove();
   thread.entries.forEach((entry, i) => {
@@ -738,7 +757,10 @@ function drawBranch() {
   } else box.append("Forked from a deleted chat");
   const first = thread.entries.find(
     (e, i) =>
-      i >= parent.count && e.message?.role === "assistant" && (!e.partial || e.stats?.usage),
+      i >= parent.count &&
+      !e.compaction &&
+      e.message?.role === "assistant" &&
+      (!e.partial || e.stats?.usage),
   );
   if (first) {
     const usage = first.stats?.usage,
@@ -826,10 +848,14 @@ async function runTool(entry, call, tool, signal) {
   }
   const display =
     tool === codeTool ? { verbatim: true } : tool === imageTool ? { model: entry.imageModel } : {};
-  let content;
+  let content, summary;
   try {
     const argument = toolArgument(call, tool.function.parameters.required[0]);
-    if (tool === codeTool) {
+    if (tool === compactTool) {
+      if (entry.message.tool_calls.length !== 1) throw Error("Call compact_chat alone");
+      summary = argument;
+      content = "Summary received.";
+    } else if (tool === codeTool) {
       notice("Running JavaScript…");
       const result = await runJavaScript(argument, signal);
       content = result.text;
@@ -849,7 +875,9 @@ async function runTool(entry, call, tool, signal) {
     content = tool === imageTool ? "Image generation failed: " + error.message : String(error);
     display.failed = true;
   }
-  return toolResult(call, content, display);
+  const result = await toolResult(call, content, display);
+  if (summary) await compactConversation(catalog.get(models.value), settings(), signal, summary);
+  return result;
 }
 function showFiles() {
   byId("files").replaceChildren(
@@ -876,8 +904,9 @@ function acceptsFiles(model) {
 }
 function selectThread(value) {
   inspectorToggle.ariaExpanded = "false";
-  if (thread && thread !== value && (prompt.value || attachments.length))
-    drafts.set(thread.id, { text: prompt.value, files: attachments, project: thread.project });
+  const text = commands.has(prompt.value.trim()) ? "" : prompt.value;
+  if (thread && thread !== value && (text || attachments.length))
+    drafts.set(thread.id, { text, files: attachments, project: thread.project });
   else if (thread) drafts.delete(thread.id);
   thread = value;
   if (!incognito) {
@@ -969,28 +998,93 @@ const promptTokens = tokenReadout("prompt-tokens", async (model, draft, signal) 
   const entry = composerMessage(userText(draft.text, values));
   const { body } = await chatBody(model, thread.entries, entry, values, signal);
   signal.throwIfAborted();
-  const result = await (await post(chat + "/input_tokens", body, signal)).json();
-  return result.input_tokens;
+  return inputTokens(body, signal);
 });
+async function inputTokens(body, signal) {
+  return (await (await post(chat + "/input_tokens", body, signal)).json()).input_tokens;
+}
+function canCompact(model) {
+  return (
+    model?.loom.endpoint === chat &&
+    !waitingForTools &&
+    thread.entries.some((e) => e.message && !e.partial)
+  );
+}
+async function compactConversation(model, values, signal, summary, automatic = false) {
+  const source = thread;
+  const handoff = userEntry(summaryPrompt(values));
+  const { body } = await chatBody(model, source.entries, handoff, values, signal, true);
+  notice("Compacting conversation…");
+  if (summary === undefined) {
+    const { stream_options, max_tokens, stop, ...request } = body;
+    request.stream = false;
+    if (request.tools) request.tool_choice = "none";
+    // A separate request leaves the original chat's named KV endpoint intact.
+    const result = await (await post(chat, request, signal)).json();
+    const choice = result.choices?.[0];
+    summary = choice?.message?.content;
+    if (choice?.finish_reason !== "stop" || choice.message.tool_calls?.length || !summary?.trim())
+      throw Error("Compaction needs a complete text summary");
+  }
+  const child = forkSession(source, source.entries.length, model.id, values);
+  child.title = "Compact · " + source.title;
+  child.named = true;
+  const reply = {
+    compaction: true,
+    message: { role: "assistant", content: summary },
+    model: model.id,
+    settings: values,
+  };
+  child.entries.push(handoff, reply);
+  let receipt = "Compacted";
+  if (model.loom.input_tokens) {
+    const next = await chatBody(model, [handoff, reply], handoff, values, signal, true);
+    const [before, after] = await Promise.all([
+      inputTokens(body, signal),
+      inputTokens(next.body, signal),
+    ]);
+    if (after >= before) {
+      if (automatic) return false;
+      throw Error("Summary would not shorten this chat");
+    }
+    receipt += " · " + before.toLocaleString() + " → " + after.toLocaleString() + " input tokens";
+  }
+  signal.throwIfAborted();
+  await openFork(source, child);
+  notice(receipt);
+  return true;
+}
+async function autoCompact(model, values, body, signal) {
+  if (
+    !values.compactAt ||
+    !model.loom.input_tokens ||
+    !model.context_length ||
+    !canCompact(model) ||
+    thread.entries.at(-1)?.compaction
+  )
+    return false;
+  if ((await inputTokens(body, signal)) < (model.context_length * Number(values.compactAt)) / 100)
+    return false;
+  return compactConversation(model, values, signal, undefined, true);
+}
 function updateDeleteAction() {
   byId("delete-chat").disabled = !byId("draft-chat").hidden && !prompt.value && !attachments.length;
 }
 function draftChanged() {
   const text = prompt.value.trim(),
-    exporting = text === "/export";
+    command = commands.get(text);
   updateDeleteAction();
   const model = catalog.get(models.value),
     route = model?.loom.endpoint;
   const ready =
-    !active &&
     !waitingForTools &&
     !thread?.checkpoint?.error &&
     acceptsFiles(model) &&
     route &&
     (text || attachments.length);
-  byId("send").disabled = Boolean(active) || (!ready && !exporting);
-  byId("send").textContent = exporting
-    ? "Export"
+  byId("send").disabled = Boolean(active) || (command ? command.disabled : !ready);
+  byId("send").textContent = command
+    ? command.firstChild.textContent
     : route === images
       ? "Generate"
       : route === speech
@@ -998,7 +1092,7 @@ function draftChanged() {
         : "Send";
   // A local command and its prefixes never enter a tokenizer request.
   const chatModel = route === chat ? model : null;
-  const counting = !active && !(text && "/export".startsWith(text));
+  const counting = !active && !(text && [...commands.keys()].some((key) => key.startsWith(text)));
   // Any edit may change history, attachments, tools, or framing. The raw
   // fields reuse a completed or pending count when their model and text match.
   const prepared = chatModel?.loom.input_tokens ? model : null;
@@ -1156,7 +1250,9 @@ async function submitTurn(mode = "send", spoken) {
   const before = thread.entries.length;
   try {
     let inputEntry = continuation
-      ? null
+      ? mode === "continue" && thread.entries.at(-1)?.compaction
+        ? userEntry("Continue.")
+        : null
       : voiceTurn
         ? userEntry(text)
         : route === chat
@@ -1164,7 +1260,7 @@ async function submitTurn(mode = "send", spoken) {
           : { role: "user", text };
     let body, headers, response;
     if (route === chat) {
-      const request = await chatBody(
+      let request = await chatBody(
         model,
         thread.entries,
         inputEntry,
@@ -1172,6 +1268,14 @@ async function submitTurn(mode = "send", spoken) {
         controller.signal,
         mode === "replay",
       );
+      if (
+        !pin &&
+        mode !== "replay" &&
+        (await autoCompact(model, values, request.body, controller.signal))
+      ) {
+        inputEntry ??= userEntry("Continue.");
+        request = await chatBody(model, thread.entries, inputEntry, values, controller.signal);
+      }
       body = request.body;
       headers = incognito ? {} : { "X-Loom-Session": thread.id };
       response = await post(
@@ -1216,6 +1320,7 @@ async function submitTurn(mode = "send", spoken) {
         else await remember();
         redraw();
         const results = [];
+        const source = thread;
         for (const call of calls) {
           controller.signal.throwIfAborted();
           const tool = executableTool(entry, call);
@@ -1227,6 +1332,20 @@ async function submitTurn(mode = "send", spoken) {
         // Only these messages are new. Retain the prepared history, including
         // any encoded attachments, for every request in this user action.
         body.messages.push(entry.message, ...results);
+        if (thread !== source || (await autoCompact(model, values, body, controller.signal))) {
+          const request = await chatBody(
+            model,
+            thread.entries,
+            userEntry("Continue."),
+            values,
+            controller.signal,
+          );
+          body = request.body;
+          headers = incognito ? {} : { "X-Loom-Session": thread.id };
+          thread.entries.push(request.input);
+          await remember();
+          redraw();
+        }
         turn = beginReply(model);
         notice("Continuing with tool results…");
         response = await post(chat, body, controller.signal, headers);
@@ -1412,20 +1531,42 @@ async function dictate(file) {
     },
   );
 }
-function exportChat(command = false) {
+function exportChat() {
   return withStop("Preparing download…", "Export cancelled", async (signal) => {
     const link = await conversationDownload(thread, signal);
-    if (command && prompt.value.trim() === "/export") prompt.value = "";
     notice("Conversation export · ");
     byId("notice").append(link);
     link.click();
   });
 }
+function compactChat() {
+  const model = catalog.get(models.value);
+  return withStop("Compacting conversation…", "Compaction stopped", (signal) =>
+    compactConversation(model, settings(), signal),
+  );
+}
+const commands = new Map();
+for (const [name, id, run] of [
+  ["/export", "export-chat", exportChat],
+  ["/compact", "compact", compactChat],
+]) {
+  const control = byId(id);
+  commands.set(name, control);
+  control.onclick = guarded(async () => {
+    await run();
+    if (prompt.value.trim() === name) {
+      prompt.value = "";
+      draftChanged();
+    }
+  });
+}
 byId("compose").onsubmit = (event) => {
   event.preventDefault();
-  guarded(() => (prompt.value.trim() === "/export" ? exportChat(true) : submitTurn()))();
+  const command = commands.get(prompt.value.trim());
+  if (command) command.click();
+  else guarded(submitTurn)();
 };
-byId("export-chat").onclick = guarded(() => exportChat());
+byId("compact-tool").onchange = () => redraw();
 byId("mcp").onclick = workspaceAction(async () => {
   const draft = await manageMcp();
   if (!draft) return;

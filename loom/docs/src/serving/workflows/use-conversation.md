@@ -74,6 +74,24 @@ reused, when the model supplies usage. **Edit in fork**, **Retry**, and
 **Compare…** preserve the original conversation while you change the input,
 model, or sampling settings.
 
+Open **Compaction** and choose **Compact now**, or send `/compact`, to
+continue in a shorter fork. The selected chat model summarizes the completed
+conversation. **Keep in summary** can name facts to carry forward, such as
+issue IDs or source URLs. The fork and its JSON export retain the full
+transcript. Subsequent requests start at the latest summary. The parent link
+opens the original chat, and an unsent draft stays available.
+
+**Let the model compact** offers `compact_chat`. Its argument is the model's
+own summary. The usual **Auto-run and return results** setting controls
+execution. **Auto-compact at % of context** starts a summary when the next
+prepared request reaches the percentage you enter, including requests that
+return tool results. An empty threshold turns this off. Automatic compaction
+requires a model that advertises a context window and input-token counting.
+Both settings start off. Leave room for the model to read the current
+history and write its summary. If a single tool result already exceeds the
+context window, choose a model with more context or fork at an earlier
+reply. A cancelled or failed summary leaves the original chat available.
+
 **Export chat** or `/export` downloads a conversation JSON file, including
 attachments, tool output, and preview sizes. On another server, choose
 **Import chat**, pick the file, select an available model, and continue.

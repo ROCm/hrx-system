@@ -52,3 +52,43 @@ test("history sends completed messages and carries tool availability on the next
   ]);
   assert.deepEqual(history, [{ role: "user", content: update + "\n\n[File: main.c]\nint main();" }]);
 });
+
+test("a compacted history starts with the latest summary and its prompt", async () => {
+  const entry = (role, content) => ({ message: { role, content } });
+  const first = entry("user", "Look up the specification");
+  const original = entry("tool", "Full search output");
+  original.message.tool_call_id = "search";
+  const call = entry("assistant", "");
+  call.message.tool_calls = [
+    { type: "function", id: "search", function: { name: "search", arguments: "{}" } },
+  ];
+  const prompt = entry("user", "Summarize");
+  const summary = { ...entry("assistant", "First handoff"), compaction: true };
+  const latest = { ...entry("assistant", "Second handoff"), compaction: true };
+  const follow = entry("user", "Continue");
+  const entries = [first, call, original, prompt, summary, follow, prompt, latest, follow];
+  assert.deepEqual(
+    await messages(entries.slice(0, 4)),
+    [first, call, original, prompt].map((e) => e.message),
+  );
+  assert.deepEqual(
+    await messages(entries.slice(0, 6)),
+    [prompt, summary, follow].map((e) => e.message),
+  );
+  assert.deepEqual(
+    await messages(entries),
+    [prompt, latest, follow].map((e) => e.message),
+  );
+  assert.equal(original.message.content, "Full search output");
+});
+
+test("the opt-in compaction tool carries the requested summary focus", () => {
+  assert.deepEqual(offeredTools({}), []);
+  const tools = offeredTools({ compactTool: true, compactFocus: "Keep source IDs" });
+  assert.equal(tools.length, 1);
+  assert.equal(tools[0].function.name, "compact_chat");
+  assert.match(tools[0].function.description, /Keep source IDs/);
+  assert.match(toolChange({}, tools), /Enabled: compact_chat/);
+  const call = { function: { name: "compact_chat", arguments: '{"summary":"Keep source S-23"}' } };
+  assert.equal(toolArgument(call, "summary"), "Keep source S-23");
+});

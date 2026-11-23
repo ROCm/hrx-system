@@ -152,6 +152,21 @@ export async function conversationImport(file, project) {
       requireField(["user", "assistant"].includes(input.role), "entry role");
       entry.role = input.role;
     }
+    if (input.compaction !== undefined) {
+      const prompt = session.entries.at(-1);
+      requireField(
+        input.compaction === true &&
+          entry.message?.role === "assistant" &&
+          entry.message.content.trim() &&
+          !entry.message.tool_calls &&
+          !input.partial &&
+          !pending.size &&
+          prompt?.message?.role === "user" &&
+          !prompt.partial,
+        "compaction boundary",
+      );
+      entry.compaction = true;
+    }
     for (const key of ["model", "imagePrompt", "imageModel", "html", "text", "problem", "draft"])
       if (input[key] != null) {
         requireField(string(input[key]), key);

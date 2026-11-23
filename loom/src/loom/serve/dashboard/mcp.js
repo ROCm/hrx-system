@@ -152,6 +152,7 @@ export async function manageMcp() {
             "present_html",
             "run_javascript",
             "generate_image",
+            "compact_chat",
             ...draft.map((b) => b.fn.name),
           ];
           const name =

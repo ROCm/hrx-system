@@ -92,6 +92,12 @@
           <button type="button" id="mcp">MCP servers…</button>
           <label title="Offer custom functions and enter their results in the chat.">Function schemas · JSON<textarea id="functions" name="functions" rows="2" placeholder='[{"type":"function","function":{"name":"…"}}]'></textarea></label>
         </details>
+        <details id="compact-settings"><summary>Compaction</summary>
+          <button id="compact" title="Summarize in a fork · /compact">Compact now</button>
+          <label class="check"><input id="compact-tool" type="checkbox" name="compactTool"> Let the model compact</label>
+          <label>Auto-compact at % of context<input id="compact-at" name="compactAt" type="number" min="1" max="99" placeholder="Off"></label>
+          <label>Keep in summary<input name="compactFocus"></label>
+        </details>
         <details id="audio-settings"><summary>Voice</summary>
           <label id="recognizer-setting" hidden>Dictation model<select id="recognizer" name="recognizer"></select></label>
           <label class="button" id="transcribe-file">Transcribe audio file<input type="file" id="recording" accept=".wav,.mp3,.flac,audio/wav,audio/mpeg,audio/flac"></label>
