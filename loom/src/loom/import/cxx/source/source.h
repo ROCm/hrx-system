@@ -25,6 +25,7 @@ class Source {
   Source& operator=(const Source&) = delete;
 
   cxx::TranslationUnit& unit() { return frontend_.unit(); }
+  const cxx::Toolchain& toolchain() const { return frontend_.toolchain(); }
   Diagnostics& diagnostics() { return frontend_.diagnostics(); }
   SourceContents& contents() { return frontend_.contents(); }
 

@@ -1513,6 +1513,46 @@ in the preheader and after each body/increment, preserving side effects and
 Discarded template arms are not instantiated. Outside templates, both arms
 remain subject to C++ source checking even though only one is imported.
 
+## Kernels launched from host code
+
+An offload driver that compiles one translation unit for both host and device
+names the kernels host code launches with a variable template of its own,
+annotated `[[loom::kernel_ref]]`:
+
+```cpp
+namespace my_runtime {
+struct launch_info;  // The driver's own launch record.
+template <auto Kernel>
+[[loom::kernel_ref]] extern const launch_info kernel_ref;
+}  // namespace my_runtime
+
+// Host code odr-uses the specialization of the kernel it launches.
+const my_runtime::launch_info* info = &my_runtime::kernel_ref<&my_kernel>;
+```
+
+The host compile only references each specialization's linkage name. The
+driver reads those names from the host module it generated and passes them as
+the import's kernel_ref roots (`loomc_cxx_import_options_t::kernel_refs`). The
+importer resolves each name to the specialization that semantic analysis
+instantiated and exports exactly the kernels named by their leading template
+argument; it reads no host body and nothing of the variable's type, which the
+driver defines. A name that is not a specialization of an annotated template
+naming a kernel is rejected. Ordinary source roots may accompany kernel_ref
+roots; the import exports both.
+
+After an import of a parsed unit, `loom::cxx_import::unit_kernel_launches()`
+reports for each root what only the importer knows: the kernel's export name,
+its exact workgroup size, and how its arguments flatten from the host
+parameter objects (one leaf per kernel argument, with its parameter, kind, and
+byte offset and size in the host object; a host subobject that flattens to
+several arguments gives one leaf per argument, each naming it). The native
+argument layout comes from target lowering and is reported by the compiled
+artifact's manifest, so a driver combines the two to pack kernel arguments.
+A kernel named by a kernel_ref root exports under its explicit `loom::symbol`
+name or, since such kernels are usually template specializations or lambdas,
+its Itanium symbol; drivers take the name from the report rather than
+recomputing it.
+
 ## Borrowed storage domains
 
 Buffer-root promises mirror the `buffer.assume.*` IR family under

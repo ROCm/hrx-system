@@ -197,6 +197,9 @@ enum loom_target_artifact_manifest_interface_flag_bits_e {
   LOOM_TARGET_ARTIFACT_MANIFEST_INTERFACE_FLAG_BINDING_COUNT = 1u << 1,
   // Indicates that constant_byte_length carries packed constant bytes.
   LOOM_TARGET_ARTIFACT_MANIFEST_INTERFACE_FLAG_CONSTANT_BYTE_LENGTH = 1u << 2,
+  // Indicates that argument_byte_length carries the native argument segment
+  // byte length.
+  LOOM_TARGET_ARTIFACT_MANIFEST_INTERFACE_FLAG_ARGUMENT_BYTE_LENGTH = 1u << 3,
 };
 
 typedef struct loom_target_artifact_manifest_interface_t {
@@ -208,7 +211,14 @@ typedef struct loom_target_artifact_manifest_interface_t {
   uint32_t binding_count;
   // Packed constant byte length when CONSTANT_BYTE_LENGTH is set.
   uint64_t constant_byte_length;
+  // Byte length of the native argument segment a host fills to call the
+  // function directly, when ARGUMENT_BYTE_LENGTH is set. Parameter rows with
+  // BYTE_OFFSET and BYTE_LENGTH locate each parameter's payload in it.
+  uint64_t argument_byte_length;
   // Optional parameter detail rows emitted in details and analysis modes.
+  // A target family that owns a native argument layout reports one row per
+  // authored parameter, in parameter order, with its ABI byte offset, payload
+  // byte length and alignment in the argument segment.
   const loom_target_artifact_manifest_parameter_t* parameters;
   // Number of parameter detail rows.
   iree_host_size_t parameter_detail_count;

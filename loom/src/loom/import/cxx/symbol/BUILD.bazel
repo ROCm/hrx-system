@@ -63,7 +63,10 @@ loom_cc_test(
 loom_cc_library(
     name = "functions",
     srcs = ["functions.cc"],
-    hdrs = ["functions.h"],
+    hdrs = [
+        "functions.h",
+        "kernel_launch.h",
+    ],
     cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [

@@ -24,6 +24,9 @@ class Diagnostics final : public cxx::DiagnosticsClient {
  public:
   explicit Diagnostics(loom_diagnostic_sink_t sink) : sink_(sink) {}
   ~Diagnostics() override { iree_status_free(status_); }
+  // Replaces the sink receiving later diagnostics, such as those of a parsed
+  // translation unit's import or of a host code generator sharing the unit.
+  void set_sink(loom_diagnostic_sink_t sink) { sink_ = sink; }
   void bind(cxx::TranslationUnit* unit, SourceContents* contents) {
     unit_ = unit;
     contents_ = contents;

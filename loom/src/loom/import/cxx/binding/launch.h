@@ -74,6 +74,11 @@ class LaunchContracts {
   LaunchConfiguration bind_configuration(cxx::FunctionSymbol* selected,
                                          cxx::AST* kernel, Types& types);
 
+  // Returns the kernel's workgroup size when an exact workgroup_size
+  // annotation fixes every dimension, or nullopt.
+  std::optional<std::array<uint32_t, 3>> exact_workgroup_size(
+      cxx::FunctionSymbol* function);
+
   // Returns whether a source function is owned as another kernel's launch
   // configuration and therefore cannot also become an ordinary callable.
   bool is_configuration(cxx::FunctionSymbol* function) const;
