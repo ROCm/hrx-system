@@ -1,7 +1,7 @@
 # Use Conversation
 
-Start `loom-serve` with a prepared chat deployment. For example, with a
-CPU-capable deployment at `models/chat/model.json`:
+Start `loom-serve` with your chat deployment. This example serves a
+CPU-capable deployment from `models/chat/model.json` on the local machine.
 
 ```sh
 loom-serve --device=task --pool_backing=fixed \
@@ -17,12 +17,11 @@ Behind a relay, open the same path under the relay's mount prefix.
 
 ## Models, prompts, and tools
 
-The model picker lists prepared deployments by name and groups them by what
-the composer can do. Choose a chat model for conversation, an image model
-to generate a picture, or a speech model to speak the input. **Refresh
-models** picks up changes to the server. Attach or drop UTF-8 text files
-into chat. A chat model advertising image input also accepts supported
-image attachments.
+Each option shows the deployment name followed by **Chat**, **Image**, or
+**Speech**. Choose **Chat** for conversation, **Image** to generate a picture,
+or **Speech** to speak the input. **Refresh models** picks up newly prepared
+deployments. Attach or drop UTF-8 text files into chat. A chat model
+advertising image input also accepts PNG, JPEG, WebP, and GIF attachments.
 
 Open **Inspector** on a narrow screen. **Prompts** holds system instructions
 and a user template with one `{{input}}` placeholder. The composer counts
