@@ -104,7 +104,6 @@ export async function manageMcp() {
     url = element("input"),
     secret = element("input");
   url.type = "url";
-  url.placeholder = "https://mcp.exa.ai/mcp";
   secret.type = "password";
   secret.autocomplete = "off";
   const kind = selectChoices([
@@ -123,7 +122,11 @@ export async function manageMcp() {
     picker.value = id || "";
   }
   function show() {
-    server = servers.get(picker.value) || { id: identity(), url: "", tools: [] };
+    server = servers.get(picker.value) || {
+      id: identity(),
+      url: servers.size ? "" : "https://mcp.exa.ai/mcp",
+      tools: [],
+    };
     url.value = server.url;
     url.readOnly = !!picker.value;
     const auth = credentials.get(server.id) || {};
@@ -190,9 +193,9 @@ export async function manageMcp() {
         menu();
         show();
       } else {
-        const address = new URL(url.value);
+        const address = URL.parse(url.value);
         if (
-          !["http:", "https:"].includes(address.protocol) ||
+          !["http:", "https:"].includes(address?.protocol) ||
           address.username ||
           address.password ||
           address.hash
