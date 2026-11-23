@@ -179,7 +179,7 @@ export async function conversationImport(file, project) {
       );
       entry.toolUpdate = input.toolUpdate;
     }
-    for (const key of ["partial", "offeredHTML", "failed", "verbatim"])
+    for (const key of ["partial", "offeredHTML", "failed", "verbatim", "automatic"])
       if (input[key] !== undefined) {
         requireField(typeof input[key] === "boolean", key);
         entry[key] = input[key];

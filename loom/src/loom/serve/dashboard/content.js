@@ -20,8 +20,9 @@ export async function attachment(file, images) {
 }
 export const partName = (part) => part.name ?? part.file?.name ?? "Image";
 export const documentText = (part) => "[File: " + part.name + "]\n" + part.text;
+export const entryContent = (entry) => entry.message?.content ?? entry.text;
 export function entryText(entry) {
-  const content = entry.message?.content ?? entry.text;
+  const content = entryContent(entry);
   if (Array.isArray(content))
     return content
       .map((part) =>
@@ -31,20 +32,33 @@ export function entryText(entry) {
   return content || entry.imagePrompt || "";
 }
 
+// Compaction keeps its own prompt immediately before the summary. A tool
+// availability notice can also occupy a user message with no actual input.
+export function isUserTurn(entry, index, entries) {
+  return (
+    (entry.message?.role ?? entry.role) === "user" &&
+    !entry.automatic &&
+    !entries[index + 1]?.compaction &&
+    entryContent(entry)?.length > 0
+  );
+}
+
 // Older exports stored only the expanded user text. Remove the exact template
 // framing once when reopening one of those turns in the composer.
 export function editable(entry, values) {
-  const content = entry.message.content;
-  const parts = Array.isArray(content) ? content : [];
-  const files = parts.filter((part) => part.type !== "text");
-  let text = Array.isArray(content)
-    ? parts
-        .filter((part) => part.type === "text")
-        .map((part) => part.text)
-        .join("\n\n")
-    : content;
+  const content = entryContent(entry);
+  const files = [];
+  let text = content;
+  if (Array.isArray(content)) {
+    const lines = [];
+    for (const part of content) {
+      if (part.type === "text") lines.push(part.text);
+      else files.push(part);
+    }
+    text = lines.join("\n\n");
+  }
   if (entry.draft !== undefined) text = entry.draft;
-  else if (values.template) {
+  else if (entry.message && values.template) {
     const [head, tail] = values.template.split("{{input}}");
     if (
       tail !== undefined &&

@@ -38,7 +38,7 @@ import {
 } from "./view.js";
 import { microphone, speak, record, transcribe } from "./audio.js";
 import { incognito, setConversationLocation } from "./topbar.js";
-import { attachment, editable, entryText, partName } from "./content.js";
+import { attachment, editable, entryContent, entryText, isUserTurn, partName } from "./content.js";
 import { ask, askName, field, findChats, selectChoices } from "./dialog.js";
 import {
   createProject,
@@ -65,6 +65,7 @@ const transcript = byId("transcript"),
   models = byId("model");
 const inspectorToggle = byId("inspector-toggle");
 const chat = "/v1/chat/completions";
+const isChatModel = (model) => model?.loom?.endpoint === chat;
 const compactTool = compactionTool({});
 const speech = "/v1/audio/speech",
   recognition = "/v1/audio/transcriptions";
@@ -85,7 +86,9 @@ const drafts = new Map();
 const alternatives = new Map();
 let chatLabels = new Map();
 const workspaceBusy = Symbol();
+const incompatibleFiles = "Select a model that accepts these files, or remove them";
 let waitingForTools = false;
+const selectedModel = () => catalog.get(models.value);
 
 function notice(text = "", failure = false) {
   const status = byId("notice");
@@ -103,16 +106,16 @@ function guarded(work) {
 function newThread() {
   return emptySession(project?.id, project?.settings);
 }
-async function remember() {
+async function remember(selected = thread) {
   if (incognito) {
-    thread.updated = Date.now();
-    privateChats.set(thread.id, thread);
+    selected.updated = Date.now();
+    privateChats.set(selected.id, selected);
     return;
   }
-  const selected = thread;
   await saveSession(database, selected);
   if (thread === selected) setConversationLocation("#session/" + selected.id);
 }
+const getChat = (id) => incognito ? privateChats.get(id) : readSession(database, id);
 function chatTitle(row) {
   const tag = chatLabels.get(row.id);
   return tag ? row.title + " · #" + tag.suffix : row.title;
@@ -154,8 +157,8 @@ async function historyMenu() {
   draft.hidden = rows.some((row) => row.id === thread.id);
   draft.value = draft.hidden ? "" : thread.id;
   for (const row of rows) {
-    if (row.parent?.id === thread.id && row.parent.turn !== undefined) {
-      const turn = row.parent.turn;
+    if (row.parent?.id === thread.id && row.parent.action) {
+      const turn = row.parent.count;
       if (!alternatives.has(turn)) alternatives.set(turn, []);
       alternatives.get(turn).push(row);
     }
@@ -195,8 +198,9 @@ function unfinished() {
   }
   return pending;
 }
+const lastUserTurn = () => thread.entries.findLastIndex(isUserTurn);
 function controls() {
-  const model = catalog.get(models.value),
+  const model = selectedModel(),
     route = model?.loom.endpoint;
   const busy = Boolean(active),
     isChat = route === chat;
@@ -208,6 +212,7 @@ function controls() {
     field.disabled = busy;
   models.disabled ||= waitingForTools || Boolean(thread.checkpoint && !thread.checkpoint.release);
   byId("stop").hidden = !busy || active === workspaceBusy;
+  byId("undo").disabled = busy || lastUserTurn() < 0;
   const canSpeak = byId("reader").length > 0,
     canHear = byId("recognizer").length > 0;
   for (const id of ["attach", "token-setting", "tools-setting", "compact-settings", "sampling"])
@@ -232,7 +237,7 @@ function controls() {
   byId("remove-preset").disabled = busy || !byId("presets").value;
 }
 function selectModel() {
-  const model = catalog.get(models.value);
+  const model = selectedModel();
   const capacity = model?.context_length?.toLocaleString() || "";
   byId("context-window").textContent = capacity ? " / " + capacity : "";
   document.documentElement.style.setProperty("--count-width", Math.max(5, capacity.length) + "ch");
@@ -255,11 +260,7 @@ async function discover() {
       .filter((model) => modes.has(model.loom?.endpoint))
       .map((model) => new Option(model.id + " · " + modes.get(model.loom.endpoint), model.id)),
   );
-  const preferred = [
-    previous,
-    thread.model,
-    data.find((model) => model.loom?.endpoint === chat)?.id,
-  ];
+  const preferred = [previous, thread.model, data.find(isChatModel)?.id];
   for (const id of preferred)
     if (modes.has(catalog.get(id)?.loom?.endpoint)) {
       models.value = id;
@@ -314,7 +315,7 @@ function drawEntry(entry, pending, position) {
   if (entry.toolUpdate) row.append(element("div", entry.toolUpdate, "caption"));
   if (message?.reasoning_content)
     row.append(disclosure("Reasoning", element("div", message.reasoning_content, "prose")));
-  const content = message?.content ?? entry.text;
+  const content = entryContent(entry);
   if (
     typeof content === "string" &&
     !(entry.html !== undefined && content === "Displayed HTML preview.")
@@ -437,7 +438,7 @@ function turnActions(entry, index) {
   const actions = element("div", undefined, "turn-actions");
   const text = entry.html ?? entryText(entry);
   if (text) actions.append(copyButton("Copy", text));
-  if (entry.message?.role === "user" && entry.message.content)
+  if (isUserTurn(entry, index, thread.entries))
     actions.append(
       button(
         "Edit in fork",
@@ -445,9 +446,9 @@ function turnActions(entry, index) {
       ),
     );
   if (entry.message?.role === "assistant") {
-    if (catalog.get(entry.model)?.loom.endpoint === chat)
+    if (isChatModel(catalog.get(entry.model)))
       actions.append(button("Retry", replayAction(index, entry.model, entry.settings, "retry")));
-    if ([...catalog.values()].some((model) => model.loom.endpoint === chat))
+    if ([...catalog.values()].some(isChatModel))
       actions.append(button("Compare…", () => compareTurn(index)));
     if (text && byId("reader").length)
       actions.append(
@@ -526,7 +527,7 @@ function redraw(follow = followingLatest()) {
       const live =
         !incognito &&
         heads.get(entry.model) === i &&
-        catalog.get(entry.model)?.loom.endpoint === chat;
+        isChatModel(catalog.get(entry.model));
       const fork = button(
         live ? "Fork here" : "Fork from history",
         workspaceAction(() => startFork(count, entry, live)),
@@ -576,7 +577,7 @@ function workspaceAction(work, after) {
   });
 }
 async function openChat(id) {
-  const selected = incognito ? privateChats.get(id) : await readSession(database, id);
+  const selected = await getChat(id);
   if (!selected) {
     await historyMenu();
     throw new Error("This chat no longer exists.");
@@ -596,17 +597,22 @@ async function restoreChat() {
   await historyMenu();
   redraw();
 }
-async function startFork(count, entry, live, action, turn) {
+async function startFork(count, entry, live, action) {
   const parent = thread;
   if (incognito || !parent.revision || parent.saved < count) await remember();
-  const child = forkSession(parent, count, entry.model, entry.settings || parent.settings);
+  const child = forkSession(
+    parent,
+    count,
+    entry.model || parent.model || models.value,
+    entry.settings || parent.settings,
+  );
   if (action) {
-    Object.assign(child.parent, { action, turn });
+    child.parent.action = action;
     child.title =
-      (action === "compare" ? "Compare · " + entry.model : action === "edit" ? "Edit" : "Retry") +
+      (action === "compare" ? "Compare · " + child.model : action === "edit" ? "Edit" : "Retry") +
       " · " +
       parent.title;
-    if (action === "compare") child.pendingPeer = peerReceipt(parent.entries[turn]);
+    if (action === "compare") child.pendingPeer = peerReceipt(parent.entries[count]);
   }
   if (live) {
     child.checkpoint = { model: entry.model };
@@ -614,23 +620,12 @@ async function startFork(count, entry, live, action, turn) {
   }
   return openFork(parent, child);
 }
-async function editTurn(index) {
-  const entry = thread.entries[index];
-  const answer = thread.entries[index + 1],
-    model = answer?.model || thread.model || models.value;
-  if (catalog.get(model)?.loom.endpoint !== chat)
-    throw new Error("This turn's chat model is unavailable");
-  const values = answer?.settings || thread.settings;
-  const edit = editable(entry, values);
-  await startFork(index, { model, settings: values }, false, "edit", index);
-  prompt.value = edit.text;
-  attachments = edit.files;
-  showFiles();
-  prompt.focus();
+function editTurn(index) {
+  return startFork(index, thread.entries[index + 1] || thread, false, "edit");
 }
 function replayAction(index, model, values, action) {
   return workspaceAction(
-    () => startFork(index, { model, settings: values }, false, action, index),
+    () => startFork(index, { model, settings: values }, false, action),
     () => submitTurn("replay"),
   );
 }
@@ -646,7 +641,7 @@ function compareTurn(index) {
     );
   const peers = [...catalog.values()].filter(
     (model) =>
-      model.loom.endpoint === chat &&
+      isChatModel(model) &&
       (!imagesInHistory || model.input_modalities.includes("image")),
   );
   if (!peers.length) {
@@ -692,16 +687,15 @@ async function openFork(parent, child) {
   const pin = child.checkpoint;
   // Journal the unique pin name (the child ID) before sending the control
   // request. A reload can still consume or release it if the reply was lost.
-  if (incognito) privateChats.set(child.id, child);
-  else await saveSession(database, child);
-  const draft = prompt.value,
-    files = attachments;
-  selectThread(child);
-  if (!child.parent.action) {
-    prompt.value = draft;
-    attachments = files;
-    showFiles();
-  }
+  await remember(child);
+  const { action, count } = child.parent;
+  const draft =
+    action === "edit"
+      ? editable(parent.entries[count], child.settings)
+      : action
+        ? undefined
+        : composerDraft();
+  selectThread(child, draft);
   await historyMenu();
   if (pin) {
     try {
@@ -876,7 +870,7 @@ async function runTool(entry, call, tool, signal) {
     display.failed = true;
   }
   const result = await toolResult(call, content, display);
-  if (summary) await compactConversation(catalog.get(models.value), settings(), signal, summary);
+  if (summary) await compactConversation(selectedModel(), settings(), signal, summary);
   return result;
 }
 function showFiles() {
@@ -890,23 +884,24 @@ function showFiles() {
       return remove;
     }),
   );
-  if (!acceptsFiles(catalog.get(models.value)))
-    byId("files").append("Select a model that accepts these files, or remove them");
+  if (!acceptsFiles(selectedModel())) byId("files").append(incompatibleFiles);
   draftChanged();
 }
 function acceptsFiles(model) {
   return (
     !attachments.length ||
-    (model?.loom.endpoint === chat &&
+    (isChatModel(model) &&
       (model.input_modalities.includes("image") ||
         attachments.every((part) => part.type !== "image")))
   );
 }
-function selectThread(value) {
+function composerDraft() {
+  return { text: prompt.value, files: attachments, project: thread.project };
+}
+function selectThread(value, draft = drafts.get(value.id)) {
   inspectorToggle.ariaExpanded = "false";
-  const text = commands.has(prompt.value.trim()) ? "" : prompt.value;
-  if (thread && thread !== value && (text || attachments.length))
-    drafts.set(thread.id, { text, files: attachments, project: thread.project });
+  if (thread && thread !== value && (prompt.value || attachments.length))
+    drafts.set(thread.id, composerDraft());
   else if (thread) drafts.delete(thread.id);
   thread = value;
   if (!incognito) {
@@ -916,13 +911,13 @@ function selectThread(value) {
   else if (
     value.importedCount &&
     value.entries.at(-1)?.message &&
-    catalog.get(models.value)?.loom.endpoint !== chat
+    !isChatModel(selectedModel())
   ) {
-    const replacement = [...catalog.values()].find((model) => model.loom.endpoint === chat);
+    const replacement = [...catalog.values()].find(isChatModel);
     if (replacement) models.value = replacement.id;
   }
-  attachments = drafts.get(value.id)?.files || [];
-  prompt.value = drafts.get(value.id)?.text || "";
+  prompt.value = draft?.text || "";
+  attachments = draft?.files || [];
   showFiles();
   selectModel();
   restoreSettings(value.settings);
@@ -932,6 +927,9 @@ function selectThread(value) {
 }
 function userEntry(content) {
   return { message: { role: "user", content } };
+}
+function continuationInput() {
+  return { ...userEntry("Continue."), automatic: true };
 }
 async function chatBody(model, entries, user, values, signal, replay = false) {
   const tools = offeredTools(values);
@@ -1005,7 +1003,7 @@ async function inputTokens(body, signal) {
 }
 function canCompact(model) {
   return (
-    model?.loom.endpoint === chat &&
+    isChatModel(model) &&
     !waitingForTools &&
     thread.entries.some((e) => e.message && !e.partial)
   );
@@ -1074,7 +1072,7 @@ function draftChanged() {
   const text = prompt.value.trim(),
     command = commands.get(text);
   updateDeleteAction();
-  const model = catalog.get(models.value),
+  const model = selectedModel(),
     route = model?.loom.endpoint;
   const ready =
     !waitingForTools &&
@@ -1215,14 +1213,14 @@ async function submitTurn(mode = "send", spoken) {
       (entry) => !entry.partial && entry.message?.tool_calls?.length,
     );
     const owner = index < (thread.importedCount || 0) ? models.value : thread.entries[index]?.model;
-    if (catalog.get(owner)?.loom.endpoint !== chat)
+    if (!isChatModel(catalog.get(owner)))
       throw new Error("Select an available chat model to continue with tool results");
     if (models.value !== owner) {
       models.value = owner;
       selectModel();
     }
   }
-  const model = catalog.get(models.value),
+  const model = selectedModel(),
     route = model?.loom.endpoint;
   if (!modes.has(route)) throw new Error("Select a prepared model");
   if (pin && pin.model !== model.id)
@@ -1231,8 +1229,7 @@ async function submitTurn(mode = "send", spoken) {
     input = draft.trim(),
     files = voiceTurn ? [] : attachments;
   if (!continuation && !input && !files.length) return;
-  if (mode === "send" && !acceptsFiles(model))
-    throw new Error("The selected model cannot accept these files");
+  if (mode === "send" && !acceptsFiles(model)) throw new Error(incompatibleFiles);
   const values = mode === "replay" ? { ...thread.settings, mcp: mcpSettings().mcp } : settings();
   const text = route === chat ? userText(input, values) : input;
   thread.settings = values;
@@ -1251,7 +1248,7 @@ async function submitTurn(mode = "send", spoken) {
   try {
     let inputEntry = continuation
       ? mode === "continue" && thread.entries.at(-1)?.compaction
-        ? userEntry("Continue.")
+        ? continuationInput()
         : null
       : voiceTurn
         ? userEntry(text)
@@ -1273,7 +1270,7 @@ async function submitTurn(mode = "send", spoken) {
         mode !== "replay" &&
         (await autoCompact(model, values, request.body, controller.signal))
       ) {
-        inputEntry ??= userEntry("Continue.");
+        inputEntry ??= continuationInput();
         request = await chatBody(model, thread.entries, inputEntry, values, controller.signal);
       }
       body = request.body;
@@ -1291,7 +1288,7 @@ async function submitTurn(mode = "send", spoken) {
       controller.signal.throwIfAborted();
       thread.entries.push(inputEntry);
       if (!continuation) {
-        if (inputEntry.message && input !== text) inputEntry.draft = input;
+        if (draft !== text) inputEntry.draft = draft;
         delete thread.pendingPeer;
         const title = (input || (files.length ? partName(files[0]) : "")).slice(0, 64);
         if (!thread.named && (!before || thread.parent?.count === before))
@@ -1336,7 +1333,7 @@ async function submitTurn(mode = "send", spoken) {
           const request = await chatBody(
             model,
             thread.entries,
-            userEntry("Continue."),
+            continuationInput(),
             values,
             controller.signal,
           );
@@ -1540,7 +1537,7 @@ function exportChat() {
   });
 }
 function compactChat() {
-  const model = catalog.get(models.value);
+  const model = selectedModel();
   return withStop("Compacting conversation…", "Compaction stopped", (signal) =>
     compactConversation(model, settings(), signal),
   );
@@ -1553,7 +1550,10 @@ for (const [name, id, run] of [
   const control = byId(id);
   commands.set(name, control);
   control.onclick = guarded(async () => {
+    const source = thread.id;
     await run();
+    const saved = drafts.get(source);
+    if (saved?.text.trim() === name) saved.text = "";
     if (prompt.value.trim() === name) {
       prompt.value = "";
       draftChanged();
@@ -1591,6 +1591,7 @@ async function startChat() {
   prompt.focus();
 }
 byId("new").onclick = workspaceAction(startChat);
+byId("undo").onclick = workspaceAction(() => editTurn(lastUserTurn()));
 const switchChat = workspaceAction((id) => (id === "+" ? startChat() : openChat(id)));
 const rename = workspaceAction(async (name) => {
   thread.title = name;
@@ -1642,8 +1643,7 @@ chooseFiles(
   workspaceAction(async ([file]) => {
     notice("Reading " + file.name + "…");
     const session = await conversationImport(file, project.id);
-    if (incognito) privateChats.set(session.id, session);
-    else await saveSession(database, session);
+    await remember(session);
     selectThread(session);
     await historyMenu();
     notice("Imported · " + session.title);
@@ -1703,8 +1703,7 @@ const deleteSelected = workspaceAction(async (projectId, chatId, message) => {
     await deleteFromWorkspace(database, projectId, chatId);
     await projectMenu(projectId);
   }
-  const next =
-    adjacent && (incognito ? privateChats.get(adjacent) : await readSession(database, adjacent));
+  const next = adjacent && await getChat(adjacent);
   if (next && next.title === thread.title && chatLabels.has(next.id))
     message += " · Now showing " + chatTitle(next);
   selectThread(next || newThread());
@@ -1805,12 +1804,12 @@ byId("remove-preset").onclick = () => {
   );
 };
 const attachFiles = workspaceAction(async (files) => {
-  const model = catalog.get(models.value);
-  if (model?.loom.endpoint !== chat) throw new Error("Select a chat model to attach files");
+  const model = selectedModel();
+  if (!isChatModel(model)) throw new Error("Select a chat model to attach files");
   const parts = await Promise.all(
     files.map((file) => attachment(file, model.input_modalities.includes("image"))),
   );
-  attachments.push(...parts);
+  attachments = attachments.concat(parts);
   showFiles();
   notice();
 });

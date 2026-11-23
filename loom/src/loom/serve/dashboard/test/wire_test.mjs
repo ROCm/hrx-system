@@ -3,6 +3,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import { editable, isUserTurn } from "../content.js";
 import { events } from "../events.js";
 import { appendCalls, chatChunks, messages, offeredTools, toolArgument, toolChange } from "../wire.js";
 
@@ -80,6 +81,45 @@ test("a compacted history starts with the latest summary and its prompt", async 
     [prompt, latest, follow].map((e) => e.message),
   );
   assert.equal(original.message.content, "Full search output");
+});
+
+test("undo finds an authored input across tool results, summary prompts, and continuations", async () => {
+  const user = (content) => ({ message: { role: "user", content } });
+  const summary = { compaction: true, message: { role: "assistant", content: "Handoff" } };
+  const handoff = user("Summarize the conversation");
+  const automatic = { ...user("Continue."), automatic: true };
+  const call = { id: "lookup", type: "function", function: { name: "search", arguments: "{}" } };
+  const entries = [
+    user("Search for this"),
+    { message: { role: "assistant", content: "", tool_calls: [call] } },
+    { message: { role: "tool", tool_call_id: "lookup", content: "Search result" } },
+    { ...user(""), toolUpdate: "Tool availability changed" },
+    handoff,
+    summary,
+    automatic,
+  ];
+  assert.equal(entries.findLastIndex(isUserTurn), 0);
+  assert.deepEqual(await messages(entries), [handoff.message, summary.message, automatic.message]);
+  const typed = user("Continue.");
+  entries.push(typed, { message: { role: "assistant", content: "Partial" }, partial: true });
+  assert.equal(entries.findLast(isUserTurn), typed);
+  assert.equal([handoff, summary, automatic].findLastIndex(isUserTurn), -1);
+});
+
+test("editing restores the composer text and attachments for chat and media inputs", () => {
+  const document = { type: "document", name: "input.txt", text: "Contents" };
+  const entry = { message: { role: "user", content: [{ type: "text", text: "<task>" }, document] } };
+  const settings = { template: "<{{input}}>" };
+  assert.deepEqual(editable(entry, settings), { text: "task", files: [document] });
+  assert.deepEqual(editable({ ...entry, draft: "  task\n" }, settings), {
+    text: "  task\n", files: [document],
+  });
+  const fileOnly = { message: { role: "user", content: [document] } };
+  assert.equal([fileOnly].findLastIndex(isUserTurn), 0);
+  assert.deepEqual(editable(fileOnly, {}), { text: "", files: [document] });
+  const media = { role: "user", text: "<task>" };
+  assert.equal([media].findLastIndex(isUserTurn), 0);
+  assert.deepEqual(editable(media, settings), { text: "<task>", files: [] });
 });
 
 test("the opt-in compaction tool carries the requested summary focus", () => {

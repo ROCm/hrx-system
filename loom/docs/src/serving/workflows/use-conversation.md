@@ -74,6 +74,11 @@ reused, when the model supplies usage. **Edit in fork**, **Retry**, and
 **Compare…** preserve the original conversation while you change the input,
 model, or sampling settings.
 
+Choose **Undo last turn** beside **Send** to reopen your most recent input
+and attachments in a history fork. The parent chat keeps the original
+reply and tool results. Edit the draft and send it when you're ready.
+The server can reuse the matching prefix on that request.
+
 Open **Compaction** and choose **Compact now**, or send `/compact`, to
 continue in a shorter fork. The selected chat model summarizes the completed
 conversation. **Keep in summary** can name facts to carry forward, such as
