@@ -101,6 +101,10 @@ trusted; deployment-owned tunnels and isolation supply any required boundary.
 devices. `/metrics`, `/logz` and `/logz/stream` expose counters and telemetry;
 slow observers do not retain model resources or backpressure record producers.
 
+`/dashboard/chat.html` opens Conversation using the prepared model catalog.
+Start a private chat, resume a project, or import a conversation from another
+server. [Conversation workflow](../../../../docs/src/serving/workflows/use-conversation.md)
+
 `/dashboard/` serves the embedded live viewer without additional flags for
 local, numeric-IP, tunneled, and trusted Unix-relay access. The
 [observation workflow](../../../../docs/src/serving/workflows/observe-model-server.md#watch-the-live-dashboard)

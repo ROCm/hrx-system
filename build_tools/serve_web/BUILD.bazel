@@ -1,0 +1,24 @@
+# Copyright 2026 The IREE Authors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("@aspect_rules_js//js:defs.bzl", "js_binary")
+load("@loom_web_npm//:defs.bzl", "npm_link_all_packages")
+
+package(default_visibility = ["//visibility:private"])
+
+npm_link_all_packages(name = "node_modules")
+
+js_binary(
+    name = "pack",
+    data = [
+        ":node_modules/@gfx/zopfli",
+        ":node_modules/@rollup/wasm-node",
+        ":node_modules/clean-css",
+        ":node_modules/html-minifier-terser",
+        ":node_modules/terser",
+    ],
+    entry_point = "pack.mjs",
+    # The generated-source rule passes execroot-relative input and output paths.
+    env = {"BAZEL_BINDIR": "."},
+    visibility = ["//loom/src/loom/serve/dashboard:__pkg__"],
+)

@@ -20,8 +20,11 @@ loom-serve --device=task --pool_backing=fixed \
   --model=vectors/model.json
 ```
 
-The dashboard is embedded in the executable: no frontend installation,
-external assets, database, or second listener. Models appear as they register.
+**Telemetry** and **Conversation** share the server's listener and embedded
+browser assets. To send a request while watching the charts, open
+**Conversation** in another tab. [Use Conversation](use-conversation.md)
+
+Models appear in Telemetry as they register.
 Token and completion rates use a five-second rolling window, with the available
 observed duration during warm-up. Lifetime averages divide cumulative work by
 elapsed source lifetime, including idle time and work before the page opened.
@@ -44,16 +47,16 @@ Model badges link to their execution device and storage pool. The Devices sectio
 request activity by that placement; these counts are not hardware utilization or
 native queue depth. Device and pool cards remain when models are unregistered.
 
-Each named pool appears once, even when multiple devices consume it. Its card
-shows committed serving allocations, observed peaks, reusable backing, and
-commitment histories, with links to the permitted devices. An elastic pool's
-retained backing is its complete managed physical total, including permanent
-storage and workspace. A fixed pool reports that total under native storage.
-The component counters describe included allocations. Elastic virtual
-reservations are address space, not physical RAM. These views exclude driver
-allocations and other processes; overlapping component counters cannot establish
-an exclusive weights/KV/workspace partition. Expand a pool to inspect its source
-counters.
+Each named pool appears once, even when multiple devices consume it. Read its
+capacity strip from left to right as held bytes, backing ready for reuse, and
+the uncommitted portion of a finite budget. The sparkline records the reusable
+bytes observed during the selected time window. Workspace counts show how many
+reservations reused a range, took fresh space, or waited, and how many occurred
+since you opened Telemetry. Workspace draws from the same pool. Virtual
+reservations measure address space separately in **All pool counters**.
+Expand **Recent physical slabs** on an elastic pool to inspect a particular
+slab. A partially leased slab shows individual pages around its first free
+page. Hover over a page for its index and state.
 
 Unchanged snapshots stay off the wire. A small heartbeat settles the rate window,
 then backs off to once per minute while idle. New activity still appears at the
@@ -71,9 +74,10 @@ browser clock, even when the feed is quiet; a dotted tail marks the last receive
 value, not new samples. **Scroll off** keeps the last activity window visible
 while counters and peaks continue updating. Neither mode adds network traffic.
 The time-range button switches between 30 seconds and two minutes.
-Pause or a hidden tab releases the live connection. Resuming reads current
-state; rolling rates and activity buckets do not replay work that happened while
-disconnected. Lifetime averages still include that work and elapsed time.
+Leave Telemetry open in another tab to collect up to 512 samples per chart
+while you use the server. Switching back draws the accumulated history.
+**Pause** or leaving the page releases the connection. Resuming starts a fresh
+rate window. Lifetime averages include work completed while disconnected.
 
 No dashboard flag is needed for same-origin access through `localhost`, a
 numeric IP address, or an SSH tunnel. The browser-visible port may differ from
@@ -357,6 +361,14 @@ Pages are live captures, not a frozen snapshot. Deduplicating IDs and restarting
 when `incarnation` or telemetry `identity` changes keeps a client from confusing
 two registration lifetimes. Router-held and tokenizer requests are reported
 separately from model-admitted entries.
+
+An admitted text request includes a `prompt` object. `total_tokens` is the
+prepared prompt length and `cached_tokens` counts positions reused at admission.
+`processed_tokens` advances as fresh prompt positions finish prefill. Prompt
+progress is `cached_tokens + processed_tokens` out of `total_tokens`. Sampling
+`processed_tokens` gives the fresh input rate and sampling
+`counters.output_tokens` gives the generation rate. Queued requests acquire
+these prompt fields when the text service assigns a session.
 
 Session IDs survive movement between `storage:"row"` and `storage:"cache"`.
 `request:null` indicates idle retained history. Positions describe completed,

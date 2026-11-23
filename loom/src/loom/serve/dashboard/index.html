@@ -1,22 +1,19 @@
 <!doctype html>
-<html lang="en">
+<!--! Copyright 2026 The IREE Authors. SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception -->
+<html lang="en" class="telemetry">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark" />
-    <title>Loom · Serve</title>
+    <title>Telemetry · Loom Serve</title>
     <link rel="stylesheet" href="style.css" />
     <script type="module" src="app.js"></script>
   </head>
   <body>
-    <main>
-      <header>
-        <a class="brand" href="./"
-          ><span class="brand-word">loom</span
-          ><span class="brand-section">/ serve</span></a
-        >
-        <span id="endpoint" class="endpoint">—</span>
-        <div class="controls">
+<header class="topbar">
+  <a class="brand" href="./" aria-label="Loom Serve">loom <span>/ serve</span></a>
+  <nav aria-label="Workspace"><a href="chat.html">Conversation</a><span aria-current="page">Telemetry</span></nav>
+  <div class="controls">
           <span id="connection-dot" class="dot"></span>
           <span id="connection">Connecting</span>
           <button id="pause" type="button">Pause</button>
@@ -37,73 +34,63 @@
           </button>
           <time id="clock">—</time>
         </div>
-      </header>
+  <span id="endpoint"></span>
+  <a id="privacy" href="chat.html?private">Incognito</a>
+</header>
+    <main>
       <div id="notice" role="status" hidden></div>
+      <template id="rate-summary">
+        <span
+          class="peak"
+          title="Highest full five-second average observed in this page session."
+          >peak <b>—</b><br /><span
+            class="average"
+            title="Lifetime average, including idle time; independent of this page session."
+            >avg <b>—</b></span
+          ></span
+        >
+      </template>
       <section class="stats" aria-label="Server counters">
-        <article class="stat">
+        <article class="stat" data-rate="output_tokens">
           <div class="stat-label">Output throughput <span>5s avg</span></div>
-          <div class="stat-value cyan">
+          <div class="stat-value series-output">
             <strong id="output-rate">—</strong><span>tok/s</span>
-            <span
-              class="peak"
-              title="Highest full five-second average observed in this page session."
-              >peak <b id="output-peak">—</b><br /><span
-                class="average"
-                title="Lifetime average, including idle time; independent of this page session."
-                >avg <b id="output-average">—</b></span
-              ></span
-            >
           </div>
           <canvas
             id="output-spark"
+            data-series="output"
             aria-label="Rolling output token rate"
           ></canvas>
           <small><span id="output-total">—</span> tokens total</small>
         </article>
         <article
-          class="stat"
+          class="stat" data-rate="input_tokens"
           title="Tokens consumed by completed model work, including decode input; not only prompt tokens."
         >
           <div class="stat-label">Input work <span>5s avg</span></div>
-          <div class="stat-value orange">
+          <div class="stat-value series-input">
             <strong id="input-rate">—</strong><span>tok/s</span>
-            <span
-              class="peak"
-              title="Highest full five-second average observed in this page session."
-              >peak <b id="input-peak">—</b><br /><span
-                class="average"
-                title="Lifetime average, including idle time; independent of this page session."
-                >avg <b id="input-average">—</b></span
-              ></span
-            >
           </div>
           <canvas
             id="input-spark"
+            data-series="input"
             aria-label="Rolling input token work rate"
           ></canvas>
           <small><span id="input-total">—</span> tokens total</small>
         </article>
-        <article class="stat">
+        <article class="stat" data-rate="completed">
           <div class="stat-label">Completions <span>5s avg</span></div>
           <div class="stat-value">
             <strong id="request-rate">—</strong><span>req/s</span>
-            <span
-              class="peak"
-              title="Highest full five-second average observed in this page session."
-              >peak <b id="request-peak">—</b><br /><span
-                class="average"
-                title="Lifetime average, including idle time; independent of this page session."
-                >avg <b id="request-average">—</b></span
-              ></span
-            >
           </div>
           <canvas
             id="request-spark"
+            data-series="request"
             aria-label="Rolling successful request rate"
           ></canvas>
           <small
             ><span id="completed">—</span> completed ·
-            <span id="batches">—</span> batches</small
+            <span id="batches" data-total="batches">—</span> batches</small
           >
         </article>
         <article
@@ -113,7 +100,7 @@
           <div class="stat-label">
             Requests received <span id="activity-span">~1s bucket</span>
           </div>
-          <div class="stat-value violet">
+          <div class="stat-value series-active">
             <strong id="activity">—</strong><span>requests</span>
             <span
               class="peak"
@@ -123,6 +110,7 @@
           </div>
           <canvas
             id="activity-spark"
+            data-series="arrivals"
             aria-label="Received requests per observation bucket"
           ></canvas>
           <small
@@ -140,7 +128,7 @@
           title="Resident logical token positions across observed text pools; not physical RAM usage."
         >
           <div class="stat-label">KV occupancy <span>now</span></div>
-          <div class="stat-value green">
+          <div class="stat-value series-memory">
             <strong id="kv">—</strong><span>% resident</span>
             <span
               class="peak"
@@ -150,6 +138,7 @@
           </div>
           <canvas
             id="kv-spark"
+            data-series="kv"
             aria-label="Logical KV occupancy history"
           ></canvas>
           <small
@@ -160,16 +149,17 @@
         </article>
         <article class="stat">
           <div class="stat-label">Failed requests <span>total</span></div>
-          <div class="stat-value red">
-            <strong id="errors">—</strong><span>failed</span>
+          <div class="stat-value series-errors">
+            <strong id="errors" data-total="failed">—</strong><span>failed</span>
           </div>
           <canvas
             id="error-spark"
+            data-series="errors"
             aria-label="Cumulative failed requests"
           ></canvas>
           <small
-            ><span id="rejected">—</span> rejected ·
-            <span id="cancelled">—</span> cancelled</small
+            ><span id="rejected" data-total="rejected">—</span> rejected ·
+            <span id="cancelled" data-total="cancelled">—</span> cancelled</small
           >
         </article>
       </section>
@@ -180,18 +170,16 @@
             <span class="muted">tok/s · 5s avg</span>
           </div>
           <div class="legend">
-            <span class="cyan">● Output</span
-            ><span class="orange">● Input work</span>
+            <span class="series-output">● Output</span
+            ><span class="series-input">● Input work</span>
           </div>
           <canvas
             id="flow"
+            data-series="input output"
             class="chart"
             aria-label="Rolling input and output token throughput"
           ></canvas>
-          <div class="chart-footer">
-            <span>−30s</span><span>−22.5s</span><span>−15s</span
-            ><span>−7.5s</span><span>NOW</span>
-          </div>
+          <div class="chart-footer"></div>
         </article>
         <article class="panel">
           <div class="panel-heading">
@@ -199,17 +187,15 @@
             <span class="muted">req/s · 5s avg</span>
           </div>
           <div class="legend">
-            <span class="orange">● Successful completions</span>
+            <span class="series-input">● Successful completions</span>
           </div>
           <canvas
             id="request-flow"
+            data-series="request"
             class="chart"
             aria-label="Rolling successful request throughput"
           ></canvas>
-          <div class="chart-footer">
-            <span>−30s</span><span>−22.5s</span><span>−15s</span
-            ><span>−7.5s</span><span>NOW</span>
-          </div>
+          <div class="chart-footer"></div>
         </article>
         <article
           class="panel"
@@ -220,18 +206,16 @@
             <span class="muted">requests · ~1s buckets</span>
           </div>
           <div class="legend">
-            <span class="violet">● Received</span
-            ><span class="orange">● Finished</span>
+            <span class="series-active">● Received</span
+            ><span class="series-input">● Finished</span>
           </div>
           <canvas
             id="activity-flow"
+            data-series="arrivals finishes"
             class="chart"
             aria-label="Received and finished requests per observation bucket"
           ></canvas>
-          <div class="chart-footer">
-            <span>−30s</span><span>−22.5s</span><span>−15s</span
-            ><span>−7.5s</span><span>NOW</span>
-          </div>
+          <div class="chart-footer"></div>
         </article>
       </section>
       <section class="sources">
@@ -290,5 +274,68 @@
         ><span id="delivery">—</span>
       </footer>
     </main>
+    <template id="model-card">
+      <article class="panel model">
+        <div class="model-head">
+          <div>
+            <h3 data-field="name"></h3>
+            <div class="kind" data-field="kind"><a class="device-link" data-field="placement"></a><a
+              class="device-link" data-field="poolPlacement"></a></div>
+          </div>
+          <span class="phase" data-field="phase"></span>
+        </div>
+        <div class="model-metrics" data-field="metrics"></div>
+        <canvas data-field="canvas"></canvas>
+        <div data-field="pool" hidden>
+          <div class="pool-heading">
+            <span>KV positions</span><span data-field="poolValue">—</span>
+          </div>
+          <div class="bar">
+            <span data-field="resident"></span><span class="reserved" data-field="reserved"></span>
+          </div>
+        </div>
+        <div class="model-facts" data-field="cache"></div>
+        <div class="model-facts" data-field="outcomes"></div>
+        <details><summary>All source counters</summary><table data-field="table"></table></details>
+      </article>
+    </template>
+    <template id="device-card">
+      <article class="panel device">
+        <div class="resource-head">
+          <h3 data-field="name"></h3>
+          <span class="device-identity" data-field="identity"></span>
+        </div>
+        <div class="device-activity" data-field="activity"></div>
+        <div class="device-pools" data-field="links"></div>
+      </article>
+    </template>
+    <template id="pool-card">
+      <article class="panel memory-pool">
+        <div class="resource-head">
+          <h3 data-field="name"></h3>
+          <span class="muted" data-field="backing"></span>
+          <div class="device-pools" data-field="links"></div>
+        </div>
+        <div class="pool-total">
+          <strong class="pool-value" data-field="committed"></strong>
+          <span class="muted" data-field="budget"></span>
+        </div>
+        <div class="capacity" data-field="capacity" title="Physical bytes grouped by state"></div>
+        <div class="capacity-key" data-field="legend"></div>
+        <div class="pool-trend">
+          <span>Reusable backing</span>
+          <canvas aria-label="Reusable backing history" data-field="canvas"></canvas>
+          <span data-field="peak" title="Highest reusable backing observed in this tab"></span>
+        </div>
+        <div class="model-facts" data-field="workspace"></div>
+        <details class="slab-map" data-field="slabs">
+          <summary></summary>
+          <select aria-label="Physical slab"></select>
+          <div class="model-facts"></div>
+          <div class="tiles"></div>
+        </details>
+        <details><summary>All pool counters</summary><table data-field="table"></table></details>
+      </article>
+    </template>
   </body>
 </html>

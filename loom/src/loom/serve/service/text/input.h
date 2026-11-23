@@ -44,6 +44,8 @@ typedef struct loom_serve_text_input_t {
   iree_vm_buffer_t* history;
   // Consumed native positions preceding tokens.
   iree_host_size_t retained_count;
+  // Output budget for this exact history, shared by reservation and decoding.
+  iree_host_size_t max_tokens;
 } loom_serve_text_input_t;
 
 // Releases compact tokens, media spans and the host history reference; accepts

@@ -87,6 +87,14 @@ void loom_runtime_memory_pool_free(loom_runtime_memory_pool_t* pool);
 loom_runtime_storage_statistics_t loom_runtime_memory_pool_statistics(
     loom_runtime_memory_pool_t* pool);
 
+// Returns the last one-based physical slab serial issued in this pool and
+// copies the most recent min(serial, capacity) slots in ascending serial
+// order. Returned slabs leave holes. The serialized owner reads only copied
+// host metadata, without polling the device or walking older allocations.
+uint64_t loom_runtime_memory_pool_query_slabs(
+    const loom_runtime_memory_pool_t* pool, iree_host_size_t capacity,
+    loom_runtime_slab_layout_t* out_slabs);
+
 // Reads the serialized owner's published range ledger without collecting
 // completions or querying native pools. Unlike statistics(), committed and
 // releasing bytes exclude idle caches and native retirement; abandoned bytes

@@ -1342,6 +1342,7 @@ static iree_status_t loom_serve_text_chat_request_render(
                               "output limit must be in [1, %d]", INT32_MAX);
     }
     history->chat->max_tokens = (iree_host_size_t)max_tokens;
+    history->chat->flags |= LOOM_SERVE_TEXT_CHAT_FLAG_EXPLICIT_MAX_TOKENS;
   }
   if (fields[6].value.data &&
       iree_any_bit_set(history->chat->flags,

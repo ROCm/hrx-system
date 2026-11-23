@@ -112,6 +112,9 @@ typedef struct loom_serve_service_t {
     iree_host_size_t context_length;
     // Maximum selectable output token budget, further bounded by input length.
     iree_host_size_t max_output_tokens;
+    // Output budget used when the caller omits its limit, before counting
+    // input.
+    iree_host_size_t default_output_tokens;
     // Exact source-prepared counting at /v1/chat/completions/input_tokens.
     bool input_token_count;
     // Source-declared reasoning support and effort selection, if known.

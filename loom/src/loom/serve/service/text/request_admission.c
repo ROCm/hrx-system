@@ -599,7 +599,7 @@ iree_status_t loom_serve_text_complete_preparation(
         .retained_tokens = pending->input.retained_count,
         .appended_tokens = pending->input.count,
         .reservation_tokens = pending->reservation,
-        .max_tokens = pending->chat.max_tokens,
+        .max_tokens = pending->input.max_tokens,
         .prepare_ns = pending->prepare_duration};
     loom_service_text_record(service->telemetry.stream,
                              &LOOM_SERVICE_TEXT_PREPARED,

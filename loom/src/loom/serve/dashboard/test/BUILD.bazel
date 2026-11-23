@@ -1,0 +1,13 @@
+# Copyright 2026 The IREE Authors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# bazel-to-cmake: skip
+
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+
+js_test(
+    name = "wire_test",
+    copy_data_to_bin = False,
+    data = ["//loom/src/loom/serve/dashboard:wire_sources"],
+    entry_point = "wire_test.mjs",
+)

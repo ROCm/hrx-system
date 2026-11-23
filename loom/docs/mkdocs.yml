@@ -116,6 +116,7 @@ nav:
       - Workflows:
           - Fetch and serve a model: serving/workflows/fetch-and-serve.md
           - Serve source-defined models: serving/workflows/serve-models.md
+          - Use Conversation: serving/workflows/use-conversation.md
           - Stream speech: serving/workflows/stream-speech.md
           - Operate a model server: serving/workflows/operate-model-server.md
           - Observe a model server: serving/workflows/observe-model-server.md

@@ -311,7 +311,7 @@ TEST_F(SourceTextServiceTest, DiscoveryReportsConfiguredSessionCapacity) {
   for (const char* field :
        {R"("input_modalities":["text"])", R"("output_modalities":["text"])",
         R"("reasoning":false)", R"("context_length":96)",
-        R"("limits":{"max_output_tokens":96})"}) {
+        R"("limits":{"max_output_tokens":96,"default_output_tokens":16})"}) {
     EXPECT_NE(models.find(field), std::string::npos) << models;
   }
 }

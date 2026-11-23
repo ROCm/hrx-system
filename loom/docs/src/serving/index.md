@@ -14,6 +14,10 @@ loom-serve --help
 loom-serve --agents_md
 ```
 
+Open `/dashboard/chat.html` on a running server to chat, generate images,
+or use a microphone with the prepared models. Projects and conversations
+are saved in your browser. [Use Conversation](workflows/use-conversation.md)
+
 [Fetch and serve a model](workflows/fetch-and-serve.md) installs a published
 Moonshine model and reaches an actual transcription response. The
 [arithmetic embedding walkthrough](workflows/serve-models.md) exercises the CPU

@@ -257,6 +257,7 @@ endif()
 
 iree_add_subdirectory(build_tools/cmake)
 iree_add_subdirectory(build_tools/embed_data)
+iree_add_subdirectory(build_tools/serve_web)
 iree_add_subdirectory(build_tools/spirv)
 include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_target_profile.cmake")
 include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_kernel_binary.cmake")

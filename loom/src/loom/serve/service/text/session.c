@@ -110,7 +110,11 @@ loom_service_request_snapshot_t loom_serve_text_session_request_snapshot(
       .phase = "active",
       .arrival_time =
           session->request.start_time - session->request.queue_duration,
-      .counters = session->request.counters};
+      .counters = session->request.counters,
+      .prompt = {.total_tokens = session->request.retained_count +
+                                 session->request.input.count,
+                 .cached_tokens = session->request.retained_count,
+                 .processed_tokens = session->request.input.offset}};
 }
 
 static loom_serve_text_chat_response_t loom_serve_text_response_metadata(

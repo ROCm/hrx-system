@@ -1,0 +1,13 @@
+{
+  "name": "loom-serve-ui-build",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.30.3",
+  "dependencies": {
+    "@gfx/zopfli": "1.0.15",
+    "@rollup/wasm-node": "4.59.0",
+    "clean-css": "5.3.3",
+    "html-minifier-terser": "7.2.0",
+    "terser": "5.44.1"
+  }
+}

@@ -652,8 +652,14 @@ static iree_status_t loom_serve_router_describe_service(
   }
   if (service->capabilities.max_output_tokens) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        output, ",\"limits\":{\"max_output_tokens\":%zu}",
+        output, ",\"limits\":{\"max_output_tokens\":%zu",
         service->capabilities.max_output_tokens));
+    if (service->capabilities.default_output_tokens) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          output, ",\"default_output_tokens\":%zu",
+          service->capabilities.default_output_tokens));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "}"));
   }
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(output, ",\"loom\":{\"kind\":"));
@@ -1387,8 +1393,8 @@ static iree_status_t loom_serve_router_accept(
   iree_string_builder_t* output = &router->output;
   const iree_string_view_t path = request->path;
   const bool get = iree_string_view_equal(request->method, IREE_SV("GET"));
-  if (get && loom_serve_dashboard_handles(path)) {
-    loom_serve_dashboard_send(router->server, connection, request);
+  if (get &&
+      loom_serve_dashboard_try_send(router->server, connection, request)) {
     return iree_ok_status();
   }
   if (get && iree_string_view_equal(path, IREE_SV("/v1/observe"))) {

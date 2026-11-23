@@ -132,6 +132,8 @@ enum loom_serve_text_chat_flag_bits_e {
   LOOM_SERVE_TEXT_CHAT_FLAG_STREAM = 1u << 0,
   // Append a final usage chunk and include usage:null on preceding chunks.
   LOOM_SERVE_TEXT_CHAT_FLAG_INCLUDE_USAGE = 1u << 1,
+  // The caller selected an output limit that must fit the complete input.
+  LOOM_SERVE_TEXT_CHAT_FLAG_EXPLICIT_MAX_TOKENS = 1u << 2,
 };
 typedef uint32_t loom_serve_text_chat_flags_t;
 
@@ -158,8 +160,9 @@ typedef struct loom_serve_text_chat_t {
     iree_string_builder_t reasoning;
   } output;
   // Maximum selected output tokens, including a terminal EOS prediction.
+  // Preparation fits the deployment default to the input before admission.
   iree_host_size_t max_tokens;
-  // Validated transport and usage options.
+  // Validated request options.
   loom_serve_text_chat_flags_t flags;
   // Declared tools borrowing the request body, independent of this turn's
   // choice.

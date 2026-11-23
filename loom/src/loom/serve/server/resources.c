@@ -11,6 +11,7 @@
 #include "iree/base/internal/json.h"
 #include "loom/runtime/execution/workspace.h"
 #include "loom/runtime/parameter/residency.h"
+#include "loom/runtime/storage/memory.h"
 #include "loom/runtime/storage/telemetry.h"
 #include "loom/serve/telemetry/sample.h"
 #include "loom/util/json.h"
@@ -132,6 +133,43 @@ static iree_status_t loom_serve_resources_write_members(
   return status;
 }
 
+// One pool page fits the shared observation frame even with 64 populated
+// slabs. Slot serials are implicit in array order; returned slots are null.
+static iree_status_t loom_serve_resources_write_slabs(
+    const loom_runtime_memory_pool_t* memory, iree_string_builder_t* output) {
+  loom_runtime_slab_layout_t slabs[64];
+  const uint64_t last = loom_runtime_memory_pool_query_slabs(
+      memory, IREE_ARRAYSIZE(slabs), slabs);
+  const iree_host_size_t count = iree_min(last, IREE_ARRAYSIZE(slabs));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      output, ",\"first_slab\":%" PRIu64 ",\"slabs\":[", last - count + 1));
+  static const char* const states[] = {
+      [LOOM_RUNTIME_SLAB_ACQUIRING] = "acquiring",
+      [LOOM_RUNTIME_SLAB_READY] = "ready",
+      [LOOM_RUNTIME_SLAB_RETIRING] = "retiring",
+      [LOOM_RUNTIME_SLAB_FAILED] = "failed",
+  };
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+    const loom_runtime_slab_layout_t* slab = &slabs[i];
+    const char* separator = i ? "," : "";
+    if (slab->page_count) {
+      status = iree_string_builder_append_format(
+          output,
+          "%s{\"state\":\"%s\",\"page_bytes\":%" PRIu64
+          ",\"pages\":%zu,\"leased\":%zu,\"offset\":%zu,\"free\":\"%016" PRIx64
+          "\"}",
+          separator, states[slab->state], (uint64_t)slab->page_bytes,
+          slab->page_count, slab->leased_count, slab->page_offset,
+          slab->free_mask);
+    } else {
+      status = iree_string_builder_append_format(output, "%snull", separator);
+    }
+  }
+  IREE_RETURN_IF_ERROR(status);
+  return iree_string_builder_append_cstring(output, "]");
+}
+
 iree_status_t loom_serve_resources_write_observation(
     const loom_serve_resources_t* resources, iree_host_size_t resource_index,
     iree_string_builder_t* output) {
@@ -166,7 +204,12 @@ iree_status_t loom_serve_resources_write_observation(
       resources, pool_index,
       (loom_runtime_telemetry_sample_sink_t){
           &writer, loom_serve_resources_write_topic}));
-  return iree_string_builder_append_cstring(output, "]}");
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "]"));
+  const loom_runtime_memory_pool_t* memory = loom_runtime_pool_memory(pool);
+  if (memory) {
+    IREE_RETURN_IF_ERROR(loom_serve_resources_write_slabs(memory, output));
+  }
+  return iree_string_builder_append_cstring(output, "}");
 }
 
 static iree_status_t loom_serve_resources_write_physical_devices(

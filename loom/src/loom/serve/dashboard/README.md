@@ -1,9 +1,21 @@
-# Embedded live observations
+# Embedded serving dashboard
 
-`index.html`, `style.css`, and `app.js` are ordinary static browser assets.
-The existing C embed-data generator includes them in the server; there is no
-JavaScript compiler, package installation, chart dependency, or runtime file
-lookup. The router serves exact asset names with a same-origin content policy.
+The dashboard is part of the `loom-serve` executable. Edit the HTML, CSS, and
+JavaScript sources here. The `bundle` build target links ES modules, minifies
+the browser resources, and gzip-compresses each URL independently. The complete
+set must fit below 50,000 compressed bytes. The C embed-data generator puts
+those bytes in the executable. Running the server needs only the executable
+and its normal serving dependencies.
+
+Bazel provides the host-side build tools. When building the dashboard with
+CMake, install Node.js and pnpm or Corepack. Both builds use the tool versions
+in the same package lock and leave generated resources in the build tree.
+
+The [Conversation workflow](../../../../docs/src/serving/workflows/use-conversation.md)
+covers the workspace, tools, and session lifecycle. The wire tests exercise
+stream decoding and tool-call assembly directly through browser-standard
+Web Streams. Run them with `node --test loom/src/loom/serve/dashboard/test/wire_test.mjs`
+from the repository root or with the dashboard's Bazel tests.
 
 The [observation workflow](../../../../docs/src/serving/workflows/observe-model-server.md#watch-the-live-dashboard)
 owns the user-facing launch and relay instructions.
@@ -42,12 +54,14 @@ JSON framing is a separate projection, not the source's numeric interface.
 budget. `storage` and `workspace` are its persistent and command allocator
 breakdowns. With fixed backing, `storage` is the native total and `workspace`
 is its child view.
-Pool identity is its independent inventory index; models and consumer devices
-link to that owner rather than duplicating its totals. The browser plots managed
-commitment once per pool, selecting the elastic total when present or the fixed
-storage total otherwise. Allocator breakdowns are included, never
-added. The elastic allowance includes permanent model buffers as well as
-parameters, sparse state, and command allocations.
+Models and consumer devices link to their pool by inventory index. Each pool's
+capacity strip groups bytes by state. Held and reusable bytes together cover
+the current commitment. A finite budget adds a segment for uncommitted bytes.
+Elastic pools use the physical owner's commitment and ready page cache. Fixed
+pools use native storage commitment and free bytes. The sparkline and observed
+peak track changes in reusable backing. Workspace shows its retained bytes,
+lifetime reservation outcomes, and the increase in reservations since the
+first sample for this pool. Its backing overlaps the pool total.
 The elastic budget is the physical source capacity or a tighter explicit limit.
 Virtual reserved bytes are address extent, not committed RAM. Pending, releasing,
 abandoned, reusable, and atomic workspace samples do not form a disjoint
@@ -55,6 +69,23 @@ partition. The UI does not infer a
 weights/KV/other split, physical addresses, or shared hardware capacity from
 these aggregate observations. Device request activity is explicitly distinct
 from hardware utilization and native queue depth.
+
+Elastic pool observation pages also carry a physical slab window. `first_slab`
+is the one-based acquisition serial of the first position in `slabs`. The
+window covers the most recent 64 issued serials in increasing order. A null
+entry means the slab has left the allocator inventory. Serials persist across
+reuse and belong to one pool for its lifetime. They convey allocation order
+and expose no device addresses.
+
+Each retained slab carries its acquisition `state` (acquiring, ready,
+retiring, or failed), `page_bytes`, total `pages`, and `leased` pages.
+The 16-digit hexadecimal `free` word contains exact unleased page bits,
+least significant first, beginning at the zero-based page `offset`. A partial
+slab shows the word containing its first free page. Full and idle slabs show
+their first word. The dashboard opens the physical inspector on a mixed slab
+when one is present. It draws the exact page word for mixed slabs and
+summarizes uniform slabs by count. A manual selection follows its serial
+while it stays in the window. Fixed pools expose their native counters.
 
 The HTTP adapter schedules sampling at four hertz while readers exist. Sources
 are sampled/formatted once per sweep, independently of reader count. A shared
@@ -168,6 +199,7 @@ Serving mix groups recent successful-request rates by modality, independently
 of current active/queued gauges. Short requests can finish between gauge samples;
 a zero current count does not imply zero work over the rate window. Logical KV
 occupancy is token-position accounting, not whole-device or process memory.
-Missing observations produce gaps rather than interpolated work. Rendering
-is sample-driven, pixel ratio is capped at two, and hiding the page releases
-its subscription.
+Missing observations produce gaps rather than interpolated work. An open
+background tab continues applying and acknowledging samples in the same
+bounded rings. Canvas drawing resumes on visibility with the retained
+history. Pause and navigation release the subscription.

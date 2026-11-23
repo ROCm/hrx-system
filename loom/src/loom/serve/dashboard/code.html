@@ -1,0 +1,74 @@
+<!doctype html>
+<!-- Copyright 2026 The IREE Authors. SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception -->
+<meta charset="utf-8">
+<meta name="referrer" content="no-referrer">
+<title>JavaScript tool</title>
+<script>
+// This function becomes the entire worker script inside the opaque sandbox.
+function evaluateInWorker() {
+  self.onmessage = async ({data:code, ports:[reply]}) => {
+    self.onmessage = null;
+    const send = reply.postMessage.bind(reply);
+    const limit = 32768, marker = "\n[output truncated]";
+    const clip = text => text.length > limit ? text.slice(0, limit - marker.length) + marker : text;
+    const format = value => {
+      if (value instanceof Error) return String(value);
+      if (typeof value !== "object" || value === null) return typeof value === "bigint" ? value + "n" : String(value);
+      return JSON.stringify(value, (_, v) => {
+        if (typeof v === "bigint") return v + "n";
+        if (typeof v === "number" && !Number.isFinite(v)) return String(v);
+        if (v instanceof Map || v instanceof Set) return [...v];
+        return v;
+      }, 2) ?? String(value);
+    };
+    let logs = "";
+    const print = (...values) => {
+      if (logs.length < limit) logs = clip(logs + values.map(format).join(" ") + "\n");
+    };
+    Object.assign(console, {log:print, info:print, debug:print, warn:print, error:print});
+    let failed = false, text;
+    try {
+      const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+      const value = await new AsyncFunction('"use strict";\n' + code)();
+      text = value === undefined && logs ? "" : value === "" ? '""' : format(value);
+    } catch (error) {
+      failed = true;
+      try { text = String(error); } catch { text = "Unprintable JavaScript exception"; }
+    }
+    send({failed, text:(logs && text ? logs.trimEnd() + "\n" : logs) + clip(text)});
+  };
+}
+// Only the chat's private port receives results. Ordinary messages from
+// authored worker code have no handler in this document or in the chat.
+self.onmessage = ({source, data:code, ports:[client]}) => {
+  if (source !== parent || parent === self || !client || typeof code !== "string") return;
+  self.onmessage = null;
+  let worker, url;
+  const channel = new MessageChannel();
+  function retire() {
+    worker?.terminate();
+    if (url) URL.revokeObjectURL(url);
+    channel.port1.close();
+    client.close();
+  }
+  function finish({failed,text}) {
+    if (typeof text !== "string") { failed = true; text = "Invalid JavaScript output"; }
+    if (text.length > 65537) text = text.slice(0, 65518) + "\n[output truncated]";
+    client.postMessage({failed:failed === true, text});
+    retire();
+  }
+  self.onpagehide = retire;
+  try {
+    url = URL.createObjectURL(new Blob(["(", evaluateInWorker.toString(), ")()"], {type:"text/javascript"}));
+    worker = new Worker(url);
+    worker.onerror = event => {
+      event.preventDefault();
+      finish({failed:true, text:event.message || "JavaScript worker failed to start"});
+    };
+    channel.port1.onmessage = ({data}) => finish(data);
+    worker.postMessage(code, [channel.port2]);
+  } catch (error) {
+    finish({failed:true, text:String(error)});
+  }
+};
+</script>

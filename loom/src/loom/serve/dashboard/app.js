@@ -1,13 +1,6 @@
-// Copyright 2026 The IREE Authors.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+/*! Copyright 2026 The IREE Authors. SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception */
 
-const COLORS = {
-  output: "#69d9da",
-  input: "#f8aa74",
-  active: "#aaa0e8",
-  memory: "#afcf87",
-  errors: "#f58c97",
-};
+import { chartColors as COLORS } from "./topbar.js";
 const RATE_WINDOW_NS = 5000000000n;
 const ACTIVITY_BUCKET_NS = 1000000000n;
 let windowMs = 30000;
@@ -21,9 +14,13 @@ const encoder = new TextEncoder();
 
 // Fixed history, independent of server uptime, counter magnitude, and traffic.
 class Ring {
-  constructor(capacity = 512) {
-    this.times = new Float64Array(capacity);
-    this.values = new Float64Array(capacity);
+  constructor(color) {
+    this.color = color;
+    this.times = new Float64Array(512);
+    this.values = new Float64Array(512);
+    this.clear();
+  }
+  clear() {
     this.count = 0;
     this.next = 0;
     this.peak = NaN;
@@ -191,21 +188,41 @@ const scaled = (value, base, units) => {
   return `${format(value)} ${units[unit]}`;
 };
 const bytes = (value) => scaled(value, 1024, ["B", "KiB", "MiB", "GiB", "TiB"]);
-const history = Object.fromEntries(
-  ["output", "input", "requests", "arrivals", "finishes", "kv", "errors"].map(
-    (key) => [key, new Ring()],
-  ),
-);
+const history = {
+  output: new Ring(COLORS.output),
+  input: new Ring(COLORS.input),
+  request: new Ring(COLORS.input),
+  arrivals: new Ring(COLORS.active),
+  finishes: new Ring(COLORS.input),
+  kv: new Ring(COLORS.memory),
+  errors: new Ring(COLORS.errors),
+};
+const plots = Array.from(document.querySelectorAll("canvas[data-series]"), (canvas) => ({
+  canvas,
+  series: canvas.dataset.series.split(" ").map((key) => history[key]),
+  grid: canvas.classList.contains("chart"),
+}));
 const models = new Map();
 const devices = new Map();
 const pools = new Map();
 const pendingPlots = new Set();
-const serverRates = Object.fromEntries(
-  ["output_tokens", "input_tokens", "completed"].map((key) => [
-    key,
-    new CounterRate(),
-  ]),
-);
+const serverRates = Array.from(document.querySelectorAll("[data-rate]"), (card) => {
+  const key = card.querySelector("canvas").dataset.series;
+  const summary = $("rate-summary").content.cloneNode(true);
+  const [peak, average] = summary.querySelectorAll("b");
+  peak.id = key + "-peak";
+  average.id = key + "-average";
+  const value = card.querySelector("strong");
+  value.parentElement.append(summary);
+  return {
+    counter: card.dataset.rate,
+    ring: history[key],
+    rate: new CounterRate(),
+    value, peak, average,
+    total: card.querySelector("small span"),
+  };
+});
+const serverTotals = document.querySelectorAll("[data-total]");
 const serverBuckets = {
   arrivals: new CounterBucket(),
   finishes: new CounterBucket(),
@@ -226,7 +243,6 @@ let receivedAt = 0;
 let sequence = 0n;
 let receivedBytes = 0;
 let receivedFrames = 0;
-let dirty = false;
 let framePending = false;
 
 function chartTime(now = performance.now()) {
@@ -255,7 +271,7 @@ function draw(canvas, series, now, grid = false) {
   const bottom = height - 3;
   const extend = socket?.readyState === WebSocket.OPEN && !paused;
   let maximum = 1;
-  for (const [ring] of series) {
+  for (const ring of series) {
     let last = NaN;
     ring.each((time, value) => {
       if (time <= now) last = value;
@@ -267,8 +283,8 @@ function draw(canvas, series, now, grid = false) {
   maximum *= 1.15;
   if (grid) {
     context.font = "9px ui-monospace, monospace";
-    context.fillStyle = "#6f7c8d";
-    context.strokeStyle = "#292f38";
+    context.fillStyle = COLORS.dim;
+    context.strokeStyle = COLORS.rule;
     context.lineWidth = 0.7;
     for (let i = 0; i <= 4; ++i) {
       const y = top + ((bottom - top) * i) / 4;
@@ -279,59 +295,48 @@ function draw(canvas, series, now, grid = false) {
       context.stroke();
     }
   }
-  for (const [ring, color] of series) {
-    const points = [];
-    let lastTime = 0;
-    let lastValue = NaN;
-    ring.each((time, value) => {
-      if (time >= now - windowMs && time <= now) points.push([time, value]);
-      if (time <= now) {
-        lastTime = time;
-        lastValue = value;
-      }
-    });
-    const x = (time) =>
-      left + ((time - now + windowMs) / windowMs) * (width - left);
-    const y = (value) => bottom - (value / maximum) * (bottom - top);
+  const x = (time) => left + ((time - now + windowMs) / windowMs) * (width - left);
+  const y = (value) => bottom - (value / maximum) * (bottom - top);
+  for (const ring of series) {
+    const color = ring.color;
     const gradient = context.createLinearGradient(0, top, 0, bottom);
     gradient.addColorStop(0, `${color}35`);
     gradient.addColorStop(1, `${color}00`);
-    // Missing observations create real gaps, not invented interpolated work.
-    let segment = [];
-    const paint = () => {
-      if (!segment.length) return;
-      context.beginPath();
-      context.moveTo(x(segment[0][0]), bottom);
-      for (const [time, value] of segment) context.lineTo(x(time), y(value));
-      context.lineTo(x(segment.at(-1)[0]), bottom);
-      context.closePath();
+    context.strokeStyle = color;
+    context.lineWidth = grid ? 1.7 : 1.4;
+    let line, firstX, lastTime, lastValue;
+    function paintSegment() {
+      if (!line) return;
+      const area = new Path2D(line);
+      const lastX = x(lastTime);
+      area.lineTo(lastX, bottom);
+      area.lineTo(firstX, bottom);
+      area.closePath();
       context.fillStyle = gradient;
-      context.fill();
+      context.fill(area);
+      context.stroke(line);
       context.beginPath();
-      segment.forEach(([time, value], index) =>
-        index
-          ? context.lineTo(x(time), y(value))
-          : context.moveTo(x(time), y(value)),
-      );
-      context.lineWidth = grid ? 1.7 : 1.4;
-      context.strokeStyle = color;
-      context.stroke();
-      const last = segment.at(-1);
-      context.beginPath();
-      context.arc(x(last[0]), y(last[1]), grid ? 2.8 : 2, 0, Math.PI * 2);
+      context.arc(lastX, y(lastValue), grid ? 2.8 : 2, 0, Math.PI * 2);
       context.fillStyle = color;
       context.fill();
-      segment = [];
-    };
-    for (const point of points) {
-      if (!Number.isFinite(point[1])) {
-        paint();
-        continue;
-      }
-      if (segment.length && point[0] - segment.at(-1)[0] > 2000) paint();
-      segment.push(point);
+      line = undefined;
     }
-    paint();
+    // A missing observation or two seconds of silence ends the current path.
+    ring.each((time, value) => {
+      if (time > now) return;
+      if (!Number.isFinite(value) || time - lastTime > 2000) paintSegment();
+      if (time >= now - windowMs && Number.isFinite(value)) {
+        if (line) line.lineTo(x(time), y(value));
+        else {
+          line = new Path2D();
+          firstX = x(time);
+          line.moveTo(firstX, y(value));
+        }
+      }
+      lastTime = time;
+      lastValue = value;
+    });
+    paintSegment();
     // Local time moves the viewport, not the observations. A dotted tail shows
     // only the last received value; it never enters history, rates, or peaks.
     if (Number.isFinite(lastValue) && extend) {
@@ -350,7 +355,6 @@ function draw(canvas, series, now, grid = false) {
 }
 
 function redraw(all = false) {
-  dirty = true;
   if (all) {
     for (const model of models.values()) pendingPlots.add(model);
     for (const pool of pools.values()) pendingPlots.add(pool);
@@ -359,39 +363,10 @@ function redraw(all = false) {
   framePending = true;
   requestAnimationFrame(() => {
     framePending = false;
-    if (!dirty) return;
-    dirty = false;
+    if (document.hidden) return;
     const now = chartTime();
-    draw(
-      $("flow"),
-      [
-        [history.input, COLORS.input],
-        [history.output, COLORS.output],
-      ],
-      now,
-      true,
-    );
-    draw($("request-flow"), [[history.requests, COLORS.input]], now, true);
-    draw(
-      $("activity-flow"),
-      [
-        [history.arrivals, COLORS.active],
-        [history.finishes, COLORS.input],
-      ],
-      now,
-      true,
-    );
-    for (const [id, key, color] of [
-      ["output-spark", "output", COLORS.output],
-      ["input-spark", "input", COLORS.input],
-      ["request-spark", "requests", COLORS.input],
-      ["activity-spark", "arrivals", COLORS.active],
-      ["kv-spark", "kv", COLORS.memory],
-      ["error-spark", "errors", COLORS.errors],
-    ])
-      draw($(id), [[history[key], color]], now);
-    for (const model of pendingPlots)
-      draw(model.canvas, [[model.ring, model.color]], now);
+    for (const { canvas, series, grid } of plots) draw(canvas, series, now, grid);
+    for (const plot of pendingPlots) draw(plot.canvas, [plot.ring], now);
     pendingPlots.clear();
   });
 }
@@ -401,6 +376,20 @@ function element(tag, className, text) {
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
+}
+
+// Clone trusted page markup once per inventory card. Observation strings only
+// enter text nodes. The bound fields survive every subsequent observation.
+function mountCard(kind, inventory) {
+  const card = $(kind + "-card").content.firstElementChild.cloneNode(true);
+  const grid = $(kind + "-grid");
+  if (!inventory.size) grid.replaceChildren();
+  grid.append(card);
+  const state = { card };
+  for (const node of card.querySelectorAll("[data-field]")) {
+    state[node.dataset.field] = node;
+  }
+  return state;
 }
 
 function updateTopicFields(topics, state) {
@@ -434,29 +423,25 @@ function updateTopicFields(topics, state) {
   return fields;
 }
 
-function deviceLabel(device) {
-  return device.key + (device.key_truncated ? "…" : "");
+function resourceName(source) {
+  return source.key + (source.key_truncated ? "…" : "");
 }
 
-function updatePlacement(state) {
-  const index = state.model.device;
-  const device = devices.get(index);
-  state.placement.textContent = device
-    ? deviceLabel(device.source)
-    : index === null || index === undefined
-      ? "unassigned"
-      : `device ${index}`;
-  if (device) state.placement.setAttribute("href", `#device-${index}`);
-  else state.placement.removeAttribute("href");
-  const poolIndex = state.model.pool;
-  const pool = pools.get(poolIndex);
-  state.poolPlacement.textContent = pool
-    ? poolLabel(pool.source)
-    : poolIndex === null || poolIndex === undefined
-      ? "unassigned pool"
-      : `pool ${poolIndex}`;
-  if (pool) state.poolPlacement.setAttribute("href", `#pool-${poolIndex}`);
-  else state.poolPlacement.removeAttribute("href");
+function mountResource(kind, inventory, source) {
+  const state = mountCard(kind, inventory);
+  state.source = source;
+  state.card.id = `${kind}-${source.index}`;
+  state.name.textContent = resourceName(source);
+  return state;
+}
+
+function place(link, kind, index, inventory, unassigned) {
+  const resource = inventory.get(index);
+  link.textContent = resource
+    ? resourceName(resource.source)
+    : index == null ? unassigned : `${kind} ${index}`;
+  if (resource) link.href = `#${kind}-${index}`;
+  else link.removeAttribute("href");
 }
 
 function summarizeDevices() {
@@ -467,7 +452,8 @@ function summarizeDevices() {
     ]),
   );
   for (const state of models.values()) {
-    updatePlacement(state);
+    place(state.placement, "device", state.model.device, devices, "unassigned");
+    place(state.poolPlacement, "pool", state.model.pool, pools, "unassigned pool");
     const totals = activity.get(state.model.device);
     if (!totals) continue;
     ++totals.models;
@@ -481,10 +467,6 @@ function summarizeDevices() {
   }
 }
 
-function poolLabel(pool) {
-  return pool.key + (pool.key_truncated ? "…" : "");
-}
-
 // Immutable inventory edges are rebuilt only when a new resource arrives.
 // This also handles a reader receiving the pool before a referenced device.
 function updateResourceLinks() {
@@ -495,12 +477,12 @@ function updateResourceLinks() {
       const device = devices.get(index);
       const link = element(
         "a", "device-link",
-        device ? deviceLabel(device.source) : `device ${index}`,
+        device ? resourceName(device.source) : `device ${index}`,
       );
       link.href = `#device-${index}`;
       pool.links.append(link);
       if (device) {
-        const owner = element("a", "device-link", poolLabel(pool.source));
+        const owner = element("a", "device-link", resourceName(pool.source));
         owner.href = `#pool-${pool.source.index}`;
         device.links.append(owner);
       }
@@ -508,74 +490,97 @@ function updateResourceLinks() {
   }
 }
 
-function createPool(source) {
-  const card = element("article", "panel memory-pool");
-  card.id = `pool-${source.index}`;
-  const heading = element("div", "resource-head");
-  const links = element("div", "device-pools");
-  heading.append(
-    element("h3", "", poolLabel(source)),
-    element("span", "muted", source.backing),
-    links,
-  );
-  const total = element("div", "pool-total");
-  const committed = element("strong", "pool-value", "—");
-  const peak = element("span", "muted");
-  peak.title = "Highest commitment observed in this page session.";
-  total.append(committed, peak);
-  const canvas = element("canvas");
-  canvas.setAttribute(
-    "aria-label",
-    `${poolLabel(source)} committed bytes`,
-  );
-  const budget = element("div", "model-facts");
-  const reservations = element("div", "model-facts");
-  const workspace = element("div", "model-facts");
-  workspace.title =
-    "Workspace is backed by this pool. It is not additional physical usage; atomic samples need not agree at the same instant.";
-  const details = element("details");
-  const table = element("table");
-  details.append(element("summary", "", "All pool counters"), table);
-  card.append(heading, total, canvas, budget, reservations, workspace, details);
-  $("pool-grid").append(card);
-  return {
-    source,
-    links,
-    card,
-    committed,
-    peak,
-    canvas,
-    budget,
-    reservations,
-    workspace,
-    table,
-    cells: new Map(),
-    ring: new Ring(),
-    color: COLORS.memory,
+function slabState(slab) {
+  if (!slab) return "returned";
+  if (slab.state !== "ready") return slab.state;
+  if (!slab.leased) return "reusable";
+  return slab.leased === slab.pages ? "leased" : "mixed";
+}
+
+// Only an open inspector materializes the latest observation's options and bits.
+function createSlabMap(details) {
+  const summary = details.querySelector("summary");
+  const select = details.querySelector("select");
+  const pages = details.querySelector(".tiles");
+  const caption = details.querySelector(".model-facts");
+  let source, selected, choiceKey, pageKey;
+
+  function showPages() {
+    const slab = source.slabs[select.selectedIndex];
+    const key = (source.first_slab + select.selectedIndex) + "/" + JSON.stringify(slab);
+    if (key === pageKey) return;
+    pageKey = key;
+    pages.replaceChildren();
+    if (!slab) {
+      caption.textContent = "Slab has left the pool";
+      return;
+    }
+    caption.textContent = `${integer(slab.leased)}/${integer(slab.pages)} pages leased · ${bytes(slab.page_bytes)} per page`;
+    if (slabState(slab) !== "mixed") return;
+    const count = Math.min(64, slab.pages - slab.offset);
+    const free = BigInt("0x" + slab.free);
+    for (let i = 0; i < count; ++i) {
+      const cell = element("i");
+      cell.dataset.state = free & (1n << BigInt(i)) ? "reusable" : "leased";
+      cell.title = `Page ${slab.offset + i} · ${cell.dataset.state}`;
+      pages.append(cell);
+    }
+    caption.textContent += ` · showing #${integer(slab.offset)}–${integer(slab.offset + count - 1)}`;
+  }
+
+  function inspect() {
+    if (!details.open || !source.slabs.length) return;
+    const first = source.first_slab;
+    const states = source.slabs.map(slabState);
+    const key = first + "/" + states.join();
+    if (key !== choiceKey) {
+      choiceKey = key;
+      select.replaceChildren(...states.map((state, i) => new Option(`#${first + i} · ${state}`)));
+    }
+    let index = selected - first;
+    if (!(index >= 0 && index < states.length)) {
+      index = states.indexOf("mixed");
+      if (index < 0) index = Math.max(0, source.slabs.findLastIndex(Boolean));
+    }
+    select.selectedIndex = index;
+    showPages();
+  }
+
+  details.ontoggle = inspect;
+  select.onchange = () => {
+    selected = source.first_slab + select.selectedIndex;
+    showPages();
+  };
+  return next => {
+    source = next;
+    details.hidden = !next.slabs.length;
+    summary.textContent = `Recent physical slabs · #${next.first_slab}–${next.first_slab + next.slabs.length - 1}`;
+    inspect();
   };
 }
 
+function createPool(source) {
+  const pool = mountResource("pool", pools, source);
+  pool.backing.textContent = source.backing;
+  pool.cells = new Map();
+  pool.ring = new Ring(COLORS.memory);
+  pool.parts = ["held", "reusable", "uncommitted"].map((state) => {
+    const segment = element("i");
+    const label = element("span");
+    segment.dataset.state = label.dataset.state = state;
+    pool.capacity.append(segment);
+    pool.legend.append(label);
+    return { segment, label, state };
+  });
+  if (source.slabs) pool.updateSlabs = createSlabMap(pool.slabs);
+  else pool.slabs.remove();
+  return pool;
+}
+
 function updateDevice(device) {
-  let state = devices.get(device.index);
-  if (!state) {
-    if (!devices.size) $("device-grid").replaceChildren();
-    const card = element("article", "panel device");
-    card.id = `device-${device.index}`;
-    const heading = element("div", "resource-head");
-    const identity = element(
-      "span",
-      "device-identity",
-      `${device.name} · ${device.driver} / ${device.backend}`,
-    );
-    heading.append(
-      element("h3", "", deviceLabel(device)),
-      identity,
-    );
-    const activity = element("div", "device-activity");
-    const links = element("div", "device-pools");
-    card.append(heading, activity, links);
-    $("device-grid").append(card);
-    state = { source: device, card, activity, links };
+  if (!devices.has(device.index)) {
+    const state = mountResource("device", devices, device);
+    state.identity.textContent = `${device.name} · ${device.driver} / ${device.backend}`;
     devices.set(device.index, state);
     updateResourceLinks();
   }
@@ -583,142 +588,118 @@ function updateDevice(device) {
   summarizeDevices();
 }
 
-function updatePool(source, time, recordHistory) {
+function updatePool(source, time) {
   let pool = pools.get(source.index);
   if (!pool) {
-    if (!pools.size) $("pool-grid").replaceChildren();
     pool = createPool(source);
     pools.set(source.index, pool);
     updateResourceLinks();
+    $("pool-count").textContent = pools.size;
+    summarizeDevices();
   }
+  pool.updateSlabs?.(source);
   const fields = updateTopicFields(source.topics, pool);
-  const value = (topic, name) =>
-    fields.has(`${topic}.${name}`)
-      ? Number(fields.get(`${topic}.${name}`).value)
-      : NaN;
+  const value = (topic, name) => Number(fields.get(`${topic}.${name}`)?.value);
   const elastic = source.backing === "elastic";
-  const storageBytes = value("storage", "committed_bytes");
-  const elasticBytes = elastic ? value("elastic", "committed_bytes") : 0;
-  // Allocator breakdowns are included in the physical owner's total.
-  const committed = elastic ? elasticBytes : storageBytes;
+  const owner = elastic ? "elastic" : "storage";
+  const committed = value(owner, "committed_bytes");
+  const limit = value(owner, "budget_limit");
+  const reusable = value(owner, elastic ? "cached_bytes" : "free_bytes");
   pool.committed.textContent = bytes(committed);
-  if (recordHistory) {
-    pool.ring.push(time, committed);
-    pendingPlots.add(pool);
+  pool.budget.textContent = limit
+    ? `committed of ${bytes(limit)} budget`
+    : "committed";
+  // Ready backing is a subset of commitment. Workspace has its own view of
+  // these bytes and its counters never enter this partition.
+  const scale = Math.max(limit, committed);
+  const amounts = [committed - reusable, reusable, Math.max(0, limit - committed)];
+  for (const [i, {segment, label, state}] of pool.parts.entries()) {
+    segment.style.width = (scale ? 100 * amounts[i] / scale : 0) + "%";
+    label.hidden = i === 2 && !limit;
+    label.textContent = `${bytes(amounts[i])} ${state}`;
   }
+  pool.ring.push(time, reusable);
+  pendingPlots.add(pool);
   pool.peak.textContent = `peak ${bytes(pool.ring.peak)}`;
-  const limit = elastic ? value("elastic", "budget_limit") : 0;
-  pool.budget.textContent = elastic
-    ? `${bytes(elasticBytes)} elastic · ${bytes(limit)} budget · ${bytes(storageBytes)} persistent allocator (included)`
-    : "Native storage · no pool budget";
-  pool.reservations.textContent = elastic
-    ? `${bytes(value("elastic", "reserved_bytes"))} virtual reserved · ${bytes(value("elastic", "cached_bytes"))} reusable`
-    : `${bytes(value("storage", "reserved_bytes"))} charged · ${bytes(value("storage", "free_bytes"))} reusable`;
-  pool.workspace.textContent =
-    `Workspace: ${bytes(value("workspace", "reserved_bytes"))} charged · ${bytes(value("workspace", "committed_bytes"))} retained (included)`;
-  $("pool-count").textContent = pools.size;
-  summarizeDevices();
+  const count = name => BigInt(fields.get("workspace." + name + "_count").value);
+  const reserves = count("reserve");
+  pool.initialReserves ??= reserves;
+  const waits = count("wait");
+  pool.workspace.textContent = `Workspace · ${bytes(value("workspace", "committed_bytes"))} retained · ${integer(count("reuse"))} reused · ${integer(count("fresh"))} fresh`
+    + (waits ? ` · ${integer(waits)} waited` : "")
+    + ` · +${integer(reserves - pool.initialReserves)} reservations since opening`;
 }
 
+const batchWork = {
+  unit: "Batches", color: COLORS.output, total: (model) => model.counters?.batches, facts: [],
+};
+const modelWork = new Map([
+  ["text", {
+    unit: "Tokens", color: COLORS.output, total: (model) => model.counters?.output_tokens,
+    facts: [["text.session_capacity", "rows"], ["text.session_cache_endpoints", "cached sessions"],
+      ["text.prefix_cache_endpoints", "cached prefixes"]],
+  }],
+  ["image", {
+    unit: "Images", color: COLORS.input, total: (_, fields) => fields.get("image.generated_images")?.value,
+    facts: [["image.generated_pixels", "pixels generated"]],
+  }],
+]);
+
 function createModel(model) {
-  if (!models.size) $("model-grid").replaceChildren();
-  const card = element("article", "panel model");
-  const heading = element("div", "model-head");
-  const name = element(
-    "h3",
-    "",
-    model.name + (model.name_truncated ? "…" : ""),
-  );
-  const identity = element("div");
-  const kind = element("div", "kind", model.kind);
-  const placement = element("a", "device-link");
-  const poolPlacement = element("a", "device-link");
-  kind.append(placement, poolPlacement);
-  identity.append(name, kind);
-  const phase = element("span", "phase", model.phase);
-  heading.append(identity, phase);
-  const metrics = element("div", "model-metrics");
-  const workUnit =
-    model.kind === "image"
-      ? "Images"
-      : model.kind === "text"
-        ? "Tokens"
-        : "Batches";
-  const numbers = {};
-  const peaks = {};
-  const averages = {};
-  for (const [key, label] of Object.entries({
-    active: "Active now",
-    queued: "Queued + held",
-    completed: "Completed",
-    requests: "Requests/s · 5s",
-    work: `${workUnit}/s · 5s`,
-    total: `${workUnit} total`,
-  })) {
-    const item = element("div");
-    const value = element("strong", "", "—");
-    item.append(element("label", "", label), value);
-    if (key !== "completed" && key !== "total") {
-      const peak = element("span", "peak", "peak —");
-      peak.title =
-        "Observed peak in this page session; rates require a full five-second window.";
-      item.append(peak);
-      peaks[key] = peak;
-    }
-    if (key === "work" || key === "requests") {
-      const average = element("span", "average", "avg —");
-      average.title =
-        "Lifetime average, including idle time; independent of this page session.";
-      item.append(average);
-      averages[key] = average;
-    }
-    metrics.append(item);
-    numbers[key] = value;
+  const state = mountCard("model", models);
+  state.name.textContent = model.name + (model.name_truncated ? "…" : "");
+  state.kind.prepend(model.kind);
+  state.canvas.ariaLabel = `${model.name} completed work rate`;
+  state.format = modelWork.get(model.kind) ?? batchWork;
+  function note(item, kind, title) {
+    const text = element("span", kind, kind === "peak" ? "peak " : "avg ");
+    const number = element("span", "", "—");
+    text.title = title;
+    text.append(number);
+    item.append(text);
+    return number;
   }
-  const canvas = element("canvas");
-  canvas.setAttribute("aria-label", `${model.name} completed work rate`);
-  const pool = element("div");
-  const poolHeading = element("div", "pool-heading");
-  const poolValue = element("span", "", "—");
-  poolHeading.append(element("span", "", "KV positions"), poolValue);
-  const bar = element("div", "bar");
-  const resident = element("span");
-  const reserved = element("span", "reserved");
-  bar.append(resident, reserved);
-  pool.append(poolHeading, bar);
-  pool.hidden = true;
-  const cache = element("div", "model-facts");
-  const outcomes = element("div", "model-facts");
-  const details = element("details");
-  const table = element("table");
-  details.append(element("summary", "", "All source counters"), table);
-  card.append(heading, metrics, canvas, pool, cache, outcomes, details);
-  $("model-grid").append(card);
-  return {
-    id: model.incarnation,
-    card,
-    phase,
-    placement,
-    poolPlacement,
-    numbers,
-    peaks,
-    averages,
-    activePeak: 0,
-    queuedPeak: 0,
-    canvas,
-    pool,
-    poolValue,
-    resident,
-    reserved,
-    cache,
-    outcomes,
-    table,
-    cells: new Map(),
-    ring: new Ring(512),
-    requestRate: new CounterRate(),
-    workRate: new CounterRate(),
-    color: model.kind === "image" ? COLORS.input : COLORS.output,
-  };
+  for (const [key, label, kind] of [
+    ["active", "Active now", "gauge"],
+    ["queued", "Queued + held", "gauge"],
+    ["completed", "Completed"],
+    ["requests", "Requests/s · 5s", "rate"],
+    ["work", `${state.format.unit}/s · 5s`, "rate"],
+    ["total", `${state.format.unit} total`],
+  ]) {
+    const item = element("div");
+    const field = state[key] = { value: element("strong", "", "—") };
+    item.append(element("label", "", label), field.value);
+    if (kind) field.peak = note(item, "peak",
+      "Observed peak in this page session; rates require a full five-second window.");
+    if (kind === "rate") {
+      field.average = note(item, "average",
+        "Lifetime average, including idle time; independent of this page session.");
+      field.rate = new CounterRate();
+    }
+    state.metrics.append(item);
+  }
+  state.requests.total = state.completed.value;
+  state.work.total = state.total.value;
+  state.id = model.incarnation;
+  state.cells = new Map();
+  state.ring = new Ring(state.format.color);
+  return state;
+}
+
+function updateGauge(field, value) {
+  field.maximum = Math.max(field.maximum || 0, value);
+  field.value.textContent = format(value);
+  field.peak.textContent = format(field.maximum);
+}
+
+function updateRate(field, total, timeNs, since, unchangedUntil) {
+  const rate = field.rate.push(timeNs, total, unchangedUntil);
+  field.value.textContent = format(rate);
+  field.peak.textContent = format(field.rate.peak);
+  field.average.textContent = formatAverage(lifetimeRate(timeNs, since, total));
+  field.total.textContent = total == null ? "—" : integer(total);
+  return rate;
 }
 
 // Only an exact revision match authorizes extending the last observed value.
@@ -743,20 +724,11 @@ function updateModel(model, time, timeNs, version, recordHistory) {
     models.set(model.slot, state);
   }
   const fields = updateTopicFields(model.topics, state);
-  const value = (key) =>
-    fields.has(key) ? Number(fields.get(key).value) : NaN;
-  const imageTotal = fields.get("image.generated_images")?.value;
-  const workTotal =
-    model.kind === "image"
-      ? imageTotal
-      : model.counters?.[model.kind === "text" ? "output_tokens" : "batches"];
+  const value = (key) => Number(fields.get(key)?.value);
+  const workTotal = state.format.total(model, fields);
   const unchangedUntil = unchangedBoundary(state.revision, version, timeNs);
-  const workRate = state.workRate.push(timeNs, workTotal, unchangedUntil);
-  state.requests = state.requestRate.push(
-    timeNs,
-    model.counters?.completed,
-    unchangedUntil,
-  );
+  const workRate = updateRate(state.work, workTotal, timeNs, model.since_ns, unchangedUntil);
+  updateRate(state.requests, model.counters?.completed, timeNs, model.since_ns, unchangedUntil);
   state.revision = version.revision;
   if (recordHistory) {
     state.ring.push(time, workRate);
@@ -765,26 +737,8 @@ function updateModel(model, time, timeNs, version, recordHistory) {
   state.model = model;
   state.fields = fields;
   state.phase.textContent = model.phase;
-  state.numbers.active.textContent = format(model.active);
-  state.numbers.queued.textContent = format(model.queued + model.held);
-  state.activePeak = Math.max(state.activePeak, model.active);
-  state.queuedPeak = Math.max(state.queuedPeak, model.queued + model.held);
-  for (const [key, value] of Object.entries({
-    active: state.activePeak,
-    queued: state.queuedPeak,
-    work: state.workRate.peak,
-    requests: state.requestRate.peak,
-  }))
-    state.peaks[key].textContent = `peak ${format(value)}`;
-  state.numbers.completed.textContent = model.counters
-    ? integer(model.counters.completed)
-    : "—";
-  state.numbers.requests.textContent = format(state.requests);
-  state.numbers.work.textContent = format(workRate);
-  state.averages.work.textContent = `avg ${formatAverage(lifetimeRate(timeNs, model.since_ns, workTotal))}`;
-  state.averages.requests.textContent = `avg ${formatAverage(lifetimeRate(timeNs, model.since_ns, model.counters?.completed))}`;
-  state.numbers.total.textContent =
-    workTotal === undefined ? "—" : integer(workTotal);
+  updateGauge(state.active, model.active);
+  updateGauge(state.queued, model.queued + model.held);
   const capacity = value("text.pool_capacity");
   state.pool.hidden = !(capacity > 0);
   if (capacity > 0) {
@@ -794,17 +748,7 @@ function updateModel(model, time, timeNs, version, recordHistory) {
     state.resident.style.width = `${(100 * resident) / capacity}%`;
     state.reserved.style.width = `${(100 * reserved) / capacity}%`;
   }
-  const facts =
-    model.kind === "text"
-      ? [
-          ["text.session_capacity", "rows"],
-          ["text.session_cache_endpoints", "cached sessions"],
-          ["text.prefix_cache_endpoints", "cached prefixes"],
-        ]
-      : model.kind === "image"
-        ? [["image.generated_pixels", "pixels generated"]]
-        : [];
-  state.cache.textContent = facts
+  state.cache.textContent = state.format.facts
     .filter(([key]) => fields.has(key))
     .map(([key, label]) => `${integer(fields.get(key).value)} ${label}`)
     .join(" · ");
@@ -840,8 +784,8 @@ function summarize(time, recordHistory) {
     };
     group.active += model.active;
     group.queued += model.queued + model.held;
-    if (Number.isFinite(state.requests)) {
-      group.rate += state.requests;
+    if (Number.isFinite(state.requests.rate.value)) {
+      group.rate += state.requests.rate.value;
       group.available = true;
     }
     if (model.counters) {
@@ -916,21 +860,10 @@ function updateServer(page, time, timeNs, version, recordHistory) {
   const unchangedUntil = unchangedBoundary(serverRevision, version, timeNs);
   serverRevision = version.revision;
   serverSample = page;
-  const output = serverRates.output_tokens.push(
-    timeNs,
-    page.counters?.output_tokens,
-    unchangedUntil,
-  );
-  const input = serverRates.input_tokens.push(
-    timeNs,
-    page.counters?.input_tokens,
-    unchangedUntil,
-  );
-  const requests = serverRates.completed.push(
-    timeNs,
-    page.counters?.completed,
-    unchangedUntil,
-  );
+  for (const field of serverRates) {
+    const value = updateRate(field, page.counters?.[field.counter], timeNs, page.since_ns, unchangedUntil);
+    if (recordHistory) field.ring.push(time, value);
+  }
   const finishes = page.counters
     ? ["completed", "rejected", "cancelled", "failed"].reduce(
         (total, key) => total + BigInt(page.counters[key]),
@@ -950,40 +883,9 @@ function updateServer(page, time, timeNs, version, recordHistory) {
   $("activity-span").textContent = serverBuckets.arrivals.duration
     ? `${(Number(serverBuckets.arrivals.duration) / 1e9).toFixed(2)}s bucket`
     : "~1s bucket";
-  if (recordHistory) {
-    history.output.push(time, output);
-    history.input.push(time, input);
-    history.requests.push(time, requests);
-    history.errors.push(
-      time,
-      page.counters ? Number(page.counters.failed) : NaN,
-    );
-  }
-  $("output-rate").textContent = format(output);
-  $("input-rate").textContent = format(input);
-  $("request-rate").textContent = format(requests);
-  $("output-peak").textContent = format(serverRates.output_tokens.peak);
-  $("input-peak").textContent = format(serverRates.input_tokens.peak);
-  $("request-peak").textContent = format(serverRates.completed.peak);
-  for (const [id, key] of [
-    ["output", "output_tokens"],
-    ["input", "input_tokens"],
-    ["request", "completed"],
-  ])
-    $(`${id}-average`).textContent = formatAverage(
-      lifetimeRate(timeNs, page.since_ns, page.counters?.[key]),
-    );
-  for (const [id, key] of [
-    ["completed", "completed"],
-    ["output-total", "output_tokens"],
-    ["input-total", "input_tokens"],
-    ["errors", "failed"],
-    ["rejected", "rejected"],
-    ["cancelled", "cancelled"],
-    ["batches", "batches"],
-  ]) {
-    $(id).textContent = page.counters ? integer(page.counters[key]) : "—";
-  }
+  if (recordHistory) history.errors.push(time, Number(page.counters?.failed));
+  for (const total of serverTotals)
+    total.textContent = page.counters ? integer(page.counters[total.dataset.total]) : "—";
 }
 
 function apply(frame) {
@@ -994,8 +896,7 @@ function apply(frame) {
     serverIdentity = frame.server;
     serverRevision = undefined;
     serverSample = undefined;
-    for (const key of Object.keys(serverRates))
-      serverRates[key] = new CounterRate();
+    for (const field of serverRates) field.rate = new CounterRate();
     for (const key of Object.keys(serverBuckets))
       serverBuckets[key] = new CounterBucket();
     activePeak = 0;
@@ -1008,7 +909,7 @@ function apply(frame) {
     $("pool-grid").replaceChildren();
     $("device-count").textContent = "0";
     $("pool-count").textContent = "0";
-    for (const key of Object.keys(history)) history[key] = new Ring();
+    for (const ring of Object.values(history)) ring.clear();
     latestTime = 0;
     historyTime = 0;
   }
@@ -1021,14 +922,14 @@ function apply(frame) {
   // Only real samples populate history; the local scroll clock adds no samples.
   const recordHistory =
     page.type !== "heartbeat" ||
-    Object.values(serverRates).some((rate) => rate.count && rate.value !== 0) ||
+    serverRates.some(({ rate }) => rate.count && rate.value !== 0) ||
     Object.values(serverBuckets).some(
       (bucket) => Number.isFinite(bucket.value) && bucket.value !== 0,
     ) ||
     [...models.values()].some(
       (model) =>
-        (model.workRate.count && model.workRate.value !== 0) ||
-        (model.requestRate.count && model.requestRate.value !== 0),
+        (model.work.rate.count && model.work.rate.value !== 0) ||
+        (model.requests.rate.count && model.requests.rate.value !== 0),
     );
   if (recordHistory) historyTime = latestTime;
   if (page.type === "server") {
@@ -1040,7 +941,7 @@ function apply(frame) {
   } else if (page.type === "device") {
     updateDevice(page);
   } else if (page.type === "pool") {
-    updatePool(page, time, recordHistory);
+    updatePool(page, time);
   } else if (page.type === "models") {
     // A live page establishes absence only for its explicitly scanned slots.
     for (let slot = page.first; slot < page.next; ++slot) {
@@ -1083,18 +984,26 @@ function state(label, live = false) {
   $("connection-dot").classList.toggle("live", live);
 }
 
-function connect() {
-  if (paused || document.hidden) return;
+function disconnect() {
   clearTimeout(retry);
-  for (const rate of Object.values(serverRates)) rate.reset();
+  if (!socket) return;
+  socket.close();
+  socket = undefined;
+  for (const ring of Object.values(history)) ring.push(latestTime, NaN);
+  for (const model of models.values()) model.ring.push(latestTime, NaN);
+  for (const pool of pools.values()) pool.ring.push(latestTime, NaN);
+}
+
+function connect() {
+  if (paused || socket) return;
+  for (const { rate } of serverRates) rate.reset();
   for (const bucket of Object.values(serverBuckets)) bucket.reset();
   for (const model of models.values()) {
-    model.requestRate.reset();
-    model.workRate.reset();
+    model.requests.rate.reset();
+    model.work.rate.reset();
   }
   const url = new URL("../v1/observe", location.href);
   url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  $("endpoint").textContent = location.host;
   state("Connecting");
   const peer = new WebSocket(url, "loom.observe.v1");
   socket = peer;
@@ -1123,11 +1032,9 @@ function connect() {
   };
   peer.onclose = () => {
     if (socket !== peer) return;
-    for (const ring of Object.values(history)) ring.push(latestTime, NaN);
-    for (const model of models.values()) model.ring.push(latestTime, NaN);
-    for (const pool of pools.values()) pool.ring.push(latestTime, NaN);
+    disconnect();
     state(paused ? "Paused" : "Disconnected");
-    if (!paused && !document.hidden) {
+    if (!paused) {
       $("notice").textContent =
         "Live feed disconnected. Relays must forward WebSocket upgrades and preserve the public origin. Reconnecting…";
       $("notice").hidden = false;
@@ -1141,44 +1048,37 @@ $("pause").onclick = () => {
   pausedTime = chartTime();
   paused = !paused;
   $("pause").textContent = paused ? "Resume" : "Pause";
-  clearTimeout(retry);
   if (paused) {
     state("Paused");
-    socket?.close(1000, "Viewer paused");
+    disconnect();
   } else connect();
 };
+function updateChartAxes() {
+  const labels = [4, 3, 2, 1].map((tick) => `−${(windowMs / 1000) * tick / 4}s`);
+  labels.push(scrolling ? "NOW" : "LAST ACTIVITY");
+  for (const footer of document.querySelectorAll(".chart-footer")) {
+    footer.replaceChildren(...labels.map((label) => element("span", "", label)));
+  }
+}
+updateChartAxes();
 $("scroll").onclick = () => {
   scrolling = !scrolling;
   $("scroll").setAttribute("aria-pressed", String(scrolling));
   $("scroll").textContent = scrolling ? "Scroll on" : "Scroll off";
-  document.querySelectorAll(".chart-footer").forEach((footer) => {
-    footer.lastElementChild.textContent = scrolling ? "NOW" : "LAST ACTIVITY";
-  });
+  updateChartAxes();
   redraw(true);
 };
 $("window").onclick = () => {
   windowMs = windowMs === 30000 ? 120000 : 30000;
   $("window").textContent = windowMs === 30000 ? "30 SEC" : "2 MIN";
-  document.querySelectorAll(".chart-footer").forEach((footer) =>
-    footer.querySelectorAll("span").forEach((tick, index) => {
-      tick.textContent =
-        index === 4
-          ? scrolling
-            ? "NOW"
-            : "LAST ACTIVITY"
-          : `−${((windowMs / 1000) * (4 - index)) / 4}s`;
-    }),
-  );
+  updateChartAxes();
   redraw(true);
 };
 document.addEventListener("visibilitychange", () => {
-  clearTimeout(retry);
-  if (document.hidden) socket?.close(1000, "Viewer hidden");
-  else if (!paused) {
-    connect();
-    redraw();
-  }
+  if (!document.hidden) redraw(true);
 });
+window.addEventListener("pagehide", disconnect);
+window.addEventListener("pageshow", connect);
 new ResizeObserver(() => redraw(true)).observe(document.querySelector("main"));
 setInterval(() => {
   if (document.hidden) return;
@@ -1190,4 +1090,3 @@ setInterval(() => {
       `Last sample ${((performance.now() - receivedAt) / 1000).toFixed(1)}s ago`;
   if (scrolling && !paused && receivedAt) redraw(true);
 }, 1000);
-connect();

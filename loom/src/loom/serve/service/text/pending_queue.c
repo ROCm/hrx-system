@@ -189,6 +189,7 @@ iree_status_t loom_serve_text_pending_queue_admit(
   const iree_host_size_t reservation = pending->reservation;
   const iree_host_size_t restored_bytes = queue->prepared.restored_bytes;
   loom_serve_text_pending_request_t request = *pending;
+  request.chat.max_tokens = request.input.max_tokens;
   if (session->mode == LOOM_SERVE_TEXT_MODE_ENCODE) {
     request.name = iree_make_cstring_view(request.sequence.handle);
   }

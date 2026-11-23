@@ -57,6 +57,14 @@ static iree_status_t loom_serve_inspection_request(
       (now - state->arrival_time) / 1e9));
   IREE_RETURN_IF_ERROR(
       loom_serve_telemetry_counters_format(&state->counters, output));
+  if (state->session) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        output,
+        ",\"prompt\":{\"total_tokens\":%zu,\"cached_tokens\":%zu,"
+        "\"processed_tokens\":%zu}",
+        state->prompt.total_tokens, state->prompt.cached_tokens,
+        state->prompt.processed_tokens));
+  }
   return iree_string_builder_append_cstring(output, "}");
 }
 

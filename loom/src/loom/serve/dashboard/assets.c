@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/serve/dashboard/etags.h"
 #include "loom/serve/dashboard/files.h"
 #include "loom/serve/server/http/response.h"
 
@@ -26,12 +27,6 @@ static const iree_file_toc_t* loom_serve_dashboard_lookup(
     }
   }
   return NULL;
-}
-
-bool loom_serve_dashboard_handles(iree_string_view_t path) {
-  return iree_string_view_equal(path, IREE_SV("/")) ||
-         iree_string_view_equal(path, IREE_SV("/dashboard")) ||
-         loom_serve_dashboard_lookup(path) != NULL;
 }
 
 // Only a positive RFC 9110 qvalue permits the compressed representation.
@@ -92,25 +87,91 @@ static bool loom_serve_dashboard_accepts_gzip(
   return (gzip >= 0 ? gzip : wildcard) > 0;
 }
 
+// If-None-Match compares opaque tags weakly, including when a quoted tag
+// contains a comma. A syntactically incomplete list cannot validate a body.
+static bool loom_serve_dashboard_matches(
+    const loom_serve_http_request_t* request, iree_string_view_t etag) {
+  iree_string_view_t field;
+  if (!loom_serve_http_request_lookup_header(request, IREE_SV("If-None-Match"),
+                                             &field)) {
+    return false;
+  }
+  field = iree_string_view_trim(field);
+  if (iree_string_view_equal(field, IREE_SV("*"))) {
+    return true;
+  }
+  bool matched = false;
+  while (field.size) {
+    if (iree_string_view_consume_prefix_char(&field, ',')) {
+      field = iree_string_view_trim(field);
+      continue;
+    }
+    iree_string_view_consume_prefix(&field, IREE_SV("W/"));
+    if (!iree_string_view_consume_prefix_char(&field, '"')) {
+      return false;
+    }
+    iree_string_view_t item;
+    if (iree_string_view_split(field, '"', &item, &field) < 0) {
+      return false;
+    }
+    matched |= iree_string_view_equal(item, etag);
+    field = iree_string_view_trim(field);
+    if (field.size && !iree_string_view_starts_with_char(field, ',')) {
+      return false;
+    }
+  }
+  return matched;
+}
+
+// Only the offline tool documents can execute model-authored content. The
+// conversation itself communicates with the serving origin.
+static const char* loom_serve_dashboard_policy(iree_string_view_t path) {
+  if (iree_string_view_equal(path, IREE_SV("/dashboard/mcp-worker.js"))) {
+    return "default-src 'none'; script-src 'self'; connect-src https: http:";
+  }
+  if (iree_string_view_equal(path, IREE_SV("/dashboard/code.html"))) {
+    return "sandbox allow-scripts; default-src 'none'; worker-src blob:; "
+           "script-src 'unsafe-inline' 'unsafe-eval'; base-uri 'none'; "
+           "form-action 'none'; frame-ancestors 'self'; webrtc 'block'";
+  }
+  if (iree_string_view_equal(path, IREE_SV("/dashboard/chat.html"))) {
+    return "default-src 'none'; script-src 'self'; style-src 'self'; "
+           "connect-src 'self'; img-src blob:; frame-src 'self'; worker-src "
+           "'self'; "
+           "form-action 'none'; base-uri 'none'; frame-ancestors 'none'";
+  }
+  if (iree_string_view_equal(path, IREE_SV("/dashboard/preview.html"))) {
+    // The shell embeds only an opaque srcdoc. That document inherits this
+    // policy, including the closed frame and connection destinations.
+    return "default-src 'none'; script-src 'unsafe-inline'; "
+           "style-src 'unsafe-inline'; img-src data: blob:; media-src data: "
+           "blob:; "
+           "font-src data:; form-action 'none'; base-uri 'none'; "
+           "frame-ancestors 'self'; webrtc 'block'";
+  }
+  return "default-src 'none'; script-src 'self'; style-src 'self'; "
+         "connect-src 'self'; base-uri 'none'; frame-ancestors 'none'";
+}
+
 typedef struct loom_serve_dashboard_response_t {
   // Stack header borrowed by the synchronous generated-send writer.
   iree_string_view_t header;
-  // Immutable embedded file with process lifetime.
-  const iree_file_toc_t* file;
+  // Immutable encoded representation. A validated GET has an empty body.
+  iree_const_byte_span_t body;
 } loom_serve_dashboard_response_t;
 
 static iree_status_t loom_serve_dashboard_write(void* self,
                                                 iree_byte_span_t storage) {
   const loom_serve_dashboard_response_t* response = self;
   memcpy(storage.data, response->header.data, response->header.size);
-  memcpy(storage.data + response->header.size, response->file->data,
-         response->file->size);
+  memcpy(storage.data + response->header.size, response->body.data,
+         response->body.data_length);
   return iree_ok_status();
 }
 
-void loom_serve_dashboard_send(loom_serve_http_server_t* server,
-                               loom_serve_http_connection_t* connection,
-                               const loom_serve_http_request_t* request) {
+bool loom_serve_dashboard_try_send(loom_serve_http_server_t* server,
+                                   loom_serve_http_connection_t* connection,
+                                   const loom_serve_http_request_t* request) {
   const iree_string_view_t path = request->path;
   if (iree_string_view_equal(path, IREE_SV("/")) ||
       iree_string_view_equal(path, IREE_SV("/dashboard"))) {
@@ -118,7 +179,11 @@ void loom_serve_dashboard_send(loom_serve_http_server_t* server,
         server, connection,
         IREE_SV("HTTP/1.1 302 Found\r\nLocation: ./dashboard/\r\n"
                 "Content-Length: 0\r\nConnection: close\r\n\r\n"));
-    return;
+    return true;
+  }
+  const iree_file_toc_t* file = loom_serve_dashboard_lookup(path);
+  if (!file) {
+    return false;
   }
   if (!loom_serve_dashboard_accepts_gzip(request)) {
     loom_serve_http_response_send(
@@ -126,40 +191,51 @@ void loom_serve_dashboard_send(loom_serve_http_server_t* server,
         IREE_SV("HTTP/1.1 406 Not Acceptable\r\nContent-Length: 0\r\n"
                 "Vary: Accept-Encoding\r\nCache-Control: no-cache\r\n"
                 "Connection: close\r\n\r\n"));
-    return;
+    return true;
   }
-  const iree_file_toc_t* file = loom_serve_dashboard_lookup(path);
   const char* content_type = "text/html; charset=utf-8";
-  if (iree_string_view_equal(path, IREE_SV("/dashboard/style.css"))) {
+  if (iree_string_view_ends_with(path, IREE_SV(".css"))) {
     content_type = "text/css; charset=utf-8";
-  } else if (iree_string_view_equal(path, IREE_SV("/dashboard/app.js"))) {
+  } else if (iree_string_view_ends_with(path, IREE_SV(".js"))) {
     content_type = "text/javascript; charset=utf-8";
   }
   char header[512];
   iree_string_builder_t output;
   iree_string_builder_initialize_with_storage(header, sizeof(header), &output);
-  iree_status_t status = iree_string_builder_append_format(
-      &output,
-      "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
-      "Content-Encoding: gzip\r\nVary: Accept-Encoding\r\n"
-      "Cache-Control: no-cache\r\nX-Content-Type-Options: nosniff\r\n"
-      "Content-Security-Policy: default-src 'none'; script-src 'self'; "
-      "style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors "
-      "'none'\r\n"
-      "Connection: close\r\n\r\n",
-      content_type, file->size);
+  const char* etag =
+      loom_serve_dashboard_etags[file - loom_serve_dashboard_files_create()];
+  const bool cached =
+      loom_serve_dashboard_matches(request, iree_make_cstring_view(etag));
+  iree_status_t status =
+      cached
+          ? iree_string_builder_append_cstring(&output,
+                                               "HTTP/1.1 304 Not Modified\r\n")
+          : iree_string_builder_append_format(
+                &output,
+                "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
+                "Content-Encoding: gzip\r\n",
+                content_type, file->size);
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_format(
+        &output,
+        "ETag: \"%s\"\r\nVary: Accept-Encoding\r\nCache-Control: no-cache\r\n"
+        "X-Content-Type-Options: nosniff\r\nContent-Security-Policy: %s\r\n"
+        "Connection: close\r\n\r\n",
+        etag, loom_serve_dashboard_policy(path));
+  }
   if (iree_status_is_ok(status) &&
       loom_serve_http_connection_can_send(connection)) {
     const loom_serve_dashboard_response_t response = {
-        iree_string_builder_view(&output), file};
+        iree_string_builder_view(&output),
+        iree_make_const_byte_span(file->data, cached ? 0 : file->size)};
     status = loom_serve_http_connection_send_generated(
-        connection,
-        (iree_net_send_prefix_t){response.header.size + file->size,
-                                 loom_serve_dashboard_write, (void*)&response});
+        connection, (iree_net_send_prefix_t){
+                        response.header.size + response.body.data_length,
+                        loom_serve_dashboard_write, (void*)&response});
   } else if (iree_status_is_ok(status)) {
     loom_serve_http_connection_abort(connection);
     iree_string_builder_deinitialize(&output);
-    return;
+    return true;
   }
   iree_string_builder_deinitialize(&output);
   if (iree_status_is_ok(status)) {
@@ -169,4 +245,5 @@ void loom_serve_dashboard_send(loom_serve_http_server_t* server,
     iree_status_free(status);
     loom_serve_http_connection_abort(connection);
   }
+  return true;
 }

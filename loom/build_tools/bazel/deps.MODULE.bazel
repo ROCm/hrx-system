@@ -8,6 +8,18 @@
 
 bazel_dep(name = "patchelf", version = "0.18.0.bcr.1")
 
+# Only the host action that links the browser UI uses JavaScript tooling.
+bazel_dep(name = "aspect_rules_js", version = "3.6.1")
+
+web_npm = use_extension("@aspect_rules_js//npm:extensions.bzl", "npm")
+web_npm.npm_translate_lock(
+    name = "loom_web_npm",
+    data = ["//build_tools/serve_web:pnpm-workspace.yaml"],
+    pnpm_lock = "//build_tools/serve_web:pnpm-lock.yaml",
+    run_lifecycle_hooks = False,
+)
+use_repo(web_npm, "loom_web_npm")
+
 sdk_version = use_repo_rule(
     "//loom/packaging/python:version.bzl",
     "sdk_version",

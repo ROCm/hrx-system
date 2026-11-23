@@ -1508,6 +1508,10 @@ loom_serve_service_t loom_serve_text_service_interface(
            .context_length = service->scheduling.context_capacity,
            .max_output_tokens =
                encodes ? 0 : service->scheduling.context_capacity,
+           .default_output_tokens =
+               encodes ? 0
+                       : iree_min(service->default_max_tokens,
+                                  service->scheduling.context_capacity),
            .input_token_count = !encodes,
            .reasoning = encodes
                             ? (loom_serve_reasoning_t){0}
