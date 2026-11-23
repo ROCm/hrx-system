@@ -288,8 +288,8 @@ function applyPreviewEdits(db, address) {
     },
   );
 }
-// Submit the completed gesture before returning to the browser. Navigation
-// can destroy the document before even one IndexedDB read callback runs.
+// A gesture submits only a write. Reconciling here would make later gestures
+// wait behind a transaction whose reads need this document to stay alive.
 export async function savePreviewSize(db, session, key, size) {
   const sizes = (session.previewSizes ??= {});
   if (size) sizes[key] = size;
@@ -308,8 +308,7 @@ export async function savePreviewSize(db, session, key, size) {
     position: position >= session.saved ? position : undefined,
   });
   tx.commit();
-  await done;
-  await applyPreviewEdits(db, [session.id, key]);
+  return done;
 }
 
 // A deleted ancestor owns only the prefix its direct children still reference.
