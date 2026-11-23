@@ -109,6 +109,7 @@ h2 { font: 600 .79rem ui-monospace, monospace; letter-spacing: .02em; margin: 0 
 .settings-heading { display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
 .settings-heading h2 { margin: 0; }
 #refresh { font-size: .8rem; }
+#turn-model { margin: 0 0 .6rem; overflow-wrap: anywhere; }
 dl { display: grid; grid-template-columns: auto 1fr; margin: 0; gap: .28rem .75rem; font: .82rem/1.5 ui-monospace, monospace; }
 dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
 canvas { width: 100%; height: 30px; margin-top: .9rem; display: block; }
