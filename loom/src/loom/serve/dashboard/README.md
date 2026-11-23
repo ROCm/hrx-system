@@ -1,9 +1,15 @@
 # Embedded live observations
 
-`index.html`, `style.css`, and `app.js` are ordinary static browser assets.
-The existing C embed-data generator includes them in the server; there is no
-JavaScript compiler, package installation, chart dependency, or runtime file
-lookup. The router serves exact asset names with a same-origin content policy.
+The dashboard is part of the `loom-serve` executable. Edit the HTML, CSS, and
+JavaScript sources here. The `bundle` build target links ES modules, minifies
+the browser resources, and gzip-compresses each URL independently. The complete
+set must fit below 50,000 compressed bytes. The C embed-data generator puts
+those bytes in the executable. Running the server needs only the executable
+and its normal serving dependencies.
+
+Bazel provides the host-side build tools. When building the dashboard with
+CMake, install Node.js and pnpm or Corepack. Both builds use the tool versions
+in the same package lock and leave generated resources in the build tree.
 
 The [observation workflow](../../../../docs/src/serving/workflows/observe-model-server.md#watch-the-live-dashboard)
 owns the user-facing launch and relay instructions.

@@ -1,5 +1,4 @@
-// Copyright 2026 The IREE Authors.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+/*! Copyright 2026 The IREE Authors. SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception */
 
 const COLORS = {
   output: "#69d9da",
