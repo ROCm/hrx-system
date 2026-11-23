@@ -199,7 +199,7 @@ function controls() {
     isChat = route === chat;
   waitingForTools = unfinished().size !== 0;
   for (const field of document.querySelectorAll(
-    "aside :is(input,textarea,select,button), #project-form :is(input,button), #branch button, " +
+    "aside :is(input,textarea,select,button), #branch button, " +
       "#transcript :is(button:not(.save-html),select.turn-picker), #files button, #model, .chat-actions button, #threads, #projects, #upload",
   ))
     field.disabled = busy;
@@ -892,7 +892,6 @@ function selectThread(value) {
     const replacement = [...catalog.values()].find((model) => model.loom.endpoint === chat);
     if (replacement) models.value = replacement.id;
   }
-  byId("project-form").hidden = true;
   attachments = drafts.get(value.id)?.files || [];
   prompt.value = drafts.get(value.id)?.text || "";
   showFiles();
@@ -1509,26 +1508,23 @@ chooseFiles(
     notice("Imported · " + session.title);
   }),
 );
-const switchProject = workspaceAction(async (id) => {
+async function selectProject(id) {
   await projectMenu(id);
   selectThread(newThread());
   await historyMenu();
-});
+}
+const switchProject = workspaceAction(selectProject);
 byId("projects").onchange = (event) => {
-  if (event.target.value === "-") {
-    askDelete(true);
-    return;
-  }
-  if (event.target.value === "+") {
-    event.target.value = project.id;
-    byId("project-form").hidden = false;
-    byId("project-name").focus();
-    return;
-  }
-  switchProject(event.target.value);
+  const id = event.target.value;
+  event.target.value = project.id;
+  if (id === "-") askDelete(true);
+  else if (id === "+") askName("New project", "", "Create", newProject, 90);
+  else switchProject(id);
 };
-const projectForm = byId("project-form");
-const deleteDialog = byId("delete-dialog");
+const newProject = workspaceAction(async (name) => {
+  await selectProject((await createProject(database, name)).id);
+  prompt.focus();
+});
 async function releaseDeletedPins() {
   const pending = await pendingReleases(database);
   const failures = [];
@@ -1581,55 +1577,22 @@ const deleteSelected = workspaceAction(async (projectId, chatId, message) => {
 function askDelete(wholeProject) {
   const projectId = project?.id,
     chatId = wholeProject ? undefined : thread.id;
-  const picker = byId(wholeProject ? "projects" : "threads");
-  picker.value = wholeProject ? project.id : thread.id;
   const draft = !wholeProject && !byId("draft-chat").hidden;
   const name = wholeProject ? project.name : chatTitle(thread);
   const action = wholeProject ? "Delete project" : draft ? "Discard draft" : "Delete chat";
-  byId("delete-title").textContent = draft ? "Discard this draft?" : "Delete “" + name + "”?";
-  byId("delete-detail").textContent = wholeProject
+  const title = draft ? "Discard this draft?" : "Delete “" + name + "”?";
+  let detail = wholeProject
     ? "All chats and forks in this project will be removed from this browser."
     : draft
       ? "The unsent message and its attachments will be cleared."
       : "Forks keep the messages they inherited from this chat.";
   if (chatLabels.get(chatId)?.shared)
-    byId("delete-detail").prepend("Several chats share this title. ");
+    detail = "Several chats share this title. " + detail;
   const message = draft
     ? "Draft discarded"
     : (wholeProject ? "Project deleted · " : "Chat deleted · ") + name;
-  byId("confirm-delete").textContent = action;
-  deleteDialog.returnValue = "cancel";
-  deleteDialog.onclose = () => {
-    if (deleteDialog.returnValue === "delete") deleteSelected(projectId, chatId, message);
-    else picker.focus();
-  };
-  deleteDialog.showModal();
+  ask(title, [element("p", detail)], action, () => deleteSelected(projectId, chatId, message), true);
 }
-function cancelProject() {
-  projectForm.hidden = true;
-  projectForm.reset();
-  byId("projects").focus();
-}
-byId("cancel-project").onclick = cancelProject;
-projectForm.onkeydown = (event) => {
-  if (event.key === "Escape") {
-    event.stopPropagation();
-    cancelProject();
-  }
-};
-projectForm.onsubmit = (event) => {
-  event.preventDefault();
-  workspaceAction(async () => {
-    const name = byId("project-name").value.trim();
-    if (!name) throw new Error("Enter a project name");
-    const created = await createProject(database, name);
-    await projectMenu(created.id);
-    projectForm.reset();
-    selectThread(newThread());
-    await historyMenu();
-    prompt.focus();
-  })();
-};
 byId("save-settings").onclick = guarded(async () => {
   const selected = thread;
   thread.settings = settings();

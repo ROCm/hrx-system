@@ -41,10 +41,6 @@
         <div class="chat-actions"><button id="new" aria-label="New chat">New<span> chat</span></button><button id="import-chat" aria-label="Import chat">Import<span> chat</span></button><button id="export-chat" aria-label="Export chat">Export<span> chat</span></button></div>
         <button id="inspector-toggle" aria-controls="inspector" aria-expanded="false">Inspector</button>
       </div>
-      <form id="project-form" autocomplete="off" hidden>
-        <label for="project-name">New project</label><input id="project-name" maxlength="90" required>
-        <button id="create-project">Create</button><button type="button" id="cancel-project">Cancel</button>
-      </form>
       <div id="branch" hidden></div>
     </header>
     <div id="transcript" role="region" aria-label="Messages" tabindex="0"></div>
@@ -123,12 +119,6 @@
       <div class="keys"><kbd>Ctrl ↵</kbd> send <kbd>Ctrl K</kbd> find chat <kbd>Esc</kbd> stop <kbd>/export</kbd> download chat</div>
     </aside>
   </main>
-  <dialog id="delete-dialog" aria-labelledby="delete-title" aria-describedby="delete-detail">
-    <form method="dialog">
-      <h2 id="delete-title"></h2><p id="delete-detail"></p>
-      <div><button value="cancel" autofocus>Cancel</button><button id="confirm-delete" value="delete"></button></div>
-    </form>
-  </dialog>
   <dialog id="action-dialog" aria-labelledby="action-title">
     <form><h2 id="action-title"></h2><div id="action-fields"></div>
       <div class="dialog-actions"><button type="button" id="dismiss">Cancel</button><button id="apply" type="submit"></button></div>
