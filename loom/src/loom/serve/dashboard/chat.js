@@ -1834,7 +1834,7 @@ models.onchange = () => {
   showFiles();
 };
 document.addEventListener("keydown", (event) => {
-  if (document.querySelector("dialog[open]") || projectForm.contains(event.target)) return;
+  if (document.querySelector("dialog[open]")) return;
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();
     findHistory();
