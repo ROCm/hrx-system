@@ -17,6 +17,17 @@ _ASSETS = [
     "style.css",
 ]
 
+_WIRE = [
+    "content.js",
+    "events.js",
+    "wire.js",
+]
+
+filegroup(
+    name = "wire_sources",
+    srcs = _WIRE,
+)
+
 loom_generated_source_family(
     name = "bundle",
     args = [
