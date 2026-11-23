@@ -61,9 +61,7 @@ const openFences = new WeakMap();
 function resizeGrip(box, layout) {
   box.tabIndex = 0;
   box.setAttribute("role", "group");
-  box.title =
-    "Resize with the corner or arrow keys. Home resets the size.";
-  box.setAttribute("aria-label", box.title);
+  box.setAttribute("aria-label", "Resize preview with arrow keys. Home resets the size.");
   let previous = layout.size || {};
   const axes = ["width", "height"];
   for (const axis of axes) if (previous[axis]) box.style[axis] = previous[axis] + "px";
@@ -140,7 +138,7 @@ function resizeGrip(box, layout) {
 export function preview(html, layout) {
   const box = element("div", undefined, "preview-box");
   const frame = element("iframe", undefined, "preview");
-  frame.title = "HTML preview";
+  frame.setAttribute("aria-label", "HTML preview");
   frame.referrerPolicy = "no-referrer";
   frame.setAttribute("aria-busy", "true");
   frame.onload = () => {

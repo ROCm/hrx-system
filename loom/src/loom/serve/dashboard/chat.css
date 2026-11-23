@@ -102,6 +102,7 @@ aside details > summary {
 aside details[open] { padding-bottom: .6rem; }
 aside details[open] > summary { border-bottom: 1px solid var(--rule); border-radius: 3px 3px 0 0; }
 aside details[open] > summary::marker { color: var(--accent); }
+aside summary + button { margin-top: .5rem; }
 aside details > label:last-child { margin-bottom: 0; }
 h2 { font: 600 .79rem ui-monospace, monospace; letter-spacing: .02em; margin: 0 0 .8rem; }
 .settings-heading { display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
