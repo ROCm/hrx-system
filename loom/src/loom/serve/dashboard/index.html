@@ -39,71 +39,58 @@
         </div>
       </header>
       <div id="notice" role="status" hidden></div>
+      <template id="rate-summary">
+        <span
+          class="peak"
+          title="Highest full five-second average observed in this page session."
+          >peak <b>—</b><br /><span
+            class="average"
+            title="Lifetime average, including idle time; independent of this page session."
+            >avg <b>—</b></span
+          ></span
+        >
+      </template>
       <section class="stats" aria-label="Server counters">
-        <article class="stat">
+        <article class="stat" data-rate="output_tokens">
           <div class="stat-label">Output throughput <span>5s avg</span></div>
           <div class="stat-value cyan">
             <strong id="output-rate">—</strong><span>tok/s</span>
-            <span
-              class="peak"
-              title="Highest full five-second average observed in this page session."
-              >peak <b id="output-peak">—</b><br /><span
-                class="average"
-                title="Lifetime average, including idle time; independent of this page session."
-                >avg <b id="output-average">—</b></span
-              ></span
-            >
           </div>
           <canvas
             id="output-spark"
+            data-series="output"
             aria-label="Rolling output token rate"
           ></canvas>
           <small><span id="output-total">—</span> tokens total</small>
         </article>
         <article
-          class="stat"
+          class="stat" data-rate="input_tokens"
           title="Tokens consumed by completed model work, including decode input; not only prompt tokens."
         >
           <div class="stat-label">Input work <span>5s avg</span></div>
           <div class="stat-value orange">
             <strong id="input-rate">—</strong><span>tok/s</span>
-            <span
-              class="peak"
-              title="Highest full five-second average observed in this page session."
-              >peak <b id="input-peak">—</b><br /><span
-                class="average"
-                title="Lifetime average, including idle time; independent of this page session."
-                >avg <b id="input-average">—</b></span
-              ></span
-            >
           </div>
           <canvas
             id="input-spark"
+            data-series="input"
             aria-label="Rolling input token work rate"
           ></canvas>
           <small><span id="input-total">—</span> tokens total</small>
         </article>
-        <article class="stat">
+        <article class="stat" data-rate="completed">
           <div class="stat-label">Completions <span>5s avg</span></div>
           <div class="stat-value">
             <strong id="request-rate">—</strong><span>req/s</span>
-            <span
-              class="peak"
-              title="Highest full five-second average observed in this page session."
-              >peak <b id="request-peak">—</b><br /><span
-                class="average"
-                title="Lifetime average, including idle time; independent of this page session."
-                >avg <b id="request-average">—</b></span
-              ></span
-            >
           </div>
           <canvas
             id="request-spark"
+            data-series="request"
             aria-label="Rolling successful request rate"
           ></canvas>
           <small
             ><span id="completed">—</span> completed ·
-            <span id="batches">—</span> batches</small
+            <span id="batches" data-total="batches">—</span> batches</small
           >
         </article>
         <article
@@ -123,6 +110,7 @@
           </div>
           <canvas
             id="activity-spark"
+            data-series="arrivals"
             aria-label="Received requests per observation bucket"
           ></canvas>
           <small
@@ -150,6 +138,7 @@
           </div>
           <canvas
             id="kv-spark"
+            data-series="kv"
             aria-label="Logical KV occupancy history"
           ></canvas>
           <small
@@ -161,15 +150,16 @@
         <article class="stat">
           <div class="stat-label">Failed requests <span>total</span></div>
           <div class="stat-value red">
-            <strong id="errors">—</strong><span>failed</span>
+            <strong id="errors" data-total="failed">—</strong><span>failed</span>
           </div>
           <canvas
             id="error-spark"
+            data-series="errors"
             aria-label="Cumulative failed requests"
           ></canvas>
           <small
-            ><span id="rejected">—</span> rejected ·
-            <span id="cancelled">—</span> cancelled</small
+            ><span id="rejected" data-total="rejected">—</span> rejected ·
+            <span id="cancelled" data-total="cancelled">—</span> cancelled</small
           >
         </article>
       </section>
@@ -185,13 +175,11 @@
           </div>
           <canvas
             id="flow"
+            data-series="input output"
             class="chart"
             aria-label="Rolling input and output token throughput"
           ></canvas>
-          <div class="chart-footer">
-            <span>−30s</span><span>−22.5s</span><span>−15s</span
-            ><span>−7.5s</span><span>NOW</span>
-          </div>
+          <div class="chart-footer"></div>
         </article>
         <article class="panel">
           <div class="panel-heading">
@@ -203,13 +191,11 @@
           </div>
           <canvas
             id="request-flow"
+            data-series="request"
             class="chart"
             aria-label="Rolling successful request throughput"
           ></canvas>
-          <div class="chart-footer">
-            <span>−30s</span><span>−22.5s</span><span>−15s</span
-            ><span>−7.5s</span><span>NOW</span>
-          </div>
+          <div class="chart-footer"></div>
         </article>
         <article
           class="panel"
@@ -225,13 +211,11 @@
           </div>
           <canvas
             id="activity-flow"
+            data-series="arrivals finishes"
             class="chart"
             aria-label="Received and finished requests per observation bucket"
           ></canvas>
-          <div class="chart-footer">
-            <span>−30s</span><span>−22.5s</span><span>−15s</span
-            ><span>−7.5s</span><span>NOW</span>
-          </div>
+          <div class="chart-footer"></div>
         </article>
       </section>
       <section class="sources">

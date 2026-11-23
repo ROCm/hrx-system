@@ -21,9 +21,13 @@ const encoder = new TextEncoder();
 
 // Fixed history, independent of server uptime, counter magnitude, and traffic.
 class Ring {
-  constructor(capacity = 512) {
-    this.times = new Float64Array(capacity);
-    this.values = new Float64Array(capacity);
+  constructor(color) {
+    this.color = color;
+    this.times = new Float64Array(512);
+    this.values = new Float64Array(512);
+    this.clear();
+  }
+  clear() {
     this.count = 0;
     this.next = 0;
     this.peak = NaN;
@@ -191,21 +195,41 @@ const scaled = (value, base, units) => {
   return `${format(value)} ${units[unit]}`;
 };
 const bytes = (value) => scaled(value, 1024, ["B", "KiB", "MiB", "GiB", "TiB"]);
-const history = Object.fromEntries(
-  ["output", "input", "requests", "arrivals", "finishes", "kv", "errors"].map(
-    (key) => [key, new Ring()],
-  ),
-);
+const history = {
+  output: new Ring(COLORS.output),
+  input: new Ring(COLORS.input),
+  request: new Ring(COLORS.input),
+  arrivals: new Ring(COLORS.active),
+  finishes: new Ring(COLORS.input),
+  kv: new Ring(COLORS.memory),
+  errors: new Ring(COLORS.errors),
+};
+const plots = Array.from(document.querySelectorAll("canvas[data-series]"), (canvas) => ({
+  canvas,
+  series: canvas.dataset.series.split(" ").map((key) => history[key]),
+  grid: canvas.classList.contains("chart"),
+}));
 const models = new Map();
 const devices = new Map();
 const pools = new Map();
 const pendingPlots = new Set();
-const serverRates = Object.fromEntries(
-  ["output_tokens", "input_tokens", "completed"].map((key) => [
-    key,
-    new CounterRate(),
-  ]),
-);
+const serverRates = Array.from(document.querySelectorAll("[data-rate]"), (card) => {
+  const key = card.querySelector("canvas").dataset.series;
+  const summary = $("rate-summary").content.cloneNode(true);
+  const [peak, average] = summary.querySelectorAll("b");
+  peak.id = key + "-peak";
+  average.id = key + "-average";
+  const value = card.querySelector("strong");
+  value.parentElement.append(summary);
+  return {
+    counter: card.dataset.rate,
+    ring: history[key],
+    rate: new CounterRate(),
+    value, peak, average,
+    total: card.querySelector("small span"),
+  };
+});
+const serverTotals = document.querySelectorAll("[data-total]");
 const serverBuckets = {
   arrivals: new CounterBucket(),
   finishes: new CounterBucket(),
@@ -254,7 +278,7 @@ function draw(canvas, series, now, grid = false) {
   const bottom = height - 3;
   const extend = socket?.readyState === WebSocket.OPEN && !paused;
   let maximum = 1;
-  for (const [ring] of series) {
+  for (const ring of series) {
     let last = NaN;
     ring.each((time, value) => {
       if (time <= now) last = value;
@@ -278,59 +302,48 @@ function draw(canvas, series, now, grid = false) {
       context.stroke();
     }
   }
-  for (const [ring, color] of series) {
-    const points = [];
-    let lastTime = 0;
-    let lastValue = NaN;
-    ring.each((time, value) => {
-      if (time >= now - windowMs && time <= now) points.push([time, value]);
-      if (time <= now) {
-        lastTime = time;
-        lastValue = value;
-      }
-    });
-    const x = (time) =>
-      left + ((time - now + windowMs) / windowMs) * (width - left);
-    const y = (value) => bottom - (value / maximum) * (bottom - top);
+  const x = (time) => left + ((time - now + windowMs) / windowMs) * (width - left);
+  const y = (value) => bottom - (value / maximum) * (bottom - top);
+  for (const ring of series) {
+    const color = ring.color;
     const gradient = context.createLinearGradient(0, top, 0, bottom);
     gradient.addColorStop(0, `${color}35`);
     gradient.addColorStop(1, `${color}00`);
-    // Missing observations create real gaps, not invented interpolated work.
-    let segment = [];
-    const paint = () => {
-      if (!segment.length) return;
-      context.beginPath();
-      context.moveTo(x(segment[0][0]), bottom);
-      for (const [time, value] of segment) context.lineTo(x(time), y(value));
-      context.lineTo(x(segment.at(-1)[0]), bottom);
-      context.closePath();
+    context.strokeStyle = color;
+    context.lineWidth = grid ? 1.7 : 1.4;
+    let line, firstX, lastTime, lastValue;
+    function paintSegment() {
+      if (!line) return;
+      const area = new Path2D(line);
+      const lastX = x(lastTime);
+      area.lineTo(lastX, bottom);
+      area.lineTo(firstX, bottom);
+      area.closePath();
       context.fillStyle = gradient;
-      context.fill();
+      context.fill(area);
+      context.stroke(line);
       context.beginPath();
-      segment.forEach(([time, value], index) =>
-        index
-          ? context.lineTo(x(time), y(value))
-          : context.moveTo(x(time), y(value)),
-      );
-      context.lineWidth = grid ? 1.7 : 1.4;
-      context.strokeStyle = color;
-      context.stroke();
-      const last = segment.at(-1);
-      context.beginPath();
-      context.arc(x(last[0]), y(last[1]), grid ? 2.8 : 2, 0, Math.PI * 2);
+      context.arc(lastX, y(lastValue), grid ? 2.8 : 2, 0, Math.PI * 2);
       context.fillStyle = color;
       context.fill();
-      segment = [];
-    };
-    for (const point of points) {
-      if (!Number.isFinite(point[1])) {
-        paint();
-        continue;
-      }
-      if (segment.length && point[0] - segment.at(-1)[0] > 2000) paint();
-      segment.push(point);
+      line = undefined;
     }
-    paint();
+    // A missing observation or two seconds of silence ends the current path.
+    ring.each((time, value) => {
+      if (time > now) return;
+      if (!Number.isFinite(value) || time - lastTime > 2000) paintSegment();
+      if (time >= now - windowMs && Number.isFinite(value)) {
+        if (line) line.lineTo(x(time), y(value));
+        else {
+          line = new Path2D();
+          firstX = x(time);
+          line.moveTo(firstX, y(value));
+        }
+      }
+      lastTime = time;
+      lastValue = value;
+    });
+    paintSegment();
     // Local time moves the viewport, not the observations. A dotted tail shows
     // only the last received value; it never enters history, rates, or peaks.
     if (Number.isFinite(lastValue) && extend) {
@@ -359,36 +372,8 @@ function redraw(all = false) {
     framePending = false;
     if (document.hidden) return;
     const now = chartTime();
-    draw(
-      $("flow"),
-      [
-        [history.input, COLORS.input],
-        [history.output, COLORS.output],
-      ],
-      now,
-      true,
-    );
-    draw($("request-flow"), [[history.requests, COLORS.input]], now, true);
-    draw(
-      $("activity-flow"),
-      [
-        [history.arrivals, COLORS.active],
-        [history.finishes, COLORS.input],
-      ],
-      now,
-      true,
-    );
-    for (const [id, key, color] of [
-      ["output-spark", "output", COLORS.output],
-      ["input-spark", "input", COLORS.input],
-      ["request-spark", "requests", COLORS.input],
-      ["activity-spark", "arrivals", COLORS.active],
-      ["kv-spark", "kv", COLORS.memory],
-      ["error-spark", "errors", COLORS.errors],
-    ])
-      draw($(id), [[history[key], color]], now);
-    for (const model of pendingPlots)
-      draw(model.canvas, [[model.ring, model.color]], now);
+    for (const { canvas, series, grid } of plots) draw(canvas, series, now, grid);
+    for (const plot of pendingPlots) draw(plot.canvas, [plot.ring], now);
     pendingPlots.clear();
   });
 }
@@ -634,8 +619,7 @@ function createPool(source) {
     updateSlabs,
     table: counterTable(card, "All pool counters"),
     cells: new Map(),
-    ring: new Ring(),
-    color: COLORS.memory,
+    ring: new Ring(COLORS.memory),
   };
 }
 
@@ -801,10 +785,9 @@ function createModel(model) {
     outcomes,
     table: counterTable(card, "All source counters"),
     cells: new Map(),
-    ring: new Ring(),
+    ring: new Ring(model.kind === "image" ? COLORS.input : COLORS.output),
     requestRate: new CounterRate(),
     workRate: new CounterRate(),
-    color: model.kind === "image" ? COLORS.input : COLORS.output,
   };
 }
 
@@ -1002,21 +985,15 @@ function updateServer(page, time, timeNs, version, recordHistory) {
   const unchangedUntil = unchangedBoundary(serverRevision, version, timeNs);
   serverRevision = version.revision;
   serverSample = page;
-  const output = serverRates.output_tokens.push(
-    timeNs,
-    page.counters?.output_tokens,
-    unchangedUntil,
-  );
-  const input = serverRates.input_tokens.push(
-    timeNs,
-    page.counters?.input_tokens,
-    unchangedUntil,
-  );
-  const requests = serverRates.completed.push(
-    timeNs,
-    page.counters?.completed,
-    unchangedUntil,
-  );
+  for (const field of serverRates) {
+    const total = page.counters?.[field.counter];
+    const rate = field.rate.push(timeNs, total, unchangedUntil);
+    if (recordHistory) field.ring.push(time, rate);
+    field.value.textContent = format(rate);
+    field.peak.textContent = format(field.rate.peak);
+    field.average.textContent = formatAverage(lifetimeRate(timeNs, page.since_ns, total));
+    field.total.textContent = page.counters ? integer(total) : "—";
+  }
   const finishes = page.counters
     ? ["completed", "rejected", "cancelled", "failed"].reduce(
         (total, key) => total + BigInt(page.counters[key]),
@@ -1036,40 +1013,9 @@ function updateServer(page, time, timeNs, version, recordHistory) {
   $("activity-span").textContent = serverBuckets.arrivals.duration
     ? `${(Number(serverBuckets.arrivals.duration) / 1e9).toFixed(2)}s bucket`
     : "~1s bucket";
-  if (recordHistory) {
-    history.output.push(time, output);
-    history.input.push(time, input);
-    history.requests.push(time, requests);
-    history.errors.push(
-      time,
-      page.counters ? Number(page.counters.failed) : NaN,
-    );
-  }
-  $("output-rate").textContent = format(output);
-  $("input-rate").textContent = format(input);
-  $("request-rate").textContent = format(requests);
-  $("output-peak").textContent = format(serverRates.output_tokens.peak);
-  $("input-peak").textContent = format(serverRates.input_tokens.peak);
-  $("request-peak").textContent = format(serverRates.completed.peak);
-  for (const [id, key] of [
-    ["output", "output_tokens"],
-    ["input", "input_tokens"],
-    ["request", "completed"],
-  ])
-    $(`${id}-average`).textContent = formatAverage(
-      lifetimeRate(timeNs, page.since_ns, page.counters?.[key]),
-    );
-  for (const [id, key] of [
-    ["completed", "completed"],
-    ["output-total", "output_tokens"],
-    ["input-total", "input_tokens"],
-    ["errors", "failed"],
-    ["rejected", "rejected"],
-    ["cancelled", "cancelled"],
-    ["batches", "batches"],
-  ]) {
-    $(id).textContent = page.counters ? integer(page.counters[key]) : "—";
-  }
+  if (recordHistory) history.errors.push(time, Number(page.counters?.failed));
+  for (const total of serverTotals)
+    total.textContent = page.counters ? integer(page.counters[total.dataset.total]) : "—";
 }
 
 function apply(frame) {
@@ -1080,8 +1026,7 @@ function apply(frame) {
     serverIdentity = frame.server;
     serverRevision = undefined;
     serverSample = undefined;
-    for (const key of Object.keys(serverRates))
-      serverRates[key] = new CounterRate();
+    for (const field of serverRates) field.rate = new CounterRate();
     for (const key of Object.keys(serverBuckets))
       serverBuckets[key] = new CounterBucket();
     activePeak = 0;
@@ -1094,7 +1039,7 @@ function apply(frame) {
     $("pool-grid").replaceChildren();
     $("device-count").textContent = "0";
     $("pool-count").textContent = "0";
-    for (const key of Object.keys(history)) history[key] = new Ring();
+    for (const ring of Object.values(history)) ring.clear();
     latestTime = 0;
     historyTime = 0;
   }
@@ -1107,7 +1052,7 @@ function apply(frame) {
   // Only real samples populate history; the local scroll clock adds no samples.
   const recordHistory =
     page.type !== "heartbeat" ||
-    Object.values(serverRates).some((rate) => rate.count && rate.value !== 0) ||
+    serverRates.some(({ rate }) => rate.count && rate.value !== 0) ||
     Object.values(serverBuckets).some(
       (bucket) => Number.isFinite(bucket.value) && bucket.value !== 0,
     ) ||
@@ -1181,7 +1126,7 @@ function disconnect() {
 
 function connect() {
   if (paused || socket) return;
-  for (const rate of Object.values(serverRates)) rate.reset();
+  for (const { rate } of serverRates) rate.reset();
   for (const bucket of Object.values(serverBuckets)) bucket.reset();
   for (const model of models.values()) {
     model.requestRate.reset();
@@ -1239,28 +1184,25 @@ $("pause").onclick = () => {
     disconnect();
   } else connect();
 };
+function updateChartAxes() {
+  const labels = [4, 3, 2, 1].map((tick) => `−${(windowMs / 1000) * tick / 4}s`);
+  labels.push(scrolling ? "NOW" : "LAST ACTIVITY");
+  for (const footer of document.querySelectorAll(".chart-footer")) {
+    footer.replaceChildren(...labels.map((label) => element("span", "", label)));
+  }
+}
+updateChartAxes();
 $("scroll").onclick = () => {
   scrolling = !scrolling;
   $("scroll").setAttribute("aria-pressed", String(scrolling));
   $("scroll").textContent = scrolling ? "Scroll on" : "Scroll off";
-  document.querySelectorAll(".chart-footer").forEach((footer) => {
-    footer.lastElementChild.textContent = scrolling ? "NOW" : "LAST ACTIVITY";
-  });
+  updateChartAxes();
   redraw(true);
 };
 $("window").onclick = () => {
   windowMs = windowMs === 30000 ? 120000 : 30000;
   $("window").textContent = windowMs === 30000 ? "30 SEC" : "2 MIN";
-  document.querySelectorAll(".chart-footer").forEach((footer) =>
-    footer.querySelectorAll("span").forEach((tick, index) => {
-      tick.textContent =
-        index === 4
-          ? scrolling
-            ? "NOW"
-            : "LAST ACTIVITY"
-          : `−${((windowMs / 1000) * (4 - index)) / 4}s`;
-    }),
-  );
+  updateChartAxes();
   redraw(true);
 };
 document.addEventListener("visibilitychange", () => {
