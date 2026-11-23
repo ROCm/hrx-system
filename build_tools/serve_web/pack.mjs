@@ -13,11 +13,18 @@ import { minify as minifyJS } from "terser";
 
 const list = { type: "string", multiple: true, default: [] };
 const { values } = parseArgs({
-  options: { entry: list, page: list, style: list, output: list, etags: { type: "string" } },
+  options: {
+    entry: list,
+    page: list,
+    style: list,
+    scoped: list,
+    output: list,
+    etags: { type: "string" },
+  },
 });
 const assets = new Map();
 const bundle = await rollup({
-  input: values.entry.map(file => path.resolve(file)),
+  input: values.entry.map((file) => path.resolve(file)),
   preserveEntrySignatures: "allow-extension",
 });
 try {
@@ -30,7 +37,9 @@ try {
   });
   for (const { fileName, code } of output) {
     const result = await minifyJS(code, {
-      ecma: 2022, module: true, compress: { passes: 3 },
+      ecma: 2022,
+      module: true,
+      compress: { passes: 3 },
       format: { comments: /@license|@preserve|^!/ },
     });
     assets.set(fileName, result.code);
@@ -41,18 +50,50 @@ try {
 
 for (const file of values.page) {
   const html = await minifyHTML(await readFile(file, "utf8"), {
-    collapseWhitespace: true, collapseBooleanAttributes: true, sortAttributes: true,
-    removeAttributeQuotes: true, removeOptionalTags: true, removeComments: true,
+    collapseWhitespace: true,
+    collapseBooleanAttributes: true,
+    sortAttributes: true,
+    minifyJS: path.basename(file) === "code.html",
+    removeAttributeQuotes: true,
+    removeOptionalTags: true,
+    removeComments: true,
     ignoreCustomComments: [/copyright|SPDX|@license/i],
   });
   assets.set(path.basename(file), html);
 }
-const styles = await Promise.all(values.style.map(file => readFile(file, "utf8")));
-const css = new CleanCSS({ level: 2, rebase: false }).minify(styles.join("\n"));
-if (css.errors.length || css.warnings.length) {
-  throw new Error([...css.errors, ...css.warnings].join("\n"));
+// Each page owns its ordinary element selectors. :where() adds the document
+// scope without changing their specificity relative to shared controls.
+function scopeRules(scope) {
+  return {
+    level2: {
+      block(tokens) {
+        for (const [kind, selectors] of tokens) {
+          if (kind !== "rule") continue;
+          for (const selector of selectors) {
+            const text = selector[1];
+            if (text.includes(scope)) continue; // Nested block already processed.
+            selector[1] = /^(html|:root)\b/.test(text)
+              ? text.replace(/^(html|:root)/, "$1" + scope)
+              : scope + " " + text;
+          }
+        }
+      },
+    },
+  };
 }
-assets.set("style.css", css.styles);
+
+const sheets = [];
+for (const file of [...values.scoped, ...values.style]) {
+  const page = path.basename(file, ".css");
+  const plugins = values.scoped.includes(file) ? [scopeRules(`:where(.${page})`)] : [];
+  const css = new CleanCSS({ level: 2, rebase: false, plugins }).minify(
+    await readFile(file, "utf8"),
+  );
+  if (css.errors.length || css.warnings.length)
+    throw new Error([...css.errors, ...css.warnings].join("\n"));
+  sheets.push(css.styles);
+}
+assets.set("style.css", sheets.join("\n"));
 
 // The output list is also the native server's resource table. A new or
 // missing module must change the declared inputs to the embed action.
@@ -70,9 +111,12 @@ for (const file of values.output) {
   await writeFile(file, encoded);
   assets.delete(name);
 }
-if (assets.size) throw new Error("Undeclared dashboard resources: " + [...assets.keys()].join(", "));
-if (total >= 50000) throw new Error(`Dashboard is ${total} gzip bytes. The budget is below 50,000.`);
+if (assets.size)
+  throw new Error("Undeclared dashboard resources: " + [...assets.keys()].join(", "));
+if (total >= 50000)
+  throw new Error(`Dashboard is ${total} gzip bytes. The budget is below 50,000.`);
 // The embed-data generator consumes the same ordered list of files.
-await writeFile(values.etags, [
-  "static const char loom_serve_dashboard_etags[][23] = {", ...etags, "};", "",
-].join("\n"));
+await writeFile(
+  values.etags,
+  ["static const char loom_serve_dashboard_etags[][23] = {", ...etags, "};", ""].join("\n"),
+);

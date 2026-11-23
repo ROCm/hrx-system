@@ -123,6 +123,33 @@ static bool loom_serve_dashboard_matches(
   return matched;
 }
 
+// Only the offline tool documents can execute model-authored content. The
+// conversation itself communicates with the serving origin.
+static const char* loom_serve_dashboard_policy(iree_string_view_t path) {
+  if (iree_string_view_equal(path, IREE_SV("/dashboard/code.html"))) {
+    return "sandbox allow-scripts; default-src 'none'; worker-src blob:; "
+           "script-src 'unsafe-inline' 'unsafe-eval'; base-uri 'none'; "
+           "form-action 'none'; frame-ancestors 'self'; webrtc 'block'";
+  }
+  if (iree_string_view_equal(path, IREE_SV("/dashboard/chat.html"))) {
+    return "default-src 'none'; script-src 'self'; style-src 'self'; "
+           "connect-src 'self'; img-src blob:; frame-src 'self'; worker-src "
+           "'self'; "
+           "form-action 'none'; base-uri 'none'; frame-ancestors 'none'";
+  }
+  if (iree_string_view_equal(path, IREE_SV("/dashboard/preview.html"))) {
+    // The shell embeds only an opaque srcdoc. That document inherits this
+    // policy, including the closed frame and connection destinations.
+    return "default-src 'none'; script-src 'unsafe-inline'; "
+           "style-src 'unsafe-inline'; img-src data: blob:; media-src data: "
+           "blob:; "
+           "font-src data:; form-action 'none'; base-uri 'none'; "
+           "frame-ancestors 'self'; webrtc 'block'";
+  }
+  return "default-src 'none'; script-src 'self'; style-src 'self'; "
+         "connect-src 'self'; base-uri 'none'; frame-ancestors 'none'";
+}
+
 typedef struct loom_serve_dashboard_response_t {
   // Stack header borrowed by the synchronous generated-send writer.
   iree_string_view_t header;
@@ -186,15 +213,12 @@ bool loom_serve_dashboard_try_send(loom_serve_http_server_t* server,
                 "Content-Encoding: gzip\r\n",
                 content_type, file->size);
   if (iree_status_is_ok(status)) {
-    const char* policy =
-        "default-src 'none'; script-src 'self'; style-src 'self'; "
-        "connect-src 'self'; base-uri 'none'; frame-ancestors 'none'";
     status = iree_string_builder_append_format(
         &output,
         "ETag: \"%s\"\r\nVary: Accept-Encoding\r\nCache-Control: no-cache\r\n"
         "X-Content-Type-Options: nosniff\r\nContent-Security-Policy: %s\r\n"
         "Connection: close\r\n\r\n",
-        etag, policy);
+        etag, loom_serve_dashboard_policy(path));
   }
   if (iree_status_is_ok(status) &&
       loom_serve_http_connection_can_send(connection)) {

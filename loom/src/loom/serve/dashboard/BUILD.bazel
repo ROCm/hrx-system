@@ -11,11 +11,27 @@ package(
     licenses = ["notice"],
 )
 
-_ASSETS = [
+# Entry points have stable URLs for pages, workers, and the audio worklet.
+_ENTRIES = [
     "app.js",
-    "index.html",
-    "style.css",
+    "capture.js",
+    "chat.js",
+    "topbar.js",
 ]
+
+_PAGES = [
+    "chat.html",
+    "code.html",
+    "index.html",
+    "preview.html",
+]
+
+_SCOPED = [
+    "chat.css",
+    "telemetry.css",
+]
+
+_ASSETS = _ENTRIES + _PAGES + ["style.css"]
 
 _WIRE = [
     "content.js",
@@ -30,13 +46,23 @@ filegroup(
 
 loom_generated_source_family(
     name = "bundle",
-    args = [
-        "--entry=$(location app.js)",
-        "--page=$(location index.html)",
-        "--style=$(location style.css)",
+    args = ["--entry=$(location " + file + ")" for file in _ENTRIES] +
+           ["--page=$(location " + file + ")" for file in _PAGES] +
+           ["--scoped=$(location " + file + ")" for file in _SCOPED] + [
+        "--style=$(location topbar.css)",
     ],
     generator = "//build_tools/serve_web:pack",
-    inputs = _ASSETS,
+    inputs = _ENTRIES + _PAGES + _SCOPED + _WIRE + [
+        "audio.js",
+        "code.js",
+        "dialog.js",
+        "export.js",
+        "reply-stats.js",
+        "settings.js",
+        "storage.js",
+        "topbar.css",
+        "view.js",
+    ],
     output_flags = ["--output=" for asset in _ASSETS] + ["--etags="],
     outputs = ["gzip/" + asset for asset in _ASSETS] + ["etags.h"],
 )

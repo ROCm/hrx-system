@@ -1,12 +1,6 @@
 /*! Copyright 2026 The IREE Authors. SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception */
 
-const COLORS = {
-  output: "#69d9da",
-  input: "#f8aa74",
-  active: "#aaa0e8",
-  memory: "#afcf87",
-  errors: "#f58c97",
-};
+import { chartColors as COLORS } from "./topbar.js";
 const RATE_WINDOW_NS = 5000000000n;
 const ACTIVITY_BUCKET_NS = 1000000000n;
 let windowMs = 30000;
@@ -289,8 +283,8 @@ function draw(canvas, series, now, grid = false) {
   maximum *= 1.15;
   if (grid) {
     context.font = "9px ui-monospace, monospace";
-    context.fillStyle = "#6f7c8d";
-    context.strokeStyle = "#292f38";
+    context.fillStyle = COLORS.dim;
+    context.strokeStyle = COLORS.rule;
     context.lineWidth = 0.7;
     for (let i = 0; i <= 4; ++i) {
       const y = top + ((bottom - top) * i) / 4;
@@ -1010,7 +1004,6 @@ function connect() {
   }
   const url = new URL("../v1/observe", location.href);
   url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  $("endpoint").textContent = location.host;
   state("Connecting");
   const peer = new WebSocket(url, "loom.observe.v1");
   socket = peer;

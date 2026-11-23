@@ -1,0 +1,65 @@
+/* Copyright 2026 The IREE Authors. SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception */
+:root {
+  --bg: #1b1916;
+  --panel: #26231f;
+  --control: #302c26;
+  --rule: #595146;
+  --text: #f0ebe1;
+  --dim: #c1b8a8;
+  --accent: #e9b863;
+  --on-accent: #221a0f;
+  --input: #d99b79;
+  --memory: #91b38d;
+  --output: #eace87;
+  --active: #c9a4ae;
+  --errors: #f09a8f;
+  --topbar-height: 46px;
+  color-scheme: dark;
+  background: var(--bg);
+  color: var(--text);
+  accent-color: var(--accent);
+}
+::selection { background: var(--accent); color: var(--on-accent); }
+::placeholder { color: var(--dim); opacity: 1; }
+.topbar {
+  display: grid;
+  grid-template-columns: max-content max-content minmax(max-content, 1fr) fit-content(26ch) max-content;
+  align-items: center;
+  gap: 0 16px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 Inter, system-ui, sans-serif;
+  font-synthesis: none;
+  white-space: nowrap;
+}
+.topbar a { color: inherit; text-decoration: none; }
+.topbar a:focus-visible, .topbar button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.topbar .brand { grid-area: 1 / 1; margin-right: 8px; font-size: 18px; font-weight: 750; letter-spacing: -.045em; }
+.topbar .brand span, .topbar nav, .topbar #endpoint { color: var(--dim); }
+.topbar nav { grid-area: 1 / 2; display: flex; gap: 17px; min-height: calc(var(--topbar-height) - 1px); }
+.topbar nav > * { display: flex; align-items: center; border-bottom: 2px solid transparent; }
+.topbar nav a:hover, .topbar nav [aria-current] { color: var(--text); }
+.topbar nav [aria-current] { border-color: var(--accent); }
+.topbar #endpoint { grid-area: 1 / 4; min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 12px ui-monospace, monospace; }
+.topbar #privacy { grid-area: 1 / -2; color: var(--accent); font-size: 12px; }
+.topbar #privacy:hover { text-decoration: underline; }
+.topbar .controls { grid-area: 1 / 3; justify-self: end; display: flex; align-items: center; gap: 8px; font-size: 11px; }
+@media (max-width: 880px) {
+  .topbar .controls { grid-area: 2 / 1 / auto / -1; justify-self: stretch; border-top: 1px solid var(--rule); padding: 4px 0; }
+  .topbar time { margin-left: auto; }
+}
+@media (max-width: 740px) {
+  .topbar { padding-inline: 10px; column-gap: 10px; grid-template-columns: max-content max-content 1fr; }
+  .topbar #endpoint { display: none; }
+  .topbar #privacy { justify-self: end; }
+}
+@media (max-width: 390px) {
+  .topbar { padding-inline: 8px; column-gap: 6px; font-size: 13px; }
+  .topbar .brand { margin: 0; font-size: 16px; }
+  .topbar nav { gap: 10px; }
+}
+@media (max-width: 360px) {
+  .topbar .brand span { display: none; }
+}

@@ -1,22 +1,19 @@
 <!doctype html>
-<html lang="en">
+<!-- Copyright 2026 The IREE Authors. SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception -->
+<html lang="en" class="telemetry">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark" />
-    <title>Loom · Serve</title>
+    <title>Telemetry · Loom Serve</title>
     <link rel="stylesheet" href="style.css" />
     <script type="module" src="app.js"></script>
   </head>
   <body>
-    <main>
-      <header>
-        <a class="brand" href="./"
-          ><span class="brand-word">loom</span
-          ><span class="brand-section">/ serve</span></a
-        >
-        <span id="endpoint" class="endpoint">—</span>
-        <div class="controls">
+<header class="topbar">
+  <a class="brand" href="./" aria-label="Loom Serve">loom <span>/ serve</span></a>
+  <nav aria-label="Workspace"><a href="chat.html">Conversation</a><span aria-current="page">Telemetry</span></nav>
+  <div class="controls">
           <span id="connection-dot" class="dot"></span>
           <span id="connection">Connecting</span>
           <button id="pause" type="button">Pause</button>
@@ -37,7 +34,10 @@
           </button>
           <time id="clock">—</time>
         </div>
-      </header>
+  <span id="endpoint"></span>
+  <a id="privacy" href="chat.html?private">Incognito</a>
+</header>
+    <main>
       <div id="notice" role="status" hidden></div>
       <template id="rate-summary">
         <span
@@ -53,7 +53,7 @@
       <section class="stats" aria-label="Server counters">
         <article class="stat" data-rate="output_tokens">
           <div class="stat-label">Output throughput <span>5s avg</span></div>
-          <div class="stat-value cyan">
+          <div class="stat-value series-output">
             <strong id="output-rate">—</strong><span>tok/s</span>
           </div>
           <canvas
@@ -68,7 +68,7 @@
           title="Tokens consumed by completed model work, including decode input; not only prompt tokens."
         >
           <div class="stat-label">Input work <span>5s avg</span></div>
-          <div class="stat-value orange">
+          <div class="stat-value series-input">
             <strong id="input-rate">—</strong><span>tok/s</span>
           </div>
           <canvas
@@ -100,7 +100,7 @@
           <div class="stat-label">
             Requests received <span id="activity-span">~1s bucket</span>
           </div>
-          <div class="stat-value violet">
+          <div class="stat-value series-active">
             <strong id="activity">—</strong><span>requests</span>
             <span
               class="peak"
@@ -128,7 +128,7 @@
           title="Resident logical token positions across observed text pools; not physical RAM usage."
         >
           <div class="stat-label">KV occupancy <span>now</span></div>
-          <div class="stat-value green">
+          <div class="stat-value series-memory">
             <strong id="kv">—</strong><span>% resident</span>
             <span
               class="peak"
@@ -149,7 +149,7 @@
         </article>
         <article class="stat">
           <div class="stat-label">Failed requests <span>total</span></div>
-          <div class="stat-value red">
+          <div class="stat-value series-errors">
             <strong id="errors" data-total="failed">—</strong><span>failed</span>
           </div>
           <canvas
@@ -170,8 +170,8 @@
             <span class="muted">tok/s · 5s avg</span>
           </div>
           <div class="legend">
-            <span class="cyan">● Output</span
-            ><span class="orange">● Input work</span>
+            <span class="series-output">● Output</span
+            ><span class="series-input">● Input work</span>
           </div>
           <canvas
             id="flow"
@@ -187,7 +187,7 @@
             <span class="muted">req/s · 5s avg</span>
           </div>
           <div class="legend">
-            <span class="orange">● Successful completions</span>
+            <span class="series-input">● Successful completions</span>
           </div>
           <canvas
             id="request-flow"
@@ -206,8 +206,8 @@
             <span class="muted">requests · ~1s buckets</span>
           </div>
           <div class="legend">
-            <span class="violet">● Received</span
-            ><span class="orange">● Finished</span>
+            <span class="series-active">● Received</span
+            ><span class="series-input">● Finished</span>
           </div>
           <canvas
             id="activity-flow"

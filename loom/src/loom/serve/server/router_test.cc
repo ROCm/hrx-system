@@ -386,6 +386,34 @@ TEST_P(HttpRouterTest, DashboardValidatesTheSelectedGzipRepresentation) {
       0u);
 }
 
+TEST_P(HttpRouterTest, ConversationConfinesExecutableToolContent) {
+  const auto policy = [&](const char* path) {
+    const auto response = Read(Send("GET", path));
+    EXPECT_EQ(response.find("HTTP/1.1 200"), 0u);
+    const std::string field = "\r\nContent-Security-Policy: ";
+    const auto index = response.find(field);
+    if (index == std::string::npos) {
+      return std::string();
+    }
+    const auto first = index + field.size();
+    return response.substr(first, response.find("\r\n", first) - first);
+  };
+  const auto chat = policy("/dashboard/chat.html");
+  EXPECT_NE(chat.find("script-src 'self';"), std::string::npos);
+  EXPECT_NE(chat.find("connect-src 'self';"), std::string::npos);
+  EXPECT_NE(chat.find("frame-src 'self';"), std::string::npos);
+  EXPECT_EQ(chat.find("'unsafe-"), std::string::npos);
+  const auto code = policy("/dashboard/code.html");
+  EXPECT_NE(code.find("sandbox allow-scripts;"), std::string::npos);
+  EXPECT_NE(code.find("worker-src blob:;"), std::string::npos);
+  EXPECT_NE(code.find("default-src 'none';"), std::string::npos);
+  EXPECT_EQ(code.find("connect-src"), std::string::npos);
+  const auto preview = policy("/dashboard/preview.html");
+  EXPECT_NE(preview.find("script-src 'unsafe-inline';"), std::string::npos);
+  EXPECT_NE(preview.find("default-src 'none';"), std::string::npos);
+  EXPECT_EQ(preview.find("connect-src"), std::string::npos);
+}
+
 TEST_P(HttpRouterTest, DashboardNegotiatesItsCompressedRepresentation) {
   for (const auto& [value, accepted] : {
            std::pair{"gzip", true},
