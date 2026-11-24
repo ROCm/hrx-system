@@ -122,6 +122,11 @@ counts remain distinct from measured external traffic and executed cycles.
 Reuse policy spans the whole machine and request: a locally efficient tile can
 still reload each panel for every worker or launch.
 
+For a grid of independent output tiles, write down which input panel adjacent
+workgroup IDs read and how many IDs separate two consumers of the same panel.
+Test that mapping before tuning the instructions inside a tile.
+[Worked traversal example](#a-token-major-input-with-three-consumers-per-key)
+
 All three prerequisites are required. Missing artifacts, unqualified machine
 measurements, or an unknown reuse policy keep the work in evidence gathering
 and baseline reproduction. The first performance candidate adopts the oracle's
@@ -312,15 +317,103 @@ whether it survives real cache competition. A winning group size on one shape
 does not select it for every shape or target. The [benchmark reuse policy](benchmark.md#control-data-reuse)
 distinguishes hot-input experiments from streaming and integrated workloads.
 
-Current subgroup-access reports describe lane geometry, not inter-workgroup
-reuse distance or physical cache misses. A traversal experiment can therefore
-be warranted even when `loom-compile-report suggest` reports no finding and
-issued-byte counts are unchanged.
-
 The [Triton matrix-multiplication tutorial](https://triton-lang.org/main/getting-started/tutorials/03-matrix-multiplication.html#l2-cache-optimizations)
 demonstrates grouped program ordering, and [CUTLASS's efficient GEMM guide](https://github.com/NVIDIA/cutlass/blob/main/media/docs/cpp/efficient_gemm.md)
 discusses threadblock rasterization. They supply algorithmic candidates; their
 chosen parameters and cache-level assumptions are not portable tuning results.
+
+### A token-major input with three consumers per key
+
+A recurrent coefficient kernel on gfx1151 took one 16-token block and one
+value head per workgroup. Each token occupied a 20 KiB row. Within that row a
+128-element BF16 head occupied 256 bytes. All 48 value heads wrote disjoint
+output tiles. Heads `k`, `k + 16`, and `k + 32` read the same query and key
+panels. This made the grid mapping testable with identical arithmetic.
+
+| What advancing grid X visits | IDs to the next use of the same panel | Median kernel time | Median read traffic leaving GPU L2 |
+| --- | ---: | ---: | ---: |
+| Next token block for one head | 8,192 | 9.19 ms | 691 MiB |
+| Next value head for one block | 16 | 1.03 ms | 135 MiB |
+| Next value head sharing the key for one block | 1 | 0.92 ms | 158 MiB |
+
+With 512 blocks per head, advancing to the next block moves the first query
+address by 320 KiB. Advancing to the next head usually moves it by 256 bytes.
+Grouping the three consumers visits the same query and key addresses three
+times before advancing. These distances describe the authored mapping.
+Hardware can execute independent workgroups in a different order.
+
+The 8,192-token replay filled the input buffers with repeated captured rows.
+All three orders launched 24,576 workgroups and produced byte-identical
+coefficient buffers. Twelve warm samples per order covered all six launch
+permutations. Separate counter runs summed the widths of read requests leaving
+L2. The axis swap accounts for most of the time and traffic savings. The
+grouped order ran a little faster even as its L2 read traffic rose.
+
+The same head order also works with eight waves in a workgroup. Give each
+wave one head and use grid Y for the token block. With 48 value heads and
+16 key heads, integer division selects the shared key.
+
+```text
+ordinal    = 8 * workgroup_x + wave_in_workgroup
+key_head   = ordinal // 3
+value_head = key_head + 16 * (ordinal % 3)
+token_base = 16 * workgroup_y
+```
+
+The first three waves write heads 0, 16, and 32 while reading key 0. The
+next three write heads 1, 17, and 33 while reading key 1. Six workgroups
+cover every head exactly once for each token block. At 16,384 tokens the
+complete grid has 6 × 1,024 = 6,144 workgroups. This changes how many
+waves run together, so it gets its own timing at the intended shape.
+
+Every order's compile report showed the same query/key load geometry within a
+wave. Each packet read 256 unique bytes spread across a 307,216-byte span.
+The last two orders also had identical grid dimensions. Once the report
+establishes what stayed fixed, trace the authored indices to identify which
+panels adjacent workgroups visit, then time each order at the production shape.
+[Grid and wave query](compile-report-queries.md#compare-grid-shape-and-wave-accesses)
+
+### When sparse queries share only some keys
+
+Changing which queries a workgroup owns can change the arithmetic as well as
+the addresses. A sparse attention kernel grouped four queries, each with
+twelve query heads, and loaded the union of their selected four-key blocks.
+Its 48 query-head rows filled three 16-row matrix tiles. Processing each
+query separately fills twelve rows of one tile and visits only its own keys.
+
+These two four-query groups came from the same layer of a 65,536-token
+prefill. Each score tile in the table covers sixteen query-head rows and
+sixteen keys for one KV head. Both counts use the recorded selections.
+
+| First query position (zero-based) | Four-key blocks, shared union | Four-key blocks, summed per query | Score tiles, queries together | Score tiles, queries separate |
+| ---: | ---: | ---: | ---: | ---: |
+| 1,024 | 257 | 1,028 | 195 | 260 |
+| 24,576 | 1,090 | 2,051 | 819 | 515 |
+
+At position 24,576, sharing the union nearly halves the K/V block visits,
+but each query also scores keys selected only by its neighbors. The union
+rounds up to 273 key tiles for each of three query-head tiles. The individual
+queries use 129, 129, 129, and 128 key tiles. A selection trace supplies
+these counts for data-dependent indices.
+
+A separate gfx1151 replay timed both schedules on the same learned BF16
+queries, keys, values, and selected blocks from a 32,768-token request. Both
+used the same probability precision. Each cell is the median of 24 GPU timings.
+
+| Query positions | Four queries share keys | Each query visits its own keys |
+| --- | ---: | ---: |
+| 0–4,095 | 10.72 ms | 13.34 ms |
+| 24,576–28,671 | 24.18 ms | 19.47 ms |
+
+Grid width sets the stride between queries assigned to one workgroup. Raising
+the per-query kernel's cap from 320 to 4,096 workgroups per KV head
+reduced late-window read requests leaving L2 from 9.85 to 8.56 GiB. The
+native binary, input addresses, and output values were identical. In the
+full service, switching schedules halfway through the context saved 245 ms
+in profiled sparse attention across twelve layers. First visible text arrived
+140 ms later in one uninstrumented comparison and 79 ms earlier in the
+reversed comparison. Measure both the kernel and the completed request before
+selecting the deployment schedule.
 
 ## Search laterally across dispatch boundaries
 

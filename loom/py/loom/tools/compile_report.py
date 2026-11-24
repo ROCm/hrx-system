@@ -45,6 +45,13 @@ policy: paneling, tile and batch sizes, prefill chunks, operand residency,
 buffering, sharing, and complete-request traffic. A numerical reference or a
 single-tile correctness example cannot qualify the performance architecture.
 
+For a GPU grid of independent output tiles, trace the input addresses for two
+adjacent workgroup IDs. If several tiles read the same panel, time both grid
+orientations and an order that groups its consumers. `show` reports the grid
+and the byte footprint within one wave. Identical wave footprints can have
+different cache traffic across workgroups.
+[Worked traversal example](https://rocm.github.io/hrx-system/loom/workflows/agent-driven-kernel-development/#a-token-major-input-with-three-consumers-per-key)
+
 For a novel kernel, count the compulsory external bytes and useful operations
 for a completed request. Measure a transfer and compute primitive on the intended
 partition with the same operand layout and reuse. Compare a representative fused
