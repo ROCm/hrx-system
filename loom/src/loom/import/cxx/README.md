@@ -1513,6 +1513,81 @@ in the preheader and after each body/increment, preserving side effects and
 Discarded template arms are not instantiated. Outside templates, both arms
 remain subject to C++ source checking even though only one is imported.
 
+## Host and device branches
+
+Single-source code that a host compiler also builds branches on
+`loom::target::is_device()` from `<loomcxx/target.h>`. The host compiler sees
+a definition whose run-time value is `false` and emits only the host arm. The
+importer folds every call to a function annotated `[[loom::is_device]]` to
+`true`. When an ordinary `if` condition is then constant, the importer selects
+its arm exactly as it selects an `if constexpr` arm: the discarded arm is
+neither analyzed nor translated, so it may hold host-only code such as I/O,
+variadic calls or host runtime APIs.
+
+```cpp
+#include <loomcxx/target.h>
+
+float scale(float value) {
+  if (loom::target::is_device()) {
+    return value * 2.0f;
+  } else {
+    std::printf("host\n");
+    return value;
+  }
+}
+```
+
+Negation and the built-in `&&`, `||` and `?:` operators fold with C++
+short-circuit rules, so `!is_device()` selects the other arm and
+`is_device() || runtime()` never evaluates `runtime()`. A condition that keeps
+a run-time operand imports both arms. Other uses of the call import as the
+constant `true`.
+
+The call is not a constant expression. A unit is analyzed once, for the host,
+so `if constexpr`, a template argument, `static_assert` or a constexpr variable
+could only hold the host value in device code too. Using the query there,
+directly or through a constexpr function, is a compile error.
+
+## Kernels launched from host code
+
+An offload driver that compiles one translation unit for both host and device
+names the kernels host code launches with a variable template of its own,
+annotated `[[loom::kernel_ref]]`:
+
+```cpp
+namespace my_runtime {
+struct launch_info;  // The driver's own launch record.
+template <auto Kernel>
+[[loom::kernel_ref]] extern const launch_info kernel_ref;
+}  // namespace my_runtime
+
+// Host code odr-uses the specialization of the kernel it launches.
+const my_runtime::launch_info* info = &my_runtime::kernel_ref<&my_kernel>;
+```
+
+The host compile only references each specialization's linkage name. The
+driver reads those names from the host module it generated and passes them as
+the import's kernel_ref roots (`loomc_cxx_import_options_t::kernel_refs`). The
+importer resolves each name to the specialization that semantic analysis
+instantiated and exports exactly the kernels named by their leading template
+argument; it reads no host body and nothing of the variable's type, which the
+driver defines. A name that is not a specialization of an annotated template
+naming a kernel is rejected. Ordinary source roots may accompany kernel_ref
+roots; the import exports both.
+
+After an import of a parsed unit, `loom::cxx_import::unit_kernel_launches()`
+reports for each root what only the importer knows: the kernel's export name,
+its exact workgroup size, and how its arguments flatten from the host
+parameter objects (one leaf per kernel argument, with its parameter, kind, and
+byte offset and size in the host object; a host subobject that flattens to
+several arguments gives one leaf per argument, each naming it). The native
+argument layout comes from target lowering and is reported by the compiled
+artifact's manifest, so a driver combines the two to pack kernel arguments.
+A kernel named by a kernel_ref root exports under its explicit `loom::symbol`
+name or, since such kernels are usually template specializations or lambdas,
+its Itanium symbol; drivers take the name from the report rather than
+recomputing it.
+
 ## Borrowed storage domains
 
 Buffer-root promises mirror the `buffer.assume.*` IR family under

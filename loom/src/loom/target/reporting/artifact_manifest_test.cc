@@ -107,10 +107,12 @@ TEST(ArtifactManifestTest, FormatsSummaryFacts) {
   functions[0].interface.flags =
       LOOM_TARGET_ARTIFACT_MANIFEST_INTERFACE_FLAG_PARAMETER_COUNT |
       LOOM_TARGET_ARTIFACT_MANIFEST_INTERFACE_FLAG_BINDING_COUNT |
-      LOOM_TARGET_ARTIFACT_MANIFEST_INTERFACE_FLAG_CONSTANT_BYTE_LENGTH;
+      LOOM_TARGET_ARTIFACT_MANIFEST_INTERFACE_FLAG_CONSTANT_BYTE_LENGTH |
+      LOOM_TARGET_ARTIFACT_MANIFEST_INTERFACE_FLAG_ARGUMENT_BYTE_LENGTH;
   functions[0].interface.parameter_count = 3;
   functions[0].interface.binding_count = 2;
   functions[0].interface.constant_byte_length = 16;
+  functions[0].interface.argument_byte_length = 32;
   functions[0].interface.parameters = parameters;
   functions[0].interface.parameter_detail_count = IREE_ARRAYSIZE(parameters);
   functions[0].execution.flags =
@@ -172,7 +174,8 @@ TEST(ArtifactManifestTest, FormatsSummaryFacts) {
                       "\"targets\":[\"gfx1100\"],"
                       "\"interface\":{\"parameter_count\":3,"
                       "\"binding_count\":2,"
-                      "\"constant_byte_length\":16},"
+                      "\"constant_byte_length\":16,"
+                      "\"argument_byte_length\":32},"
                       "\"execution\":{\"workgroup_size\":[256,1,1],"
                       "\"subgroup_size\":32,"
                       "\"cluster_size\":[1,2,1]}}],"

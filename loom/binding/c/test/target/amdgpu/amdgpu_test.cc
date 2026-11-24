@@ -867,6 +867,103 @@ kernel.def target(@gfx1151) @complete_launch(%group_count: index) {
   EXPECT_EQ(launch_config.workgroup_size.x, 64u);
 }
 
+// The artifact manifest reports the kernarg layout HAL ABI lowering chose,
+// so hosts pack direct arguments without repeating the rule: by-value
+// arguments start on 4-byte words (sub-word payloads do not pack together),
+// buffers are 8-byte aligned pointers, and the segment is padded to 8 bytes.
+TEST(AmdgpuTargetTest, ArtifactManifestReportsKernelArgumentLayout) {
+  TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
+  ContextPtr context = CreateAmdgpuContext(target_environment.get());
+  WorkspacePtr workspace = CreateWorkspace();
+  CompilerPtr compiler = CreateCompiler(context.get());
+  SourcePtr source = CreateTextSource("mixed_arguments.loom", R"(
+amdgpu.target<gfx90a> @gfx90a
+
+kernel.def target(@gfx90a) @mixed_arguments() {
+  %one = index.constant 1 : index
+  %wave_size = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%wave_size, %one, %one) : index
+} launch(%c: i8, %s: i16, %b: i1, %y: buffer, %c2: i8, %d: f64, %z: buffer, %i: i32) {
+  %zero_offset = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %global = buffer.assume.memory_space<global> %z : buffer
+  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32>
+  view.store %i, %view[%zero_index] : i32, view<1xi32>
+  kernel.return
+}
+)");
+  ModulePtr module =
+      DeserializeModule(context.get(), workspace.get(), source.get());
+  TargetProfilePtr profile =
+      CreateTargetProfile(target_environment.get(), "gfx90a");
+  const loomc_string_view_t root = loomc_make_cstring_view("mixed_arguments");
+  const loomc_artifact_manifest_options_t manifest_options = {
+      .type = LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS,
+      .structure_size = sizeof(manifest_options),
+      .next = nullptr,
+      .mode = LOOMC_ARTIFACT_MANIFEST_MODE_DETAILS,
+      .identifier = loomc_string_view_empty(),
+  };
+  const loomc_emit_options_t emit_options = {
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(emit_options),
+      .next = &manifest_options,
+      .artifact_format =
+          loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO),
+      .identifier = loomc_make_cstring_view("mixed_arguments.hsaco"),
+      .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
+  };
+  const loomc_compile_artifact_options_t options = {
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_ARTIFACT_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .roots = &root,
+      .root_count = 1,
+      .excluded_roots = nullptr,
+      .excluded_root_count = 0,
+      .target_profile = profile.get(),
+      .config = nullptr,
+      .emit_options = &emit_options,
+      .artifact_flags = 0,
+  };
+  loomc_result_t* result = nullptr;
+  LOOMC_ASSERT_OK(loomc_compile_artifact(
+      compiler.get(), workspace.get(), /*pass_program=*/nullptr, module.get(),
+      &options, loomc_allocator_system(), &result));
+  ResultPtr result_ptr(result);
+  ExpectSucceededResult(result_ptr.get());
+  const loomc_artifact_t* manifest_artifact =
+      FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_KIND_REPORT,
+                   LOOMC_ARTIFACT_FORMAT_ARTIFACT_MANIFEST_JSON);
+  ASSERT_NE(manifest_artifact, nullptr);
+  const std::string manifest = ToString(manifest_artifact->contents);
+  EXPECT_NE(manifest.find("\"argument_byte_length\":56"), std::string::npos)
+      << manifest;
+  // (kind, index, kernarg offset, payload length, alignment).
+  const char* const rows[] = {
+      "\"kind\":\"value\",\"index\":0,\"byte_offset\":0,\"byte_length\":1,"
+      "\"byte_alignment\":4",
+      "\"kind\":\"value\",\"index\":1,\"byte_offset\":4,\"byte_length\":2,"
+      "\"byte_alignment\":4",
+      "\"kind\":\"value\",\"index\":2,\"byte_offset\":8,\"byte_length\":1,"
+      "\"byte_alignment\":4",
+      "\"kind\":\"binding\",\"index\":3,\"byte_offset\":16,\"byte_length\":8,"
+      "\"byte_alignment\":8",
+      "\"kind\":\"value\",\"index\":4,\"byte_offset\":24,\"byte_length\":1,"
+      "\"byte_alignment\":4",
+      "\"kind\":\"value\",\"index\":5,\"byte_offset\":28,\"byte_length\":8,"
+      "\"byte_alignment\":4",
+      "\"kind\":\"binding\",\"index\":6,\"byte_offset\":40,\"byte_length\":8,"
+      "\"byte_alignment\":8",
+      "\"kind\":\"value\",\"index\":7,\"byte_offset\":48,\"byte_length\":4,"
+      "\"byte_alignment\":4",
+  };
+  for (const char* row : rows) {
+    EXPECT_NE(manifest.find(row), std::string::npos) << row << "\n"
+                                                     << manifest;
+  }
+}
+
 TEST(AmdgpuTargetTest, LaunchConfigArtifactContainsAllKernelExports) {
   TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
   ContextPtr context = CreateAmdgpuContext(target_environment.get());

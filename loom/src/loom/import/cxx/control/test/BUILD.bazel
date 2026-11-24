@@ -28,6 +28,8 @@ loom_check_test_suite(
         "control_invalid.cxx-test",
         "counted_loops.cxx-test",
         "deep_conditionals.cxx-test",
+        "device_selection.cxx-test",
+        "device_selection_invalid.cxx-test",
         "logical.cxx-test",
         "loop_bodies.cxx-test",
         "loop_exits.cxx-test",

@@ -512,9 +512,94 @@ static iree_status_t loom_amdgpu_hal_kernel_library_project_manifest_target(
   return iree_ok_status();
 }
 
+// Reports the kernarg layout that HAL ABI lowering recorded on the prepared
+// kernel (loom_amdgpu_map_abi_layout and binding materialization): the
+// segment size and, per authored kernel parameter, its kernarg offset,
+// payload size and alignment. A by-value payload narrower than its 4-byte
+// word occupies the word's low-address bytes.
+static iree_status_t loom_amdgpu_hal_kernel_library_project_manifest_interface(
+    const loom_module_t* module, const loom_target_entry_t* entry,
+    bool include_parameters, iree_arena_allocator_t* arena,
+    loom_target_artifact_manifest_interface_t* inout_interface) {
+  const loom_op_t* function_op = entry->func.op;
+  if (!loom_amdgpu_hal_kernel_abi_has_layout_attr(function_op)) {
+    return iree_ok_status();
+  }
+  // Compilation already admitted this layout, so admission here cannot
+  // reject it and needs no diagnostic emitter.
+  loom_amdgpu_hal_kernel_abi_layout_t layout = {0};
+  bool accepted = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_layout_from_attr(
+      module, function_op, (iree_diagnostic_emitter_t){0}, arena, &accepted,
+      &layout));
+  if (!accepted) {
+    return iree_ok_status();
+  }
+  inout_interface->flags |=
+      LOOM_TARGET_ARTIFACT_MANIFEST_INTERFACE_FLAG_ARGUMENT_BYTE_LENGTH;
+  inout_interface->argument_byte_length = layout.kernarg_segment_size;
+  if (!include_parameters) {
+    return iree_ok_status();
+  }
+  inout_interface->parameters = NULL;
+  inout_interface->parameter_detail_count = 0;
+  if (layout.parameter_count == 0) {
+    return iree_ok_status();
+  }
+  loom_target_artifact_manifest_parameter_t* parameters = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, layout.parameter_count, sizeof(*parameters), (void**)&parameters));
+  for (uint32_t i = 0; i < layout.parameter_count; ++i) {
+    parameters[i] = (loom_target_artifact_manifest_parameter_t){
+        .kind = LOOM_TARGET_ARTIFACT_MANIFEST_PARAMETER_KIND_UNKNOWN,
+        .flags = LOOM_TARGET_ARTIFACT_MANIFEST_PARAMETER_FLAG_INDEX,
+        .index = i,
+    };
+  }
+  const loom_target_artifact_manifest_parameter_flags_t layout_flags =
+      LOOM_TARGET_ARTIFACT_MANIFEST_PARAMETER_FLAG_INDEX |
+      LOOM_TARGET_ARTIFACT_MANIFEST_PARAMETER_FLAG_BYTE_OFFSET |
+      LOOM_TARGET_ARTIFACT_MANIFEST_PARAMETER_FLAG_BYTE_LENGTH |
+      LOOM_TARGET_ARTIFACT_MANIFEST_PARAMETER_FLAG_BYTE_ALIGNMENT;
+  for (iree_host_size_t i = 0; i < layout.resource_count; ++i) {
+    const loom_amdgpu_hal_kernarg_resource_t* resource = &layout.resources[i];
+    IREE_ASSERT_LT(resource->parameter_index, layout.parameter_count);
+    parameters[resource->parameter_index] =
+        (loom_target_artifact_manifest_parameter_t){
+            .name = resource->name,
+            .kind = LOOM_TARGET_ARTIFACT_MANIFEST_PARAMETER_KIND_BINDING,
+            .flags = layout_flags,
+            .index = resource->parameter_index,
+            .byte_offset = resource->kernarg_offset,
+            .byte_length = resource->kernarg_size,
+            .byte_alignment = resource->kernarg_alignment,
+        };
+  }
+  for (iree_host_size_t i = 0; i < layout.direct_arg_count; ++i) {
+    const loom_amdgpu_hal_kernarg_direct_arg_t* direct_arg =
+        &layout.direct_args[i];
+    IREE_ASSERT_LT(direct_arg->parameter_index, layout.parameter_count);
+    parameters[direct_arg->parameter_index] =
+        (loom_target_artifact_manifest_parameter_t){
+            .name = direct_arg->name,
+            .kind = LOOM_TARGET_ARTIFACT_MANIFEST_PARAMETER_KIND_VALUE,
+            .flags = layout_flags,
+            .index = direct_arg->parameter_index,
+            .byte_offset = direct_arg->kernarg_offset,
+            .byte_length = direct_arg->payload_size,
+            .byte_alignment = direct_arg->kernarg_alignment,
+        };
+  }
+  inout_interface->parameters = parameters;
+  inout_interface->parameter_detail_count = layout.parameter_count;
+  return iree_ok_status();
+}
+
 static const loom_target_artifact_manifest_target_projection_t
     kLoomAmdgpuHalKernelLibraryManifestTargetProjection = {
         .project = loom_amdgpu_hal_kernel_library_project_manifest_target,
+        .project_interface =
+            loom_amdgpu_hal_kernel_library_project_manifest_interface,
 };
 
 static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_plan(

@@ -591,7 +591,9 @@ static iree_status_t loom_target_artifact_manifest_collect_targets(
 
 static iree_status_t loom_target_artifact_manifest_collect_functions(
     const loom_module_t* module, loom_target_entry_list_t entries,
-    loom_target_artifact_manifest_mode_t mode, iree_arena_allocator_t* arena,
+    loom_target_artifact_manifest_mode_t mode,
+    const loom_target_artifact_manifest_target_projection_t* target_projection,
+    iree_arena_allocator_t* arena,
     loom_target_artifact_manifest_function_t** out_functions) {
   loom_target_artifact_manifest_function_t* functions = NULL;
   IREE_RETURN_IF_ERROR(loom_target_artifact_manifest_allocate_array(
@@ -625,10 +627,17 @@ static iree_status_t loom_target_artifact_manifest_collect_functions(
         module, entry, arena, &functions[i].interface));
     loom_target_artifact_manifest_collect_execution(entry,
                                                     &functions[i].execution);
-    if (loom_target_artifact_manifest_collect_mode_includes_details(mode)) {
+    const bool include_parameters =
+        loom_target_artifact_manifest_collect_mode_includes_details(mode);
+    if (include_parameters) {
       IREE_RETURN_IF_ERROR(loom_target_artifact_manifest_collect_parameters(
           module, argument_ids, argument_count, arena,
           &functions[i].interface));
+    }
+    if (target_projection != NULL &&
+        target_projection->project_interface != NULL) {
+      IREE_RETURN_IF_ERROR(target_projection->project_interface(
+          module, entry, include_parameters, arena, &functions[i].interface));
     }
   }
   *out_functions = functions;
@@ -862,7 +871,8 @@ iree_status_t loom_target_artifact_manifest_collect_from_entries(
 
   loom_target_artifact_manifest_function_t* functions = NULL;
   IREE_RETURN_IF_ERROR(loom_target_artifact_manifest_collect_functions(
-      module, entries, options->mode, arena, &functions));
+      module, entries, options->mode, options->target_projection, arena,
+      &functions));
 
   loom_target_artifact_manifest_global_t* globals = NULL;
   iree_host_size_t global_count = 0;

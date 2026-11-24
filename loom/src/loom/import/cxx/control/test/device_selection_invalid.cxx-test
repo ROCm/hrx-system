@@ -1,0 +1,55 @@
+// RUN: verify
+// The host arm of a runtime condition is imported, and its variadic call is
+// rejected.
+#include <loomcxx/target.h>
+// ERROR@+1: LOWERING/059 "variadic functions are not admitted"
+extern "C" int printf(const char* format, ...);
+int entry(int value) {
+  if (value > 0) printf("host %d\n", value);
+  return value;
+}
+
+// ====
+// The query is not a constant expression: `if constexpr` cannot select an arm
+// with it.
+#include <loomcxx/target.h>
+int entry(int value) {
+  // ERROR@+1: PARSE/036 "constexpr if condition is not a constant expression"
+  if constexpr (loom::target::is_device()) return value;
+  return -value;
+}
+
+// ====
+// Nor can a constexpr function that calls it.
+#include <loomcxx/target.h>
+constexpr bool on_device() { return loom::target::is_device(); }
+int entry(int value) {
+  // ERROR@+1: PARSE/036 "constexpr if condition is not a constant expression"
+  if constexpr (on_device()) return value;
+  return -value;
+}
+
+// ====
+// A const local initialized from the query is not usable in constant
+// expressions.
+#include <loomcxx/target.h>
+int entry(int value) {
+  const bool device = loom::target::is_device();
+  // ERROR@+1: PARSE/036 "constexpr if condition is not a constant expression"
+  if constexpr (device) return value;
+  return -value;
+}
+
+// ====
+// A static assertion cannot test the query.
+#include <loomcxx/target.h>
+// ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
+static_assert(!loom::target::is_device());
+int entry(int value) { return value; }
+
+// ====
+// A template argument cannot hold the query.
+#include <loomcxx/target.h>
+template <bool Device> struct Select { static constexpr int value = Device ? 1 : 2; };
+// ERROR@+1: PARSE/036 "template argument is not a constant expression"
+int entry(int value) { return value + Select<loom::target::is_device()>::value; }

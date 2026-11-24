@@ -26,6 +26,7 @@ using SourcePtr = HandlePtr<loomc_source_t, loomc_source_release>;
 using ModulePtr = HandlePtr<loomc_module_t, loomc_module_release>;
 using ResultPtr = HandlePtr<loomc_result_t, loomc_result_release>;
 using PreamblePtr = HandlePtr<loomc_cxx_preamble_t, loomc_cxx_preamble_release>;
+using UnitPtr = HandlePtr<loomc_cxx_unit_t, loomc_cxx_unit_release>;
 using CompilerPtr = HandlePtr<loomc_compiler_t, loomc_compiler_release>;
 using PassPtr = HandlePtr<loomc_pass_program_t, loomc_pass_program_release>;
 using LinkBuilderPtr =
@@ -604,6 +605,61 @@ TEST_F(CxxTest, SourcePathMapperCannotMergeDistinctSources) {
                          Import(source.get(), &options));
   EXPECT_EQ(module_, nullptr);
   EXPECT_EQ(result_, nullptr);
+}
+
+TEST_F(CxxTest, ParsedUnitImportsRepeatedlyAfterSourceRelease) {
+  UnitPtr unit;
+  {
+    auto source = Source("unit.cpp",
+                         "static int helper(int x) { return x * 3; }"
+                         "int first(int x) { return helper(x) + 1; }"
+                         "int second(int x) { return x - 1; }");
+    loomc_cxx_unit_t* raw_unit = nullptr;
+    loomc_result_t* raw_result = nullptr;
+    LOOMC_ASSERT_OK(loomc_cxx_unit_parse(context_.get(), source.get(), nullptr,
+                                         loomc_allocator_system(), &raw_unit,
+                                         &raw_result));
+    ResultPtr result(raw_result);
+    unit.reset(raw_unit);
+    ExpectSuccess(result.get());
+    ASSERT_NE(unit, nullptr);
+  }
+  // The source handle is gone; each import reuses the parsed unit.
+  for (const char* root : {"first", "second"}) {
+    const loomc_string_view_t roots[] = {loomc_make_cstring_view(root)};
+    loomc_cxx_import_options_t options = {
+        .type = LOOMC_STRUCTURE_TYPE_CXX_IMPORT_OPTIONS,
+        .structure_size = sizeof(options),
+        .roots = roots,
+        .root_count = 1,
+    };
+    loomc_module_t* module = nullptr;
+    loomc_result_t* result = nullptr;
+    LOOMC_ASSERT_OK(loomc_module_import_cxx_unit(
+        context_.get(), workspace_.get(), unit.get(), &options,
+        loomc_allocator_system(), &module, &result));
+    ModulePtr module_owner(module);
+    ResultPtr result_owner(result);
+    ExpectSuccess(result);
+    ASSERT_NE(module, nullptr);
+    const std::string printed = Print(module);
+    EXPECT_NE(printed.find(std::string("@") + root), std::string::npos)
+        << printed;
+  }
+}
+
+TEST_F(CxxTest, ParsedUnitRejectionReturnsAFailedResult) {
+  auto source = Source("unit.cpp", "int entry() { return missing; }");
+  loomc_cxx_unit_t* unit = nullptr;
+  loomc_result_t* raw_result = nullptr;
+  LOOMC_ASSERT_OK(loomc_cxx_unit_parse(context_.get(), source.get(), nullptr,
+                                       loomc_allocator_system(), &unit,
+                                       &raw_result));
+  ResultPtr result(raw_result);
+  EXPECT_EQ(unit, nullptr);
+  ASSERT_NE(result, nullptr);
+  EXPECT_FALSE(loomc_result_succeeded(result.get()));
+  EXPECT_GT(loomc_result_diagnostic_count(result.get()), 0u);
 }
 
 TEST_F(CxxTest, InvalidOptionsClearOutputs) {

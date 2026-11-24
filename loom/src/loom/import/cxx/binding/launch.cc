@@ -184,6 +184,22 @@ void LaunchContracts::apply(Contract& contract, Annotation annotation,
   }
 }
 
+std::optional<std::array<uint32_t, 3>> LaunchContracts::exact_workgroup_size(
+    cxx::FunctionSymbol* function) {
+  const Contract* contract = resolve(function);
+  if (!contract || !contract->size || contract->size->form != Form::Exact) {
+    return std::nullopt;
+  }
+  std::array<uint32_t, 3> size;
+  for (size_t i = 0; i < 3; ++i) {
+    const auto& axis = contract->size->axes[i];
+    size[i] = axis.lower == axis.upper && axis.upper > 0
+                  ? static_cast<uint32_t>(axis.upper)
+                  : 0;
+  }
+  return size;
+}
+
 void LaunchContracts::declaration(
     cxx::FunctionSymbol* function,
     cxx::List<cxx::AttributeSpecifierAST*>* attributes,

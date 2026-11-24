@@ -41,10 +41,10 @@ void append_part(std::string& destination, std::string_view value) {
 class FrontendIdentity {
  public:
   explicit FrontendIdentity(const loom_cxx_import_options_t& options)
-      : standard_(options.standard.size ? copy_string(options.standard)
-                                        : "c++26"),
+      : standard_(copy_string(loom_cxx_import_options_standard(&options))),
         triple_(copy_string(options.triple)),
         data_model_(options.data_model),
+        hosted_(iree_all_bits_set(options.flags, LOOM_CXX_IMPORT_FLAG_HOSTED)),
         builtin_includes_(!iree_any_bit_set(
             options.flags, LOOM_CXX_IMPORT_FLAG_NO_BUILTIN_INCLUDES)) {
     include_paths_.reserve(options.include_path_count);
@@ -61,19 +61,26 @@ class FrontendIdentity {
       defines_.emplace_back(copy_string(options.defines[i].name),
                             copy_string(options.defines[i].value));
     }
+    undefines_.reserve(options.undefine_count);
+    for (iree_host_size_t i = 0; i < options.undefine_count; ++i) {
+      undefines_.push_back(copy_string(options.undefines[i]));
+    }
   }
 
   bool matches(const loom_cxx_import_options_t& options) const {
-    const auto standard = options.standard.size ? string_view(options.standard)
-                                                : std::string_view("c++26");
+    const auto standard =
+        string_view(loom_cxx_import_options_standard(&options));
+    const bool hosted =
+        iree_all_bits_set(options.flags, LOOM_CXX_IMPORT_FLAG_HOSTED);
     const bool builtin_includes = !iree_any_bit_set(
         options.flags, LOOM_CXX_IMPORT_FLAG_NO_BUILTIN_INCLUDES);
     if (standard != standard_ || string_view(options.triple) != triple_ ||
-        options.data_model != data_model_ ||
+        options.data_model != data_model_ || hosted != hosted_ ||
         builtin_includes != builtin_includes_ ||
         options.include_path_count != include_paths_.size() ||
         options.system_include_path_count != system_include_paths_.size() ||
-        options.define_count != defines_.size()) {
+        options.define_count != defines_.size() ||
+        options.undefine_count != undefines_.size()) {
       return false;
     }
     for (iree_host_size_t i = 0; i < options.include_path_count; ++i) {
@@ -93,6 +100,11 @@ class FrontendIdentity {
         return false;
       }
     }
+    for (iree_host_size_t i = 0; i < options.undefine_count; ++i) {
+      if (string_view(options.undefines[i]) != undefines_[i]) {
+        return false;
+      }
+    }
     return true;
   }
 
@@ -100,6 +112,7 @@ class FrontendIdentity {
     std::string target;
     append_part(target, triple_);
     target.append(std::to_string(data_model_));
+    target.push_back(hosted_ ? 'h' : 'f');
     std::string options;
     options.push_back(builtin_includes_ ? '1' : '0');
     for (const auto& path : include_paths_) {
@@ -113,6 +126,10 @@ class FrontendIdentity {
     for (const auto& [name, value] : defines_) {
       append_part(options, name);
       append_part(options, value);
+    }
+    options.push_back('|');
+    for (const auto& name : undefines_) {
+      append_part(options, name);
     }
     return {
         .serializationAbi = cxx::precompiledHeaderSerializationAbi(),
@@ -129,6 +146,8 @@ class FrontendIdentity {
   std::string triple_;
   // Source integer and pointer data model.
   loom_cxx_data_model_t data_model_;
+  // Whether the frontend is configured as a hosted Linux compile.
+  bool hosted_;
   // Whether the embedded include catalog participates in lookup.
   bool builtin_includes_;
   // Ordered user include search roots.
@@ -137,6 +156,8 @@ class FrontendIdentity {
   std::vector<std::string> system_include_paths_;
   // Ordered preprocessor definitions and replacement text.
   std::vector<std::pair<std::string, std::string>> defines_;
+  // Ordered macro names removed after the definitions.
+  std::vector<std::string> undefines_;
 };
 
 bool is_spliced_newline(std::string_view source, size_t newline) {
