@@ -377,8 +377,26 @@ At position 24,576, sharing the union nearly halves the K/V block visits,
 but each query also scores keys selected only by its neighbors. The union
 rounds up to 273 key tiles for each of three query-head tiles. The individual
 queries use 129, 129, 129, and 128 key tiles. A selection trace supplies
-these counts for data-dependent indices. Device counters and completed
-request timings establish which tradeoff wins on the target.
+these counts for data-dependent indices.
+
+A separate gfx1151 replay timed both schedules on the same learned BF16
+queries, keys, values, and selected blocks from a 32,768-token request. Both
+used the same probability precision. Each cell is the median of 24 GPU timings.
+
+| Query positions | Four queries share keys | Each query visits its own keys |
+| --- | ---: | ---: |
+| 0–4,095 | 10.72 ms | 13.34 ms |
+| 24,576–28,671 | 24.18 ms | 19.47 ms |
+
+Grid width sets the stride between queries assigned to one workgroup. Raising
+the per-query kernel's cap from 320 to 4,096 workgroups per KV head
+reduced late-window read requests leaving L2 from 9.85 to 8.56 GiB. The
+native binary, input addresses, and output values were identical. In the
+full service, switching schedules halfway through the context saved 245 ms
+in profiled sparse attention across twelve layers. First visible text arrived
+140 ms later in one uninstrumented comparison and 79 ms earlier in the
+reversed comparison. Measure both the kernel and the completed request before
+selecting the deployment schedule.
 
 ## Search laterally across dispatch boundaries
 
