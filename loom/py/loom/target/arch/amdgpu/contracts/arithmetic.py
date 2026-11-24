@@ -39,7 +39,7 @@ from loom.target.arch.amdgpu.contracts.packed_i8 import (
 )
 from loom.target.arch.amdgpu.contracts.packed_i8 import (
     packed_i8_add_rules,
-    packed_i8_logical_shift_rules,
+    packed_i8_shift_rules,
     packed_i8_sub_rules,
 )
 from loom.target.arch.amdgpu.contracts.roots import root_rules
@@ -4977,7 +4977,7 @@ def _rules() -> tuple[ContractCase, ...]:
                 _i64_vector_shift_rule(source_op, descriptor_key),
             )
         )
-    rules.extend(packed_i8_logical_shift_rules(_DESCRIPTOR_SET))
+    rules.extend(packed_i8_shift_rules(_DESCRIPTOR_SET))
     rules.extend(_vector_bitfield_rules())
     rules.extend(_vector_packed_integer_recipe_rules())
     for source_op, descriptor_key in (

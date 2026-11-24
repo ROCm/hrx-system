@@ -4,11 +4,12 @@
 // in all three directions. Each backing row has one trailing guard lane so
 // partial packet accesses remain observable while transfers stay aligned.
 
+// The first 63 count bytes are independent. The last byte is shared by all lanes.
 func.def @vector_i8_shifts(%input: buffer, %count_input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %values_view = buffer.view %input[%base] : buffer -> view<64xi8>
   %counts_view = buffer.view %count_input[%base] : buffer -> view<64xi8>
-  %results = buffer.view %output[%base] : buffer -> view<6x64xi8>
+  %results = buffer.view %output[%base] : buffer -> view<9x64xi8>
   %values = vector.load %values_view[0] : view<64xi8> -> vector<63xi8>
   %raw_counts = vector.load %counts_view[0] : view<64xi8> -> vector<63xi8>
   %count_mask = vector.splati 7 : vector<63xi8>
@@ -16,18 +17,26 @@ func.def @vector_i8_shifts(%input: buffer, %count_input: buffer, %output: buffer
   %left_count = vector.splati 1 : vector<63xi8>
   %logical_count = vector.splati 7 : vector<63xi8>
   %signed_count = vector.splati 4 : vector<63xi8>
+  %byte_count = view.load %counts_view[63] : view<64xi8> -> i8
+  %shared_count = vector.splat %byte_count : vector<63xi8>
   %uniform_left = vector.shli %values, %left_count : vector<63xi8>
   %uniform_logical = vector.shrui %values, %logical_count : vector<63xi8>
   %uniform_signed = vector.shrsi %values, %signed_count : vector<63xi8>
   %varying_left = vector.shli %values, %counts : vector<63xi8>
   %varying_logical = vector.shrui %values, %counts : vector<63xi8>
   %varying_signed = vector.shrsi %values, %counts : vector<63xi8>
-  vector.store %uniform_left, %results[0, 0] : vector<63xi8>, view<6x64xi8>
-  vector.store %uniform_logical, %results[1, 0] : vector<63xi8>, view<6x64xi8>
-  vector.store %uniform_signed, %results[2, 0] : vector<63xi8>, view<6x64xi8>
-  vector.store %varying_left, %results[3, 0] : vector<63xi8>, view<6x64xi8>
-  vector.store %varying_logical, %results[4, 0] : vector<63xi8>, view<6x64xi8>
-  vector.store %varying_signed, %results[5, 0] : vector<63xi8>, view<6x64xi8>
+  %shared_left = vector.shli %values, %shared_count : vector<63xi8>
+  %shared_logical = vector.shrui %values, %shared_count : vector<63xi8>
+  %shared_signed = vector.shrsi %values, %shared_count : vector<63xi8>
+  vector.store %uniform_left, %results[0, 0] : vector<63xi8>, view<9x64xi8>
+  vector.store %uniform_logical, %results[1, 0] : vector<63xi8>, view<9x64xi8>
+  vector.store %uniform_signed, %results[2, 0] : vector<63xi8>, view<9x64xi8>
+  vector.store %varying_left, %results[3, 0] : vector<63xi8>, view<9x64xi8>
+  vector.store %varying_logical, %results[4, 0] : vector<63xi8>, view<9x64xi8>
+  vector.store %varying_signed, %results[5, 0] : vector<63xi8>, view<9x64xi8>
+  vector.store %shared_left, %results[6, 0] : vector<63xi8>, view<9x64xi8>
+  vector.store %shared_logical, %results[7, 0] : vector<63xi8>, view<9x64xi8>
+  vector.store %shared_signed, %results[8, 0] : vector<63xi8>, view<9x64xi8>
   func.return
 }
 
@@ -38,11 +47,12 @@ func.def @vector_i8_shifts_oracle(%input: buffer, %count_input: buffer, %output:
   %step = index.constant 1 : index
   %values = buffer.view %input[%base] : buffer -> view<64xi8>
   %raw_counts = buffer.view %count_input[%base] : buffer -> view<64xi8>
-  %results = buffer.view %output[%base] : buffer -> view<6x64xi8>
+  %results = buffer.view %output[%base] : buffer -> view<9x64xi8>
   %count_mask = scalar.constant 7 : i8
   %left_count = scalar.constant 1 : i8
   %logical_count = scalar.constant 7 : i8
   %signed_count = scalar.constant 4 : i8
+  %shared_count = view.load %raw_counts[63] : view<64xi8> -> i8
   scf.for %i = [%begin to %end step %step] {
     %value = view.load %values[%i] : view<64xi8> -> i8
     %raw_count = view.load %raw_counts[%i] : view<64xi8> -> i8
@@ -53,23 +63,38 @@ func.def @vector_i8_shifts_oracle(%input: buffer, %count_input: buffer, %output:
     %varying_left = scalar.shli %value, %count : i8
     %varying_logical = scalar.shrui %value, %count : i8
     %varying_signed = scalar.shrsi %value, %count : i8
-    view.store %uniform_left, %results[0, %i] : i8, view<6x64xi8>
-    view.store %uniform_logical, %results[1, %i] : i8, view<6x64xi8>
-    view.store %uniform_signed, %results[2, %i] : i8, view<6x64xi8>
-    view.store %varying_left, %results[3, %i] : i8, view<6x64xi8>
-    view.store %varying_logical, %results[4, %i] : i8, view<6x64xi8>
-    view.store %varying_signed, %results[5, %i] : i8, view<6x64xi8>
+    %shared_left = scalar.shli %value, %shared_count : i8
+    %shared_logical = scalar.shrui %value, %shared_count : i8
+    %shared_signed = scalar.shrsi %value, %shared_count : i8
+    view.store %uniform_left, %results[0, %i] : i8, view<9x64xi8>
+    view.store %uniform_logical, %results[1, %i] : i8, view<9x64xi8>
+    view.store %uniform_signed, %results[2, %i] : i8, view<9x64xi8>
+    view.store %varying_left, %results[3, %i] : i8, view<9x64xi8>
+    view.store %varying_logical, %results[4, %i] : i8, view<9x64xi8>
+    view.store %varying_signed, %results[5, %i] : i8, view<9x64xi8>
+    view.store %shared_left, %results[6, %i] : i8, view<9x64xi8>
+    view.store %shared_logical, %results[7, %i] : i8, view<9x64xi8>
+    view.store %shared_signed, %results[8, %i] : i8, view<9x64xi8>
   }
   func.return
 }
 
+func.def @set_shared_byte_shift(%count_input: buffer, %amount: index) {
+  %base = index.constant 0 : offset
+  %counts = buffer.view %count_input[%base] : buffer -> view<64xi8>
+  %count = index.cast %amount : index to i8
+  view.store %count, %counts[63] : i8, view<64xi8>
+  func.return
+}
+
 check.scenario @vector_i8_shift_values {
-  check.trial[1](%trial: index, %entropy: check.entropy) {
+  check.trial[8](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(-128) step(85) period(4) : tensor<64xi8>
     %counts = check.generate.iota offset(0) step(1) : tensor<64xi8>
-    %output = check.generate.fill value(91) : tensor<384xi8>
-    check.compare<@vector_i8_shifts, @vector_i8_shifts_oracle>(%input, %counts, %output) : (tensor<64xi8>, tensor<64xi8>, tensor<384xi8>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<384xi8>
+    check.generate<@set_shared_byte_shift>(%counts, %trial) : (tensor<64xi8>, index) -> ()
+    %output = check.generate.fill value(91) : tensor<576xi8>
+    check.compare<@vector_i8_shifts, @vector_i8_shifts_oracle>(%input, %counts, %output) : (tensor<64xi8>, tensor<64xi8>, tensor<576xi8>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<576xi8>
     }
   }
   check.return
