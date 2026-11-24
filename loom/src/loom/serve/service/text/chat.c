@@ -1181,9 +1181,91 @@ typedef struct loom_serve_text_chat_history_t {
   iree_string_builder_t reasoning;
   // Canonical tool calls for one message.
   iree_string_builder_t calls;
+  // Decoded id and function name of every earlier assistant tool call, as
+  // records of two sizes followed by the id and name bytes.
+  iree_string_builder_t call_names;
+  // Decoded tool_call_id for one message.
+  iree_string_builder_t call_id;
+  // One tool message with its resolved function name added.
+  iree_string_builder_t named_message;
   // Source-owned rendering state, with no native interpretation.
   int64_t state;
 } loom_serve_text_chat_history_t;
+
+static iree_status_t loom_serve_text_chat_call_name_record(
+    loom_serve_text_chat_history_t* history, iree_string_view_t raw_id,
+    iree_string_view_t name) {
+  iree_string_builder_reset(&history->call_id);
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_chat_append_decoded(&history->call_id, raw_id));
+  const iree_string_view_t id = iree_string_builder_view(&history->call_id);
+  const iree_host_size_t sizes[2] = {id.size, name.size};
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
+      &history->call_names,
+      iree_make_string_view((const char*)sizes, sizeof(sizes))));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_string(&history->call_names, id));
+  return iree_string_builder_append_string(&history->call_names, name);
+}
+
+// Finds the function name of the latest earlier call with this id.
+static bool loom_serve_text_chat_call_name_find(
+    const loom_serve_text_chat_history_t* history, iree_string_view_t id,
+    iree_string_view_t* out_name) {
+  const iree_string_view_t records =
+      iree_string_builder_view(&history->call_names);
+  bool found = false;
+  iree_host_size_t offset = 0;
+  while (offset < records.size) {
+    iree_host_size_t sizes[2];
+    memcpy(sizes, records.data + offset, sizeof(sizes));
+    offset += sizeof(sizes);
+    if (iree_string_view_equal(
+            id, iree_make_string_view(records.data + offset, sizes[0]))) {
+      *out_name =
+          iree_make_string_view(records.data + offset + sizes[0], sizes[1]);
+      found = true;
+    }
+    offset += sizes[0] + sizes[1];
+  }
+  return found;
+}
+
+// A tool message that has only tool_call_id reaches source as if the client
+// had also sent the function name of the call it answers. A message that has
+// a name key, even a null one, and a call id that is unknown pass unchanged.
+static iree_status_t loom_serve_text_chat_tool_message(
+    loom_serve_text_chat_history_t* history, iree_string_view_t message,
+    iree_string_view_t raw_id, iree_string_view_t* out_message) {
+  loom_serve_text_chat_field_t name[] = {
+      {"name", LOOM_SERVE_TEXT_CHAT_STRING | LOOM_SERVE_TEXT_CHAT_NULL}};
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
+      message, IREE_ARRAYSIZE(name), name,
+      LOOM_SERVE_TEXT_CHAT_FIELDS_IGNORE_UNKNOWN));
+  if (name[0].value.data) {
+    return iree_ok_status();
+  }
+  iree_string_builder_reset(&history->call_id);
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_chat_append_decoded(&history->call_id, raw_id));
+  iree_string_view_t function_name;
+  if (!loom_serve_text_chat_call_name_find(
+          history, iree_string_builder_view(&history->call_id),
+          &function_name)) {
+    return iree_ok_status();
+  }
+  iree_string_builder_reset(&history->named_message);
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+      &history->named_message, "{\"name\":"));
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_chat_quote(&history->named_message, function_name));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(&history->named_message, ","));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
+      &history->named_message, iree_string_view_remove_prefix(message, 1)));
+  *out_message = iree_string_builder_view(&history->named_message);
+  return iree_ok_status();
+}
 
 static iree_status_t loom_serve_text_chat_history_tool(
     void* user_data, iree_host_size_t index, iree_json_value_type_t type,
@@ -1211,9 +1293,14 @@ static iree_status_t loom_serve_text_chat_history_tool(
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_function_decode(
       fields[2].value, LOOM_SERVE_TEXT_CHAT_FIELDS_IGNORE_UNKNOWN,
       &history->arguments, &name, &arguments));
-  return loom_serve_text_chat_function_render(history->chat->policy, name,
-                                              arguments, index, &history->calls,
-                                              history->chat->host_allocator);
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_function_render(
+      history->chat->policy, name, arguments, index, &history->calls,
+      history->chat->host_allocator));
+  if (fields[0].value.data) {
+    IREE_RETURN_IF_ERROR(
+        loom_serve_text_chat_call_name_record(history, fields[0].value, name));
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_serve_text_chat_history_message(
@@ -1248,8 +1335,14 @@ static iree_status_t loom_serve_text_chat_history_message(
     IREE_RETURN_IF_ERROR(iree_json_enumerate_array_typed(
         fields[3].value, loom_serve_text_chat_history_tool, history));
   }
+  iree_string_view_t message = value;
+  if (fields[4].value.data &&
+      iree_string_view_equal(fields[0].value, IREE_SV("tool"))) {
+    IREE_RETURN_IF_ERROR(loom_serve_text_chat_tool_message(
+        history, value, fields[4].value, &message));
+  }
   const iree_string_view_t inputs[] = {
-      value,
+      message,
       fields[0].value,
       iree_string_builder_view(&history->scratch),
       iree_string_builder_view(&history->content_records),
@@ -1442,6 +1535,9 @@ iree_status_t loom_serve_text_chat_initialize(
   iree_string_builder_initialize(host_allocator, &history.arguments);
   iree_string_builder_initialize(host_allocator, &history.reasoning);
   iree_string_builder_initialize(host_allocator, &history.calls);
+  iree_string_builder_initialize(host_allocator, &history.call_names);
+  iree_string_builder_initialize(host_allocator, &history.call_id);
+  iree_string_builder_initialize(host_allocator, &history.named_message);
   IREE_TRACE_ZONE_BEGIN_NAMED(z_render, "loom_serve_text_chat_request_render");
   iree_status_t status = loom_serve_text_chat_request_render(body, &history);
   IREE_TRACE_ZONE_END(z_render);
@@ -1451,6 +1547,9 @@ iree_status_t loom_serve_text_chat_initialize(
     status = loom_serve_text_chat_resolve_options(out_chat, body, request_id);
     IREE_TRACE_ZONE_END(z_options);
   }
+  iree_string_builder_deinitialize(&history.named_message);
+  iree_string_builder_deinitialize(&history.call_id);
+  iree_string_builder_deinitialize(&history.call_names);
   iree_string_builder_deinitialize(&history.calls);
   iree_string_builder_deinitialize(&history.reasoning);
   iree_string_builder_deinitialize(&history.arguments);
