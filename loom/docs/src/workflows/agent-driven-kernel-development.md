@@ -356,6 +356,30 @@ establishes what stayed fixed, trace the authored indices to identify which
 panels adjacent workgroups visit, then time each order at the production shape.
 [Grid and wave query](compile-report-queries.md#compare-grid-shape-and-wave-accesses)
 
+### When sparse queries share only some keys
+
+Changing which queries a workgroup owns can change the arithmetic as well as
+the addresses. A sparse attention kernel grouped four queries, each with
+twelve query heads, and loaded the union of their selected four-key blocks.
+Its 48 query-head rows filled three 16-row matrix tiles. Processing each
+query separately fills twelve rows of one tile and visits only its own keys.
+
+These two four-query groups came from the same layer of a 65,536-token
+prefill. Each score tile in the table covers sixteen query-head rows and
+sixteen keys for one KV head. Both counts use the recorded selections.
+
+| First query position (zero-based) | Four-key blocks, shared union | Four-key blocks, summed per query | Score tiles, queries together | Score tiles, queries separate |
+| ---: | ---: | ---: | ---: | ---: |
+| 1,024 | 257 | 1,028 | 195 | 260 |
+| 24,576 | 1,090 | 2,051 | 819 | 515 |
+
+At position 24,576, sharing the union nearly halves the K/V block visits,
+but each query also scores keys selected only by its neighbors. The union
+rounds up to 273 key tiles for each of three query-head tiles. The individual
+queries use 129, 129, 129, and 128 key tiles. A selection trace supplies
+these counts for data-dependent indices. Device counters and completed
+request timings establish which tradeoff wins on the target.
+
 ## Search laterally across dispatch boundaries
 
 Fusion is one of Loom's highest-leverage searches because the semantic cut is
