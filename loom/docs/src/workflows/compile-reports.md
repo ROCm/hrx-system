@@ -595,6 +595,13 @@ they do not rank runtime cost or optimization value. `status: available` means
 the relevant interpreter is available. An empty finding list cannot establish
 that the current execution shape is competitive.
 
+Two GPU kernels with the same kinds of findings can have very different
+cache traffic. Compare the grid dimensions and per-wave footprints, then
+trace which operand adjacent workgroup IDs read. A measured example shows a
+tenfold change in kernel time with the same wave accesses.
+[Grid and wave query](compile-report-queries.md#compare-grid-shape-and-wave-accesses) ·
+[Worked traversal example](agent-driven-kernel-development.md#a-token-major-input-with-three-consumers-per-key)
+
 For a port, establish the reference's native instruction mix, performance on
 the intended machine, and data reuse policy before acting on these findings.
 Paneling, tile and batch sizes, prefill chunks, resident

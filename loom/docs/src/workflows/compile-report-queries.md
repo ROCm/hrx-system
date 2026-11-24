@@ -483,6 +483,28 @@ inventory of the hardware counter. A planned wait with
 crosses a control-flow edge. Read zero as no packet counted in that local block,
 not as proof that the hardware wait is redundant.
 
+## Compare grid shape and wave accesses
+
+When a GPU kernel reads the same operand from several independent workgroups,
+this query shows the grid dimensions and the byte footprint of each modeled
+packet with exact lane geometry.
+
+```shell
+loom-compile-report show kernel.report.json --format=json |
+  jq '{grid: .workload.workgroup_count,
+       accesses: [.subgroup_access.groups[]? | select(.access.proof == "exact") |
+         {operand: .identity.source_root, packet: .identity.packet,
+          unique_bytes: .access.geometry.subgroup_unique_bytes,
+          span_bytes: .access.geometry.subgroup_span_bytes}]}'
+```
+
+Each access describes the addresses of the active lanes in one wave packet.
+The grid gives the number of workgroups on each axis when the artifact fixes
+it. Two mappings can have identical values for every field above and visit
+different panels at adjacent workgroup IDs. Interleaved device timings and
+cache counters measure the difference.
+[Worked traversal example](agent-driven-kernel-development.md#a-token-major-input-with-three-consumers-per-key)
+
 ## Account for memory traffic
 
 Top-level economics separate authored logical traffic from target-Low issued
