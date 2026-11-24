@@ -17,6 +17,40 @@ class RuntimeConfigureTest(unittest.TestCase):
             bazel_configure.parse_arguments(arguments)
         )
 
+    def test_codec_lists_have_equivalent_portable_and_native_spellings(self):
+        portable = self.generate(
+            ["-DIREE_CODEC_IMAGE_CODECS=png;jpeg", "-DIREE_CODEC_AUDIO_CODECS=wav;flac"]
+        )
+        native = self.generate(
+            [
+                "--//runtime/config/codec:image_codecs=png,jpeg",
+                "--//runtime/config/codec:audio_codecs=wav,flac",
+            ]
+        )
+        self.assertEqual(portable, native)
+        self.assertIn(
+            "build --//runtime/config/codec:image_codecs=png,jpeg\n", portable
+        )
+        self.assertIn(
+            "build --//runtime/config/codec:audio_codecs=wav,flac\n", portable
+        )
+
+    def test_codec_lists_reject_unknown_values_and_mixed_spellings(self):
+        for arguments in (
+            ["-DIREE_CODEC_IMAGE_CODECS=png;typo"],
+            ["--//runtime/config/codec:audio_codecs=typo"],
+            [
+                "-DIREE_CODEC_AUDIO_CODECS=wav",
+                "--//runtime/config/codec:audio_codecs=mp3",
+            ],
+            [
+                "--//runtime/config/codec:image_codecs=jpeg",
+                "-DIREE_CODEC_IMAGE_CODECS=png",
+            ],
+        ):
+            with self.subTest(arguments=arguments), self.assertRaises(SystemExit):
+                self.generate(arguments)
+
     def test_amd_umbrella_defaults_and_explicit_opt_outs(self):
         for arguments, drivers, provider in (
             ([], "task,amd-gpu,amd-xdna", True),

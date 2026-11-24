@@ -10,7 +10,7 @@
 
 #include "loom/runtime/execution/wait.h"
 #include "loom/runtime/host/readiness.h"
-#include "loom/serve/media/image_request.h"
+#include "loom/service/media/image_request.h"
 #include "loom/service/prepared_request.h"
 
 typedef struct loom_serve_text_media_projection_result_t {
@@ -243,7 +243,7 @@ struct loom_serve_text_media_projector_t {
   // Failed readiness retains it through the owner's normal retirement path.
   loom_service_finite_result_t* result;
   // Contiguous codec descriptors borrowing the selected jobs.
-  loom_serve_media_image_request_t* requests;
+  loom_service_media_image_request_t* requests;
   // Codec result buffers transferred into jobs after realization.
   iree_vm_buffer_t** packets;
   // Per-projection realization results transferred into jobs.
@@ -270,7 +270,7 @@ iree_status_t loom_serve_text_media_projector_allocate(
       sizeof(loom_serve_text_media_projector_t), &length,
       IREE_STRUCT_FIELD(capacity, loom_serve_text_media_job_t, &jobs_offset),
       IREE_STRUCT_FIELD(capacity, loom_serve_text_media_job_t*, &cohort_offset),
-      IREE_STRUCT_FIELD(capacity, loom_serve_media_image_request_t,
+      IREE_STRUCT_FIELD(capacity, loom_service_media_image_request_t,
                         &requests_offset),
       IREE_STRUCT_FIELD(capacity, iree_vm_buffer_t*, &packets_offset),
       IREE_STRUCT_FIELD(capacity, iree_status_t, &statuses_offset),
@@ -323,7 +323,7 @@ bool loom_serve_text_media_projector_offer(
     const loom_serve_text_media_projection_t* projection =
         &request->chat->projections.values[index];
     iree_host_size_t length = 0;
-    iree_status_t status = loom_serve_media_image_request_size(
+    iree_status_t status = loom_service_media_image_request_size(
         projection->image_count,
         &request->chat->images.values[projection->image_begin].info,
         sizeof(*request->chat->images.values), projection->metadata_length,
@@ -373,7 +373,7 @@ static iree_status_t loom_serve_text_media_request_forecast(
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
     const loom_serve_text_media_projection_t* projection =
         &request->chat->projections.values[request->first_projection + i];
-    status = loom_serve_media_image_request_describe(
+    status = loom_service_media_image_request_describe(
         projection->image_count,
         &request->chat->images.values[projection->image_begin].info,
         sizeof(*request->chat->images.values),
@@ -454,7 +454,7 @@ static iree_status_t loom_serve_text_media_projector_prepare(void* user_data) {
   if (!input_capacity) {
     return iree_ok_status();
   }
-  loom_serve_media_image_input_t* inputs = NULL;
+  loom_service_media_image_input_t* inputs = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array_uninitialized(
       projector->host_allocator, input_capacity, sizeof(*inputs),
       (void**)&inputs));
@@ -471,7 +471,7 @@ static iree_status_t loom_serve_text_media_projector_prepare(void* user_data) {
     const iree_host_size_t input_begin = input_count;
     for (iree_host_size_t j = 0;
          j < projection->image_count && iree_status_is_ok(job->status); ++j) {
-      job->status = loom_serve_media_image_input_initialize(
+      job->status = loom_service_media_image_input_initialize(
           chat->images.values[projection->image_begin + j].source,
           &chat->policy->images.limits, projector->host_allocator,
           &inputs[input_count++]);
@@ -480,20 +480,20 @@ static iree_status_t loom_serve_text_media_projector_prepare(void* user_data) {
       continue;
     }
     projector->cohort[valid_count] = job;
-    projector->requests[valid_count++] = (loom_serve_media_image_request_t){
+    projector->requests[valid_count++] = (loom_service_media_image_request_t){
         .image_count = projection->image_count,
         .images = &inputs[input_begin],
         .metadata = loom_serve_text_media_projection_metadata(chat, projection),
         .output_rows = projection->feature_count,
     };
   }
-  iree_status_t status = loom_serve_media_image_request_create_batch(
+  iree_status_t status = loom_service_media_image_request_create_batch(
       valid_count, projector->requests, projector->host_allocator,
       projector->packets, projector->statuses);
   // Failed inputs are zero-initialized by the codec facade. All successful
   // compressed storage retires after decode, including partial failed groups.
   for (iree_host_size_t i = 0; i < input_count; ++i) {
-    loom_serve_media_image_input_deinitialize(&inputs[i]);
+    loom_service_media_image_input_deinitialize(&inputs[i]);
   }
   iree_allocator_free(projector->host_allocator, inputs);
   for (iree_host_size_t i = 0; i < valid_count; ++i) {

@@ -243,14 +243,14 @@ def codec_options(build_system: str) -> tuple[str, ...]:
     )
     if build_system == "cmake":
         return tuple(
-            "-DLOOM_SERVE_"
+            "-DIREE_CODEC_"
             + kind.upper()
             + "_CODECS="
             + ";".join(codecs if enabled else ())
             for kind, codecs in groups
         )
     return tuple(
-        "--//loom/config/serve:"
+        "--//runtime/config/codec:"
         + kind
         + "_codecs="
         + ",".join(codecs if enabled else ())

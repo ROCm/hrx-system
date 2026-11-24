@@ -9,10 +9,10 @@
 #include <string.h>
 
 #include "iree/base/threading/mutex.h"
+#include "iree/codec/audio/decoder.h"
+#include "iree/codec/audio/resampler.h"
+#include "iree/codec/audio/source.h"
 #include "loom/runtime/parameter/telemetry.h"
-#include "loom/serve/media/audio_decoder.h"
-#include "loom/serve/media/audio_resampler.h"
-#include "loom/serve/media/audio_source.h"
 #include "loom/serve/service/endpoint.h"
 #include "loom/serve/service/recognition/transcription.h"
 #include "loom/service/kind.h"
@@ -36,15 +36,15 @@ typedef struct loom_serve_recognition_job_t {
   // Input state selected by the checked request's PCM declaration.
   union {
     // Independent codec/resampler state borrowing this upload's file bytes.
-    loom_serve_audio_decoder_t* decoder;
+    iree_codec_audio_decoder_t* decoder;
     // PCM conversion retained independently of the model's encoder history.
     struct {
       // Upload frames converted by retired or currently accepted CPU work.
       iree_host_size_t offset;
       // Immutable rate conversion, initialized only for a rate mismatch.
-      loom_serve_audio_resampler_filter_t filter;
+      iree_codec_audio_resampler_filter_t filter;
       // Independent history borrowing the stable filter in this request slot.
-      loom_serve_audio_resampler_t resampler;
+      iree_codec_audio_resampler_t resampler;
     } pcm;
   } input;
   // Owned bounded F32LE staging, written only by a captured CPU task.
@@ -204,10 +204,10 @@ static void loom_serve_transcription_release(
     loom_serve_recognition_stream_close(row->stream);
   }
   if (row->request.audio.sample_rate) {
-    loom_serve_audio_resampler_deinitialize(&row->input.pcm.resampler);
-    loom_serve_audio_resampler_filter_deinitialize(&row->input.pcm.filter);
+    iree_codec_audio_resampler_deinitialize(&row->input.pcm.resampler);
+    iree_codec_audio_resampler_filter_deinitialize(&row->input.pcm.filter);
   } else {
-    loom_serve_audio_decoder_free(row->input.decoder);
+    iree_codec_audio_decoder_free(row->input.decoder);
   }
   iree_allocator_free(service->host_allocator, row->samples);
   if (finish) {
@@ -306,19 +306,19 @@ static iree_status_t loom_serve_transcription_read_pcm(
         row->request.audio.frame_count - row->input.pcm.offset;
     row->frame_count = iree_min(service->options.decode_frames, remaining);
     IREE_RETURN_IF_ERROR(
-        loom_serve_audio_source_read(&row->request.audio, row->input.pcm.offset,
+        iree_codec_audio_source_read(&row->request.audio, row->input.pcm.offset,
                                      row->frame_count, row->samples));
     row->input.pcm.offset += row->frame_count;
     row->decoded = row->input.pcm.offset == row->request.audio.frame_count;
     return iree_ok_status();
   }
-  loom_serve_audio_resampler_t* resampler = &row->input.pcm.resampler;
+  iree_codec_audio_resampler_t* resampler = &row->input.pcm.resampler;
   if (!resampler->samples) {
-    IREE_RETURN_IF_ERROR(loom_serve_audio_resampler_filter_initialize(
+    IREE_RETURN_IF_ERROR(iree_codec_audio_resampler_filter_initialize(
         row->request.audio.sample_rate, format.sample_rate,
         service->options.conversion_limit, service->host_allocator,
         &row->input.pcm.filter));
-    IREE_RETURN_IF_ERROR(loom_serve_audio_resampler_initialize(
+    IREE_RETURN_IF_ERROR(iree_codec_audio_resampler_initialize(
         &row->input.pcm.filter, format.channels, service->options.decode_frames,
         service->options.conversion_limit - row->input.pcm.filter.storage_size,
         service->host_allocator, resampler));
@@ -328,29 +328,29 @@ static iree_status_t loom_serve_transcription_read_pcm(
   iree_status_t status = iree_ok_status();
   while (iree_status_is_ok(status) &&
          row->frame_count < service->options.decode_frames) {
-    row->frame_count += loom_serve_audio_resampler_read(
+    row->frame_count += iree_codec_audio_resampler_read(
         resampler, service->options.decode_frames - row->frame_count,
         row->samples + row->frame_count * format.channels);
-    row->decoded = loom_serve_audio_resampler_is_complete(resampler);
+    row->decoded = iree_codec_audio_resampler_is_complete(resampler);
     if (row->decoded || row->frame_count == service->options.decode_frames ||
         received == service->options.decode_frames) {
       break;
     }
     iree_host_size_t capacity = 0;
-    float* input = loom_serve_audio_resampler_reserve(resampler, &capacity);
+    float* input = iree_codec_audio_resampler_reserve(resampler, &capacity);
     const uint64_t remaining =
         row->request.audio.frame_count - row->input.pcm.offset;
     const iree_host_size_t count =
         iree_min(remaining,
                  iree_min(capacity, service->options.decode_frames - received));
-    status = loom_serve_audio_source_read(&row->request.audio,
+    status = iree_codec_audio_source_read(&row->request.audio,
                                           row->input.pcm.offset, count, input);
     if (iree_status_is_ok(status)) {
-      loom_serve_audio_resampler_commit(resampler, count);
+      iree_codec_audio_resampler_commit(resampler, count);
       row->input.pcm.offset += count;
       received += count;
       if (row->input.pcm.offset == row->request.audio.frame_count) {
-        loom_serve_audio_resampler_finish(resampler);
+        iree_codec_audio_resampler_finish(resampler);
       }
     }
   }
@@ -368,12 +368,12 @@ static iree_status_t loom_serve_transcription_cpu_run(
     IREE_RETURN_IF_ERROR(loom_serve_transcription_read_pcm(service, row));
   } else {
     if (!row->input.decoder) {
-      IREE_RETURN_IF_ERROR(loom_serve_audio_decoder_allocate(
+      IREE_RETURN_IF_ERROR(iree_codec_audio_decoder_allocate(
           row->request.audio.data, service->generator.format.sample_rate,
           service->generator.format.channels, service->host_allocator,
           &row->input.decoder));
     }
-    IREE_RETURN_IF_ERROR(loom_serve_audio_decoder_read(
+    IREE_RETURN_IF_ERROR(iree_codec_audio_decoder_read(
         row->input.decoder, service->options.decode_frames, row->samples,
         &row->frame_count, &row->decoded));
   }

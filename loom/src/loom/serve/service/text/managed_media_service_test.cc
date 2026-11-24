@@ -8,8 +8,8 @@
 #include <cstring>
 
 #include "iree/base/internal/json.h"
-#include "loom/serve/media/image_codec.h"
 #include "loom/serve/service/text/service_test_fixture.h"
+#include "loom/service/media/image_codecs.h"
 
 namespace {
 
@@ -351,7 +351,7 @@ TEST_P(ManagedMediaServiceTest,
       ImageMessage("a", "image/x-portable-arbitrarymap", kPam, "low", "b");
   const auto first =
       Read(Send(Request(message, 4), "X-Loom-Session: image\r\n"));
-  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_PAM)) {
+  if (!loom_service_media_image_codec(IREE_CODEC_IMAGE_FORMAT_PAM)) {
     EXPECT_EQ(first.find("HTTP/1.1 501"), 0u) << first;
     return;
   }
@@ -426,7 +426,7 @@ TEST_P(ManagedMediaServiceTest, FailedImageWarmupLeavesTextAvailable) {
 }
 
 TEST_P(ManagedMediaServiceTest, InvalidInputsPreserveHealthAndServingPeers) {
-  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_PAM)) {
+  if (!loom_service_media_image_codec(IREE_CODEC_IMAGE_FORMAT_PAM)) {
     return;
   }
   ASSERT_NO_FATAL_FAILURE(Register());

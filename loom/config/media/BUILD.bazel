@@ -1,0 +1,47 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# bazel-to-cmake: skip
+
+load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+
+package(default_visibility = ["//visibility:public"])
+
+bool_flag(
+    name = "image_input",
+    build_setting_default = True,
+)
+
+config_setting(
+    name = "image_input_requested",
+    flag_values = {":image_input": "true"},
+)
+
+selects.config_setting_group(
+    name = "image_input_enabled",
+    match_all = [
+        ":image_input_requested",
+        "//runtime/config/codec:host",
+        "//loom/config/emit:vm_binary",
+    ],
+)
+
+[
+    selects.config_setting_group(
+        name = codec,
+        match_all = [
+            ":image_input_enabled",
+            "//runtime/config/codec:" + codec,
+        ],
+    )
+    for codec in [
+        "png",
+        "jpeg",
+        "gif",
+        "webp",
+    ]
+]

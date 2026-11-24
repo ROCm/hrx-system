@@ -297,7 +297,7 @@ static iree_status_t loom_serve_text_chat_media_detail(
 static iree_status_t loom_serve_text_chat_inspect_image(
     loom_serve_text_chat_content_t* content, iree_host_size_t content_ordinal,
     loom_serve_text_chat_content_kind_t kind,
-    loom_serve_media_image_source_t source,
+    loom_service_media_image_source_t source,
     loom_serve_text_chat_image_detail_t detail, double timestamp) {
   if (content->message_ordinal > UINT32_MAX || content_ordinal > UINT32_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -314,8 +314,8 @@ static iree_status_t loom_serve_text_chat_inspect_image(
         "chat request supports at most %zu image occurrences",
         content->chat->policy->images.maximum_count);
   }
-  loom_serve_media_image_info_t info;
-  IREE_RETURN_IF_ERROR(loom_serve_media_image_inspect(
+  loom_service_media_image_info_t info;
+  IREE_RETURN_IF_ERROR(loom_service_media_image_inspect(
       source, &content->chat->policy->images.limits,
       content->chat->host_allocator, &info));
   const iree_host_size_t image_index = content->chat->images.count;
@@ -365,7 +365,7 @@ static iree_status_t loom_serve_text_chat_image_part(
       (uint32_t)(content->chat->images.count - content->first_image);
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_inspect_image(
       content, content_ordinal, LOOM_SERVE_TEXT_CHAT_CONTENT_IMAGE,
-      loom_serve_media_image_source_from_data_url(fields[0].value), detail,
+      loom_service_media_image_source_from_data_url(fields[0].value), detail,
       0.0));
   return loom_serve_text_chat_content_record(content,
                                              LOOM_SERVE_TEXT_CHAT_CONTENT_IMAGE,
@@ -460,9 +460,9 @@ static iree_status_t loom_serve_text_chat_video_part(
         status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                   "video fps produces a nonfinite timestamp");
       } else {
-        const loom_serve_media_image_source_t source = {
+        const loom_service_media_image_source_t source = {
             .value = loom_serve_text_chat_video_component(&cursor),
-            .format = LOOM_SERVE_MEDIA_IMAGE_FORMAT_JPEG,
+            .format = IREE_CODEC_IMAGE_FORMAT_JPEG,
         };
         status = loom_serve_text_chat_inspect_image(
             content, content_ordinal, LOOM_SERVE_TEXT_CHAT_CONTENT_VIDEO,
@@ -768,7 +768,7 @@ iree_status_t loom_serve_text_chat_policy_initialize(
           "compressed bytes, width, height and pixels");
     } else if (valid_enabled) {
       out_policy->images.maximum_count = (iree_host_size_t)limits[0];
-      out_policy->images.limits = (loom_serve_media_image_limits_t){
+      out_policy->images.limits = (loom_service_media_image_limits_t){
           .compressed_bytes = (iree_host_size_t)limits[1],
           .width = (uint32_t)limits[2],
           .height = (uint32_t)limits[3],

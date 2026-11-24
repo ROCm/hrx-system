@@ -252,6 +252,15 @@ PROJECT_CONFIG = bazel_to_cmake_config.ProjectConfig(
         "@iree_macos_toolchain//:Foundation": ['"-framework Foundation"'],
     },
     condition_mappings={
+        "//runtime/config/codec:host": "IREE_CODEC_HOST",
+        "//runtime/config/codec:audio_decoding": "IREE_CODEC_AUDIO_DECODING",
+        "//runtime/config/codec:png": "IREE_CODEC_IMAGE_CODEC_PNG",
+        "//runtime/config/codec:jpeg": "IREE_CODEC_IMAGE_CODEC_JPEG",
+        "//runtime/config/codec:gif": "IREE_CODEC_IMAGE_CODEC_GIF",
+        "//runtime/config/codec:webp": "IREE_CODEC_IMAGE_CODEC_WEBP",
+        "//runtime/config/codec:wav": "IREE_CODEC_AUDIO_CODEC_WAV",
+        "//runtime/config/codec:mp3": "IREE_CODEC_AUDIO_CODEC_MP3",
+        "//runtime/config/codec:flac": "IREE_CODEC_AUDIO_CODEC_FLAC",
         "//runtime/src/iree/math:gnu_x86": all_of(
             all_of(Matches("CMAKE_C_COMPILER_ID", "Clang|GNU"), Not(Option("MSVC"))),
             any_of(Equal("IREE_ARCH", "x86_32"), Equal("IREE_ARCH", "x86_64")),

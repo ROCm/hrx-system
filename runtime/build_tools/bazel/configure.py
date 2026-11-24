@@ -38,6 +38,9 @@ SUPPORTED_ENABLED_DRIVERS = frozenset(ALL_DRIVERS).difference(("amd",))
 NATIVE_DRIVER_FLAG = "--//runtime/config/hal:drivers"
 NATIVE_AMDGPU_TARGETS_FLAG = "--//runtime/src/iree/hal/driver/amd/gpu:targets"
 NATIVE_RDMA_FLAG = "--//runtime/config/net:rdma"
+CODECS = {"image": ("png", "jpeg", "gif", "webp"), "audio": ("wav", "mp3", "flac")}
+CODEC_DEFINES = {f"IREE_CODEC_{kind.upper()}_CODECS": kind for kind in CODECS}
+CODEC_FLAGS = {f"--//runtime/config/codec:{kind}_codecs": kind for kind in CODECS}
 
 _REMOVED_OPTIONS = (
     "--enable-driver",
@@ -58,6 +61,12 @@ class State:
     amdgpu_targets: set[str] | None = None  # Native AMD GPU device binaries.
     rdma_enabled: bool = False  # Whether native RDMA resources are built.
     rdma_source: str | None = None  # Portable or native RDMA spelling.
+    # Enabled codec implementations by modality, independent of any consumer.
+    codecs: dict[str, set[str]] = field(
+        default_factory=lambda: {kind: set(values) for kind, values in CODECS.items()}
+    )
+    # Explicit portable or native spelling used for each codec list.
+    codec_sources: dict[str, str] = field(default_factory=dict)
 
 
 def configuration(request: ConfigRequest) -> State:
@@ -107,9 +116,27 @@ def _set_rdma(state: State, enabled: bool, source: str) -> None:
     state.rdma_enabled = enabled
 
 
+def _set_codecs(state: State, kind: str, value: str, source: str) -> None:
+    if state.codec_sources.get(kind) not in (None, source):
+        raise SystemExit(
+            f"Do not mix portable -DIREE_CODEC_{kind.upper()}_CODECS with the "
+            f"native --//runtime/config/codec:{kind}_codecs=... Bazel option."
+        )
+    values = parse_string_list(value, ";" if source == "portable" else ",")
+    unknown = values.difference(CODECS[kind])
+    if unknown:
+        raise SystemExit(
+            f"Unknown runtime {kind} codec(s): " + ", ".join(sorted(unknown))
+        )
+    state.codecs[kind] = values
+    state.codec_sources[kind] = source
+
+
 def _apply_define(request: ConfigRequest, name: str, value: str) -> None:
     state = configuration(request)
-    if name == "IREE_NET_RDMA":
+    if name in CODEC_DEFINES:
+        _set_codecs(state, CODEC_DEFINES[name], value, "portable")
+    elif name == "IREE_NET_RDMA":
         _set_rdma(state, parse_bool(name, value), "portable")
     else:
         _set_driver(state, DRIVER_DEFINES[name], parse_bool(name, value))
@@ -117,7 +144,9 @@ def _apply_define(request: ConfigRequest, name: str, value: str) -> None:
 
 def _apply_native_option(request: ConfigRequest, name: str, value: str) -> None:
     state = configuration(request)
-    if name == NATIVE_DRIVER_FLAG:
+    if name in CODEC_FLAGS:
+        _set_codecs(state, CODEC_FLAGS[name], value, "native")
+    elif name == NATIVE_DRIVER_FLAG:
         _set_driver_list(state, value)
     elif name == NATIVE_AMDGPU_TARGETS_FLAG:
         state.amdgpu_targets = parse_string_list(value)
@@ -180,6 +209,19 @@ def _sections(request: ConfigRequest) -> tuple[BazelrcSection, ...]:
     return (
         BazelrcSection("Runtime driver registry scope.", tuple(driver_lines)),
         BazelrcSection(
+            "Optional runtime codecs; built-in PAM and raw PCM are always available.",
+            tuple(
+                bazelrc_line(
+                    "build",
+                    f"--//runtime/config/codec:{kind}_codecs="
+                    + ",".join(
+                        codec for codec in values if codec in state.codecs[kind]
+                    ),
+                )
+                for kind, values in CODECS.items()
+            ),
+        ),
+        BazelrcSection(
             "Native RDMA resources; no host carrier is implicitly registered.",
             (
                 bazelrc_line(
@@ -196,11 +238,13 @@ CONTRIBUTOR = Contributor(
     defines={
         **{name: _apply_define for name in DRIVER_DEFINES},
         "IREE_NET_RDMA": _apply_define,
+        **{name: _apply_define for name in CODEC_DEFINES},
     },
     native_options={
         NATIVE_DRIVER_FLAG: _apply_native_option,
         NATIVE_AMDGPU_TARGETS_FLAG: _apply_native_option,
         NATIVE_RDMA_FLAG: _apply_native_option,
+        **{name: _apply_native_option for name in CODEC_FLAGS},
     },
     removed_options={name: _removed_option for name in _REMOVED_OPTIONS},
     resolve=_resolve,

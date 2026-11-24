@@ -1,0 +1,111 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+iree_runtime_cc_library(
+    name = "image",
+    hdrs = ["image.h"],
+    visibility = ["//visibility:public"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+iree_runtime_cc_library(
+    name = "codec",
+    hdrs = ["codec.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":image",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "metadata",
+    srcs = ["metadata.c"],
+    hdrs = ["metadata.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+iree_runtime_cc_library(
+    name = "pam",
+    srcs = ["pam.c"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":codec",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "png",
+    srcs = ["png.c"],
+    target_compatible_with = select({
+        "//runtime/config/codec:png": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":codec",
+        ":metadata",
+        "//runtime/src/iree/base",
+        "//third_party:libpng",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "jpeg",
+    srcs = ["jpeg.c"],
+    target_compatible_with = select({
+        "//runtime/config/codec:jpeg": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":codec",
+        ":metadata",
+        "//runtime/src/iree/base",
+        "//third_party:libjpeg_turbo",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "gif",
+    srcs = ["gif.c"],
+    target_compatible_with = select({
+        "//runtime/config/codec:gif": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":codec",
+        ":metadata",
+        "//runtime/src/iree/base",
+        "//third_party:giflib",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "webp",
+    srcs = ["webp.c"],
+    target_compatible_with = select({
+        "//runtime/config/codec:webp": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":codec",
+        ":metadata",
+        "//runtime/src/iree/base",
+        "//third_party:libwebp",
+    ],
+)

@@ -9,7 +9,7 @@
 
 #include "iree/base/api.h"
 #include "iree/vm/buffer.h"
-#include "loom/serve/media/image.h"
+#include "loom/service/media/image.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -94,7 +94,7 @@ typedef enum loom_serve_text_media_span_field_e {
 // the image-conditioned prefix is not already resident.
 typedef struct loom_serve_text_chat_image_t {
   // Encoded image bytes borrowed from the request until bounded realization.
-  loom_serve_media_image_source_t source;
+  loom_service_media_image_source_t source;
   // Source-visible processing hint participating in semantic identity.
   loom_serve_text_chat_image_detail_t detail;
   // Image or video content kind; all frames in one part have the same kind.
@@ -108,7 +108,7 @@ typedef struct loom_serve_text_chat_image_t {
   // Decoded text bytes preceding this occurrence within the message.
   uint32_t text_offset;
   // Exact compressed identity and codec/display geometry.
-  loom_serve_media_image_info_t info;
+  loom_service_media_image_info_t info;
 } loom_serve_text_chat_image_t;
 
 // One checked source projection, independent of inspected input storage and
@@ -130,7 +130,7 @@ typedef struct loom_serve_text_media_projection_t {
   // Byte length of source-private preprocessing metadata.
   uint32_t metadata_length;
   // Immutable identity of every input, timestamp, placement, and source fact.
-  loom_serve_media_digest_t identity_digest;
+  loom_service_media_digest_t identity_digest;
 } loom_serve_text_media_projection_t;
 
 // One checked projection range in source-tokenized model input. Ranges are

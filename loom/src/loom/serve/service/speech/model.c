@@ -10,6 +10,7 @@
 
 #include "iree/base/threading/mutex.h"
 #include "iree/base/threading/notification.h"
+#include "iree/codec/audio/recording.h"
 #include "iree/vm/buffer.h"
 #include "iree/vm/sync.h"
 #include "loom/model/card.h"
@@ -26,7 +27,6 @@
 #include "loom/runtime/program/stage_set.h"
 #include "loom/runtime/program/tokenizer_load.h"
 #include "loom/runtime/storage/rows.h"
-#include "loom/serve/media/audio_recording.h"
 #include "loomc/iree.h"
 
 typedef struct loom_serve_speech_model_stage_t {
@@ -1273,21 +1273,21 @@ static iree_status_t loom_serve_speech_generator_prepare(
 
 static void loom_serve_speech_recording_release(void* self,
                                                 iree_byte_span_t storage) {
-  loom_serve_audio_recording_free(self);
+  iree_codec_audio_recording_free(self);
 }
 
 static iree_status_t loom_serve_speech_generator_prepare_voice(
     void* self, iree_host_size_t row_index, iree_host_size_t voice_index,
-    const loom_serve_audio_source_t* audio, void** out_invocation,
+    const iree_codec_audio_source_t* audio, void** out_invocation,
     void** out_voice) {
   *out_invocation = NULL;
   *out_voice = NULL;
   loom_serve_speech_model_t* model = self;
-  loom_serve_audio_recording_t* recording = NULL;
-  IREE_RETURN_IF_ERROR(loom_serve_audio_recording_allocate(
+  iree_codec_audio_recording_t* recording = NULL;
+  IREE_RETURN_IF_ERROR(iree_codec_audio_recording_allocate(
       audio, model->voice_audio_capacity, model->host_allocator, &recording));
-  const loom_serve_audio_source_t decoded =
-      loom_serve_audio_recording_source(recording);
+  const iree_codec_audio_source_t decoded =
+      iree_codec_audio_recording_source(recording);
   iree_vm_buffer_t* samples = NULL;
   iree_status_t status = iree_vm_buffer_wrap(
       IREE_VM_BUFFER_ACCESS_FLAG_READ,
@@ -1296,7 +1296,7 @@ static iree_status_t loom_serve_speech_generator_prepare_voice(
                                           recording},
       model->host_allocator, &samples);
   if (!iree_status_is_ok(status)) {
-    loom_serve_audio_recording_free(recording);
+    iree_codec_audio_recording_free(recording);
     return status;
   }
   iree_vm_variant_t arguments[] = {

@@ -29,17 +29,13 @@ ARCHITECTURES = target_presets.ARCHITECTURES
 ARTIFACT_FORMATS = target_presets.ARTIFACT_FORMATS
 EXECUTION_SUBSTRATES = target_presets.EXECUTION_SUBSTRATES
 IMPORTERS = tuple(IMPORT_DEFINES.values())
-IMAGE_CODECS = ("png", "jpeg", "gif", "webp")
-AUDIO_CODECS = ("wav", "mp3", "flac")
 
 NATIVE_ARCH_FLAG = "--//loom/config/arch:enable"
 NATIVE_AMDGPU_TARGETS_FLAG = "--//loom/config/arch/amdgpu:targets"
 NATIVE_EMIT_FLAG = "--//loom/config/emit:enable"
 NATIVE_EXECUTE_FLAG = "--//loom/config/execute:enable"
 NATIVE_IMPORT_FLAG = "--//loom/config/import:enable"
-NATIVE_IMAGE_INPUT_FLAG = "--//loom/config/serve:image_input"
-NATIVE_IMAGE_CODECS_FLAG = "--//loom/config/serve:image_codecs"
-NATIVE_AUDIO_CODECS_FLAG = "--//loom/config/serve:audio_codecs"
+NATIVE_IMAGE_INPUT_FLAG = "--//loom/config/media:image_input"
 
 _NAME = "loom"
 
@@ -117,26 +113,6 @@ class State:
     amdgpu_targets: set[str] | None = None  # AMDGPU processor selectors.
     image_input: bool = True  # Whether image inputs are accepted.
     image_input_source: str | None = None  # Portable or native spelling.
-    # Encoded image provider selection.
-    image_codecs: SetSelection = field(
-        default_factory=lambda: SetSelection(
-            IMAGE_CODECS,
-            "LOOM_SERVE_IMAGE_CODECS",
-            NATIVE_IMAGE_CODECS_FLAG,
-            "image codec",
-            set(IMAGE_CODECS),
-        )
-    )
-    # Encoded audio provider selection; raw PCM is always present.
-    audio_codecs: SetSelection = field(
-        default_factory=lambda: SetSelection(
-            AUDIO_CODECS,
-            "LOOM_SERVE_AUDIO_CODECS",
-            NATIVE_AUDIO_CODECS_FLAG,
-            "audio codec",
-            set(AUDIO_CODECS),
-        )
-    )
     # Presets selected before fallback replacement and transitive expansion.
     enabled_presets: set[str] = field(default_factory=lambda: {"default"})
     explicit_presets: set[str] = field(default_factory=set)  # User-named presets.
@@ -168,18 +144,11 @@ _MEMBER_DEFINES = {
     **{name: ("importers", value) for name, value in IMPORT_DEFINES.items()},
 }
 
-_LIST_DEFINES = {
-    "LOOM_SERVE_IMAGE_CODECS": "image_codecs",
-    "LOOM_SERVE_AUDIO_CODECS": "audio_codecs",
-}
-
 _NATIVE_SELECTIONS = {
     NATIVE_ARCH_FLAG: "architectures",
     NATIVE_EMIT_FLAG: "artifact_formats",
     NATIVE_EXECUTE_FLAG: "execution_substrates",
     NATIVE_IMPORT_FLAG: "importers",
-    NATIVE_IMAGE_CODECS_FLAG: "image_codecs",
-    NATIVE_AUDIO_CODECS_FLAG: "audio_codecs",
 }
 
 
@@ -198,12 +167,7 @@ def _apply_define(request: ConfigRequest, name: str, value: str) -> None:
         selection = cast(SetSelection, getattr(state, member[0]))
         selection.set_member(member[1], parse_bool(name, value))
         return
-    list_attribute = _LIST_DEFINES.get(name)
-    if list_attribute is not None:
-        selection = cast(SetSelection, getattr(state, list_attribute))
-        selection.set_list(value, "portable", ";")
-        return
-    if name == "LOOM_SERVE_IMAGE_INPUT":
+    if name == "LOOM_MEDIA_IMAGE_INPUT":
         _set_image_input(state, parse_bool(name, value), "portable")
         return
     raise RuntimeError(f"unhandled declared Loom configure option {name}")
@@ -299,25 +263,12 @@ def _sections(request: ConfigRequest) -> tuple[BazelrcSection, ...]:
     state = configuration(request)
     return (
         BazelrcSection(
-            "Optional encoded audio providers; raw PCM is always available.",
-            (
-                _list_line(
-                    NATIVE_AUDIO_CODECS_FLAG,
-                    _ordered(state.audio_codecs.values, AUDIO_CODECS),
-                ),
-            ),
-        ),
-        BazelrcSection(
             "Loom architecture, artifact, execution, and importer scope.",
             (
                 *("# " + line for line in _summary(request)),
                 bazelrc_line(
                     "build",
                     NATIVE_IMAGE_INPUT_FLAG + "=" + str(state.image_input).lower(),
-                ),
-                _list_line(
-                    NATIVE_IMAGE_CODECS_FLAG,
-                    _ordered(state.image_codecs.values, IMAGE_CODECS),
                 ),
                 _list_line(
                     NATIVE_ARCH_FLAG,
@@ -355,9 +306,7 @@ _DEFINE_NAMES = (
     *target_presets.EMIT_DEFINES,
     *target_presets.EXECUTE_DEFINES,
     *IMPORT_DEFINES,
-    "LOOM_SERVE_IMAGE_INPUT",
-    "LOOM_SERVE_IMAGE_CODECS",
-    "LOOM_SERVE_AUDIO_CODECS",
+    "LOOM_MEDIA_IMAGE_INPUT",
 )
 _NATIVE_FLAGS = (
     *_NATIVE_SELECTIONS,

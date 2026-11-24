@@ -8,9 +8,9 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "loom/serve/media/image_request.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/service/finite/model.h"
+#include "loom/service/media/image_request.h"
 
 namespace {
 
@@ -50,7 +50,7 @@ class PixelProjectorExecutionTest : public SourceTextServiceTest,
     for (size_t i = 0; i < inputs_.size(); ++i) {
       iree_vm_buffer_release(prepared_[i].bytes);
       iree_vm_buffer_release(packets_[i]);
-      loom_serve_media_image_input_deinitialize(&inputs_[i]);
+      loom_service_media_image_input_deinitialize(&inputs_[i]);
     }
   }
 
@@ -90,7 +90,7 @@ class PixelProjectorExecutionTest : public SourceTextServiceTest,
   // Independent image model sharing the actual text device and workspace.
   loom_service_finite_model_t* projector_ = nullptr;
   // Immutable compressed images retained only through packet realization.
-  std::array<loom_serve_media_image_input_t, 2> inputs_ = {};
+  std::array<loom_service_media_image_input_t, 2> inputs_ = {};
   // Real source input packets, not test-authored decoded pixel arrays.
   std::array<iree_vm_buffer_t*, 2> packets_ = {};
   // Source-produced batch inputs retaining original image ordinals.
@@ -106,15 +106,15 @@ TEST_P(PixelProjectorExecutionTest, RgbAndRgbaCohortConditionsRetainedText) {
       std::string("data:image/x-portable-arbitrarymap;base64,") + kPam,
       std::string("data:image/x-portable-arbitrarymap;base64,") + kAlphaPam,
   };
-  const loom_serve_media_image_limits_t limits = {
+  const loom_service_media_image_limits_t limits = {
       .compressed_bytes = 2048,
       .width = 64,
       .height = 64,
       .pixels = 4096,
   };
   for (size_t i = 0; i < inputs_.size(); ++i) {
-    auto status = loom_serve_media_image_input_initialize(
-        loom_serve_media_image_source_from_data_url(
+    auto status = loom_service_media_image_input_initialize(
+        loom_service_media_image_source_from_data_url(
             iree_make_string_view(urls[i].data(), urls[i].size())),
         &limits, host_allocator_, &inputs_[i]);
     if (iree_status_is_unimplemented(status)) {
@@ -124,17 +124,17 @@ TEST_P(PixelProjectorExecutionTest, RgbAndRgbaCohortConditionsRetainedText) {
     IREE_ASSERT_OK(status);
   }
   const uint8_t metadata[] = {9, 8, 7};
-  const loom_serve_media_image_request_t requests[] = {
+  const loom_service_media_image_request_t requests[] = {
       {GetParam() ? 2u : 1u, &inputs_[0], {}, 3},
       {1, &inputs_[1], iree_make_const_byte_span(metadata, sizeof(metadata)),
        2},
   };
   iree_status_t statuses[2];
-  IREE_ASSERT_OK(loom_serve_media_image_request_create_batch(
+  IREE_ASSERT_OK(loom_service_media_image_request_create_batch(
       2, requests, host_allocator_, packets_.data(), statuses));
   for (size_t i = 0; i < inputs_.size(); ++i) {
     IREE_ASSERT_OK(statuses[i]);
-    loom_serve_media_image_input_deinitialize(&inputs_[i]);
+    loom_service_media_image_input_deinitialize(&inputs_[i]);
     IREE_ASSERT_OK(loom_service_finite_model_prepare_request(
         projector_, packets_[i], &prepared_[i]));
     EXPECT_EQ(prepared_[i].units, requests[i].output_rows);

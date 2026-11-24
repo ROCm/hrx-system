@@ -8,9 +8,9 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "loom/serve/media/image_codec.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/service/finite/component.h"
+#include "loom/service/media/image_codecs.h"
 
 namespace {
 
@@ -207,7 +207,7 @@ class CachedMediaServiceTest : public MediaServiceTest {
 
 TEST_F(CachedMediaServiceTest,
        DetachedHistorySurvivesPreparedMediaAndExchange) {
-  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_PAM)) {
+  if (!loom_service_media_image_codec(IREE_CODEC_IMAGE_FORMAT_PAM)) {
     return;
   }
   const std::string prompt = "abxa";
@@ -262,7 +262,7 @@ TEST_F(CapacityMediaServiceTest, ProjectionWaitsForItsTextContinuation) {
   ASSERT_NO_FATAL_FAILURE(
       SendTogether({Request(image, 4), Request(image, 4)}, &clients));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] { return Idle(); }));
-  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_PAM)) {
+  if (!loom_service_media_image_codec(IREE_CODEC_IMAGE_FORMAT_PAM)) {
     EXPECT_EQ(Read(clients[0]).find("HTTP/1.1 501"), 0u);
     EXPECT_EQ(Read(clients[1]).find("HTTP/1.1 501"), 0u);
     return;
@@ -300,7 +300,7 @@ class OrderedMediaServiceTest
 };
 
 TEST_P(OrderedMediaServiceTest, LookaheadCannotReservePastUnadmittedText) {
-  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_PAM)) {
+  if (!loom_service_media_image_codec(IREE_CODEC_IMAGE_FORMAT_PAM)) {
     return;
   }
   const std::string image =
@@ -341,8 +341,8 @@ TEST_F(FailedMediaServiceTest, ComponentFailureRejectsImagesButPreservesText) {
                                         Request(Message("user", "abxa"), 4)},
                                        &clients));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] { return Idle(); }));
-  const bool enabled = loom_serve_media_image_codec(
-                           LOOM_SERVE_MEDIA_IMAGE_FORMAT_PAM) != nullptr;
+  const bool enabled =
+      loom_service_media_image_codec(IREE_CODEC_IMAGE_FORMAT_PAM) != nullptr;
   for (int client : {clients[0], clients[1]}) {
     const std::string response = Read(client);
     EXPECT_EQ(response.find(enabled ? "HTTP/1.1 503" : "HTTP/1.1 501"), 0u)
@@ -381,7 +381,7 @@ TEST_F(SplitMediaServiceTest, OneRequestKeepsFeaturesAcrossBoundedCohorts) {
   loom_serve_http_connection_t* connection = nullptr;
   ASSERT_NO_FATAL_FAILURE(Accept(client, interface_, &connection));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] { return Idle(); }));
-  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_PAM)) {
+  if (!loom_service_media_image_codec(IREE_CODEC_IMAGE_FORMAT_PAM)) {
     EXPECT_EQ(Read(client).find("HTTP/1.1 501"), 0u);
     return;
   }
@@ -413,7 +413,7 @@ TEST_F(MediaServiceTest, LateCodecErrorRejectsOneRequestWithoutLosingPeers) {
                4)},
       &clients));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] { return Idle(); }));
-  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_PAM)) {
+  if (!loom_service_media_image_codec(IREE_CODEC_IMAGE_FORMAT_PAM)) {
     for (int client : clients) {
       EXPECT_EQ(Read(client).find("HTTP/1.1 501"), 0u);
     }
@@ -440,7 +440,7 @@ class CancelledMediaServiceTest
 
 TEST_P(CancelledMediaServiceTest,
        StopJoinsAcceptedWorkBeforeReleasingHttpBodies) {
-  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_PAM)) {
+  if (!loom_service_media_image_codec(IREE_CODEC_IMAGE_FORMAT_PAM)) {
     return;
   }
   std::vector<int> clients;
@@ -483,7 +483,7 @@ INSTANTIATE_TEST_SUITE_P(CodecAndCompiler, CancelledMediaServiceTest,
                                            "image_specialize"));
 
 TEST_F(MediaServiceTest, CancelledMiddlePeerPreservesPreparedCohortOrdinals) {
-  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_PAM)) {
+  if (!loom_service_media_image_codec(IREE_CODEC_IMAGE_FORMAT_PAM)) {
     return;
   }
   const std::array<std::string, 3> bodies = {
@@ -575,7 +575,7 @@ TEST_F(MediaServiceTest, CrossRequestImagesConditionTextAndRetainedFollowup) {
     }
   });
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] { return Idle(); }));
-  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_PAM)) {
+  if (!loom_service_media_image_codec(IREE_CODEC_IMAGE_FORMAT_PAM)) {
     EXPECT_EQ(Read(clients[0]).find("HTTP/1.1 501"), 0u);
     EXPECT_EQ(Read(clients[1]).find("HTTP/1.1 501"), 0u);
     EXPECT_EQ(Content(Read(clients[2])), Oracle::Complete("abxa", 4));

@@ -14,48 +14,18 @@ def generate(arguments: list[str]) -> str:
     return bazel_configure.generate_config(bazel_configure.parse_arguments(arguments))
 
 
-def test_media_options_have_equivalent_portable_and_native_spellings() -> None:
-    portable = generate(
-        [
-            "-DLOOM_SERVE_IMAGE_INPUT=OFF",
-            "-DLOOM_SERVE_IMAGE_CODECS=png;jpeg",
-            "-DLOOM_SERVE_AUDIO_CODECS=wav;flac",
-        ]
-    )
-    native = generate(
-        [
-            "--//loom/config/serve:image_input=false",
-            "--//loom/config/serve:image_codecs=png,jpeg",
-            "--//loom/config/serve:audio_codecs=wav,flac",
-        ]
-    )
-
+def test_image_input_has_equivalent_portable_and_native_spellings() -> None:
+    portable = generate(["-DLOOM_MEDIA_IMAGE_INPUT=OFF"])
+    native = generate(["--//loom/config/media:image_input=false"])
     assert portable == native
-    assert "build --//loom/config/serve:image_input=false\n" in portable
-    assert "build --//loom/config/serve:image_codecs=png,jpeg\n" in portable
-    assert "build --//loom/config/serve:audio_codecs=wav,flac\n" in portable
+    assert "build --//loom/config/media:image_input=false\n" in portable
 
 
-@pytest.mark.parametrize(
-    "arguments",
-    [
-        ["-DLOOM_SERVE_IMAGE_CODECS=png;typo"],
-        ["--//loom/config/serve:audio_codecs=typo"],
-        [
-            "-DLOOM_SERVE_IMAGE_INPUT=ON",
-            "--//loom/config/serve:image_input=false",
-        ],
-        [
-            "-DLOOM_SERVE_AUDIO_CODECS=wav",
-            "--//loom/config/serve:audio_codecs=mp3",
-        ],
-    ],
-)
-def test_media_options_reject_unknown_values_and_mixed_spellings(
-    arguments: list[str],
-) -> None:
+def test_image_input_rejects_mixed_spellings() -> None:
     with pytest.raises(SystemExit):
-        generate(arguments)
+        generate(
+            ["-DLOOM_MEDIA_IMAGE_INPUT=ON", "--//loom/config/media:image_input=false"]
+        )
 
 
 @pytest.mark.parametrize(

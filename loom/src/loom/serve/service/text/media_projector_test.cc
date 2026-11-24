@@ -104,7 +104,7 @@ class MediaProjectorTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_serve_text_media_projector_allocate(
         model_, requests_.size() * 3, loom_runtime_host_executor(host),
         proactor, observer, host_allocator_, &projector_));
-    image_.source = loom_serve_media_image_source_from_data_url(IREE_SV(
+    image_.source = loom_service_media_image_source_from_data_url(IREE_SV(
         "data:image/x-portable-arbitrarymap;base64,"
         "UDcKV0lEVEggMgpIRUlHSFQgMgpERVBUSCAzCk1BWFZBTCAyNTUKVFVQTFRZUEUg"
         "UkdCCkVOREhEUgr/AAAA/wAAAP////8="));
@@ -116,7 +116,7 @@ class MediaProjectorTest : public ::testing::Test {
         .height = 2,
         .pixels = 4,
     };
-    IREE_ASSERT_OK(loom_serve_media_image_inspect(
+    IREE_ASSERT_OK(loom_service_media_image_inspect(
         image_.source, &policy_.images.limits, host_allocator_, &image_.info));
     chat_.policy = &policy_;
     chat_.images.count = 1;

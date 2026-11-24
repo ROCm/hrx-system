@@ -7,7 +7,7 @@
 #ifndef LOOM_SERVE_SERVICE_SPEECH_VOICE_H_
 #define LOOM_SERVE_SERVICE_SPEECH_VOICE_H_
 
-#include "loom/serve/media/audio_source.h"
+#include "iree/codec/audio/source.h"
 #include "loom/serve/service/speech/consumer.h"
 
 #ifdef __cplusplus
@@ -23,7 +23,7 @@ typedef struct loom_serve_speech_voice_request_t {
   // Owned original recording bytes, retained until preparation retires.
   iree_string_builder_t storage;
   // Validated format and borrowed view into storage.
-  loom_serve_audio_source_t audio;
+  iree_codec_audio_source_t audio;
 } loom_serve_speech_voice_request_t;
 
 // Copies caller bytes; success is independent of their lifetime. Failure leaves

@@ -1,0 +1,128 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# bazel-to-cmake: skip
+
+load("@bazel_skylib//lib:selects.bzl", "selects")
+load("//build_tools/bazel:settings.bzl", "iree_string_list_flag")
+
+package(default_visibility = ["//visibility:public"])
+
+[
+    config_setting(
+        name = "host_" + os,
+        constraint_values = ["@platforms//os:" + os],
+    )
+    for os in [
+        "linux",
+        "osx",
+        "windows",
+    ]
+]
+
+selects.config_setting_group(
+    name = "host",
+    match_any = [
+        ":host_linux",
+        ":host_osx",
+        ":host_windows",
+    ],
+)
+
+iree_string_list_flag(
+    name = "image_codecs",
+    build_setting_default = [
+        "png",
+        "jpeg",
+        "gif",
+        "webp",
+    ],
+    values = [
+        "png",
+        "jpeg",
+        "gif",
+        "webp",
+    ],
+)
+
+[
+    config_setting(
+        name = codec + "_requested",
+        flag_values = {":image_codecs": codec},
+    )
+    for codec in [
+        "png",
+        "jpeg",
+        "gif",
+        "webp",
+    ]
+]
+
+[
+    selects.config_setting_group(
+        name = codec,
+        match_all = [
+            ":host",
+            ":" + codec + "_requested",
+        ],
+    )
+    for codec in [
+        "png",
+        "jpeg",
+        "gif",
+        "webp",
+    ]
+]
+
+iree_string_list_flag(
+    name = "audio_codecs",
+    build_setting_default = [
+        "wav",
+        "mp3",
+        "flac",
+    ],
+    values = [
+        "wav",
+        "mp3",
+        "flac",
+    ],
+)
+
+[
+    config_setting(
+        name = codec + "_requested",
+        flag_values = {":audio_codecs": codec},
+    )
+    for codec in [
+        "wav",
+        "mp3",
+        "flac",
+    ]
+]
+
+[
+    selects.config_setting_group(
+        name = codec,
+        match_all = [
+            ":host",
+            ":" + codec + "_requested",
+        ],
+    )
+    for codec in [
+        "wav",
+        "mp3",
+        "flac",
+    ]
+]
+
+selects.config_setting_group(
+    name = "audio_decoding",
+    match_any = [
+        ":wav",
+        ":mp3",
+        ":flac",
+    ],
+)

@@ -133,17 +133,13 @@ _LOOM_CONFIG_CMAKE_OPTIONS = {
     "//loom/config/execute:x86_task_hal": "LOOM_ROUTE_X86_TASK_HAL",
     "//loom/config/import/cxx:embed_includes_enabled": "LOOM_IMPORT_CXX_EMBED_INCLUDES",
     "//loom/config/import:cxx": "LOOM_IMPORT_CXX",
-    "//loom/config/serve:audio_decoding": "LOOM_SERVE_AUDIO_DECODING",
-    "//loom/config/serve:flac": "LOOM_SERVE_AUDIO_CODEC_FLAC",
-    "//loom/config/serve:gif": "LOOM_SERVE_IMAGE_CODEC_GIF",
-    "//loom/config/serve:image_input_enabled": all_of(
-        "LOOM_BUILD", "LOOM_SERVE_IMAGE_INPUT"
+    "//loom/config/media:gif": "LOOM_MEDIA_IMAGE_CODEC_GIF",
+    "//loom/config/media:image_input_enabled": all_of(
+        "LOOM_ARTIFACT_VM_BINARY", "LOOM_MEDIA_IMAGE_INPUT", "IREE_CODEC_HOST"
     ),
-    "//loom/config/serve:jpeg": "LOOM_SERVE_IMAGE_CODEC_JPEG",
-    "//loom/config/serve:mp3": "LOOM_SERVE_AUDIO_CODEC_MP3",
-    "//loom/config/serve:png": "LOOM_SERVE_IMAGE_CODEC_PNG",
-    "//loom/config/serve:wav": "LOOM_SERVE_AUDIO_CODEC_WAV",
-    "//loom/config/serve:webp": "LOOM_SERVE_IMAGE_CODEC_WEBP",
+    "//loom/config/media:jpeg": "LOOM_MEDIA_IMAGE_CODEC_JPEG",
+    "//loom/config/media:png": "LOOM_MEDIA_IMAGE_CODEC_PNG",
+    "//loom/config/media:webp": "LOOM_MEDIA_IMAGE_CODEC_WEBP",
 }
 _LOOM_CONFIG_CMAKE_OPTIONS.update(_loom_amdgpu_config_cmake_options())
 
