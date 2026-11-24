@@ -41,10 +41,6 @@
         <div class="chat-actions"><button id="new" aria-label="New chat">New<span> chat</span></button><button id="import-chat" aria-label="Import chat">Import<span> chat</span></button><button id="export-chat" aria-label="Export chat">Export<span> chat</span></button></div>
         <button id="inspector-toggle" aria-controls="inspector" aria-expanded="false">Inspector</button>
       </div>
-      <form id="project-form" autocomplete="off" hidden>
-        <label for="project-name">New project</label><input id="project-name" maxlength="90" required>
-        <button id="create-project">Create</button><button type="button" id="cancel-project">Cancel</button>
-      </form>
       <div id="branch" hidden></div>
     </header>
     <div id="transcript" role="region" aria-label="Messages" tabindex="0"></div>
@@ -55,27 +51,28 @@
         <label class="model-picker">Model <select id="model"></select></label>
         <label class="button" id="attach" title="Attach or drop text, source files, or supported images">Attach files<input id="upload" type="file" multiple></label>
         <button id="mic" type="button" hidden>Dictate</button>
+        <button id="undo" type="button" disabled>Undo last turn</button>
         <button id="stop" type="button" hidden>Stop</button>
         <button id="send" class="primary" type="submit">Send</button>
       </div>
       <div class="compose-status">
         <p id="notice" role="status"></p>
-        <span class="token-count" hidden title="Input size for the next request, including history, instructions, tools, and attachments">Input tokens <output id="prompt-tokens" for="prompt" aria-label="Input tokens" aria-live="off">—</output><span id="context-window" title="Model context window"></span></span>
+        <span class="token-count" hidden title="Next input including history, instructions, tools, and attachments">Input tokens <output id="prompt-tokens" for="prompt" aria-label="Input tokens" aria-live="off">—</output><span id="context-window" title="Model context window"></span></span>
       </div>
     </form>
     <aside id="inspector" aria-label="Inspector" tabindex="0">
       <section>
         <div class="settings-heading"><h2>Model settings</h2><button id="refresh">Refresh models</button></div>
         <div class="options">
-          <label id="token-setting" title="Generated tokens, including reasoning. Auto fits the model default to the remaining context.">Output limit<input id="limit" name="max_tokens" type="number" min="1" step="1" placeholder="Model default"></label>
+          <label id="token-setting" title="Includes reasoning. Auto fits the model default into remaining context.">Output limit<input id="limit" name="max_tokens" type="number" min="1" step="1" placeholder="Model default"></label>
           <label id="size-setting" hidden>Image size<input id="size" name="size" pattern="[1-9][0-9]*x[1-9][0-9]*" placeholder="WIDTHxHEIGHT"></label>
           <label>Seed<input id="seed" name="seed" inputmode="numeric" placeholder="Model default"></label>
           <label id="effort-setting" hidden>Reasoning<select id="effort" name="reasoning_effort"></select></label>
         </div>
         <details id="prompt-options"><summary>Prompts</summary>
-          <div class="prompt-label"><label for="system">System instructions</label><span class="token-count" hidden title="Text tokens before chat formatting"><output id="system-tokens" for="system" aria-label="System instruction tokens" aria-live="off">—</output> tok</span></div>
+          <div class="prompt-label"><label for="system">System instructions</label><span class="token-count" hidden title="Before chat formatting"><output id="system-tokens" for="system" aria-label="System instruction tokens" aria-live="off">—</output> tok</span></div>
           <textarea id="system" name="system" rows="3"></textarea>
-          <div class="prompt-label"><label for="template">User prompt template</label><span class="token-count" hidden title="Text tokens after inserting the current draft"><output id="template-tokens" for="template prompt" aria-label="Expanded user prompt tokens" aria-live="off">—</output> tok</span></div>
+          <div class="prompt-label"><label for="template">User prompt template</label><span class="token-count" hidden title="After inserting the draft"><output id="template-tokens" for="template prompt" aria-label="Expanded user prompt tokens" aria-live="off">—</output> tok</span></div>
           <textarea id="template" name="template" rows="2" placeholder="{{input}}"></textarea>
         </details>
         <details id="sampling"><summary>Sampling</summary>
@@ -88,13 +85,19 @@
           </div>
           <label>Stop sequences · one per line<textarea id="stops" name="stop" rows="2"></textarea></label>
         </details>
-        <details id="tools-setting"><summary title="Tool changes are sent with your next input">Tools</summary>
-          <label class="check" title="Run enabled built-in tools and send their results back to the model"><input id="auto-tools" name="autoTools" type="checkbox" checked> Auto-run and return results</label>
+        <details id="tools-setting"><summary title="Tool changes apply on the next input">Tools</summary>
+          <label class="check" title="Run enabled built-ins and return their results."><input id="auto-tools" name="autoTools" type="checkbox" checked> Auto-run and return results</label>
           <label class="check"><input id="html-tool" name="htmlTool" type="checkbox"> HTML preview</label>
           <label class="check" title="Run JavaScript in an offline browser worker"><input id="code-tool" name="codeTool" type="checkbox"> Code mode (JavaScript)</label>
           <label id="image-tool-setting" hidden>Image generation<select id="image-tool" name="imageModel"><option value="">Off</option></select></label>
           <button type="button" id="mcp">MCP servers…</button>
-          <label title="Offer additional functions to the model. Supply their results in the transcript.">Function schemas · JSON<textarea id="functions" name="functions" rows="2" placeholder='[{"type":"function","function":{"name":"…"}}]'></textarea></label>
+          <label title="Offer custom functions and enter their results in the chat.">Function schemas · JSON<textarea id="functions" name="functions" rows="2" placeholder='[{"type":"function","function":{"name":"…"}}]'></textarea></label>
+        </details>
+        <details id="compact-settings"><summary>Compaction</summary>
+          <button id="compact" title="Summarize in a fork · /compact">Compact now</button>
+          <label class="check"><input id="compact-tool" type="checkbox" name="compactTool"> Let the model compact</label>
+          <label>Auto-compact at % of context<input id="compact-at" name="compactAt" type="number" min="1" max="99" placeholder="Off"></label>
+          <label>Keep in summary<input name="compactFocus"></label>
         </details>
         <details id="audio-settings"><summary>Voice</summary>
           <label id="recognizer-setting" hidden>Dictation model<select id="recognizer" name="recognizer"></select></label>
@@ -102,7 +105,7 @@
           <label id="reader-setting">Read aloud with<select id="reader" name="reader"></select></label>
           <label id="voice-setting">Voice ID<input id="voice" name="voice" autocomplete="off" placeholder="Deployment voice"></label>
           <label id="speed-setting">Speech speed<input id="speed" name="speed" type="number" min=".25" max="4" step=".05" placeholder="1.0"></label>
-          <button id="voice-chat" title="Listen between replies. A pause sends the turn to the chat model.">Start turn-based voice chat</button>
+          <button id="voice-chat" title="Listen between replies and send on a pause.">Start turn-based voice chat</button>
         </details>
         <details id="preset-options"><summary>Presets</summary>
           <label>Apply preset<select id="presets"></select></label>
@@ -111,6 +114,7 @@
         <div class="row-actions"><button id="save-settings">Save to chat</button><button id="defaults">Set project defaults</button></div>
       </section>
       <section id="turn-inspector" hidden><h2>Turn inspector</h2>
+        <p id="turn-model"></p>
         <dl id="metrics"></dl>
         <canvas id="trace" width="500" height="60" aria-label="Arrival times of streamed events"></canvas>
         <span class="caption">Stream arrivals · elapsed time</span>
@@ -122,12 +126,6 @@
       <div class="keys"><kbd>Ctrl ↵</kbd> send <kbd>Ctrl K</kbd> find chat <kbd>Esc</kbd> stop <kbd>/export</kbd> download chat</div>
     </aside>
   </main>
-  <dialog id="delete-dialog" aria-labelledby="delete-title" aria-describedby="delete-detail">
-    <form method="dialog">
-      <h2 id="delete-title"></h2><p id="delete-detail"></p>
-      <div><button value="cancel" autofocus>Cancel</button><button id="confirm-delete" value="delete"></button></div>
-    </form>
-  </dialog>
   <dialog id="action-dialog" aria-labelledby="action-title">
     <form><h2 id="action-title"></h2><div id="action-fields"></div>
       <div class="dialog-actions"><button type="button" id="dismiss">Cancel</button><button id="apply" type="submit"></button></div>

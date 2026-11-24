@@ -6,8 +6,8 @@
   "dependencies": {
     "@gfx/zopfli": "1.0.15",
     "@rollup/wasm-node": "4.59.0",
+    "@swc/wasm": "1.15.3",
     "clean-css": "5.3.3",
-    "html-minifier-terser": "7.2.0",
-    "terser": "5.44.1"
+    "html-minifier-terser": "7.2.0"
   }
 }

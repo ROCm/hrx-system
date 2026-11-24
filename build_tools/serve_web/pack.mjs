@@ -6,10 +6,10 @@ import { readFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { rollup } from "@rollup/wasm-node";
+import { minifySync } from "@swc/wasm";
 import zopfli from "@gfx/zopfli";
 import CleanCSS from "clean-css";
 import { minify as minifyHTML } from "html-minifier-terser";
-import { minify as minifyJS } from "terser";
 
 const list = { type: "string", multiple: true, default: [] };
 const { values } = parseArgs({
@@ -36,11 +36,12 @@ try {
     hoistTransitiveImports: false,
   });
   for (const { fileName, code } of output) {
-    const result = await minifyJS(code, {
+    const result = minifySync(code, {
       ecma: 2022,
       module: true,
       compress: { passes: 3 },
-      format: { comments: /@license|@preserve|^!/ },
+      mangle: true,
+      format: { comments: "some" },
     });
     assets.set(fileName, result.code);
   }

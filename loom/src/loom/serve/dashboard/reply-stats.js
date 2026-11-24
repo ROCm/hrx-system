@@ -272,10 +272,10 @@ export function watchReplyStats(stats, start, kind, inspect) {
 export function metrics(stats, liveOutput, promptProgress) {
   byId("turn-inspector").hidden = !stats;
   if (!stats) return;
+  byId("turn-model").textContent = stats.model ?? "—";
   const ms = (value) => (value == null ? "—" : Math.round(value) + " ms");
   const usage = stats.usage;
   const rows = [
-    ["Model", stats.model],
     ["First output delta", ms(stats.firstDelta ?? stats.firstText)],
     ["Elapsed", ms(stats.elapsed)],
     ["Prompt tokens", usage?.prompt_tokens ?? promptProgress?.total_tokens],

@@ -13,9 +13,9 @@ js_binary(
     data = [
         ":node_modules/@gfx/zopfli",
         ":node_modules/@rollup/wasm-node",
+        ":node_modules/@swc/wasm",
         ":node_modules/clean-css",
         ":node_modules/html-minifier-terser",
-        ":node_modules/terser",
     ],
     entry_point = "pack.mjs",
     # The generated-source rule passes execroot-relative input and output paths.

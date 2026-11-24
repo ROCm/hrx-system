@@ -103,11 +103,24 @@ export const codeTool = textTool(
   "Compute a result in a fresh, offline JavaScript worker. Supply an async function body as code. Use return for the result, or console.log for output. No DOM, network, or files.",
   "code",
 );
+export function summaryPrompt(values) {
+  const instructions =
+    "Summarize this chat for continuation. Keep goals, decisions, exact IDs, source URLs, and open work. Be concise.";
+  return values.compactFocus ? instructions + "\nFocus: " + values.compactFocus : instructions;
+}
+export function compactionTool(values) {
+  return textTool(
+    "compact_chat",
+    "Start a shorter chat. Call alone. " + summaryPrompt(values),
+    "summary",
+  );
+}
 
 export function offeredTools(values) {
   const tools = [];
   if (values.htmlTool) tools.push(htmlTool);
   if (values.codeTool) tools.push(codeTool);
+  if (values.compactTool) tools.push(compactionTool(values));
   if (values.imageModel) tools.push(imageTool);
   if (values.mcp?.length || values.functions?.trim()) {
     const extra = values.functions?.trim() ? JSON.parse(values.functions) : [];
@@ -186,6 +199,10 @@ export function fileURL(file, signal) {
 }
 
 export async function messages(entries, signal) {
+  // A compacted fork owns the full transcript. Only the newest handoff and
+  // its suffix participate in inference, token counts, and request previews.
+  const start = entries.findLastIndex((entry) => entry.compaction);
+  if (start >= 0) entries = entries.slice(start - 1);
   return Promise.all(
     entries
       .filter((entry) => entry.message && !entry.partial)

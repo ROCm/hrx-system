@@ -6,7 +6,7 @@
 [hidden] { display: none !important; }
 html { overflow: clip; }
 body { margin: 0; height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: clip; }
-.pickers, .toolbar, .attachments, #project-form, #branch { display: flex; align-items: center; gap: .6rem; }
+.pickers, .toolbar, .attachments, #branch { display: flex; align-items: center; gap: .6rem; }
 a { color: var(--accent); text-decoration: none; }
 .caption, .keys, dt, .stamp { color: var(--dim); }
 main {
@@ -21,15 +21,13 @@ main {
 .threadbar, #compose, #transcript, aside { overflow: auto; overscroll-behavior: contain; }
 .chat-actions { display: flex; gap: .45rem; white-space: nowrap; }
 #inspector-toggle { display: none; }
-.pickers, #project-form, #branch { flex-wrap: wrap; }
+.pickers, #branch { flex-wrap: wrap; }
 .pickers label, .model-picker { display: flex; align-items: center; gap: .45rem; min-width: 0; color: var(--dim); font-size: .85rem; }
 .pickers select, #model { min-width: 0; color: var(--text); font-size: 1rem; }
 #projects { max-width: 12rem; }
 .chat-picker { flex: 1 1 10rem; }
 #threads { flex: 1; width: 0; }
-#project-form, #branch { margin-top: .6rem; }
-#project-name { min-width: 5rem; max-width: 16rem; flex: 1; }
-#branch { font-size: .84rem; color: var(--dim); overflow-wrap: anywhere; }
+#branch { margin-top: .6rem; font-size: .84rem; color: var(--dim); overflow-wrap: anywhere; }
 #branch button, .fork-turn { font: inherit; border: 0; padding: 0; background: transparent; color: var(--accent); }
 #branch button:hover, .fork-turn:hover { text-decoration: underline; }
 .fork-turn { float: right; font: .78rem/1.5 ui-monospace, monospace; }
@@ -104,11 +102,13 @@ aside details > summary {
 aside details[open] { padding-bottom: .6rem; }
 aside details[open] > summary { border-bottom: 1px solid var(--rule); border-radius: 3px 3px 0 0; }
 aside details[open] > summary::marker { color: var(--accent); }
+aside summary + button { margin-top: .5rem; }
 aside details > label:last-child { margin-bottom: 0; }
 h2 { font: 600 .79rem ui-monospace, monospace; letter-spacing: .02em; margin: 0 0 .8rem; }
 .settings-heading { display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
 .settings-heading h2 { margin: 0; }
 #refresh { font-size: .8rem; }
+#turn-model { margin: 0 0 .6rem; overflow-wrap: anywhere; }
 dl { display: grid; grid-template-columns: auto 1fr; margin: 0; gap: .28rem .75rem; font: .82rem/1.5 ui-monospace, monospace; }
 dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
 canvas { width: 100%; height: 30px; margin-top: .9rem; display: block; }
@@ -136,7 +136,6 @@ dialog label { display: grid; gap: .25rem; margin: .65rem 0; }
 .mcp-tool pre { white-space: pre-wrap; font-size: .8rem; }
 .search-results { max-height: 45dvh; overflow: auto; }
 .search-results button { display: block; width: 100%; text-align: left; margin: .15rem 0; }
-#delete-dialog form > div { display: flex; justify-content: flex-end; gap: .6rem; }
 #compose { grid-area: compose; border-top: 1px solid var(--rule); }
 textarea { background: transparent; border: 0; padding: .2rem 0; width: 100%; resize: vertical; }
 #prompt { display: block; margin-bottom: .6rem; max-height: 30dvh; }
@@ -153,7 +152,7 @@ textarea { background: transparent; border: 0; padding: .2rem 0; width: 100%; re
 .prompt-label { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; column-gap: .4rem; margin-top: .75rem; }
 .prompt-label label { margin: 0; }
 .prompt-label .token-count { color: var(--dim); font: .76rem/1.4 ui-monospace, monospace; }
-#confirm-delete, #notice[data-error=true], .failed { color: var(--errors); }
+#notice[data-error=true], .failed { color: var(--errors); }
 .attachments { flex-wrap: wrap; }
 .attachments button { font-size: .8rem; }
 kbd { border: 1px solid var(--rule); padding: .06rem .25rem; margin-right: .2rem; border-radius: 2px; }

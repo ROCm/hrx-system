@@ -6,20 +6,24 @@ import { byId, element } from "./view.js";
 const dialog = byId("action-dialog");
 const form = dialog.querySelector("form"),
   fields = byId("action-fields");
-const apply = byId("apply");
-byId("dismiss").onclick = () => dialog.close();
+const apply = byId("apply"),
+  dismiss = byId("dismiss");
+dismiss.onclick = () => dialog.close();
 
 export function field(label, control) {
   const node = element("label", label);
   node.append(control);
   return node;
 }
-export function ask(title, inputs, verb, accept) {
+export function ask(title, inputs, verb, accept, destructive = false) {
   byId("action-title").textContent = title;
-  byId("dismiss").textContent = verb ? "Cancel" : "Close";
+  dismiss.textContent = verb ? "Cancel" : "Close";
   fields.replaceChildren(...inputs);
   apply.textContent = verb || "";
   apply.hidden = !verb;
+  apply.classList.toggle("failed", destructive);
+  if (destructive) dialog.setAttribute("aria-describedby", fields.id);
+  else dialog.removeAttribute("aria-describedby");
   form.onsubmit = (event) => {
     event.preventDefault();
     if (!verb) return;
@@ -27,13 +31,13 @@ export function ask(title, inputs, verb, accept) {
     accept();
   };
   dialog.showModal();
-  fields.querySelector("input,select")?.focus();
+  (fields.querySelector("input,select") || dismiss).focus();
 }
-export function askName(title, value, verb, accept) {
+export function askName(title, value, verb, accept, maxLength = 100) {
   const name = element("input");
   name.value = value;
   name.required = true;
-  name.maxLength = 100;
+  name.maxLength = maxLength;
   name.pattern = ".*\\S.*";
   ask(title, [field("Name", name)], verb, () => accept(name.value.trim()));
   name.select();
