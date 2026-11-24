@@ -957,6 +957,65 @@ def test_fragment_packet_expansion_cites_source_packets_and_pressure(
     )
 
 
+@pytest.mark.parametrize("split_by", ["fallback_reason", "storage"])
+def test_fragment_packet_partitions_share_wave_evidence(split_by: str) -> None:
+    report = _compile_report()
+    _add_fragment_packet_evidence(report, expanded=True)
+    memory = report["source_low"]["memory"]
+    packets = memory["argument_packets"]
+    first = packets[0]
+    first.update(packet_count=60, scalar_packet_count=60)
+    split = dict(first, index=len(packets), packet_count=4, scalar_packet_count=4)
+    if split_by == "fallback_reason":
+        split["fallback_reason"] = "fragment_noncontiguous_registers"
+    else:
+        split["storage"] = {"element_format": "bf16"}
+    packets.append(split)
+    memory["argument_packet_count"] = len(packets)
+
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(
+        parse_compile_report(report),
+        CompileReportSuggestionOptions(include_experimental=True),
+    )
+    finding = next(
+        suggestion
+        for suggestion in result.suggestions
+        if suggestion.suggestion_id == "amdgpu.fragment_packet_expansion"
+    )
+    assert "128 scalar load packets" in finding.action
+    counts = [
+        evidence.value
+        for evidence in finding.evidence
+        if evidence.path.endswith(".summary.modeled_packet_count")
+    ]
+    assert counts == [64, 64]
+    assert [
+        evidence.value
+        for evidence in finding.evidence
+        if evidence.path.endswith("].packet_count")
+    ] == [60, 64, 4]
+
+
+@pytest.mark.parametrize("extra", [-1, 1])
+def test_fragment_packet_expansion_requires_matching_wave_totals(extra: int) -> None:
+    report = _compile_report()
+    _add_fragment_packet_evidence(report, expanded=True)
+    memory = report["source_low"]["memory"]
+    for row in (memory["argument_packets"][0], memory["arguments"][0]):
+        row["packet_count"] += extra
+        row["scalar_packet_count"] += extra
+    document = parse_compile_report(report)
+    options = CompileReportSuggestionOptions(include_experimental=True)
+    if extra < 0:
+        with pytest.raises(CompileReportError, match="subgroup access groups model 64"):
+            AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document, options)
+    else:
+        result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document, options)
+        assert "amdgpu.fragment_packet_expansion" not in {
+            suggestion.suggestion_id for suggestion in result.suggestions
+        }
+
+
 def test_fragment_packet_expansion_reports_mixed_packet_shapes_honestly() -> None:
     report = _compile_report(target_key="gfx942", subgroup_size=64)
     _add_fragment_packet_evidence(report, expanded=True)

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from typing import cast
 
@@ -841,17 +842,16 @@ def _suggest_fragment_packet_expansion(
             packet_count = 0
             scalar_packet_count = 0
             contiguous_vector_packet_count = 0
-            packet_names = []
+            packet_counts: Counter[str] = Counter()
+            scalar_packet_names: set[str] = set()
             storage_formats = []
             packet_evidence = []
-            packet_rows_with_scalar_packets = []
             for packet_position, packet_row in packet_group:
                 packet_path = f"{packet_row_path}[{packet_position}]"
                 packet_name = _report_string(
                     packet_row.get("packet"),
                     f"{packet_path}.packet",
                 )
-                packet_names.append(packet_name)
                 storage = _report_object(
                     packet_row.get("storage"),
                     f"{packet_path}.storage",
@@ -877,10 +877,11 @@ def _suggest_fragment_packet_expansion(
                 packet_count += row_packet_count
                 scalar_packet_count += row_scalar_packet_count
                 contiguous_vector_packet_count += row_contiguous_vector_packet_count
+                # Packet rows distinguish storage and fallback reasons. Wave
+                # geometry groups share one instruction identity across them.
+                packet_counts[packet_name] += row_packet_count
                 if row_scalar_packet_count != 0:
-                    packet_rows_with_scalar_packets.append(
-                        (packet_position, packet_name, row_packet_count)
-                    )
+                    scalar_packet_names.add(packet_name)
                 packet_evidence.extend(
                     (
                         CompileReportSuggestionEvidence(
@@ -917,7 +918,11 @@ def _suggest_fragment_packet_expansion(
                 memory_space=memory_space,
                 operation=operation,
                 strategy=strategy,
-                packet_rows=packet_rows_with_scalar_packets,
+                packet_counts={
+                    name: count
+                    for name, count in packet_counts.items()
+                    if name in scalar_packet_names
+                },
                 packet_row_path=packet_row_path,
             )
             if wave_accesses is None:
@@ -1008,7 +1013,7 @@ def _suggest_fragment_packet_expansion(
                 for value in (source_operation, source_root, memory_space)
                 if value is not None
             )
-            packet_summary = ", ".join(dict.fromkeys(packet_names))
+            packet_summary = ", ".join(packet_counts)
             storage_summary = "/".join(dict.fromkeys(storage_formats))
             operation_name = operation or "memory"
             if scalar_packet_count == packet_count:
@@ -1080,13 +1085,12 @@ def _match_exact_fragment_wave_accesses(
     memory_space: str | None,
     operation: str | None,
     strategy: str,
-    packet_rows: list[tuple[int, str, int]],
+    packet_counts: dict[str, int],
     packet_row_path: str,
 ) -> tuple[_FragmentWaveAccess, ...] | None:
     """Matches packet rows to exact wave facts without reconstructing geometry."""
     accesses = []
-    used_group_indexes = set()
-    for packet_position, packet_name, packet_count in packet_rows:
+    for packet_name, packet_count in packet_counts.items():
         group_key = (
             function_name,
             source_operation,
@@ -1105,11 +1109,6 @@ def _match_exact_fragment_wave_accesses(
         modeled_packet_count = 0
         for group in matched_groups:
             report_index = cast(int, group["report_index"])
-            if report_index in used_group_indexes:
-                raise CompileReportError(
-                    "one subgroup access group matched multiple fragment packet rows"
-                )
-            used_group_indexes.add(report_index)
             path_prefix = f"source_low.memory.subgroup_access_groups[{report_index}]"
             summary = cast(dict[str, object], group["summary"])
             group_packet_count = cast(int, summary["modeled_packet_count"])
@@ -1145,11 +1144,15 @@ def _match_exact_fragment_wave_accesses(
                     ),
                 )
             )
-        if modeled_packet_count != packet_count:
+        if modeled_packet_count > packet_count:
             raise CompileReportError(
-                f"{packet_row_path}[{packet_position}].packet_count: subgroup "
-                f"access groups model {modeled_packet_count}, got {packet_count}"
+                f"{packet_row_path}: subgroup access groups model "
+                f"{modeled_packet_count} packets for {packet_name}, "
+                f"but the packet rows contain {packet_count}"
             )
+        if modeled_packet_count < packet_count:
+            # Some packets have no retained wave geometry for this source op.
+            return None
     return tuple(accesses)
 
 
