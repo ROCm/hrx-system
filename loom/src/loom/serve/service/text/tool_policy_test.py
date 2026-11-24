@@ -341,6 +341,26 @@ class ToolPolicyTest(unittest.TestCase):
                 self.assertIn('read: {"q":"styles.css"}', value["prompt"])
                 self.assertIn("missing required property path", value["prompt"])
 
+    def test_history_call_type_defaults_to_function(self):
+        def history(**fields):
+            call = {"id": "call_1_0", "function": self.call()["function"], **fields}
+            return [
+                {"role": "assistant", "content": None, "tool_calls": [call]},
+                {"role": "user", "content": "hello"},
+            ]
+
+        for fields in ({}, {"type": None}, {"type": "function"}):
+            with self.subTest(fields=fields):
+                result = self.execute("[]", messages=history(**fields))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('read: {"path":"a"}', json.loads(result.stdout)["prompt"])
+        for fields in ({"type": "custom"}, {"type": ""}, {"type": 7}):
+            with self.subTest(fields=fields):
+                result = self.execute("[]", messages=history(**fields))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("INVALID_ARGUMENT", result.stderr)
+
     def test_history_and_generated_calls_share_decoded_function_fields(self):
         call = {"id": "call_1_0", **self.call(arguments="{}")}
         call["function"]["name"] = "r\\u0065ad"
