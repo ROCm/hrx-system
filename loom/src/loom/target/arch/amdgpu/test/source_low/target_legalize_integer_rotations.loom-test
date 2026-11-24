@@ -94,34 +94,22 @@ func.def target(@target) @vector_rotations(%bytes: vector<2xi8>, %byte_amounts: 
 amdgpu.target<gfx1151> @target
 
 func.def target(@target) @vector_rotations(%bytes: vector<2xi8>, %byte_amounts: vector<2xi8>, %halfwords: vector<2xi16>, %halfword_amounts: vector<2xi16>, %words: vector<2xi32>, %word_amounts: vector<2xi32>, %wide: vector<2xi64>, %wide_amounts: vector<2xi64>) -> (vector<2xi8>, vector<2xi8>, vector<2xi16>, vector<2xi16>, vector<2xi32>, vector<2xi32>, vector<2xi64>, vector<2xi64>) {
-  %88 = vector.splati 7 : vector<2xi8>
-  %89 = vector.andi %byte_amounts, %88 : vector<2xi8>
-  %90 = vector.xori %89, %88 : vector<2xi8>
-  %91 = vector.splati 1 : vector<2xi8>
-  %100 = vector.extui %bytes : vector<2xi8> to vector<2xi16>
-  %101 = vector.extui %90 : vector<2xi8> to vector<2xi16>
-  %102 = vector.shrui %100, %101 : vector<2xi16>
-  %103 = vector.trunci %102 : vector<2xi16> to vector<2xi8>
-  %96 = vector.extsi %bytes : vector<2xi8> to vector<2xi16>
-  %97 = vector.extsi %89 : vector<2xi8> to vector<2xi16>
-  %98 = vector.shli %96, %97 : vector<2xi16>
-  %99 = vector.trunci %98 : vector<2xi16> to vector<2xi8>
-  %94 = vector.shrui %103, %91 : vector<2xi8>
-  %byte_left = vector.ori %99, %94 : vector<2xi8>
+  %80 = vector.splati 7 : vector<2xi8>
+  %81 = vector.andi %byte_amounts, %80 : vector<2xi8>
+  %82 = vector.xori %81, %80 : vector<2xi8>
+  %83 = vector.splati 1 : vector<2xi8>
+  %84 = vector.shrui %bytes, %82 : vector<2xi8>
+  %85 = vector.shli %bytes, %81 : vector<2xi8>
+  %86 = vector.shrui %84, %83 : vector<2xi8>
+  %byte_left = vector.ori %85, %86 : vector<2xi8>
   %72 = vector.splati 7 : vector<2xi8>
   %73 = vector.andi %byte_amounts, %72 : vector<2xi8>
   %74 = vector.xori %73, %72 : vector<2xi8>
   %75 = vector.splati 1 : vector<2xi8>
-  %84 = vector.extsi %bytes : vector<2xi8> to vector<2xi16>
-  %85 = vector.extsi %74 : vector<2xi8> to vector<2xi16>
-  %86 = vector.shli %84, %85 : vector<2xi16>
-  %87 = vector.trunci %86 : vector<2xi16> to vector<2xi8>
-  %77 = vector.shli %87, %75 : vector<2xi8>
-  %80 = vector.extui %bytes : vector<2xi8> to vector<2xi16>
-  %81 = vector.extui %73 : vector<2xi8> to vector<2xi16>
-  %82 = vector.shrui %80, %81 : vector<2xi16>
-  %83 = vector.trunci %82 : vector<2xi16> to vector<2xi8>
-  %byte_right = vector.ori %77, %83 : vector<2xi8>
+  %76 = vector.shli %bytes, %74 : vector<2xi8>
+  %77 = vector.shli %76, %75 : vector<2xi8>
+  %78 = vector.shrui %bytes, %73 : vector<2xi8>
+  %byte_right = vector.ori %77, %78 : vector<2xi8>
   %64 = vector.splati 15 : vector<2xi16>
   %65 = vector.andi %halfword_amounts, %64 : vector<2xi16>
   %66 = vector.xori %65, %64 : vector<2xi16>
