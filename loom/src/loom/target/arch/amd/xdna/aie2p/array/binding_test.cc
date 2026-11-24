@@ -10,6 +10,21 @@
 
 namespace {
 
+// Expand a native descriptor as the DMA address generator would for one word.
+uint64_t WordOffset(const loom_aie2p_array_binding_plan_t& plan,
+                    uint64_t ordinal) {
+  uint64_t offset = 0;
+  for (uint8_t axis = 0; axis < plan.dma_dimension_count; ++axis) {
+    const auto& dimension = plan.dma_dimensions[axis];
+    offset += (dimension.wrap ? ordinal % dimension.wrap : ordinal) *
+              dimension.step_size;
+    if (dimension.wrap) {
+      ordinal /= dimension.wrap;
+    }
+  }
+  return offset;
+}
+
 class Aie2pArrayBindingTest
     : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
  protected:
@@ -109,15 +124,7 @@ TEST_P(Aie2pArrayBindingTest, WideScalarsTransferEveryNativeWord) {
       EXPECT_EQ(plan.binding_span_byte_length,
                 (row_stride + (columns - 1) * column_stride + 1) * 8);
       for (uint64_t i = 0; i < plan.transfer_byte_length / 4; ++i) {
-        uint64_t coordinate = i, word = 0;
-        for (uint8_t axis = 0; axis < plan.dma_dimension_count; ++axis) {
-          const auto dimension = plan.dma_dimensions[axis];
-          word += (dimension.wrap ? coordinate % dimension.wrap : coordinate) *
-                  dimension.step_size;
-          if (dimension.wrap) {
-            coordinate /= dimension.wrap;
-          }
-        }
+        const uint64_t word = WordOffset(plan, i);
         const uint64_t element = i / 2;
         EXPECT_EQ(word, 2 * ((element / columns) * row_stride +
                              (element % columns) * column_stride) +
@@ -153,6 +160,69 @@ TEST_P(Aie2pArrayBindingTest, WideWordAxisCountsAgainstTheModuleLimit) {
   ASSERT_TRUE(
       Resolve(geometry, geometry.rank, 8u << geometry.rank, 1, &plan, &reason));
   EXPECT_EQ(plan.dma_dimension_count, dma->address_dimension_count);
+}
+
+TEST_P(Aie2pArrayBindingTest, AdjacentAxesShareWordAndStridedIterators) {
+  for (uint16_t bits : {1, 2, 4, 8, 16, 32}) {
+    SCOPED_TRACE(bits);
+    const uint64_t elements_per_word = 32 / bits;
+    const loom_storage_geometry_t source = {
+        .layout_kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
+        .element_bit_count = bits,
+        .rank = 6,
+        .axes = {{2, 96 * elements_per_word},
+                 {2, 48 * elements_per_word},
+                 {2, 8 * elements_per_word},
+                 {2, 4 * elements_per_word},
+                 {2 * elements_per_word, 2},
+                 {2, 1}},
+    };
+    loom_aie2p_array_binding_plan_t plan = {};
+    iree_string_view_t reason;
+    ASSERT_TRUE(Resolve(source, source.rank, 256, 1, &plan, &reason));
+    EXPECT_EQ(plan.binding_span_byte_length, 640u);
+    EXPECT_EQ(plan.transfer_byte_length, 256u);
+    ASSERT_EQ(plan.dma_dimension_count, 2);
+    ASSERT_EQ(plan.dma_dimensions[0].wrap, 16);
+    EXPECT_EQ(plan.dma_dimensions[1].wrap, 0);
+    for (uint32_t word = 0; word < 64; ++word) {
+      EXPECT_EQ(WordOffset(plan, word),
+                word / 32 * 96 + word / 16 % 2 * 48 + word % 16);
+    }
+  }
+}
+
+TEST_P(Aie2pArrayBindingTest, CoalescedInnerWrapCountsNativeWords) {
+  const auto& dma =
+      loom_xdna_array_tile_kind_facts(loom_xdna_npu2_array_family(), GetParam())
+          ->dma;
+  const uint32_t maximum_wrap = (1u << dma.wrap_bits) - 1;
+  for (uint16_t bits : {1, 2, 4, 8, 16, 32}) {
+    const uint64_t elements_per_word = 32 / bits;
+    for (uint32_t half : {maximum_wrap / 2, maximum_wrap / 2 + 1}) {
+      SCOPED_TRACE(::testing::Message() << "bits=" << bits << " half=" << half);
+      const uint32_t words_per_row = 2 * half;
+      const uint32_t row_stride = words_per_row + 1;
+      const loom_storage_geometry_t source = {
+          .layout_kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
+          .element_bit_count = bits,
+          .rank = 3,
+          .axes = {{2, row_stride * elements_per_word},
+                   {2, half * elements_per_word},
+                   {half * elements_per_word, 1}},
+      };
+      loom_aie2p_array_binding_plan_t plan = {};
+      iree_string_view_t reason;
+      ASSERT_TRUE(
+          Resolve(source, source.rank, 8 * words_per_row, 1, &plan, &reason));
+      ASSERT_EQ(plan.dma_dimension_count,
+                words_per_row <= maximum_wrap ? 2 : 3);
+      for (uint32_t word = 0; word < 2 * words_per_row; ++word) {
+        EXPECT_EQ(WordOffset(plan, word),
+                  word / words_per_row * row_stride + word % words_per_row);
+      }
+    }
+  }
 }
 
 TEST_P(Aie2pArrayBindingTest, SingleCoordinateHasNoAddressDimensions) {

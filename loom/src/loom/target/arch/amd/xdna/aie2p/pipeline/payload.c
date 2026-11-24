@@ -105,7 +105,10 @@ static iree_status_t loom_aie2p_native_intern_payload(
   if (!source) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate(context->pass->arena,
                                              sizeof(*source), (void**)&source));
-    *source = (loom_aie2p_native_payload_source_t){.endpoint = sender};
+    *source = (loom_aie2p_native_payload_source_t){
+        .endpoint = sender,
+        .column_ingress =
+            sender.tile->facts->kind == LOOM_XDNA_TILE_KIND_SHIM_NOC};
     inventory->sources[slot] = *inventory->tail = source;
     inventory->tail = &source->next;
   }
@@ -176,6 +179,7 @@ static iree_status_t loom_aie2p_native_intern_payload(
           destinations[0].tile->facts->kind == LOOM_XDNA_TILE_KIND_SHIM_NOC};
   memcpy(payload->destinations, destinations,
          destination_count * sizeof(*destinations));
+  source->column_ingress &= !cross_column && destination_count == 1;
   source->nonlocal_class_count += !compute || cross_column;
   if (inventory->has_serial && distribution && compute && cross_column &&
       destination_count > 1 &&
@@ -371,6 +375,25 @@ iree_status_t loom_aie2p_native_form_payloads(
         if (!phase->payload) {
           return iree_ok_status();
         }
+      }
+    }
+  }
+  // At each switch in a vertical ingress tree the destinations farther up
+  // the column all use the same north output. Numbering them [0, n) permits
+  // an exact cover in popcount(n) filters, including a single filter for
+  // four compute rows. Local DMA queues and unused IDs stay outside those
+  // masks. A smaller namespace fits even with one filter per destination.
+  const uint16_t filter_slots =
+      loom_xdna_register_field_dimension(
+          LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_STREAM_SLAVE_SLOT_ENABLE, 1)
+          .count;
+  for (loom_aie2p_native_payload_source_t* source = context->payload_sources;
+       source; source = source->next) {
+    if (source->column_ingress && source->class_count > filter_slots) {
+      uint8_t packet = 0;
+      for (loom_aie2p_native_payload_class_t* payload = source->classes;
+           payload; payload = payload->next) {
+        payload->packet = packet++;
       }
     }
   }

@@ -146,13 +146,8 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
                                     loom_xdna_stream_port_t destination_port,
                                     uint8_t packet,
                                     loom_aie2p_array_route_sharing_t* sharing) {
-  context->control_connections[context->control_connection_count++] =
-      (loom_aie2p_native_control_connection_t){
-          .source = {source, source_port, 0},
-          .destination = {destination, destination_port, 0},
-          .packet = packet};
   const iree_host_size_t first = context->routing.route_count;
-  const uint32_t index = (*next_source)++;
+  const uint32_t index = *next_source;
   const iree_host_size_t tile =
       loom_xdna_array_physical_tile_index(context->family, source);
   const uint32_t source_index =
@@ -166,19 +161,6 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
                     2 +
                 (destination_port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL)
           : UINT32_MAX;
-  if (!control->tree.root_index) {
-    control->destination = destination_index;
-  } else if (control->destination != destination_index) {
-    control->destination = UINT32_MAX;
-  }
-  if (destination_index != UINT32_MAX) {
-    uint32_t* owner = &context->control_destination_sources[destination_index];
-    if (*owner == UINT32_MAX) {
-      *owner = source_index;
-    } else if (*owner != source_index) {
-      *owner = UINT32_MAX - 1;
-    }
-  }
   const bool routed =
       sharing ? loom_aie2p_array_route_control(
                     &context->routing, index, &control->tree, source,
@@ -189,10 +171,26 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
   if (!routed) {
     return false;
   }
-  if (sharing && sharing->used) {
-    // Shared carriers merge independently addressed packets, so even a single
-    // endpoint needs filtering. Retain that exclusion for the source tree.
+  ++*next_source;
+  context->control_connections[context->control_connection_count++] =
+      (loom_aie2p_native_control_connection_t){
+          .source = {source, source_port, 0},
+          .destination = {destination, destination_port, 0},
+          .packet = packet};
+  if (!control->packet_mask) {
+    control->destination = destination_index;
+  }
+  if (control->destination != destination_index || (sharing && sharing->used)) {
+    // A merged source needs packet filtering even for a single endpoint.
     control->destination = UINT32_MAX;
+  }
+  if (destination_index != UINT32_MAX) {
+    uint32_t* owner = &context->control_destination_sources[destination_index];
+    if (*owner == UINT32_MAX) {
+      *owner = source_index;
+    } else if (*owner != source_index) {
+      *owner = UINT32_MAX - 1;
+    }
   }
   loom_aie2p_native_route_label(
       context, first, packet,
@@ -221,10 +219,22 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
   return true;
 }
 
+// An admitted register path and its extensions stay within one delivery's
+// packet/terminal identity. The ordinary granted payload keeps its own domain.
+typedef struct loom_aie2p_native_command_suffix_t {
+  // First edge in the longest admitted route before another core joins it.
+  iree_host_size_t first;
+  // Edge count of that complete register route, including the final port.
+  iree_host_size_t count;
+  // Command-only domain after the first join, or zero while gathering edges.
+  iree_host_size_t domain;
+} loom_aie2p_native_command_suffix_t;
+
 // Shared paths retain a terminal identity across independent core sources.
 // Control selection admits at most four terminal classes per core; complete
-// switch admission owns the physical filter and arbiter budgets.
-static bool loom_aie2p_native_select_packet_route(
+// switch admission owns the physical filter and arbiter budgets. An unavailable
+// route leaves the caller's packet slot at UINT8_MAX.
+static iree_status_t loom_aie2p_native_select_packet_route(
     loom_aie2p_native_context_t* context, iree_host_size_t worker_index,
     const loom_aie2p_native_tile_t* tile, loom_xdna_stream_port_t port,
     loom_aie2p_native_control_path_t* commands, uint32_t* next_source,
@@ -233,7 +243,7 @@ static bool loom_aie2p_native_select_packet_route(
       &context->workers[context->execution
                             .workers[context->core_engines[worker_index]]];
   if (owner->control_packet_count == 4) {
-    return false;
+    return iree_ok_status();
   }
   loom_aie2p_native_delivery_t* delivery =
       commands ? NULL
@@ -249,14 +259,41 @@ static bool loom_aie2p_native_select_packet_route(
   const uint8_t packet = loom_aie2p_native_delivery_packet(
       delivery, owner->packet_mask | packet_scope->packets, tile, port, 0,
       canonical ? *canonical : UINT8_MAX);
-  if (packet == UINT8_MAX ||
-      !loom_aie2p_native_packet_route(
-          context, next_source, context->workers[worker_index].tile->coordinate,
-          LOOM_XDNA_STREAM_PORT_CORE, tile->coordinate, port, packet,
-          commands   ? &commands->sharing
-          : delivery ? &delivery->sharing
-                     : NULL)) {
-    return false;
+  if (packet == UINT8_MAX) {
+    return iree_ok_status();
+  }
+  const loom_xdna_tile_coordinate_t source =
+      context->workers[worker_index].tile->coordinate;
+  const iree_host_size_t first = context->routing.route_count;
+  loom_aie2p_native_command_suffix_t* suffix =
+      delivery ? delivery->packets[packet].command : NULL;
+  if (!loom_aie2p_native_packet_route(context, next_source, source,
+                                      LOOM_XDNA_STREAM_PORT_CORE,
+                                      tile->coordinate, port, packet,
+                                      commands   ? &commands->sharing
+                                      : delivery ? &delivery->sharing
+                                                 : NULL)) {
+    if (!suffix) {
+      return iree_ok_status();
+    }
+    // The payload grant covers its own lanes. A command may have reached
+    // those lanes through a private approach. Only the same packet and
+    // complete terminal can follow that approach to the already framed wire.
+    loom_aie2p_array_route_sharing_t repeat = {
+        .domain = suffix->domain,
+        .carrier = LOOM_AIE2P_ARRAY_ROUTE_CARRIER_HARDWARE_COMMAND,
+        .destination = tile->coordinate};
+    if (!repeat.domain) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_array_route_sharing_initialize(
+          &context->routing, suffix->first, suffix->count, tile->coordinate,
+          LOOM_AIE2P_ARRAY_ROUTE_CARRIER_HARDWARE_COMMAND, &repeat));
+      suffix->domain = repeat.domain;
+    }
+    if (!loom_aie2p_native_packet_route(
+            context, next_source, source, LOOM_XDNA_STREAM_PORT_CORE,
+            tile->coordinate, port, packet, &repeat)) {
+      return iree_ok_status();
+    }
   }
   owner->packet_mask |= UINT32_C(1) << packet;
   packet_scope->packets |= UINT32_C(1) << packet;
@@ -268,10 +305,21 @@ static bool loom_aie2p_native_select_packet_route(
   }
   if (delivery && delivery->sharing.used) {
     owner->packet_mask |= UINT32_C(1) << LOOM_AIE2P_NATIVE_DELIVERY_PACKET_ID;
+    const iree_host_size_t count = context->routing.route_count - first;
+    if (!suffix) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(
+          context->pass->arena, sizeof(*suffix), (void**)&suffix));
+      *suffix =
+          (loom_aie2p_native_command_suffix_t){.first = first, .count = count};
+      delivery->packets[packet].command = suffix;
+    } else if (!suffix->domain && count > suffix->count) {
+      suffix->first = first;
+      suffix->count = count;
+    }
   }
   ++owner->control_packet_count;
   *out_packet = packet;
-  return true;
+  return iree_ok_status();
 }
 
 iree_status_t loom_aie2p_native_select_control_route(
@@ -315,9 +363,10 @@ iree_status_t loom_aie2p_native_select_control_route(
         commands = path;
       }
     }
-    if (!loom_aie2p_native_select_packet_route(
-            context, worker_index, tile, LOOM_XDNA_STREAM_PORT_TILE_CONTROL,
-            commands, next_source, &owner->control_packets[index])) {
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_select_packet_route(
+        context, worker_index, tile, LOOM_XDNA_STREAM_PORT_TILE_CONTROL,
+        commands, next_source, &owner->control_packets[index]));
+    if (owner->control_packets[index] == UINT8_MAX) {
       return loom_aie2p_native_reject(
           context, realization->workers[worker_index].source->declaration,
           IREE_SV("available worker control-packet routes"));

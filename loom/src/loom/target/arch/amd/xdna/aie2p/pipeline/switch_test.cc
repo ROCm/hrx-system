@@ -274,9 +274,10 @@ class Aie2pControlSwitchTest : public Aie2pSwitchTest {
     }
   }
 
-  void AddPayloads(uint32_t count, loom_aie2p_native_delivery_t* delivery) {
+  void AddPayloads(uint32_t count, loom_aie2p_native_delivery_t* delivery,
+                   uint16_t granted_row = 3) {
     const loom_xdna_tile_coordinate_t sources[] = {
-        {0, 3}, {0, 3}, {0, 4}, {0, 5}};
+        {0, granted_row}, {0, 3}, {0, 4}, {0, 5}};
     const uint8_t engines[] = {0, 1, 0, 0};
     for (uint32_t i = 0; i < count; ++i) {
       const size_t first = context_.routing.route_count;
@@ -659,6 +660,33 @@ TEST_F(Aie2pControlSwitchTest, BorrowedPayloadLaneKeepsControlPacketFiltering) {
                      LOOM_XDNA_STREAM_PORT_DMA) &
                 (1u << 7),
             0u);
+}
+
+TEST_F(Aie2pControlSwitchTest, CommandsJoinAnApproachToTheGrantedPayload) {
+  loom_aie2p_native_delivery_t delivery = {};
+  ASSERT_NO_FATAL_FAILURE(AddPayloads(4, &delivery, 2));
+  // The grant starts on row 2. Three independent result streams leave one
+  // lane on row 3 for commands approaching it from above.
+  for (size_t worker : {1, 2, 3}) {
+    const size_t first = context_.routing.route_count;
+    ASSERT_NO_FATAL_FAILURE(SelectCommand(worker, 1, false));
+    EXPECT_EQ(workers_[worker].control_packets[1], 0u);
+    ASSERT_EQ(context_.routing.route_count - first, worker + 2);
+    const auto* route = context_.routing.routes + first;
+    EXPECT_EQ(route[worker - 1].coordinate.row, 3u);
+    EXPECT_EQ(route[worker - 1].destination_port, LOOM_XDNA_STREAM_PORT_SOUTH);
+    EXPECT_EQ(route[worker - 1].destination_channel, 3u);
+    EXPECT_EQ(route[worker].coordinate.row, 2u);
+    EXPECT_EQ(route[worker].source_channel, 3u);
+    EXPECT_EQ(route[worker].destination_channel, 0u);
+  }
+  // The shim register has a distinct packet even though it uses the same
+  // granted payload to reach SRAM. Check both commands against the complete
+  // programmed switch tables and the four original DMA destinations.
+  ASSERT_NO_FATAL_FAILURE(SelectCommand(0, 0, false));
+  EXPECT_NE(workers_[0].control_packets[0], workers_[1].control_packets[1]);
+  EXPECT_EQ(context_.control_connection_count, 4u);
+  ASSERT_NO_FATAL_FAILURE(Build(true, 6));
 }
 
 TEST_P(Aie2pSwitchTest, OneInputSharesAnArbiterAcrossDestinationSets) {

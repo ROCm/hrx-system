@@ -195,10 +195,11 @@ bool loom_aie2p_array_resolve_binding_transfer(
       const bool wide = element_bit_width > unit_bits;
       const uint16_t axis_bits = wide ? unit_bits : element_bit_width;
       const uint64_t maximum_wrap = (UINT64_C(1) << dma_facts->wrap_bits) - 1;
-      // A wide scalar contributes an innermost run of consecutive native
-      // words. Keep it separate across gaps, or when a combined wrap would
-      // exceed its field. The measured transfer and envelope bound the
-      // products in native words below.
+      // The innermost wrap counts native words, including when several
+      // elements share each word. Later wraps count logical positions.
+      const uint64_t maximum_inner_extent =
+          maximum_wrap * unit_bits / axis_bits;
+      // A wide scalar supplies an implicit innermost run of native words.
       const uint16_t words = wide ? element_bit_width / unit_bits : 0;
       loom_storage_geometry_axis_t inner = {.extent = words,
                                             .element_stride = 1};
@@ -210,13 +211,20 @@ bool loom_aie2p_array_resolve_binding_transfer(
         --transfer_rank;
         if (wide) {
           source_axis.element_stride *= words;
-          if (source_axis.element_stride ==
-                  inner.extent * inner.element_stride &&
-              (!transfer_rank ||
-               inner.extent * source_axis.extent <= maximum_wrap)) {
-            inner.extent *= source_axis.extent;
-            continue;
-          }
+        }
+        // Adjacent coordinates with the same address progression share an
+        // iterator. Only the outermost iterator can run without a wrap.
+        const uint64_t wrap_limit =
+            dma_dimension_count == 0 ? maximum_inner_extent : maximum_wrap;
+        uint64_t next_stride = 0;
+        if (inner.extent &&
+            iree_checked_mul_u64(inner.extent, inner.element_stride,
+                                 &next_stride) &&
+            source_axis.element_stride == next_stride &&
+            (!transfer_rank ||
+             inner.extent * source_axis.extent <= wrap_limit)) {
+          inner.extent *= source_axis.extent;
+          continue;
         }
         if (inner.extent &&
             !loom_aie2p_array_binding_append_dimension(

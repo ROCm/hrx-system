@@ -229,6 +229,67 @@ TEST_F(PayloadTest, PhasedInputAndOrdinaryIngressUseTheSamePhysicalClass) {
   EXPECT_FALSE(phase.payload->distribution_only);
 }
 
+TEST_F(PayloadTest, ColumnIngressFitsBothSRAMQueuesAndAllComputeRows) {
+  // One shim queue serves both SRAM queues and all four compute rows. In
+  // discovery order the northbound IDs would be 1..4, requiring three
+  // filters in addition to the two SRAM destinations on the same input.
+  const loom_aie2p_native_connection_endpoint_t destinations[] = {
+      {{0, 1}, LOOM_XDNA_STREAM_PORT_DMA, 0},
+      {{0, 2}, LOOM_XDNA_STREAM_PORT_DMA, 0},
+      {{0, 3}, LOOM_XDNA_STREAM_PORT_DMA, 0},
+      {{0, 4}, LOOM_XDNA_STREAM_PORT_DMA, 0},
+      {{0, 5}, LOOM_XDNA_STREAM_PORT_DMA, 0},
+      {{0, 1}, LOOM_XDNA_STREAM_PORT_DMA, 4},
+  };
+  loom_aie2p_native_dma_path_t ingress[IREE_ARRAYSIZE(destinations)] = {};
+  for (size_t i = IREE_ARRAYSIZE(ingress); i > 0; --i) {
+    auto& path = ingress[i - 1];
+    path.shim = &tiles_[0];
+    path.local = &tiles_[destinations[i - 1].coordinate.row];
+    path.local_engine = destinations[i - 1].channel;
+    path.ingress = true;
+    path.next_demand = workers_[0].transfer_paths;
+    workers_[0].transfer_paths = &path;
+  }
+  Form();
+  IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
+      context_.family, 64, &arena_, &context_.routing));
+  routes_.resize(64);
+  context_.routes = routes_.data();
+  uint32_t next_source = 0;
+  bool valid = false;
+  IREE_ASSERT_OK(loom_aie2p_native_route_payload(
+      &context_, ingress[0].payload, nullptr, &next_source, &valid));
+  ASSERT_TRUE(valid);
+  const loom_aie2p_native_switch_input_t input = {
+      .routing = &context_.routing,
+      .routes = context_.routes,
+  };
+  iree_string_view_t requirement = iree_string_view_empty();
+  IREE_ASSERT_OK(loom_aie2p_native_switches_build(
+      &input, &arena_, &context_.switches, &requirement));
+  ASSERT_TRUE(iree_string_view_is_empty(requirement));
+  loom_aie2p_native_connectivity_t* connectivity = nullptr;
+  IREE_ASSERT_OK(loom_aie2p_native_connectivity_allocate(
+      context_.family, context_.switches, context_.routing.routes,
+      context_.routing.route_count, &arena_, &connectivity));
+  const loom_aie2p_native_connection_endpoint_t shim = {
+      {0, 0}, LOOM_XDNA_STREAM_PORT_DMA, 0};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(ingress); ++i) {
+    EXPECT_EQ(loom_aie2p_native_connectivity_check(connectivity, shim,
+                                                   ingress[i].payload->packet,
+                                                   &destinations[i], 1, false)
+                  .failure,
+              LOOM_AIE2P_NATIVE_CONNECTIVITY_NONE);
+  }
+  for (uint8_t packet = IREE_ARRAYSIZE(ingress); packet < 32; ++packet) {
+    EXPECT_EQ(loom_aie2p_native_connectivity_check(connectivity, shim, packet,
+                                                   nullptr, 0, false)
+                  .failure,
+              LOOM_AIE2P_NATIVE_CONNECTIVITY_DEAD_END);
+  }
+}
+
 TEST_F(PayloadTest, LaterPassthroughConstrainsAnEarlierShortIngress) {
   loom::testing::DiagnosticEmissionCapture diagnostics;
   pass_.diagnostic_emitter = diagnostics.emitter();
