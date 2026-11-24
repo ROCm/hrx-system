@@ -1198,12 +1198,14 @@ static iree_status_t loom_serve_text_chat_history_tool(
   }
   loom_serve_text_chat_field_t fields[] = {
       {"id", LOOM_SERVE_TEXT_CHAT_STRING | LOOM_SERVE_TEXT_CHAT_NULL},
-      {"type", LOOM_SERVE_TEXT_CHAT_STRING},
+      {"type", LOOM_SERVE_TEXT_CHAT_STRING | LOOM_SERVE_TEXT_CHAT_NULL},
       {"function", LOOM_SERVE_TEXT_CHAT_OBJECT}};
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_request_fields(
       value, IREE_ARRAYSIZE(fields), fields));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[2]));
-  if (!iree_string_view_equal(fields[1].value, IREE_SV("function"))) {
+  // A missing or null type defaults to function, the only defined type.
+  if (fields[1].value.data &&
+      !iree_string_view_equal(fields[1].value, IREE_SV("function"))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "assistant tool_calls must be functions");
   }
