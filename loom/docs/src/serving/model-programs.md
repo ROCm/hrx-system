@@ -494,6 +494,23 @@ not acquire physical memory until request admission needs it.
 
 Shared prefixes and explicit checkpoints keep immutable endpoint references.
 A branch needs a private recurrent writer without copying the entire KV prefix.
+
+The runtime does not copy the recurrent slot of a branch. When a row forks from
+a shared prefix, a checkpoint, or a retained session, it gets a new private
+writer slot and keeps the shared slot as an immutable reader. `encode_state`
+receives one record of four little-endian 64-bit words for each row whose
+binding changed: the row index, the reader byte offset, the writer byte offset,
+and the number of positions the row has consumed. Reader and writer are
+different only until the first span after the fork has run. That span starts at
+the consumed position in the record. Later records for the row have the same
+reader and writer.
+
+A program that updates recurrent state in place must handle the first span
+after a fork. It can read the reader slot and write the writer slot. If a
+kernel only uses the writer slot, copy the reader state into the writer slot
+before the first layer of that span. A program that skips this reads stale
+state, and the output changes only after a prefix or session hit.
+
 The tiny text package exercises a partial-page frontier, an unconsumed pending
 token, fork/rewind, cancellation and full-replay equivalence. Those boundaries
 matter more than getting one unretained prompt to emit plausible text. The

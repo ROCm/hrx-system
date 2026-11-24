@@ -468,7 +468,9 @@ replay when a client drops generated reasoning or changes a later message.
 This extension never evicts another prefix. New branches and memory pressure
 can still reclaim entries, and a one-slot cache retains its first matching
 ancestor. Reuse depends on exact token and media identity, not message labels;
-`cached_tokens` reports the prefix actually used.
+`cached_tokens` reports the prefix actually used. A prefix hit always ends at a
+retained boundary, so the tokens after the last boundary replay with the new
+tokens, at most about one prefill window (`prefill_capacity`).
 
 `X-Loom-Checkpoint: NAME` requests an explicit immutable endpoint for the
 destination session. It is not best effort: an unknown name returns 404 and a
