@@ -19,7 +19,14 @@ CONTROL = Path(sys.argv.pop(1)).resolve()
 
 class ToolPolicyTest(unittest.TestCase):
     def execute(
-        self, calls, stream=True, messages=None, tools=None, checker_args=(), **options
+        self,
+        calls,
+        stream=True,
+        messages=None,
+        tools=None,
+        checker_args=(),
+        control=CONTROL,
+        **options,
     ):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
@@ -76,7 +83,7 @@ class ToolPolicyTest(unittest.TestCase):
             return subprocess.run(
                 [
                     str(CHECKER),
-                    f"--control={CONTROL}",
+                    f"--control={control}",
                     f"--tokenizer={tokenizer}",
                     f"--request={request}",
                     f"--response={response}",
@@ -340,6 +347,71 @@ class ToolPolicyTest(unittest.TestCase):
                 self.assertIn("already-created.png", value["prompt"])
                 self.assertIn('read: {"q":"styles.css"}', value["prompt"])
                 self.assertIn("missing required property path", value["prompt"])
+
+    def test_tool_message_reaches_source_with_the_name_of_its_call(self):
+        source = CONTROL.read_text(encoding="utf-8")
+        needle = "%text = func.call @join(%prefix, %content)"
+        self.assertIn(needle, source)
+        with tempfile.TemporaryDirectory() as temporary:
+            # This copy renders the raw message JSON instead of its content.
+            control = Path(temporary) / "raw_chat.loom"
+            control.write_text(
+                source.replace(needle, "%text = func.call @join(%prefix, %raw)"),
+                encoding="utf-8",
+            )
+
+            def call(call_id, name):
+                return {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {"name": name, "arguments": "{}"},
+                }
+
+            def render(*tool_messages, calls=()):
+                messages = [
+                    {"role": "assistant", "content": None, "tool_calls": list(calls)},
+                    *tool_messages,
+                    {"role": "user", "content": "hello"},
+                ]
+                result = self.execute("[]", messages=messages, control=control)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return json.loads(result.stdout)["prompt"]
+
+            def tool(call_id, **fields):
+                return {
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "content": "ok",
+                    **fields,
+                }
+
+            def named(message, name):
+                return '{"name":' + json.dumps(name) + "," + json.dumps(message)[1:]
+
+            message = tool("call_2")
+            prompt = render(
+                tool("call_1"),
+                message,
+                calls=[call("call_1", "read"), call("call_2", 'li"st')],
+            )
+            self.assertIn(named(tool("call_1"), "read"), prompt)
+            self.assertIn(named(message, 'li"st'), prompt)
+            # The latest earlier call with an id supplies the name.
+            repeated = [call("call_1", "read"), call("call_1", "list")]
+            self.assertIn(
+                named(tool("call_1"), "list"), render(tool("call_1"), calls=repeated)
+            )
+            # A client name, a null name, an unknown id and a missing id stay as sent.
+            for message in (
+                tool("call_1", name="other"),
+                tool("call_1", name=None),
+                tool("call_9"),
+                {"role": "tool", "content": "ok"},
+            ):
+                with self.subTest(message=message):
+                    prompt = render(message, calls=[call("call_1", "read")])
+                    self.assertIn(json.dumps(message), prompt)
+                    self.assertNotIn('{"name":"read"', prompt)
 
     def test_history_and_generated_calls_share_decoded_function_fields(self):
         call = {"id": "call_1_0", **self.call(arguments="{}")}
