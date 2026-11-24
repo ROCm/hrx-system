@@ -1081,14 +1081,17 @@ iree_status_t loom_serve_text_chat_prepare_input(
 
 // Function records have the same decoded name/argument semantics in client
 // history and generated output. The scratch owner retains both through the
-// synchronous source formatter call.
+// synchronous source formatter call. Client history may also give the
+// arguments as a JSON object, which reaches source as its original text.
 static iree_status_t loom_serve_text_chat_function_decode(
     iree_string_view_t value, loom_serve_text_chat_field_flags_t flags,
-    iree_string_builder_t* scratch, iree_string_view_t* out_name,
-    iree_string_view_t* out_arguments) {
+    bool allow_object_arguments, iree_string_builder_t* scratch,
+    iree_string_view_t* out_name, iree_string_view_t* out_arguments) {
   loom_serve_text_chat_field_t fields[] = {
       {"name", LOOM_SERVE_TEXT_CHAT_STRING},
-      {"arguments", LOOM_SERVE_TEXT_CHAT_STRING}};
+      {"arguments",
+       LOOM_SERVE_TEXT_CHAT_STRING |
+           (allow_object_arguments ? LOOM_SERVE_TEXT_CHAT_OBJECT : 0)}};
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
       value, IREE_ARRAYSIZE(fields), fields, flags));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[0]));
@@ -1097,8 +1100,13 @@ static iree_status_t loom_serve_text_chat_function_decode(
   IREE_RETURN_IF_ERROR(
       loom_serve_text_chat_append_decoded(scratch, fields[0].value));
   const iree_host_size_t name_length = iree_string_builder_size(scratch);
-  IREE_RETURN_IF_ERROR(
-      loom_serve_text_chat_append_decoded(scratch, fields[1].value));
+  if (fields[1].type == IREE_JSON_VALUE_TYPE_OBJECT) {
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_string(scratch, fields[1].value));
+  } else {
+    IREE_RETURN_IF_ERROR(
+        loom_serve_text_chat_append_decoded(scratch, fields[1].value));
+  }
   const iree_string_view_t decoded = iree_string_builder_view(scratch);
   *out_name = iree_string_view_substr(decoded, 0, name_length);
   *out_arguments =
@@ -1210,7 +1218,7 @@ static iree_status_t loom_serve_text_chat_history_tool(
   iree_string_view_t name, arguments;
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_function_decode(
       fields[2].value, LOOM_SERVE_TEXT_CHAT_FIELDS_IGNORE_UNKNOWN,
-      &history->arguments, &name, &arguments));
+      /*allow_object_arguments=*/true, &history->arguments, &name, &arguments));
   return loom_serve_text_chat_function_render(history->chat->policy, name,
                                               arguments, index, &history->calls,
                                               history->chat->host_allocator);
@@ -1661,7 +1669,8 @@ static iree_status_t loom_serve_text_chat_completion_tool(
   }
   iree_string_view_t name, arguments;
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_function_decode(
-      call[1].value, 0, &tools->scratch->arguments, &name, &arguments));
+      call[1].value, 0, /*allow_object_arguments=*/false,
+      &tools->scratch->arguments, &name, &arguments));
   IREE_RETURN_IF_ERROR(loom_serve_text_tool_calls_append(
       tools->calls, tools->request_id, name, arguments));
   const loom_serve_text_tool_call_t decoded_call =

@@ -341,6 +341,31 @@ class ToolPolicyTest(unittest.TestCase):
                 self.assertIn('read: {"q":"styles.css"}', value["prompt"])
                 self.assertIn("missing required property path", value["prompt"])
 
+    def test_history_arguments_accept_a_json_object(self):
+        arguments = {"path": "a b", "nested": {"keep": [1, 2]}}
+        text = json.dumps(arguments)
+
+        def history(value):
+            call = {"id": "call_1_0", **self.call(arguments=value)}
+            return [
+                {"role": "assistant", "content": None, "tool_calls": [call]},
+                {"role": "user", "content": "hello"},
+            ]
+
+        as_string = self.execute("[]", messages=history(text))
+        as_object = self.execute("[]", messages=history(arguments))
+        self.assertEqual(as_string.returncode, 0, as_string.stderr)
+        self.assertEqual(as_object.returncode, 0, as_object.stderr)
+        prompt = json.loads(as_object.stdout)["prompt"]
+        self.assertIn("read: " + text + "\n", prompt)
+        self.assertEqual(prompt, json.loads(as_string.stdout)["prompt"])
+        for value in (7, [], None, True):
+            with self.subTest(value=value):
+                result = self.execute("[]", messages=history(value))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("chat field 'arguments' expects", result.stderr)
+
     def test_history_and_generated_calls_share_decoded_function_fields(self):
         call = {"id": "call_1_0", **self.call(arguments="{}")}
         call["function"]["name"] = "r\\u0065ad"
