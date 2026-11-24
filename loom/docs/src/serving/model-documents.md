@@ -363,8 +363,8 @@ Native capacity fields are:
 | `context_capacity` | `16384` | Per-row logical context limit in token positions, fitting a positive signed 32-bit count. The source validates the model's supported context window. |
 | `prefill_capacity` | `512` | Maximum tokens admitted to one submission across all active rows. Longer prompts span multiple submissions. |
 | `checkpoint_capacity` | `0` | Explicit pinned endpoint slots, independent of execution rows. |
-| `session_cache_capacity` | automatic | Evictable idle histories beyond resident rows. An explicit count is exact; zero disables this cache. Nonzero counts also reserve one admission-exchange endpoint. |
-| `prefix_cache_capacity` | automatic | Evictable exact intermediate-prefix endpoints. An explicit count is exact; zero disables capture. |
+| `session_cache_capacity` | automatic | Evictable idle histories beyond resident rows, for requests that name a session with `X-Loom-Session`. An explicit count is exact; zero disables this cache. Nonzero counts also reserve one admission-exchange endpoint. |
+| `prefix_cache_capacity` | automatic | Evictable exact intermediate-prefix endpoints, captured at prefill boundaries and shared by all requests, named or not. Each endpoint holds one recurrent state slot and shares KV pages with its source. An explicit count is exact; zero disables capture. |
 | `cache_target_bytes` | automatic | Soft sizing target for additional initial cache storage. Omission uses 2 GiB, reduced to 1/16 of a configured shared physical-memory budget. Zero disables automatic counts without changing explicit counts. |
 | `admission_overtakes` | `rows` | Successful fitting admissions allowed to pass a blocked oldest request; zero selects FIFO. |
 | `max_tokens` | `512` | Default request output limit, fitting a positive signed 32-bit count. Prompt and output together must fit the configured context. |
