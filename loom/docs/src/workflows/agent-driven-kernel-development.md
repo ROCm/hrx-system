@@ -349,6 +349,23 @@ permutations. Separate counter runs summed the widths of read requests leaving
 L2. The axis swap accounts for most of the time and traffic savings. The
 grouped order ran a little faster even as its L2 read traffic rose.
 
+The same head order also works with eight waves in a workgroup. Give each
+wave one head and use grid Y for the token block. With 48 value heads and
+16 key heads, integer division selects the shared key.
+
+```text
+ordinal    = 8 * workgroup_x + wave_in_workgroup
+key_head   = ordinal // 3
+value_head = key_head + 16 * (ordinal % 3)
+token_base = 16 * workgroup_y
+```
+
+The first three waves write heads 0, 16, and 32 while reading key 0. The
+next three write heads 1, 17, and 33 while reading key 1. Six workgroups
+cover every head exactly once for each token block. At 16,384 tokens the
+complete grid has 6 × 1,024 = 6,144 workgroups. This changes how many
+waves run together, so it gets its own timing at the intended shape.
+
 Every order's compile report showed the same query/key load geometry within a
 wave. Each packet read 256 unique bytes spread across a 307,216-byte span.
 The last two orders also had identical grid dimensions. Once the report
