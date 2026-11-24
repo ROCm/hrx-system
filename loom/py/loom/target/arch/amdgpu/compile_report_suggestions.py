@@ -1452,17 +1452,16 @@ def _suggest_lds_bank_service(
                 entry_name=_entry_name_for_function(document, function_name),
                 confidence=confidence,
                 action=(
-                    "Test a pitch or padding change for "
-                    f"{location or 'this LDS access'}: "
+                    f"{location or 'this LDS access'} ({packet_bytes} B/lane): "
                     f"{conflicted_count:,}/{exact_count:,} proven instruction sites "
                     f"conflict, needing {required:,} service rounds versus "
                     f"{uncontended:,} uncontended ({required / uncontended:.2f}x; "
                     f"{extra_rounds:,} extra). These are static counts, not cycles "
-                    "or a runtime ranking. Update producer and consumer views "
-                    f"together and recheck the current {packet_bytes} B/lane "
-                    f"instruction width.{padding}{incomplete} Recompile, compare "
-                    "all access directions, check spill or occupancy regressions, "
-                    "and select only from hardware timing."
+                    "or a runtime ranking. Try a pitch change. For explicitly "
+                    "indexed accesses, also try reassigning elements to lanes "
+                    "at the current pitch. Compare producer and consumer packet "
+                    f"widths and alignment.{padding}{incomplete} Check for "
+                    "spill or occupancy regressions and compare hardware timing."
                 ),
                 evidence=tuple(evidence),
             )

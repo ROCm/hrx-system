@@ -477,6 +477,26 @@ register pressure, LDS footprint, residency, and native execution time before
 selecting the layout. Instruction scheduling can overlap service with other
 work; it cannot remove a conflict within one LDS instruction.
 
+For example, a gfx1151 recurrent kernel staged a 16-row key panel in
+transposed order. With a 24-element BF16 pitch, neighboring lanes within a
+half-wave stored eight features apart. Their addresses differed by 384 bytes,
+placing sixteen distinct words in the same bank. Two changes reduced that
+conflict to two rounds per store. They had different effects on the matrix reads.
+
+| Layout of the transposed key | Modeled rounds per narrow store | Wide read sites with exact bank analysis | Feedback time |
+| --- | ---: | ---: | ---: |
+| Pitch 24, lanes advance across features | 16 | 48/48 | 5.27 ms |
+| Pitch 17, same lane assignment | 2 | 32/48 | 5.74 ms |
+| Pitch 24, lanes advance across token rows | 2 | 48/48 | 5.06 ms |
+
+The shorter pitch kept the wide read instructions but lost the alignment
+proof for sixteen sites. Reassigning the writers kept every wide read aligned
+and also changed which global input addresses neighboring lanes fetched. The
+times are medians of twenty interleaved 8,192-token replays. All three used
+the same register and LDS allocations, produced identical output and state,
+and executed the same matrix instructions. The store conflict identified
+where to experiment. The read evidence and timing distinguished the layouts.
+
 ## Diff one controlled change
 
 Capture the same root, configuration, target, and workload before and after one
