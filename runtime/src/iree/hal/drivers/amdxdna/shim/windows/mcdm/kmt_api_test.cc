@@ -1741,6 +1741,53 @@ TEST(KmtApiTest, BufferResidencyUsesNegotiatedPagingModel) {
   EXPECT_EQ(g_gpu_wait_count, 1u);
 }
 
+TEST(KmtApiTest, SubmitThroughDeviceCopyWaitsForPagingRequestedOnOriginal) {
+  ResetFakes();
+  KmtApi api = {};
+  api.create_allocation2 = FakeCreateAllocation;
+  api.map_gpu_virtual_address = FakeMapGpuVirtualAddress;
+  api.make_resident = FakeMakeResident;
+  api.lock2 = FakeLock2;
+  api.submit_command_to_hw_queue = FakeSubmitCommandToHwQueue;
+  api.invalidate_cache = FakeInvalidateCache;
+  api.wait_from_cpu = FakeWaitFromCpu;
+  Device device = {};
+  device.device = 0x10;
+  device.paging_queue = 0x11;
+  device.paging_sync_object = 0x12;
+  device.mcdm_abi = McdmAbi::compact;
+  uint64_t completed_paging_fence = 0;
+  device.paging_fence_cpu = &completed_paging_fence;
+  // Contexts keep a copy of the Device taken at context creation.
+  const Device context_copy = device;
+  Context context = {};
+  context.hw_queue = 0x20;
+  context.progress_fence = 0x21;
+  context.next_fence_id = 7;
+  CommandAperture aperture = {};
+  aperture.gpu_allocation = 0x30;
+  alignas(64) static std::array<uint8_t, 0x100000> aperture_storage = {};
+  aperture.gpu_cpu_ptr = aperture_storage.data();
+  aperture.gpu_va_size = aperture_storage.size();
+  Error error = {};
+  ASSERT_TRUE(ConfigurePathBCodeRangeForSetupPayload(McdmAbi::compact, 9952,
+                                                     &aperture, &error));
+
+  Buffer buffer = {};
+  ASSERT_TRUE(
+      CreateBuffer(api, device, BufferKind::host_only, 4096, &buffer, &error))
+      << ErrorMessage(&error);
+  const size_t waits_before_submit = g_wait_count;
+  const size_t submits_before = g_submit_count;
+
+  ASSERT_TRUE(PublishPathBCodeWrite(api, context_copy, &context, aperture,
+                                    aperture.code_offset, 0x10000, &error))
+      << ErrorMessage(&error);
+  ASSERT_GT(g_wait_count, waits_before_submit);
+  EXPECT_EQ(g_wait_fences[waits_before_submit], 11u);
+  EXPECT_GT(g_submit_count, submits_before);
+}
+
 TEST(KmtApiTest, CodeRangeLifecycleMatchesNegotiatedAbi) {
   auto run = [](McdmAbi mcdm_abi, size_t setup_payload_size) {
     ResetFakes();

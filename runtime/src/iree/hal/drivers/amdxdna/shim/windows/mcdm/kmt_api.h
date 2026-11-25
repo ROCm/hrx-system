@@ -19,8 +19,10 @@
 #include <d3dkmthk.h>
 // clang-format on
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 
 namespace iree::hal::amdxdna::mcdm {
 
@@ -271,8 +273,11 @@ struct Device {
   D3DKMT_HANDLE paging_sync_object = 0;
   void* paging_fence_cpu = nullptr;
   // Highest paging-queue fence returned by Map/MakeResident. XRT drains this
-  // device-wide watermark before every HW-queue submit.
-  mutable volatile LONG64 pending_paging_fence_value = 0;
+  // device-wide watermark before every HW-queue submit. Contexts and buffers
+  // hold copies of the Device, so the watermark is shared by every copy: a
+  // submit through any copy must wait for paging requested through any other.
+  std::shared_ptr<std::atomic<UINT64>> pending_paging_fence =
+      std::make_shared<std::atomic<UINT64>>(0);
   McdmAbi mcdm_abi = McdmAbi::legacy;
   McdmAbiDiagnostics mcdm_abi_diagnostics = {};
   DriverVersion driver_version = {};

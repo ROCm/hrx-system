@@ -1546,23 +1546,22 @@ bool WaitForPagingFenceCpu(const KmtApi& api, const Device& device,
 }
 
 void RecordPendingPagingFence(const Device& device, UINT64 fence_value) {
-  if (fence_value == 0) return;
-  auto* const watermark = &device.pending_paging_fence_value;
-  LONG64 observed = InterlockedCompareExchange64(watermark, 0, 0);
-  const LONG64 requested = static_cast<LONG64>(fence_value);
-  while (observed < requested) {
-    const LONG64 prior =
-        InterlockedCompareExchange64(watermark, requested, observed);
-    if (prior == observed) break;
-    observed = prior;
+  if (fence_value == 0 || !device.pending_paging_fence) return;
+  std::atomic<UINT64>& watermark = *device.pending_paging_fence;
+  UINT64 observed = watermark.load(std::memory_order_acquire);
+  while (observed < fence_value &&
+         !watermark.compare_exchange_weak(observed, fence_value,
+                                          std::memory_order_acq_rel)) {
   }
 }
 
 bool WaitForPendingPagingBeforeSubmit(const KmtApi& api,
                                       const Device& device,
                                       Error* out_error) {
-  const UINT64 fence_value = static_cast<UINT64>(InterlockedCompareExchange64(
-      &device.pending_paging_fence_value, 0, 0));
+  const UINT64 fence_value =
+      device.pending_paging_fence
+          ? device.pending_paging_fence->load(std::memory_order_acquire)
+          : 0;
   if (fence_value == 0) return true;
 
   if (WaitForPagingFenceCpu(api, device, fence_value)) return true;
