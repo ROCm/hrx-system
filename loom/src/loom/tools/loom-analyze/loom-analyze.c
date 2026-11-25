@@ -35,8 +35,10 @@ IREE_FLAG(int32_t, min_ops, 6,
 IREE_FLAG(int32_t, min_occurrences, 2,
           "Minimum number of copies reported as a clone.");
 IREE_FLAG(string, parameterize, "none",
-          "Comparison relaxation: none, or constants to match sequences whose "
-          "*.constant values differ (candidates for motif parameters).");
+          "Comparison relaxations, comma separated: none; constants to match "
+          "sequences whose *.constant values differ (candidates for motif "
+          "parameters); types to match sequences differing only in element "
+          "types (reported, not applicable: motifs cannot be type-generic).");
 IREE_FLAG(string, format, "text", "Report format: text, json, or sarif.");
 IREE_FLAG(string, output, "-",
           "Report path. Use '-' or the empty string for stdout.");
@@ -196,7 +198,7 @@ int main(int argc, char** argv) {
       "\n"
       "Usage:\n"
       "  loom-analyze [--min-ops=N] [--min-occurrences=K] "
-      "[--parameterize=none|constants]\n"
+      "[--parameterize=none|constants,types]\n"
       "          [--format=text|json|sarif] [--output=file] "
       "[--exclude=pattern] path...\n"
       "  loom-analyze --agents_md\n"
@@ -244,18 +246,8 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status)) {
     options.min_op_count = (uint32_t)FLAG_min_ops;
     options.min_occurrence_count = (uint32_t)FLAG_min_occurrences;
-    const iree_string_view_t parameterize =
-        iree_make_cstring_view(FLAG_parameterize);
-    if (iree_string_view_equal(parameterize, IREE_SV("none"))) {
-      options.parameterization = LOOM_ANALYZE_PARAMETERIZE_NONE;
-    } else if (iree_string_view_equal(parameterize, IREE_SV("constants"))) {
-      options.parameterization = LOOM_ANALYZE_PARAMETERIZE_CONSTANTS;
-    } else {
-      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "unknown --parameterize '%s'; expected none "
-                                "or constants",
-                                FLAG_parameterize);
-    }
+    status = loom_analyze_parse_parameterization(
+        iree_make_cstring_view(FLAG_parameterize), &options.parameterization);
   }
   if (iree_status_is_ok(status) && argc < 2) {
     status =

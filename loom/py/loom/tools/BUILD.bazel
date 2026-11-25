@@ -82,6 +82,14 @@ iree_py_library(
 )
 
 iree_py_library(
+    name = "source_reduce",
+    srcs = [
+        "__init__.py",
+        "source_reduce.py",
+    ],
+)
+
+iree_py_library(
     name = "export_cxx",
     srcs = ["export_cxx.py"],
     deps = ["//loom/py/loom/format/cxx"],
@@ -99,6 +107,13 @@ iree_py_binary(
     srcs = ["source_lint.py"],
     main = "source_lint.py",
     deps = [":source_lint"],
+)
+
+iree_py_binary(
+    name = "loom-reduce",
+    srcs = ["source_reduce.py"],
+    main = "source_reduce.py",
+    deps = [":source_reduce"],
 )
 
 iree_py_binary(
@@ -124,6 +139,7 @@ iree_py_test(
         "pytest_style_runner.py",
         "pytest_style_runner_test.py",
         "source_lint_test.py",
+        "source_reduce_test.py",
         "source_surface_test.py",
     ],
     args = [
@@ -134,6 +150,7 @@ iree_py_test(
         "loom.tools.pytest_style_runner_test",
         "loom.tools.source_surface_test",
         "loom.tools.source_lint_test",
+        "loom.tools.source_reduce_test",
     ],
     main = "pytest_style_runner.py",
     deps = [
@@ -142,6 +159,7 @@ iree_py_test(
         ":export_cxx",
         ":loom_opt",
         ":source_lint",
+        ":source_reduce",
         ":tools",
         "//loom/py/loom/format/cxx:test_support",
     ],

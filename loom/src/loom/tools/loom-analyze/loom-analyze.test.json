@@ -103,6 +103,32 @@
       },
       "exit": {"code": 2},
       "stderr": {"contains": ["no .loom inputs remain"]}
+    },
+    {
+      "name": "element type differences are not clones by default",
+      "run": {
+        "tool": "loom-analyze",
+        "args": ["{srcdir}/testdata/type_variant.loom"]
+      },
+      "stderr": {"empty": true}
+    },
+    {
+      "name": "type parameterization reports element type variants",
+      "run": {
+        "tool": "loom-analyze",
+        "args": ["--parameterize=constants,types", "{srcdir}/testdata/type_variant.loom"]
+      },
+      "exit": {"code": 1},
+      "stderr": {"empty": true}
+    },
+    {
+      "name": "rejects an unknown parameterization",
+      "run": {
+        "tool": "loom-analyze",
+        "args": ["--parameterize=shapes", "{srcdir}/testdata/clean.loom"]
+      },
+      "exit": {"code": 2},
+      "stderr": {"contains": ["unknown --parameterize 'shapes'"]}
     }
   ]
 }

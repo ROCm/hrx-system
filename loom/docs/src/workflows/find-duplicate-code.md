@@ -29,8 +29,8 @@ kernels/motifs/copy/strided_source.loom:41:5: note: copy spans lines 41-50 in @g
 The run ends with a summary:
 
 ```text
-loom-analyze: 1247 finding(s) in 286 module(s); 28761 of 46773 ops (61.5%) are in duplicated sequences
-loom-analyze: refactor plan of 514 non-overlapping finding(s) removes 13342 ops (28.5%)
+loom-analyze: 1230 finding(s) in 286 module(s); 27998 of 46773 ops (59.9%) are in duplicated sequences
+loom-analyze: refactor plan of 502 non-overlapping finding(s) removes 13170 ops (28.2%)
 ```
 
 The first line counts the operations inside definitions that lie in any
@@ -82,6 +82,15 @@ loom-analyze --parameterize=constants kernels/
 With `constants`, `*.constant` operations compare by result type without their
 literal value, and each message says the match holds up to constant values.
 
+`--parameterize=types` also matches sequences that differ only in element types,
+such as the same computation on `f32` and `i16`. Loom motifs cannot be generic
+over element types, so these findings are reported with `"applicable": false`
+and never join the refactor plan. The summary states how many more operations
+type-generic motifs would remove. Relaxations combine:
+`--parameterize=constants,types`. A finding records the relaxations its copies
+actually needed in `parameterized_by`; copies that match exactly stay exact even
+when relaxations are enabled.
+
 ## Copies in launch configuration
 
 A copy inside a `kernel.def` launch-config region carries an extra note:
@@ -118,7 +127,38 @@ callable copy with
 copy's names. A module calling a motif defined in another file also needs its
 `func.decl`, and the program that links the kernel must supply the motif's
 file. An inline motif is inlined during compilation, so each kernel's emitted
-code can be compared before and after the rewrite.
+code can be compared before and after the rewrite. The motif returns every value
+any copy uses afterwards, so all copies share one signature.
+
+## Reduce the source
+
+`loom-reduce` applies the plan. It copies the source tree to an empty output
+directory and rewrites only the copy:
+
+```shell
+loom-analyze --format=json --output=plan.json kernels/
+loom-reduce --plan=plan.json --output-dir=reduced/ --report=reduce.json
+```
+
+Run it from the directory where `loom-analyze` ran, or pass `--root`. Each
+selected finding becomes one `func.def inline` motif, defined at the end of the
+file holding its copies, and each callable copy becomes a call. Findings whose
+copies differ in constants or types, and copies of an existing motif in another
+file, are skipped with a reason. Every rewritten file is parsed and verified
+with `loom-analyze`; a file that fails keeps only the motifs that verify on
+their own. The summary and `reduce.json` list applied, skipped and reverted
+motifs:
+
+```text
+loom-reduce: 293 motif(s) replace 998 copies in 79 file(s); removes 6542 of 46773 ops (14.0%)
+loom-reduce: 49 skipped, 10 reverted after verification
+```
+
+Analyzing the reduced tree again can find further copies; a second pass on the
+same corpus removed another 841 operations. Inlining makes most kernels compile
+to identical code, but the compiler may select different instructions around a
+call boundary, so compare the compiled kernels and measure any that change
+before adopting the reduced sources.
 
 ## Use loom-analyze in CI
 
@@ -153,6 +193,7 @@ are still analyzed and the run exits with status 2.
 
 ## Limits
 
-Sequences must be contiguous operations of one block. Copies interleaved with
-unrelated operations, and copies that differ in types, are not matched; a
-type-generic motif for them is a design decision `loom-analyze` does not infer.
+Sequences must be contiguous operations of one block, and a block's terminator
+is never part of one. Copies interleaved with unrelated operations are not
+matched. Copies that differ in element types are reported only with
+`--parameterize=types` and cannot be reduced until motifs can be type-generic.

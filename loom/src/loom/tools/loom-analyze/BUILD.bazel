@@ -67,6 +67,7 @@ iree_cli_test(
         "testdata/duplicates.loom",
         "testdata/invalid.loom",
         "testdata/motif.loom",
+        "testdata/type_variant.loom",
     ],
     manifests = ["loom-analyze.test.json"],
     tags = ["hostonly"],

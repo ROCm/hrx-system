@@ -65,9 +65,9 @@ includes the audio request, expected transcript, and offline/cache behavior.
 
 ## Tools and Python APIs
 
-The installed commands are `amdf-info`, `loom-benchmark`, `loom-check`, `loom-compile`,
-`loom-compile-report`, `loom-export-cxx`, `loom-fetch`, `loom-format`,
-`loom-import-cxx`, `loom-link`, `loom-lint`, `loom-opt`, `loom-run`, `loom-analyze`,
+The installed commands are `amdf-info`, `loom-analyze`, `loom-benchmark`, `loom-check`,
+`loom-compile`, `loom-compile-report`, `loom-export-cxx`, `loom-fetch`, `loom-format`,
+`loom-import-cxx`, `loom-link`, `loom-lint`, `loom-opt`, `loom-reduce`, `loom-run`,
 `loom-serve`, and `loom-test`. Each provides `--help`.
 
 `amdf-info` reports AMD GPUs, NPUs, memory pools, and native capabilities without

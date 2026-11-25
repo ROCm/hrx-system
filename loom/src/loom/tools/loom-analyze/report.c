@@ -66,9 +66,34 @@ static iree_string_view_t loom_analyze_file_or_unknown(
   return iree_string_view_is_empty(file) ? IREE_SV("<unknown>") : file;
 }
 
+// Returns the message qualifier for the relaxations a finding needed.
+static const char* loom_analyze_relaxation_suffix(
+    loom_analyze_parameterization_t value) {
+  switch (value & LOOM_ANALYZE_PARAMETERIZE_ALL_) {
+    case LOOM_ANALYZE_PARAMETERIZE_CONSTANTS:
+      return " (up to constant values)";
+    case LOOM_ANALYZE_PARAMETERIZE_TYPES:
+      return " (up to element types)";
+    case LOOM_ANALYZE_PARAMETERIZE_CONSTANTS | LOOM_ANALYZE_PARAMETERIZE_TYPES:
+      return " (up to constant values and element types)";
+    default:
+      return "";
+  }
+}
+
 // Writes the primary message shared by every result of |finding|.
 static iree_status_t loom_analyze_write_message(
     const loom_analyze_finding_t* finding, loom_output_stream_t* stream) {
+  const char* suffix =
+      loom_analyze_relaxation_suffix(finding->parameterized_by);
+  if (!finding->applicable) {
+    return loom_output_stream_write_format(
+        stream,
+        "%" PRIu32 "-op sequence is duplicated %" PRIu32
+        " times%s; a motif replacing it would need to be generic over "
+        "element types",
+        finding->op_count, finding->occurrence_count, suffix);
+  }
   if (finding->rule == LOOM_ANALYZE_RULE_REIMPLEMENTED_MOTIF) {
     return loom_output_stream_write_format(
         stream,
@@ -76,15 +101,13 @@ static iree_status_t loom_analyze_write_message(
         "-op sequence repeats the body of motif @%.*s%s; call the "
         "motif instead of copying it",
         finding->op_count, (int)finding->motif_symbol.size,
-        finding->motif_symbol.data,
-        finding->parameterized ? " (up to constant values)" : "");
+        finding->motif_symbol.data, suffix);
   }
   return loom_output_stream_write_format(
       stream,
       "%" PRIu32 "-op sequence is duplicated %" PRIu32
       " times%s; factor it into a func.def inline or template.def motif",
-      finding->op_count, finding->occurrence_count,
-      finding->parameterized ? " (up to constant values)" : "");
+      finding->op_count, finding->occurrence_count, suffix);
 }
 
 // Writes the note text for one occurrence, without location or severity.
@@ -183,7 +206,7 @@ static iree_status_t loom_analyze_write_text(
       summary->op_count ? 100.0 * (double)summary->removable_op_count /
                               (double)summary->op_count
                         : 0.0;
-  return loom_output_stream_write_format(
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
       stream,
       "loom-analyze: %" PRIhsz " finding(s) in %" PRIu32 " module(s); %" PRIu64
       " of %" PRIu64
@@ -192,7 +215,20 @@ static iree_status_t loom_analyze_write_text(
       " non-overlapping finding(s) removes %" PRIu64 " ops (%.1f%%)\n",
       loom_analyze_report_result_count(result), summary->module_count,
       summary->duplicated_op_count, summary->op_count, percent,
-      summary->selected_count, summary->removable_op_count, plan_percent);
+      summary->selected_count, summary->removable_op_count, plan_percent));
+  if (summary->type_generic_removable_op_count == 0) {
+    return iree_ok_status();
+  }
+  const double generic_percent =
+      summary->op_count
+          ? 100.0 * (double)summary->type_generic_removable_op_count /
+                (double)summary->op_count
+          : 0.0;
+  return loom_output_stream_write_format(
+      stream,
+      "loom-analyze: type-generic motifs would remove %" PRIu64
+      " more ops (%.1f%%)\n",
+      summary->type_generic_removable_op_count, generic_percent);
 }
 
 //===----------------------------------------------------------------------===//
@@ -275,6 +311,9 @@ static iree_status_t loom_analyze_write_json_summary(
       &object, IREE_SV("removable_ops"), result->summary.removable_op_count));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
       &object, IREE_SV("selected"), result->summary.selected_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("removable_ops_if_type_generic"),
+      result->summary.type_generic_removable_op_count));
   IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
       &object, IREE_SV("results"), loom_analyze_report_result_count(result)));
   return loom_json_object_end(&object);
@@ -321,8 +360,14 @@ static iree_status_t loom_analyze_write_json(
         loom_json_object_begin_field(&object, IREE_SV("fingerprint")));
     IREE_RETURN_IF_ERROR(
         loom_analyze_write_fingerprint_string(finding->fingerprint, stream));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &object, IREE_SV("parameterized_by"),
+        loom_analyze_parameterization_name(finding->parameterized_by)));
     IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
-        &object, IREE_SV("parameterized"), finding->parameterized));
+        &object, IREE_SV("applicable"), finding->applicable));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+        &object, IREE_SV("removable_ops_if_type_generic"),
+        finding->type_generic_removable_op_count));
     IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
         &object, IREE_SV("selected"), finding->selected));
     IREE_RETURN_IF_ERROR(loom_json_object_write_string_field_if_nonempty(
@@ -604,8 +649,11 @@ static iree_status_t loom_analyze_write_sarif_result(
       &properties, IREE_SV("opCount"), finding->op_count));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
       &properties, IREE_SV("occurrenceCount"), finding->occurrence_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &properties, IREE_SV("parameterizedBy"),
+      loom_analyze_parameterization_name(finding->parameterized_by)));
   IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
-      &properties, IREE_SV("parameterized"), finding->parameterized));
+      &properties, IREE_SV("applicable"), finding->applicable));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
       &properties, IREE_SV("inputCount"), finding->input_count));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(

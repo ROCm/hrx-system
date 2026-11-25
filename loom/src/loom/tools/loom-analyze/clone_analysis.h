@@ -60,13 +60,29 @@ iree_string_view_t loom_analyze_rule_id(loom_analyze_rule_t rule);
 // Returns a one-sentence rule description for help and SARIF metadata.
 iree_string_view_t loom_analyze_rule_description(loom_analyze_rule_t rule);
 
-typedef enum loom_analyze_parameterization_e {
+// Comparison relaxations, combinable as a bitmask.
+enum loom_analyze_parameterization_bits_e {
   // Operations compare exactly up to SSA renaming.
   LOOM_ANALYZE_PARAMETERIZE_NONE = 0,
   // `*.constant` operations additionally compare without their literal value,
   // treating differing constants as motif parameters.
-  LOOM_ANALYZE_PARAMETERIZE_CONSTANTS = 1,
-} loom_analyze_parameterization_t;
+  LOOM_ANALYZE_PARAMETERIZE_CONSTANTS = 1u << 0,
+  // Element types (i16, f32, bf16, the f32 of vector<4xf32>, ...) compare as
+  // one placeholder. Shapes, layouts and type constructors still compare
+  // exactly. Loom motifs cannot be generic over element types today, so such
+  // findings are reported but never applicable.
+  LOOM_ANALYZE_PARAMETERIZE_TYPES = 1u << 1,
+  LOOM_ANALYZE_PARAMETERIZE_ALL_ = (1u << 2) - 1,
+};
+typedef uint32_t loom_analyze_parameterization_t;
+
+// Parses a comma-separated list of "none", "constants" and "types".
+iree_status_t loom_analyze_parse_parameterization(
+    iree_string_view_t value, loom_analyze_parameterization_t* out_value);
+
+// Returns "", "constants", "types" or "constants,types".
+iree_string_view_t loom_analyze_parameterization_name(
+    loom_analyze_parameterization_t value);
 
 typedef struct loom_analyze_options_t {
   // Minimum clone size in operations, counting nested operations.
@@ -128,8 +144,16 @@ typedef struct loom_analyze_finding_t {
   // file names, SSA names and process state, so it identifies the same clone
   // across runs for baselines and SARIF partial fingerprints.
   uint64_t fingerprint;
-  // True when the match relied on --parameterize relaxations.
-  bool parameterized;
+  // Relaxations the copies actually needed to match: zero for exact clones
+  // even when relaxations were enabled.
+  loom_analyze_parameterization_t parameterized_by;
+  // False when no Loom motif can replace the copies today: they differ in
+  // element types. Inapplicable findings have zero removable_op_count and
+  // never join the plan.
+  bool applicable;
+  // Operations the refactor would remove if motifs could be generic over the
+  // differing element types; equals removable_op_count when applicable.
+  uint64_t type_generic_removable_op_count;
   // Distinct values flowing into the sequence: the parameters a motif
   // replacing it takes (before any constant parameterization).
   uint32_t input_count;
@@ -169,6 +193,10 @@ typedef struct loom_analyze_summary_t {
   uint64_t removable_op_count;
   // Number of selected findings.
   uint32_t selected_count;
+  // Additional operations removable if motifs could be generic over element
+  // types: a second greedy pass over type-variant findings, restricted to
+  // operations the plan leaves untouched. Zero unless types are parameterized.
+  uint64_t type_generic_removable_op_count;
 } loom_analyze_summary_t;
 
 typedef struct loom_analyze_result_t {

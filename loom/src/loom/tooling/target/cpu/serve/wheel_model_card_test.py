@@ -197,6 +197,7 @@ def main(
                 assert runpath == "$ORIGIN", (name, runpath)
         for command in (
             "amdf-info",
+            "loom-analyze",
             "loom-benchmark",
             "loom-check",
             "loom-compile",
@@ -208,6 +209,7 @@ def main(
             "loom-link",
             "loom-lint",
             "loom-opt",
+            "loom-reduce",
             "loom-run",
             "loom-serve",
             "loom-test",

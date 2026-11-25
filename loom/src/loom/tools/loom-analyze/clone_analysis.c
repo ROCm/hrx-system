@@ -54,6 +54,45 @@ void loom_analyze_options_initialize(loom_analyze_options_t* out_options) {
   out_options->parameterization = LOOM_ANALYZE_PARAMETERIZE_NONE;
 }
 
+iree_status_t loom_analyze_parse_parameterization(
+    iree_string_view_t value, loom_analyze_parameterization_t* out_value) {
+  loom_analyze_parameterization_t result = LOOM_ANALYZE_PARAMETERIZE_NONE;
+  iree_string_view_t remaining = value;
+  while (!iree_string_view_is_empty(remaining)) {
+    iree_string_view_t item = iree_string_view_empty();
+    iree_string_view_split(remaining, ',', &item, &remaining);
+    item = iree_string_view_trim(item);
+    if (iree_string_view_equal(item, IREE_SV("none"))) {
+      continue;
+    } else if (iree_string_view_equal(item, IREE_SV("constants"))) {
+      result |= LOOM_ANALYZE_PARAMETERIZE_CONSTANTS;
+    } else if (iree_string_view_equal(item, IREE_SV("types"))) {
+      result |= LOOM_ANALYZE_PARAMETERIZE_TYPES;
+    } else {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "unknown --parameterize '%.*s'; expected a "
+                              "comma list of none, constants, types",
+                              (int)item.size, item.data);
+    }
+  }
+  *out_value = result;
+  return iree_ok_status();
+}
+
+iree_string_view_t loom_analyze_parameterization_name(
+    loom_analyze_parameterization_t value) {
+  switch (value & LOOM_ANALYZE_PARAMETERIZE_ALL_) {
+    case LOOM_ANALYZE_PARAMETERIZE_CONSTANTS:
+      return IREE_SV("constants");
+    case LOOM_ANALYZE_PARAMETERIZE_TYPES:
+      return IREE_SV("types");
+    case LOOM_ANALYZE_PARAMETERIZE_CONSTANTS | LOOM_ANALYZE_PARAMETERIZE_TYPES:
+      return IREE_SV("constants,types");
+    default:
+      return iree_string_view_empty();
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // Stable hashing
 //===----------------------------------------------------------------------===//
@@ -106,14 +145,80 @@ static iree_host_size_t loom_analyze_find_type_separator(
   return separator;
 }
 
+// Returns true for scalar element type spellings: i8, si32, ui16, bf16, f32,
+// f8E4M3FN, ...
+static bool loom_analyze_is_element_type(iree_string_view_t token) {
+  iree_host_size_t i = 0;
+  if (iree_string_view_equal(token, IREE_SV("bf16"))) {
+    return true;
+  }
+  if (token.size >= 2 && token.data[0] == 'f' &&
+      loom_analyze_is_digit(token.data[1])) {
+    for (i = 2; i < token.size; ++i) {
+      const char c = token.data[i];
+      if (!loom_analyze_is_digit(c) && !(c >= 'a' && c <= 'z') &&
+          !(c >= 'A' && c <= 'Z')) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (token.size > 0 && (token.data[0] == 's' || token.data[0] == 'u')) {
+    i = 1;
+  }
+  if (i >= token.size || token.data[i] != 'i' || i + 1 >= token.size) {
+    return false;
+  }
+  for (++i; i < token.size; ++i) {
+    if (!loom_analyze_is_digit(token.data[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Returns true when |token| spells an element type, either alone (f32) or as
+// the suffix of a shape (4x8xf32, ?xi16). |out_keep| receives the length of
+// the shape prefix that still compares exactly.
+static bool loom_analyze_split_type_token(iree_string_view_t token,
+                                          iree_host_size_t* out_keep) {
+  *out_keep = 0;
+  if (loom_analyze_is_element_type(token)) {
+    return true;
+  }
+  iree_host_size_t split = IREE_STRING_VIEW_NPOS;
+  for (iree_host_size_t i = 0; i < token.size; ++i) {
+    if (token.data[i] == 'x') {
+      split = i;
+    }
+  }
+  if (split == IREE_STRING_VIEW_NPOS || split == 0) {
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < split; ++i) {
+    const char c = token.data[i];
+    if (!loom_analyze_is_digit(c) && c != '?' && c != 'x') {
+      return false;
+    }
+  }
+  if (!loom_analyze_is_element_type(
+          iree_string_view_substr(token, split + 1, IREE_HOST_SIZE_MAX))) {
+    return false;
+  }
+  *out_keep = split + 1;
+  return true;
+}
+
 // Hashes printed IR after removing everything that does not carry program
 // content: SSA value names (%x), block labels (^bb), comments, and layout
 // whitespace. With |strip_numbers|, numeric literals before the result type
 // separator are also removed so constants differing only in value hash
 // equally while their types (including shapes such as vector<4xi32>) still
-// compare exactly.
+// compare exactly. With |strip_types|, element types become one placeholder
+// while shapes and type constructors remain.
 static uint64_t loom_analyze_hash_normalized_text(iree_string_view_t text,
-                                                  bool strip_numbers) {
+                                                  bool strip_numbers,
+                                                  bool strip_types) {
   uint64_t hash = LOOM_ANALYZE_FNV_OFFSET;
   const iree_host_size_t strip_limit =
       strip_numbers ? loom_analyze_find_type_separator(text) : 0;
@@ -160,6 +265,29 @@ static uint64_t loom_analyze_hash_normalized_text(iree_string_view_t text,
       previous = ' ';
       ++i;
       continue;
+    }
+    if (strip_types && loom_analyze_is_name_char(c) && c != '#' && c != '$' &&
+        !loom_analyze_is_name_char(previous)) {
+      iree_host_size_t end = i;
+      while (end < text.size && loom_analyze_is_name_char(text.data[end])) {
+        ++end;
+      }
+      iree_host_size_t keep = 0;
+      if (loom_analyze_split_type_token(
+              iree_make_string_view(text.data + i, end - i), &keep)) {
+        if (pending_space && emitted_any) {
+          hash = loom_analyze_hash_byte(hash, ' ');
+        }
+        for (iree_host_size_t k = 0; k < keep; ++k) {
+          hash = loom_analyze_hash_byte(hash, (uint8_t)text.data[i + k]);
+        }
+        hash = loom_analyze_hash_byte(hash, 'T');
+        pending_space = false;
+        emitted_any = true;
+        previous = 'T';
+        i = end;
+        continue;
+      }
     }
     char emitted = c;
     if (c == '%' || c == '^') {
@@ -216,16 +344,17 @@ typedef struct loom_analyze_op_t {
   uint32_t subtree_end;
   // Index into blocks of the first block nested under this operation.
   uint32_t block_cursor;
-  // Hash of the operation's normalized printed form, regions elided.
-  uint64_t exact_hash;
-  // Same with numeric literals removed for constant operations.
-  uint64_t parameterized_hash;
+  // Hash of the operation's normalized printed form, regions elided, for each
+  // combination of loom_analyze_parameterization_t relaxations. Index 0 is
+  // exact; constant-literal stripping applies only to `*.constant` ops.
+  uint64_t hashes[LOOM_ANALYZE_PARAMETERIZE_ALL_ + 1];
 } loom_analyze_op_t;
 
 // One indexed block, in the same pre-order as operations.
 typedef struct loom_analyze_block_t {
-  // Hash of the argument count and normalized argument types.
-  uint64_t argument_hash;
+  // Hash of the argument count and normalized argument types: [0] exact,
+  // [1] with element types relaxed.
+  uint64_t argument_hashes[2];
 } loom_analyze_block_t;
 
 // One candidate operation sequence: the operations of one nested block.
@@ -234,7 +363,8 @@ typedef struct loom_analyze_sequence_t {
   uint32_t module_index;
   // Offset into sequence_ops of the block's operation indices.
   uint32_t op_offset;
-  // Number of operations directly in the block.
+  // Number of candidate operations: the block's operations except a
+  // trailing terminator.
   uint32_t length;
   // Body length excluding the terminator when this block is the entry block
   // of a top-level definition body; zero otherwise.
@@ -282,6 +412,8 @@ typedef struct loom_analyze_class_t {
   uint32_t occurrence_count;
   uint32_t input_count;
   uint32_t output_count;
+  // Relaxations the copies actually needed to match.
+  loom_analyze_parameterization_t parameterized_by;
 } loom_analyze_class_t;
 
 // Growable token buffer used to compare canonical encodings exactly.
@@ -338,6 +470,9 @@ struct loom_analyze_analyzer_t {
   loom_analyze_tokens_t tokens_b;
   // Distinct external inputs of the most recently encoded window.
   uint32_t last_window_input_count;
+  // Hash variant used by window encoding; the configured relaxations except
+  // while classifying which relaxations a finding needed.
+  uint32_t encode_variant;
   // Owned strings referenced by results, such as printed binding types.
   loom_analyze_string_vector_t strings;
   // Results.
@@ -362,6 +497,8 @@ iree_status_t loom_analyze_analyzer_create(
       iree_allocator_malloc(allocator, sizeof(*analyzer), (void**)&analyzer));
   analyzer->allocator = allocator;
   analyzer->options = *options;
+  analyzer->encode_variant =
+      options->parameterization & LOOM_ANALYZE_PARAMETERIZE_ALL_;
   iree_string_builder_initialize(allocator, &analyzer->scratch);
   *out_analyzer = analyzer;
   return iree_ok_status();
@@ -421,8 +558,7 @@ typedef struct loom_analyze_index_context_t {
 // to their operation name and arity, which still separates distinct ops.
 static void loom_analyze_hash_operation(loom_analyze_index_context_t* context,
                                         const loom_op_t* op,
-                                        uint64_t* out_exact,
-                                        uint64_t* out_parameterized) {
+                                        uint64_t* out_hashes) {
   iree_string_builder_t* scratch = &context->analyzer->scratch;
   iree_string_builder_reset(scratch);
   loom_output_stream_t stream;
@@ -435,26 +571,35 @@ static void loom_analyze_hash_operation(loom_analyze_index_context_t* context,
       context->printer, op, &stream, &print_options);
   if (!iree_status_is_ok(status)) {
     iree_status_free(status);
-    uint64_t hash = loom_analyze_hash_normalized_text(name, false);
+    uint64_t hash = loom_analyze_hash_normalized_text(name, false, false);
     hash = loom_analyze_hash_u64(hash, op->operand_count);
     hash = loom_analyze_hash_u64(hash, op->result_count);
     hash = loom_analyze_hash_u64(hash, op->region_count);
-    *out_exact = hash;
-    *out_parameterized = hash;
+    for (uint32_t v = 0; v <= LOOM_ANALYZE_PARAMETERIZE_ALL_; ++v) {
+      out_hashes[v] = hash;
+    }
     return;
   }
   const iree_string_view_t text = iree_string_builder_view(scratch);
-  *out_exact = loom_analyze_hash_normalized_text(text, /*strip_numbers=*/false);
-  *out_parameterized =
-      iree_string_view_ends_with(name, IREE_SV(".constant"))
-          ? loom_analyze_hash_normalized_text(text, /*strip_numbers=*/true)
-          : *out_exact;
+  const bool is_constant =
+      iree_string_view_ends_with(name, IREE_SV(".constant"));
+  for (uint32_t v = 0; v <= LOOM_ANALYZE_PARAMETERIZE_ALL_; ++v) {
+    out_hashes[v] = loom_analyze_hash_normalized_text(
+        text,
+        /*strip_numbers=*/is_constant &&
+            (v & LOOM_ANALYZE_PARAMETERIZE_CONSTANTS) != 0,
+        /*strip_types=*/(v & LOOM_ANALYZE_PARAMETERIZE_TYPES) != 0);
+  }
 }
 
-static uint64_t loom_analyze_hash_block_arguments(
-    loom_analyze_index_context_t* context, const loom_block_t* block) {
-  uint64_t hash =
+// Hashes the argument count and normalized argument types, once exactly and
+// once with element types relaxed.
+static void loom_analyze_hash_block_arguments(
+    loom_analyze_index_context_t* context, const loom_block_t* block,
+    uint64_t out_hashes[2]) {
+  out_hashes[0] =
       loom_analyze_hash_u64(LOOM_ANALYZE_FNV_OFFSET, block->arg_count);
+  out_hashes[1] = out_hashes[0];
   iree_string_builder_t* scratch = &context->analyzer->scratch;
   for (uint16_t i = 0; i < block->arg_count; ++i) {
     const loom_type_t type =
@@ -464,17 +609,18 @@ static uint64_t loom_analyze_hash_block_arguments(
     loom_output_stream_for_builder(scratch, &stream);
     iree_status_t status =
         loom_text_printer_write_type(context->printer, type, &stream, NULL);
-    uint64_t type_hash = 0;
-    if (iree_status_is_ok(status)) {
-      type_hash =
-          loom_analyze_hash_normalized_text(iree_string_builder_view(scratch),
-                                            /*strip_numbers=*/false);
-    } else {
-      iree_status_free(status);
+    for (int relaxed = 0; relaxed < 2; ++relaxed) {
+      uint64_t type_hash = 0;
+      if (iree_status_is_ok(status)) {
+        type_hash = loom_analyze_hash_normalized_text(
+            iree_string_builder_view(scratch), /*strip_numbers=*/false,
+            /*strip_types=*/relaxed != 0);
+      }
+      out_hashes[relaxed] =
+          loom_analyze_hash_u64(out_hashes[relaxed], type_hash);
     }
-    hash = loom_analyze_hash_u64(hash, type_hash);
+    iree_status_free(status);
   }
-  return hash;
 }
 
 static iree_status_t loom_analyze_index_operation(
@@ -523,8 +669,9 @@ static iree_status_t loom_analyze_index_regions(
 
       IREE_RETURN_IF_ERROR(
           loom_analyze_block_vector_reserve(allocator, &analyzer->blocks, 1));
-      analyzer->blocks.data[analyzer->blocks.count++].argument_hash =
-          loom_analyze_hash_block_arguments(context, block);
+      loom_analyze_hash_block_arguments(
+          context, block,
+          analyzer->blocks.data[analyzer->blocks.count++].argument_hashes);
 
       uint32_t length = 0;
       for (const loom_op_t* child = block->first_op; child;
@@ -542,13 +689,18 @@ static iree_status_t loom_analyze_index_regions(
       memset(sequence, 0, sizeof(*sequence));
       sequence->module_index = context->module_index;
       sequence->op_offset = op_offset;
-      sequence->length = length;
+      // A block terminator never joins a candidate window: it cannot move
+      // into a motif, and implicit terminators (an elided scf.yield) have a
+      // source range reaching the region's closing brace. Its operation is
+      // still indexed below so nested pre-order numbering stays dense.
+      const bool ends_in_terminator =
+          length > 0 &&
+          iree_any_bit_set(block->last_op->traits, LOOM_TRAIT_TERMINATOR);
+      sequence->length = ends_in_terminator ? length - 1 : length;
       sequence->in_launch_config = context->in_launch_config;
       sequence->symbol = context->symbol;
-      if (motif_region == region && b == 0 && length > 0) {
-        const bool ends_in_terminator =
-            iree_any_bit_set(block->last_op->traits, LOOM_TRAIT_TERMINATOR);
-        sequence->motif_length = ends_in_terminator ? length - 1 : length;
+      if (motif_region == region && b == 0) {
+        sequence->motif_length = sequence->length;
       }
 
       uint32_t position = 0;
@@ -576,11 +728,9 @@ static iree_status_t loom_analyze_index_operation(
   entry->op = op;
   entry->module_index = context->module_index;
   entry->block_cursor = (uint32_t)analyzer->blocks.count;
-  uint64_t exact_hash = 0;
-  uint64_t parameterized_hash = 0;
-  loom_analyze_hash_operation(context, op, &exact_hash, &parameterized_hash);
-  entry->exact_hash = exact_hash;
-  entry->parameterized_hash = parameterized_hash;
+  uint64_t hashes[LOOM_ANALYZE_PARAMETERIZE_ALL_ + 1];
+  loom_analyze_hash_operation(context, op, hashes);
+  memcpy(analyzer->ops.data[op_index].hashes, hashes, sizeof(hashes));
   IREE_RETURN_IF_ERROR(
       loom_analyze_index_regions(context, op, /*is_top_level=*/false));
   // Recursion may have grown the vector; address the entry by index.
@@ -675,7 +825,8 @@ typedef struct loom_analyze_encoder_t {
   loom_analyze_analyzer_t* analyzer;
   loom_analyze_module_t* module_entry;
   const loom_module_t* module;
-  bool parameterized;
+  // Index into loom_analyze_op_t::hashes selecting the active relaxations.
+  uint32_t variant;
   uint32_t generation;
   uint64_t next_defined;
   uint64_t next_external;
@@ -749,12 +900,21 @@ static iree_status_t loom_analyze_encode_operation(
   const loom_module_t* module = encoder->module;
 
   IREE_RETURN_IF_ERROR(loom_analyze_emit(encoder, LOOM_ANALYZE_TOKEN_OP));
-  IREE_RETURN_IF_ERROR(loom_analyze_emit(
-      encoder,
-      encoder->parameterized ? entry->parameterized_hash : entry->exact_hash));
+  IREE_RETURN_IF_ERROR(
+      loom_analyze_emit(encoder, entry->hashes[encoder->variant]));
+
+  // SSA values embedded in operand types (dynamic dims such as
+  // view<[%n]xf32>) come first: the printed op spells them, so they are inputs
+  // of the sequence, and a motif parameter's type may only mention earlier
+  // parameters.
+  const loom_value_id_t* operands = loom_op_const_operands(op);
+  for (uint16_t i = 0; i < op->operand_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_type_walk_value_refs(
+        module, loom_module_value_type(module, operands[i]),
+        loom_analyze_emit_value_ref, encoder));
+  }
 
   // Operands. Commutative operands compare as a multiset.
-  const loom_value_id_t* operands = loom_op_const_operands(op);
   if (iree_any_bit_set(op->traits, LOOM_TRAIT_COMMUTATIVE) &&
       op->operand_count <= LOOM_ANALYZE_MAX_SORTED_OPERANDS) {
     uint64_t tags[LOOM_ANALYZE_MAX_SORTED_OPERANDS];
@@ -812,8 +972,11 @@ static iree_status_t loom_analyze_encode_operation(
           &analyzer->blocks.data[(*block_cursor)++];
       IREE_RETURN_IF_ERROR(
           loom_analyze_emit(encoder, LOOM_ANALYZE_TOKEN_BLOCK));
-      IREE_RETURN_IF_ERROR(
-          loom_analyze_emit(encoder, block_entry->argument_hash));
+      IREE_RETURN_IF_ERROR(loom_analyze_emit(
+          encoder,
+          block_entry
+              ->argument_hashes[(encoder->variant &
+                                 LOOM_ANALYZE_PARAMETERIZE_TYPES) != 0]));
       for (uint16_t a = 0; a < block->arg_count; ++a) {
         const loom_value_id_t argument = block->arg_ids[a];
         IREE_RETURN_IF_ERROR(loom_type_walk_value_refs(
@@ -847,8 +1010,7 @@ static iree_status_t loom_analyze_encode_window(
       .analyzer = analyzer,
       .module_entry = module_entry,
       .module = module_entry->module,
-      .parameterized =
-          analyzer->options.parameterization != LOOM_ANALYZE_PARAMETERIZE_NONE,
+      .variant = analyzer->encode_variant,
       .generation = ++module_entry->generation,
       .hash = LOOM_ANALYZE_FNV_OFFSET,
       .tokens = tokens,
@@ -1138,6 +1300,35 @@ static iree_status_t loom_analyze_record_group(
       analyzer, representative->sequence_index, representative->start, length,
       /*out_values=*/NULL, /*capacity=*/0);
 
+  // Classify the weakest relaxation under which every copy still matches, so
+  // exact clones found with relaxations enabled stay applicable.
+  const uint32_t configured = analyzer->encode_variant;
+  loom_analyze_parameterization_t parameterized_by = configured;
+  if (configured != LOOM_ANALYZE_PARAMETERIZE_NONE) {
+    static const uint32_t kWeakerVariants[] = {
+        LOOM_ANALYZE_PARAMETERIZE_NONE,
+        LOOM_ANALYZE_PARAMETERIZE_CONSTANTS,
+        LOOM_ANALYZE_PARAMETERIZE_TYPES,
+    };
+    iree_status_t status = iree_ok_status();
+    for (size_t v = 0; v < IREE_ARRAYSIZE(kWeakerVariants); ++v) {
+      const uint32_t variant = kWeakerVariants[v];
+      if (variant == configured || (variant & ~configured) != 0) {
+        continue;
+      }
+      analyzer->encode_variant = variant;
+      bool equal = false;
+      status = loom_analyze_group_equal_at(analyzer, candidates, group, kept,
+                                           length, &equal);
+      if (!iree_status_is_ok(status) || equal) {
+        parameterized_by = variant;
+        break;
+      }
+    }
+    analyzer->encode_variant = configured;
+    IREE_RETURN_IF_ERROR(status);
+  }
+
   IREE_RETURN_IF_ERROR(
       loom_analyze_class_vector_reserve(allocator, &detection->classes, 1));
   IREE_RETURN_IF_ERROR(loom_analyze_class_occurrence_vector_reserve(
@@ -1150,6 +1341,7 @@ static iree_status_t loom_analyze_record_group(
   clone_class->occurrence_count = kept;
   clone_class->input_count = input_count;
   clone_class->output_count = output_count;
+  clone_class->parameterized_by = parameterized_by;
   clone_class->op_count = 0;
   for (uint32_t i = 0; i < kept; ++i) {
     const loom_analyze_candidate_t* candidate = &candidates[group[i]];
@@ -1348,13 +1540,106 @@ static iree_status_t loom_analyze_print_type(loom_analyze_analyzer_t* analyzer,
   return iree_ok_status();
 }
 
+#define LOOM_ANALYZE_TAG_KIND_MASK (UINT64_C(0xFF) << 56)
+
+// Returns the definition ordinal of a value defined inside the most recently
+// encoded window of |module_entry|, or UINT32_MAX.
+static uint32_t loom_analyze_defined_ordinal(
+    const loom_analyze_module_t* module_entry, loom_value_id_t value_id) {
+  if ((iree_host_size_t)value_id >= module_entry->value_count ||
+      module_entry->value_stamps[value_id] != module_entry->generation) {
+    return UINT32_MAX;
+  }
+  const uint64_t tag = module_entry->value_tags[value_id];
+  if ((tag & LOOM_ANALYZE_TAG_KIND_MASK) != LOOM_ANALYZE_TAG_DEFINED) {
+    return UINT32_MAX;
+  }
+  return (uint32_t)(tag & ~LOOM_ANALYZE_TAG_KIND_MASK);
+}
+
+static int loom_analyze_compare_u32(const void* lhs, const void* rhs) {
+  const uint32_t a = *(const uint32_t*)lhs;
+  const uint32_t b = *(const uint32_t*)rhs;
+  return a < b ? -1 : (a > b ? 1 : 0);
+}
+
+// Collects the motif results of |clone_class|: the definition ordinals of
+// values used after the sequence in any occurrence, sorted. Equal encodings
+// give every occurrence the same ordinal for the same value, so one motif
+// signature serves all copies even when each copy uses a different subset.
+static iree_status_t loom_analyze_collect_output_ordinals(
+    loom_analyze_analyzer_t* analyzer,
+    const loom_analyze_detection_t* detection,
+    const loom_analyze_class_t* clone_class,
+    loom_analyze_index_vector_t* out_ordinals) {
+  iree_allocator_t allocator = analyzer->allocator;
+  out_ordinals->count = 0;
+  loom_value_id_t* escaping = NULL;
+  iree_host_size_t escaping_capacity = 0;
+  iree_status_t status = iree_ok_status();
+  for (uint32_t i = 0;
+       i < clone_class->occurrence_count && iree_status_is_ok(status); ++i) {
+    const loom_analyze_class_occurrence_t* source =
+        &detection->occurrences.data[clone_class->occurrence_offset + i];
+    uint64_t hash = 0;
+    status = loom_analyze_encode_window(analyzer, source->sequence_index,
+                                        source->start, clone_class->length,
+                                        NULL, &hash);
+    if (!iree_status_is_ok(status)) {
+      break;
+    }
+    const uint32_t count = loom_analyze_window_outputs(
+        analyzer, source->sequence_index, source->start, clone_class->length,
+        NULL, 0);
+    if (count > escaping_capacity) {
+      status =
+          iree_allocator_grow_array(allocator, count, sizeof(loom_value_id_t),
+                                    &escaping_capacity, (void**)&escaping);
+      if (!iree_status_is_ok(status)) {
+        break;
+      }
+    }
+    loom_analyze_window_outputs(analyzer, source->sequence_index, source->start,
+                                clone_class->length, escaping, count);
+    const loom_analyze_module_t* module_entry =
+        &analyzer->modules.data[analyzer->sequences.data[source->sequence_index]
+                                    .module_index];
+    for (uint32_t j = 0; j < count && iree_status_is_ok(status); ++j) {
+      const uint32_t ordinal =
+          loom_analyze_defined_ordinal(module_entry, escaping[j]);
+      if (ordinal == UINT32_MAX) {
+        continue;
+      }
+      bool present = false;
+      for (iree_host_size_t k = 0; k < out_ordinals->count && !present; ++k) {
+        present = out_ordinals->data[k] == ordinal;
+      }
+      if (present) {
+        continue;
+      }
+      status = loom_analyze_index_vector_reserve(allocator, out_ordinals, 1);
+      if (iree_status_is_ok(status)) {
+        out_ordinals->data[out_ordinals->count++] = ordinal;
+      }
+    }
+  }
+  iree_allocator_free(allocator, escaping);
+  if (iree_status_is_ok(status) && out_ordinals->count > 1) {
+    qsort(out_ordinals->data, out_ordinals->count, sizeof(uint32_t),
+          loom_analyze_compare_u32);
+  }
+  return status;
+}
+
 // Records the values crossing one occurrence's boundary: its inputs in
-// canonical parameter order and its escaping outputs in definition order.
-// Re-encoding the window leaves each external value stamped with the current
-// generation and tagged with its parameter index.
+// canonical parameter order and the values at |output_ordinals| (the class's
+// motif results) in definition order. Re-encoding the window leaves each
+// boundary value stamped with the current generation and tagged with its
+// parameter index or definition ordinal.
 static iree_status_t loom_analyze_bind_occurrence(
     loom_analyze_analyzer_t* analyzer, loom_text_printer_t* printers,
     const loom_analyze_class_occurrence_t* source, uint32_t length,
+    const loom_analyze_index_vector_t* output_ordinals,
     loom_analyze_occurrence_t* occurrence) {
   iree_allocator_t allocator = analyzer->allocator;
   const loom_analyze_sequence_t* sequence =
@@ -1369,9 +1654,7 @@ static iree_status_t loom_analyze_bind_occurrence(
       analyzer, source->sequence_index, source->start, length, NULL, &hash));
   const uint32_t input_count = analyzer->last_window_input_count;
   const uint32_t generation = module_entry->generation;
-  const uint32_t output_count = loom_analyze_window_outputs(
-      analyzer, source->sequence_index, source->start, length,
-      /*out_values=*/NULL, /*capacity=*/0);
+  const uint32_t output_count = (uint32_t)output_ordinals->count;
   const uint32_t total = input_count + output_count;
   if (total == 0) {
     return iree_ok_status();
@@ -1383,22 +1666,25 @@ static iree_status_t loom_analyze_bind_occurrence(
   for (uint32_t i = 0; i < total; ++i) {
     values[i] = LOOM_VALUE_ID_INVALID;
   }
-  const uint64_t kind_mask = UINT64_C(0xFF) << 56;
   for (iree_host_size_t v = 0; v < module_entry->value_count; ++v) {
     if (module_entry->value_stamps[v] != generation) {
       continue;
     }
     const uint64_t tag = module_entry->value_tags[v];
-    if ((tag & kind_mask) != LOOM_ANALYZE_TAG_EXTERNAL) {
-      continue;
-    }
-    const uint64_t parameter = tag & ~kind_mask;
-    if (parameter < input_count) {
-      values[parameter] = (loom_value_id_t)v;
+    const uint64_t kind = tag & LOOM_ANALYZE_TAG_KIND_MASK;
+    const uint64_t payload = tag & ~LOOM_ANALYZE_TAG_KIND_MASK;
+    if (kind == LOOM_ANALYZE_TAG_EXTERNAL && payload < input_count) {
+      values[payload] = (loom_value_id_t)v;
+    } else if (kind == LOOM_ANALYZE_TAG_DEFINED) {
+      const uint32_t* found = (const uint32_t*)bsearch(
+          &(uint32_t){(uint32_t)payload}, output_ordinals->data, output_count,
+          sizeof(uint32_t), loom_analyze_compare_u32);
+      if (found) {
+        values[input_count + (found - output_ordinals->data)] =
+            (loom_value_id_t)v;
+      }
     }
   }
-  loom_analyze_window_outputs(analyzer, source->sequence_index, source->start,
-                              length, values + input_count, output_count);
 
   loom_analyze_binding_t* bindings = NULL;
   iree_status_t status = iree_allocator_malloc_array(
@@ -1475,6 +1761,53 @@ static int loom_analyze_compare_savings(const void* lhs, const void* rhs) {
   return a_index < b_index ? -1 : (a_index > b_index ? 1 : 0);
 }
 
+static int loom_analyze_compare_type_generic_savings(const void* lhs,
+                                                     const void* rhs) {
+  const uint32_t a_index = *(const uint32_t*)lhs;
+  const uint32_t b_index = *(const uint32_t*)rhs;
+  const loom_analyze_finding_t* a = &loom_analyze_sort_findings[a_index];
+  const loom_analyze_finding_t* b = &loom_analyze_sort_findings[b_index];
+  if (a->type_generic_removable_op_count !=
+      b->type_generic_removable_op_count) {
+    return a->type_generic_removable_op_count >
+                   b->type_generic_removable_op_count
+               ? -1
+               : 1;
+  }
+  return a_index < b_index ? -1 : (a_index > b_index ? 1 : 0);
+}
+
+// Claims the operations of every callable copy of |clone_class| when none is
+// already claimed. Returns false and claims nothing on overlap.
+static bool loom_analyze_claim_callable_ops(
+    const loom_analyze_analyzer_t* analyzer,
+    const loom_analyze_detection_t* detection,
+    const loom_analyze_class_t* clone_class, uint8_t* claimed) {
+  const loom_analyze_class_occurrence_t* occurrences =
+      &detection->occurrences.data[clone_class->occurrence_offset];
+  for (uint32_t j = 0; j < clone_class->occurrence_count; ++j) {
+    if (analyzer->sequences.data[occurrences[j].sequence_index]
+            .in_launch_config) {
+      continue;
+    }
+    for (uint32_t op = occurrences[j].op_begin; op < occurrences[j].op_end;
+         ++op) {
+      if (claimed[op]) {
+        return false;
+      }
+    }
+  }
+  for (uint32_t j = 0; j < clone_class->occurrence_count; ++j) {
+    if (analyzer->sequences.data[occurrences[j].sequence_index]
+            .in_launch_config) {
+      continue;
+    }
+    memset(&claimed[occurrences[j].op_begin], 1,
+           occurrences[j].op_end - occurrences[j].op_begin);
+  }
+  return true;
+}
+
 // Selects the refactor plan: largest savings first, a finding joins the plan
 // only when none of its callable copies touches an operation already claimed
 // by a selected finding. Overlapping alternatives, such as the phase-shifted
@@ -1511,34 +1844,33 @@ static iree_status_t loom_analyze_select_plan(
       }
       const loom_analyze_class_t* clone_class =
           &detection->classes.data[kept_classes[order[i]]];
-      const loom_analyze_class_occurrence_t* occurrences =
-          &detection->occurrences.data[clone_class->occurrence_offset];
-      bool overlaps = false;
-      for (uint32_t j = 0; j < clone_class->occurrence_count && !overlaps;
-           ++j) {
-        if (analyzer->sequences.data[occurrences[j].sequence_index]
-                .in_launch_config) {
-          continue;
-        }
-        for (uint32_t op = occurrences[j].op_begin;
-             op < occurrences[j].op_end && !overlaps; ++op) {
-          overlaps = claimed[op] != 0;
-        }
-      }
-      if (overlaps) {
+      if (!loom_analyze_claim_callable_ops(analyzer, detection, clone_class,
+                                           claimed)) {
         continue;
-      }
-      for (uint32_t j = 0; j < clone_class->occurrence_count; ++j) {
-        if (analyzer->sequences.data[occurrences[j].sequence_index]
-                .in_launch_config) {
-          continue;
-        }
-        memset(&claimed[occurrences[j].op_begin], 1,
-               occurrences[j].op_end - occurrences[j].op_begin);
       }
       finding->selected = true;
       ++result->summary.selected_count;
       result->summary.removable_op_count += finding->removable_op_count;
+    }
+
+    // Second pass: what type-generic motifs would add on top of the plan.
+    loom_analyze_sort_findings = result->findings;
+    qsort(order, finding_count, sizeof(order[0]),
+          loom_analyze_compare_type_generic_savings);
+    loom_analyze_sort_findings = NULL;
+    for (uint32_t i = 0; i < finding_count; ++i) {
+      loom_analyze_finding_t* finding = &result->findings[order[i]];
+      if (finding->applicable ||
+          finding->type_generic_removable_op_count == 0) {
+        continue;
+      }
+      const loom_analyze_class_t* clone_class =
+          &detection->classes.data[kept_classes[order[i]]];
+      if (loom_analyze_claim_callable_ops(analyzer, detection, clone_class,
+                                          claimed)) {
+        result->summary.type_generic_removable_op_count +=
+            finding->type_generic_removable_op_count;
+      }
     }
   }
   iree_allocator_free(allocator, claimed);
@@ -1557,9 +1889,6 @@ static iree_status_t loom_analyze_build_findings(
         allocator, kept_count, sizeof(loom_analyze_finding_t),
         (void**)&result->findings));
   }
-  const bool parameterized =
-      analyzer->options.parameterization != LOOM_ANALYZE_PARAMETERIZE_NONE;
-
   // One printer per module spells binding types with module-local names.
   loom_text_printer_t* printers = NULL;
   if (kept_count > 0) {
@@ -1572,6 +1901,7 @@ static iree_status_t loom_analyze_build_findings(
     }
   }
   iree_status_t status = iree_ok_status();
+  loom_analyze_index_vector_t output_ordinals = {0};
   for (uint32_t k = 0; k < kept_count && iree_status_is_ok(status); ++k) {
     const loom_analyze_class_t* clone_class =
         &detection->classes.data[kept_classes[k]];
@@ -1580,13 +1910,22 @@ static iree_status_t loom_analyze_build_findings(
     finding->rule = LOOM_ANALYZE_RULE_DUPLICATE_SEQUENCE;
     finding->op_count = clone_class->op_count;
     finding->fingerprint = clone_class->fingerprint;
-    finding->parameterized = parameterized;
+    finding->parameterized_by = clone_class->parameterized_by;
+    // Loom motifs cannot be generic over element types.
+    finding->applicable =
+        (clone_class->parameterized_by & LOOM_ANALYZE_PARAMETERIZE_TYPES) == 0;
     finding->occurrence_count = clone_class->occurrence_count;
     status = iree_allocator_malloc_array(
         allocator, clone_class->occurrence_count,
         sizeof(loom_analyze_occurrence_t), (void**)&finding->occurrences);
     if (!iree_status_is_ok(status)) {
       finding->occurrence_count = 0;
+      break;
+    }
+
+    status = loom_analyze_collect_output_ordinals(
+        analyzer, detection, clone_class, &output_ordinals);
+    if (!iree_status_is_ok(status)) {
       break;
     }
 
@@ -1599,9 +1938,9 @@ static iree_status_t loom_analyze_build_findings(
           &detection->occurrences.data[clone_class->occurrence_offset + i];
       loom_analyze_resolve_occurrence(analyzer, source, clone_class->length,
                                       &finding->occurrences[i]);
-      status = loom_analyze_bind_occurrence(analyzer, printers, source,
-                                            clone_class->length,
-                                            &finding->occurrences[i]);
+      status = loom_analyze_bind_occurrence(
+          analyzer, printers, source, clone_class->length, &output_ordinals,
+          &finding->occurrences[i]);
       const loom_analyze_sequence_t* sequence =
           &analyzer->sequences.data[source->sequence_index];
       if (motif_index == UINT32_MAX && sequence->motif_length > 0 &&
@@ -1618,7 +1957,7 @@ static iree_status_t loom_analyze_build_findings(
       finding->motif_symbol = finding->occurrences[motif_index].symbol;
     }
     finding->input_count = clone_class->input_count;
-    finding->output_count = clone_class->output_count;
+    finding->output_count = (uint32_t)output_ordinals.count;
     // Each replaced callable copy leaves one call behind.
     const uint64_t ops = finding->op_count;
     uint64_t callable_copies = 0;
@@ -1628,17 +1967,20 @@ static iree_status_t loom_analyze_build_findings(
         ++callable_copies;
       }
     }
+    uint64_t removable = 0;
     if (finding->rule == LOOM_ANALYZE_RULE_REIMPLEMENTED_MOTIF) {
-      finding->removable_op_count = callable_copies * (ops - 1);
+      removable = callable_copies * (ops - 1);
     } else {
       const uint64_t before = callable_copies * ops;
       const uint64_t after = ops + callable_copies;
-      finding->removable_op_count =
-          callable_copies >= 2 && before > after ? before - after : 0;
+      removable = callable_copies >= 2 && before > after ? before - after : 0;
     }
+    finding->type_generic_removable_op_count = removable;
+    finding->removable_op_count = finding->applicable ? removable : 0;
     qsort(finding->occurrences, finding->occurrence_count,
           sizeof(finding->occurrences[0]), loom_analyze_compare_occurrences);
   }
+  loom_analyze_index_vector_free(allocator, &output_ordinals);
   if (printers) {
     for (iree_host_size_t m = 0; m < analyzer->modules.count; ++m) {
       loom_text_printer_deinitialize(&printers[m]);
