@@ -6,8 +6,8 @@ environment's `bin/` directory on Unix or `Scripts/` directory on Windows. An
 activated virtual environment makes them available on PATH.
 
 The native commands are `amdf-info`, `loom-benchmark`, `loom-check`, `loom-compile`,
-`loom-format`, `loom-import-cxx`, `loom-link`, `loom-opt`, `loom-run`, `loom-serve`,
-and `loom-test`. Python supplies `loom-compile-report`, `loom-export-cxx`,
+`loom-format`, `loom-import-cxx`, `loom-link`, `loom-opt`, `loom-run`, `loom-analyze`,
+`loom-serve`, and `loom-test`. Python supplies `loom-compile-report`, `loom-export-cxx`,
 `loom-fetch`, and `loom-lint`. The wheel includes the matching native shared
 libraries beside the executables. C++ import includes its standard and Loom
 headers, so it works without a separate compiler or source checkout.

@@ -811,6 +811,7 @@ def shared_tool_bazel_step(
             "//loom/src/loom/tools/loom-format:execution_test",
             "//loom/src/loom/tools/loom-link:cli_test",
             "//loom/src/loom/tools/loom-run:execution_test",
+            "//loom/src/loom/tools/loom-analyze:execution_test",
             "//loom/src/loom/tooling/target/cpu/test:run_cxx_input_test",
             "//loom/src/loom/import/cxx/binding/test/contracts:contracts_export_test",
             "//loom/src/loom/import/cxx/binding/test/data:views_export_test",
@@ -1232,6 +1233,7 @@ def cmake_shared_tool_steps(command_name: str) -> list[CiStep]:
                 "loom-format",
                 "loom-link",
                 "loom-run",
+                "loom-analyze",
                 "loom-import-cxx",
                 "loom-serve",
                 "loom-check",
@@ -1244,7 +1246,7 @@ def cmake_shared_tool_steps(command_name: str) -> list[CiStep]:
             command_name,
             "Test shared Loom tools",
             regex=(
-                r"^(loom/tools/(loom-compile|loom-opt|loom-format|loom-link|loom-import-cxx|loom-run|loom-serve|loom-check|loom-test|loom-benchmark)/(execution_test|scenario_execution_test)"
+                r"^(loom/tools/(loom-compile|loom-opt|loom-format|loom-link|loom-import-cxx|loom-run|loom-analyze|loom-serve|loom-check|loom-test|loom-benchmark)/(execution_test|scenario_execution_test)"
                 r"|loom/tools/loom-check/test/.*"
                 r"|loom/tooling/execution/hal/command_scenario_(execution|specialization)_test"
                 r"|loom/tools/loom-benchmark/test/benchmark_scenario_correctness_test"

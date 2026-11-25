@@ -83,6 +83,7 @@ nav:
       - Tune loop unrolling and pipelining: workflows/tune-loop-schedules.md
       - Search per-instance loop schedules: workflows/search-loop-schedules.md
       - Format and verify source: workflows/format-and-verify.md
+      - Find duplicate code: workflows/find-duplicate-code.md
       - Link and package modules: workflows/link-and-package.md
       - Build libraries and binaries with Bazel: workflows/build-with-bazel.md
       - Test correctness: workflows/test-correctness.md

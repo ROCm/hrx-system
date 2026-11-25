@@ -16,6 +16,7 @@ NATIVE_COMMANDS = [
     "//loom/src/loom/tools/loom-link",
     "//loom/src/loom/tools/loom-opt",
     "//loom/src/loom/tools/loom-run",
+    "//loom/src/loom/tools/loom-analyze",
     "//loom/src/loom/tools/loom-serve",
     "//loom/src/loom/tools/loom-test",
 ]

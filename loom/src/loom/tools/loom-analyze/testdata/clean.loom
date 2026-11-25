@@ -1,0 +1,10 @@
+// Every operation sequence in this module is written once.
+func.def @scale(%value: index, %factor: index) -> (index) {
+  %product = index.mul %value, %factor : index
+  func.return %product : index
+}
+
+func.def @offset(%value: index, %delta: index) -> (index) {
+  %sum = index.add %value, %delta : index
+  func.return %sum : index
+}

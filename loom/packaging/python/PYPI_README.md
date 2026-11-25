@@ -67,8 +67,8 @@ includes the audio request, expected transcript, and offline/cache behavior.
 
 The installed commands are `amdf-info`, `loom-benchmark`, `loom-check`, `loom-compile`,
 `loom-compile-report`, `loom-export-cxx`, `loom-fetch`, `loom-format`,
-`loom-import-cxx`, `loom-link`, `loom-lint`, `loom-opt`, `loom-run`, `loom-serve`,
-and `loom-test`. Each provides `--help`.
+`loom-import-cxx`, `loom-link`, `loom-lint`, `loom-opt`, `loom-run`, `loom-analyze`,
+`loom-serve`, and `loom-test`. Each provides `--help`.
 
 `amdf-info` reports AMD GPUs, NPUs, memory pools, and native capabilities without
 ROCr or XRT. Use `amdf-info --format=json` for automation and

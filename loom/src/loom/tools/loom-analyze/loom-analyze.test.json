@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "prints agent documentation",
+      "run": {
+        "tool": "loom-analyze",
+        "args": ["--agents_md"]
+      },
+      "stdout": {"contains": ["## loom-analyze"]}
+    },
+    {
+      "name": "requires an input path",
+      "run": {
+        "tool": "loom-analyze",
+        "args": []
+      },
+      "exit": {"code": 2},
+      "stderr": {"contains": ["requires at least one input"]}
+    },
+    {
+      "name": "rejects an unknown report format",
+      "run": {
+        "tool": "loom-analyze",
+        "args": ["--format=xml", "{srcdir}/testdata/clean.loom"]
+      },
+      "exit": {"code": 2},
+      "stderr": {"contains": ["unknown --format 'xml'"]}
+    },
+    {
+      "name": "rejects a single-occurrence threshold",
+      "run": {
+        "tool": "loom-analyze",
+        "args": ["--min-occurrences=1", "{srcdir}/testdata/clean.loom"]
+      },
+      "exit": {"code": 2},
+      "stderr": {"contains": ["--min-occurrences must be at least 2"]}
+    },
+    {
+      "name": "rejects a missing input path",
+      "run": {
+        "tool": "loom-analyze",
+        "args": ["{srcdir}/testdata/does-not-exist.loom"]
+      },
+      "exit": {"code": 2},
+      "stderr": {"contains": ["does not exist"]}
+    },
+    {
+      "name": "exits zero without findings",
+      "run": {
+        "tool": "loom-analyze",
+        "args": ["{srcdir}/testdata/clean.loom"]
+      },
+      "stdout": {"non_empty": true},
+      "stderr": {"empty": true}
+    },
+    {
+      "name": "exits one with duplicate sequences",
+      "run": {
+        "tool": "loom-analyze",
+        "args": ["{srcdir}/testdata/duplicates.loom"]
+      },
+      "exit": {"code": 1},
+      "stderr": {"empty": true}
+    },
+    {
+      "name": "exits one with a reimplemented motif",
+      "run": {
+        "tool": "loom-analyze",
+        "args": ["{srcdir}/testdata/motif.loom"]
+      },
+      "exit": {"code": 1},
+      "stderr": {"empty": true}
+    },
+    {
+      "name": "exits two when an input fails to load",
+      "run": {
+        "tool": "loom-analyze",
+        "args": ["{srcdir}/testdata/clean.loom", "{srcdir}/testdata/invalid.loom"]
+      },
+      "exit": {"code": 2},
+      "stderr": {"non_empty": true}
+    },
+    {
+      "name": "publishes a requested SARIF report",
+      "run": {
+        "tool": "loom-analyze",
+        "args": [
+          "--format=sarif",
+          "--output={tmp}/report.sarif",
+          "{srcdir}/testdata/duplicates.loom"
+        ]
+      },
+      "exit": {"code": 1},
+      "stdout": {"empty": true},
+      "files": [{"path": "{tmp}/report.sarif", "non_empty": true}]
+    },
+    {
+      "name": "excluded inputs leave nothing to analyze",
+      "run": {
+        "tool": "loom-analyze",
+        "args": ["--exclude=*/testdata/*", "{srcdir}/testdata"]
+      },
+      "exit": {"code": 2},
+      "stderr": {"contains": ["no .loom inputs remain"]}
+    }
+  ]
+}

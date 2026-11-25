@@ -35,6 +35,7 @@ at `.loombc`. A JIT embedding can perform the same operations in memory through
 | --- | --- |
 | Check or rewrite canonical source | [Format and verify source](format-and-verify.md) |
 | Convert text and bytecode | [Format and verify source](format-and-verify.md#convert-text-and-bytecode) |
+| Find sequences to factor into motifs | [Find duplicate code](find-duplicate-code.md) |
 | Inspect symbols and dependency closure | [Link and package modules](link-and-package.md#inspect-before-linking) |
 | Build a root-selected artifact input | [Link and package modules](link-and-package.md#link-one-program) |
 | Merge a reusable bytecode catalog | [Link and package modules](link-and-package.md#merge-a-reusable-catalog) |

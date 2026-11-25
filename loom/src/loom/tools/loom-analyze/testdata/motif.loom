@@ -1,0 +1,23 @@
+// @wrap_address is an existing motif. @kernel_address repeats its complete
+// body inline instead of calling it, so loom-analyze reports a reimplemented-motif
+// finding against the copy.
+func.def inline @wrap_address(%row: index, %col: index, %stride: index, %base: index) -> (index) {
+  %scaled = index.mul %row, %stride : index
+  %offset = index.add %scaled, %col : index
+  %shifted = index.add %base, %offset : index
+  %wrapped = index.rem %shifted, %stride : index
+  %bucket = index.div %shifted, %stride : index
+  %address = index.add %bucket, %wrapped : index
+  func.return %address : index
+}
+
+func.def @kernel_address(%row: index, %col: index, %stride: index, %base: index, %bias: index) -> (index) {
+  %scaled = index.mul %row, %stride : index
+  %offset = index.add %scaled, %col : index
+  %shifted = index.add %base, %offset : index
+  %wrapped = index.rem %shifted, %stride : index
+  %bucket = index.div %shifted, %stride : index
+  %address = index.add %bucket, %wrapped : index
+  %biased = index.mul %address, %bias : index
+  func.return %biased : index
+}
