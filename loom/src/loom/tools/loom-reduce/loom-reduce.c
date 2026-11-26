@@ -34,6 +34,10 @@ IREE_FLAG(string, motif_file, "loom_reduce_{group}_motifs.loom",
 IREE_FLAG(int32_t, min_ops, 4,
           "Minimum duplicated sequence size in operations. Sequences whose "
           "calls would not remove operations are skipped.");
+IREE_FLAG(string, parameterize, "none",
+          "none: share motifs only between identical copies. constants: also "
+          "between copies differing in top-level constants, which stay at "
+          "each call site and are passed to the motif.");
 IREE_FLAG(int32_t, min_occurrences, 2,
           "Minimum number of copies of a duplicated sequence.");
 IREE_FLAG(string, report, "",
@@ -202,7 +206,9 @@ static void loom_reduce_print_agents_markdown(FILE* stream) {
       "motif; in corpus scope its definition moves unchanged into the group's\n"
       "motif file when copies live in other files. `reduce.json` lists under\n"
       "`reuse_fallbacks` why reuse was impossible where a new motif was made.\n"
-      "Run repeatedly on the output until no motifs are reported.\n"
+      "Run repeatedly on the output until no motifs are reported, then once\n"
+      "more with `--parameterize=constants` to share motifs between copies\n"
+      "that differ in constants interleaved with the shared operations.\n"
       "\n"
       "Every rewritten file is parsed and verified in memory; motifs touching "
       "a\n"
@@ -328,6 +334,20 @@ int main(int argc, char** argv) {
   loom_analyze_options_initialize(&analyze_options);
   analyze_options.min_op_count = (uint32_t)FLAG_min_ops;
   analyze_options.min_occurrence_count = (uint32_t)FLAG_min_occurrences;
+  if (iree_status_is_ok(status)) {
+    status = loom_analyze_parse_parameterization(
+        iree_make_cstring_view(FLAG_parameterize),
+        &analyze_options.parameterization);
+    if (iree_status_is_ok(status) &&
+        (analyze_options.parameterization &
+         ~(loom_analyze_parameterization_t)
+             LOOM_ANALYZE_PARAMETERIZE_CONSTANTS)) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "--parameterize accepts none or constants; motifs cannot be generic "
+          "over element types");
+    }
+  }
   if (iree_status_is_ok(status)) {
     status =
         loom_analyze_analyzer_create(&analyze_options, allocator, &analyzer);

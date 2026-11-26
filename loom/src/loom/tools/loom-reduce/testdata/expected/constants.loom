@@ -1,0 +1,28 @@
+// The same tiling computation with different tile sizes. With
+// --parameterize=constants, each tile size constant stays in its function and
+// is passed to one shared motif covering the whole computation.
+func.def @tile16(%index: index, %base: index) -> (index) {
+  %tile = index.constant 16 : index
+  %packed = func.call @loom_reduce_8330b709b25e_ee2b47(%index, %base, %tile) : (index, index, index) -> (index)
+  %result = index.mul %packed, %base : index
+  func.return %result : index
+}
+
+func.def @tile32(%position: index, %origin: index) -> (index) {
+  %size = index.constant 32 : index
+  %combined = func.call @loom_reduce_8330b709b25e_ee2b47(%position, %origin, %size) : (index, index, index) -> (index)
+  %result = index.sub %combined, %origin : index
+  func.return %result : index
+}
+
+// Motifs extracted by loom-reduce.
+
+// Motif extracted by loom-reduce from 2 copies (6 ops each).
+func.def inline @loom_reduce_8330b709b25e_ee2b47(%index: index, %base: index, %tile: index) -> (index) {
+  %scaled = index.mul %index, %base : index
+  %offset = index.add %scaled, %tile : index
+  %row = index.div %offset, %tile : index
+  %column = index.rem %offset, %tile : index
+  %packed = index.add %row, %column : index
+  func.return %packed : index
+}

@@ -81,6 +81,11 @@ loom-analyze --parameterize=constants kernels/
 
 With `constants`, `*.constant` operations compare by result type without their
 literal value, and each message says the match holds up to constant values.
+In the JSON report, `call_site_constants` counts the constants directly in the
+sequence whose values differ between copies. A motif keeps them at each call
+site and takes them as parameters, so `removable_ops` counts them as staying in
+every copy. Copies that differ in a constant nested in a region, such as inside
+an `scf.if`, remove nothing.
 
 `--parameterize=types` also matches sequences that differ only in element types,
 such as the same computation on `f32` and `i16`. Loom motifs cannot be generic
@@ -221,6 +226,23 @@ the sequence its size depends on, and its buffer is passed to the motif:
 
 The motif receives only the values its body uses. Those operations must be pure
 and must not hold regions.
+
+### Copies that differ in constants
+
+`--parameterize=constants` also shares a motif between copies that differ only
+in constants directly in the sequence. Each such constant stays at its call
+site and is passed to the motif:
+
+```shell
+loom-reduce --parameterize=constants --output-dir=reduced/ kernels/
+```
+
+A differing constant defined before the shared operations already becomes a
+parameter without this flag. The flag matters only where differing constants
+are interleaved with the shared operations, and relaxing the match changes
+which sequences the plan selects. Run it after repeated default runs stop
+finding motifs. On the corpus above, it removes another 60 operations after
+convergence.
 
 ### Skipped rewrites
 

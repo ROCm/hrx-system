@@ -415,6 +415,10 @@ typedef struct loom_analyze_class_t {
   uint32_t output_count;
   // Relaxations the copies actually needed to match.
   loom_analyze_parameterization_t parameterized_by;
+  // Top-level constants differing between copies, and whether a constant
+  // nested in a region differs.
+  uint32_t call_site_constant_count;
+  bool nested_constant_differs;
 } loom_analyze_class_t;
 
 // Growable token buffer used to compare canonical encodings exactly.
@@ -1399,6 +1403,37 @@ static iree_status_t loom_analyze_record_group(
       clone_class->op_count = occurrence->op_end - occurrence->op_begin;
     }
   }
+
+  // Copies matching only up to constants differ in constant literals; compare
+  // the exact hash of each operation, in the shared pre-order, against the
+  // first copy.
+  clone_class->call_site_constant_count = 0;
+  clone_class->nested_constant_differs = false;
+  if (parameterized_by == LOOM_ANALYZE_PARAMETERIZE_CONSTANTS) {
+    const loom_analyze_class_occurrence_t* first =
+        &detection->occurrences.data[clone_class->occurrence_offset];
+    const loom_block_t* block =
+        analyzer->ops.data[first->op_begin].op->parent_block;
+    for (uint32_t k = 0; k < clone_class->op_count; ++k) {
+      const loom_analyze_op_t* reference =
+          &analyzer->ops.data[first->op_begin + k];
+      bool differs = false;
+      for (uint32_t i = 1; i < kept && !differs; ++i) {
+        const loom_analyze_class_occurrence_t* other =
+            &detection->occurrences.data[clone_class->occurrence_offset + i];
+        differs = analyzer->ops.data[other->op_begin + k].hashes[0] !=
+                  reference->hashes[0];
+      }
+      if (!differs) {
+        continue;
+      }
+      if (reference->op->parent_block == block) {
+        ++clone_class->call_site_constant_count;
+      } else {
+        clone_class->nested_constant_differs = true;
+      }
+    }
+  }
   return iree_ok_status();
 }
 
@@ -1996,6 +2031,7 @@ static iree_status_t loom_analyze_build_findings(
       finding->motif_symbol = finding->occurrences[motif_index].symbol;
     }
     finding->input_count = clone_class->input_count;
+    finding->call_site_constant_count = clone_class->call_site_constant_count;
     finding->output_count = (uint32_t)output_ordinals.count;
     // Each replaced callable copy leaves one call behind.
     const uint64_t ops = finding->op_count;
@@ -2009,9 +2045,12 @@ static iree_status_t loom_analyze_build_findings(
     uint64_t removable = 0;
     if (finding->rule == LOOM_ANALYZE_RULE_REIMPLEMENTED_MOTIF) {
       removable = callable_copies * (ops - 1);
-    } else {
+    } else if (!clone_class->nested_constant_differs) {
+      // Call-site constants stay in every copy and leave the motif body.
+      const uint64_t kept_ops = clone_class->call_site_constant_count;
       const uint64_t before = callable_copies * ops;
-      const uint64_t after = ops + callable_copies;
+      const uint64_t after =
+          (ops - kept_ops) + callable_copies * (kept_ops + 1);
       removable = callable_copies >= 2 && before > after ? before - after : 0;
     }
     finding->type_generic_removable_op_count = removable;

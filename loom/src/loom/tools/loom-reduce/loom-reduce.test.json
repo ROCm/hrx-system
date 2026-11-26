@@ -76,6 +76,34 @@
       ]
     },
     {
+      "name": "keeps differing constants at call sites",
+      "run": {
+        "tool": "loom-reduce",
+        "args": [
+          "--parameterize=constants",
+          "--output-dir={tmp}/out",
+          "{srcdir}/testdata/constants"
+        ]
+      },
+      "stderr": {"empty": true},
+      "files": [
+        {"path": "{tmp}/out/kernel.loom", "equals": "{srcdir}/testdata/expected/constants.loom"}
+      ]
+    },
+    {
+      "name": "rejects type parameterization",
+      "run": {
+        "tool": "loom-reduce",
+        "args": [
+          "--parameterize=types",
+          "--output-dir={tmp}/out",
+          "{srcdir}/testdata/constants"
+        ]
+      },
+      "exit": {"code": 2},
+      "stderr": {"contains": ["motifs cannot be generic over element types"]}
+    },
+    {
       "name": "corpus scope writes a shared motif file and link inputs",
       "run": {
         "tool": "loom-reduce",

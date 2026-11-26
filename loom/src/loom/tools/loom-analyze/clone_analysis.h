@@ -157,15 +157,22 @@ typedef struct loom_analyze_finding_t {
   // Distinct values flowing into the sequence: the parameters a motif
   // replacing it takes (before any constant parameterization).
   uint32_t input_count;
+  // Top-level constants whose values differ between copies. They stay at each
+  // call site and are passed to the motif. Zero unless constants are
+  // parameterized.
+  uint32_t call_site_constant_count;
   // Values defined by the sequence and used after it: the results a motif
   // replacing it returns. Measured on the first occurrence.
   uint32_t output_count;
   // Estimated operations removed by the refactor the rule suggests, counting
   // only callable copies (launch-config copies cannot become calls). For a
   // duplicate sequence with c callable copies: each becomes one call and one
-  // motif body is added, c * op_count - (op_count + c). For a reimplemented
-  // motif the body already exists: each callable copy saves op_count - 1.
-  // Never negative.
+  // motif body is added, c * op_count - (op_count + c). Each of the k
+  // call-site constants stays in every copy and leaves the motif body:
+  // c * op_count - (op_count - k + c * (k + 1)). Copies differing in a
+  // constant nested in a region remove nothing, since that constant cannot
+  // stay at the call site. For a reimplemented motif the body already exists:
+  // each callable copy saves op_count - 1. Never negative.
   uint64_t removable_op_count;
   // True when the finding belongs to the analyzer's refactor plan: a greedy
   // selection, largest removable_op_count first, of findings whose callable

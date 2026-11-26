@@ -51,8 +51,10 @@ loomc_cc_binary(
 iree_cli_test(
     name = "execution_test",
     data = [
+        "testdata/constants/kernel.loom",
         "testdata/corpus/family/first.loom",
         "testdata/corpus/family/second.loom",
+        "testdata/expected/constants.loom",
         "testdata/expected/hoist.loom",
         "testdata/expected/kernel.loom",
         "testdata/hoist/kernel.loom",

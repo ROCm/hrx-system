@@ -183,6 +183,8 @@ typedef struct loom_reduce_job_t {
   // already defined at the call site).
   uint32_t hoist_count;
   uint32_t passed_count;
+  // Copies may differ in top-level constants, which stay at the call sites.
+  bool vary_constants;
   // The called function is `pure`: it is defined and declared pure and
   // called with `func.call pure`, so pure functions holding copies stay
   // verifiably pure.
@@ -1093,11 +1095,12 @@ static iree_status_t loom_reduce_add_hoist(loom_reduce_plan_t* plan,
       !loom_reduce_offset(source, range.end_line, range.end_column,
                           &hoist->end) ||
       hoist->end <= hoist->start) {
-    *out_reason = "a hoisted allocation's source range does not resolve";
+    *out_reason = "an operation kept at the call site has no source range";
     return iree_ok_status();
   }
   if (!loom_reduce_alone_on_lines(source->text, hoist->start, hoist->end)) {
-    *out_reason = "a hoisted allocation shares its lines with other code";
+    *out_reason =
+        "an operation kept at the call site shares its lines with other code";
     return iree_ok_status();
   }
   hoist->start_line = range.start_line;
@@ -1107,7 +1110,7 @@ static iree_status_t loom_reduce_add_hoist(loom_reduce_plan_t* plan,
     const loom_value_t* result = loom_op_result_value(module, op, r);
     if (result->name_id == LOOM_STRING_ID_INVALID ||
         result->name_id >= module->strings.count) {
-      *out_reason = "a hoisted allocation's result has no source name";
+      *out_reason = "an operation kept at the call site has an unnamed result";
       return iree_ok_status();
     }
     loom_analyze_binding_t* binding =
@@ -1160,6 +1163,7 @@ static const loom_op_t* loom_reduce_copy_first_op(
 static iree_status_t loom_reduce_collect_hoists(loom_reduce_plan_t* plan,
                                                 loom_reduce_copy_t* copy,
                                                 const loom_op_t* first,
+                                                const bool* forced,
                                                 const char** out_reason) {
   const loom_module_t* module = plan->sources[copy->source].module;
   const loom_analyze_occurrence_t* occurrence = copy->occurrence;
@@ -1183,7 +1187,11 @@ static iree_status_t loom_reduce_collect_hoists(loom_reduce_plan_t* plan,
       return iree_ok_status();
     }
   }
-  if (alloca_count == 0) {
+  bool any_forced = false;
+  for (uint32_t k = 0; forced && k < length; ++k) {
+    any_forced = any_forced || forced[k];
+  }
+  if (alloca_count == 0 && !any_forced) {
     return iree_ok_status();
   }
   const loom_op_t** ops = NULL;
@@ -1195,7 +1203,7 @@ static iree_status_t loom_reduce_collect_hoists(loom_reduce_plan_t* plan,
   uint32_t i = 0;
   for (const loom_op_t* op = first; i < length; op = op->next_op, ++i) {
     ops[i] = op;
-    marked[i] = loom_reduce_is_alloca(module, op);
+    marked[i] = loom_reduce_is_alloca(module, op) || (forced && forced[i]);
   }
   // Mark what the allocations depend on. Definitions precede their uses, so
   // one backward pass reaches the whole slice.
@@ -1289,6 +1297,154 @@ static bool loom_reduce_is_hoisted(const loom_reduce_copy_t* copy,
                                   name) != UINT32_MAX;
 }
 
+// Returns the top-level operations of |copy|'s sequence starting at |first|.
+static iree_status_t loom_reduce_window_ops(loom_reduce_plan_t* plan,
+                                            const loom_reduce_copy_t* copy,
+                                            const loom_op_t* first,
+                                            const loom_op_t*** out_ops,
+                                            uint32_t* out_length) {
+  const loom_module_t* module = plan->sources[copy->source].module;
+  const loom_analyze_occurrence_t* occurrence = copy->occurrence;
+  uint32_t length = 0;
+  for (const loom_op_t* op = first; op; op = op->next_op) {
+    loom_source_range_t range;
+    if (!loom_reduce_op_range(module, op, &range) ||
+        !loom_reduce_position_before(range.start_line, range.start_column,
+                                     occurrence->end_line,
+                                     occurrence->end_column)) {
+      break;
+    }
+    ++length;
+  }
+  const loom_op_t** ops = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      &plan->arena, (length + 1) * sizeof(*ops), (void**)&ops));
+  const loom_op_t* op = first;
+  for (uint32_t i = 0; i < length; ++i, op = op->next_op) {
+    ops[i] = op;
+  }
+  *out_ops = ops;
+  *out_length = length;
+  return iree_ok_status();
+}
+
+static bool loom_reduce_is_constant(const loom_module_t* module,
+                                    const loom_op_t* op) {
+  return iree_string_view_ends_with(loom_op_name(module, op),
+                                    IREE_SV(".constant"));
+}
+
+// Sets |*out_equal| to whether constants |op| of |source| and |other_op| of
+// |other| print the same apart from their result names.
+static iree_status_t loom_reduce_constants_equal(
+    loom_reduce_plan_t* plan, loom_reduce_source_t* source, const loom_op_t* op,
+    loom_reduce_source_t* other, const loom_op_t* other_op, bool* out_equal) {
+  iree_string_builder_t first, second;
+  iree_string_builder_initialize(plan->allocator, &first);
+  iree_string_builder_initialize(plan->allocator, &second);
+  iree_status_t status =
+      loom_reduce_print_header(source, op, plan->allocator, &first);
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_reduce_print_header(other, other_op, plan->allocator, &second);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_string_view_t a = iree_string_builder_view(&first);
+    iree_string_view_t b = iree_string_builder_view(&second);
+    const iree_host_size_t a_at = iree_string_view_find_char(a, '=', 0);
+    const iree_host_size_t b_at = iree_string_view_find_char(b, '=', 0);
+    *out_equal = a_at != IREE_STRING_VIEW_NPOS &&
+                 b_at != IREE_STRING_VIEW_NPOS &&
+                 iree_string_view_equal(
+                     iree_string_view_substr(a, a_at, IREE_HOST_SIZE_MAX),
+                     iree_string_view_substr(b, b_at, IREE_HOST_SIZE_MAX));
+  }
+  iree_string_builder_deinitialize(&first);
+  iree_string_builder_deinitialize(&second);
+  return status;
+}
+
+// Sets |*out_differ| when a constant nested in the regions of |op| differs
+// from its counterpart in |other_op|. Copies match structurally, so their
+// regions are walked in lockstep.
+static iree_status_t loom_reduce_nested_constants_differ(
+    loom_reduce_plan_t* plan, loom_reduce_source_t* source, const loom_op_t* op,
+    loom_reduce_source_t* other, const loom_op_t* other_op, bool* out_differ) {
+  loom_region_t** regions = loom_op_regions(op);
+  loom_region_t** other_regions = loom_op_regions(other_op);
+  for (uint8_t r = 0; r < op->region_count && !*out_differ; ++r) {
+    if (!regions[r] || !other_regions[r]) {
+      continue;
+    }
+    for (uint16_t b = 0; b < regions[r]->block_count && !*out_differ; ++b) {
+      const loom_block_t* block = regions[r]->blocks[b];
+      const loom_block_t* other_block = other_regions[r]->blocks[b];
+      const loom_op_t* child = block ? block->first_op : NULL;
+      const loom_op_t* other_child = other_block ? other_block->first_op : NULL;
+      for (; child && other_child && !*out_differ;
+           child = child->next_op, other_child = other_child->next_op) {
+        if (loom_reduce_is_constant(source->module, child)) {
+          bool equal = false;
+          IREE_RETURN_IF_ERROR(loom_reduce_constants_equal(
+              plan, source, child, other, other_child, &equal));
+          *out_differ = !equal;
+        } else {
+          IREE_RETURN_IF_ERROR(loom_reduce_nested_constants_differ(
+              plan, source, child, other, other_child, out_differ));
+        }
+      }
+    }
+  }
+  return iree_ok_status();
+}
+
+// Finds the top-level constants whose values differ between the copies of
+// |job| (starting at |firsts|). They stay at the call sites like allocations,
+// so one motif serves every copy and each call passes its own value.
+static iree_status_t loom_reduce_differing_constants(
+    loom_reduce_plan_t* plan, const loom_reduce_job_t* job,
+    const loom_op_t** firsts, bool** out_forced, const char** out_reason) {
+  const loom_op_t** template_ops = NULL;
+  uint32_t length = 0;
+  IREE_RETURN_IF_ERROR(loom_reduce_window_ops(plan, &job->copies[0], firsts[0],
+                                              &template_ops, &length));
+  bool* forced = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      &plan->arena, (length + 1) * sizeof(bool), (void**)&forced));
+  memset(forced, 0, (length + 1) * sizeof(bool));
+  loom_reduce_source_t* source = &plan->sources[job->copies[0].source];
+  for (uint32_t c = 1; c < job->copy_count && !*out_reason; ++c) {
+    const loom_op_t** ops = NULL;
+    uint32_t other_length = 0;
+    IREE_RETURN_IF_ERROR(loom_reduce_window_ops(
+        plan, &job->copies[c], firsts[c], &ops, &other_length));
+    if (other_length != length) {
+      *out_reason = "copies disagree on their operations";
+      break;
+    }
+    loom_reduce_source_t* other = &plan->sources[job->copies[c].source];
+    for (uint32_t k = 0; k < length && !*out_reason; ++k) {
+      if (loom_reduce_is_constant(source->module, template_ops[k])) {
+        bool equal = false;
+        IREE_RETURN_IF_ERROR(loom_reduce_constants_equal(
+            plan, source, template_ops[k], other, ops[k], &equal));
+        forced[k] = forced[k] || !equal;
+        continue;
+      }
+      bool differ = false;
+      IREE_RETURN_IF_ERROR(loom_reduce_nested_constants_differ(
+          plan, source, template_ops[k], other, ops[k], &differ));
+      if (differ) {
+        *out_reason =
+            "copies differ in a constant nested in a region, which cannot "
+            "stay at the call site";
+      }
+    }
+  }
+  *out_forced = forced;
+  return iree_ok_status();
+}
+
 // Keeps a new motif's allocations at its call sites: each copy's top-level
 // `buffer.alloca` ops stay before its call and their buffers become trailing
 // motif parameters, so every call site keeps its own allocation.
@@ -1297,25 +1453,35 @@ static iree_status_t loom_reduce_prepare_hoists(loom_reduce_plan_t* plan,
   const loom_analyze_occurrence_t* occurrence = job->copies[0].occurrence;
   job->output_count = occurrence->output_count;
   const char* reason = NULL;
+  const loom_op_t** firsts = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      &plan->arena, job->copy_count * sizeof(*firsts), (void**)&firsts));
   for (uint32_t c = 0; c < job->copy_count && !reason; ++c) {
-    const loom_op_t* first = loom_reduce_copy_first_op(plan, &job->copies[c]);
-    if (!first) {
+    firsts[c] = loom_reduce_copy_first_op(plan, &job->copies[c]);
+    if (!firsts[c]) {
       reason = "a copy's operations do not resolve";
       break;
     }
     // A copy inside a pure function makes the motif pure; the verifier checks
     // that its body is.
-    job->pure =
-        job->pure || loom_reduce_in_pure_function(
-                         plan->sources[job->copies[c].source].module, first);
+    job->pure = job->pure ||
+                loom_reduce_in_pure_function(
+                    plan->sources[job->copies[c].source].module, firsts[c]);
+  }
+  bool* forced = NULL;
+  if (!reason && job->vary_constants) {
     IREE_RETURN_IF_ERROR(
-        loom_reduce_collect_hoists(plan, &job->copies[c], first, &reason));
+        loom_reduce_differing_constants(plan, job, firsts, &forced, &reason));
+  }
+  for (uint32_t c = 0; c < job->copy_count && !reason; ++c) {
+    IREE_RETURN_IF_ERROR(loom_reduce_collect_hoists(
+        plan, &job->copies[c], firsts[c], forced, &reason));
     if (!reason &&
         (job->copies[c].hoist_count != job->copies[0].hoist_count ||
          job->copies[c].hoisted_value_count !=
              job->copies[0].hoisted_value_count ||
          job->copies[c].passed_count != job->copies[0].passed_count)) {
-      reason = "copies disagree on their allocations";
+      reason = "copies disagree on what stays at the call site";
     }
   }
   job->hoist_count = reason ? 0 : job->copies[0].hoist_count;
@@ -1385,13 +1551,26 @@ iree_status_t loom_reduce_plan_create(const loom_reduce_options_t* options,
     if (!finding->selected) {
       continue;
     }
-    if (finding->parameterized_by != LOOM_ANALYZE_PARAMETERIZE_NONE) {
-      status = loom_reduce_skip(plan, finding->fingerprint,
-                                "copies differ in constants or types");
-    } else if (finding->rule == LOOM_ANALYZE_RULE_REIMPLEMENTED_MOTIF) {
+    const bool exact =
+        finding->parameterized_by == LOOM_ANALYZE_PARAMETERIZE_NONE;
+    if (finding->rule == LOOM_ANALYZE_RULE_REIMPLEMENTED_MOTIF && exact) {
       status = loom_reduce_add_existing_job(plan, finding);
-    } else {
+    } else if (finding->rule == LOOM_ANALYZE_RULE_DUPLICATE_SEQUENCE &&
+               (exact || finding->parameterized_by ==
+                             LOOM_ANALYZE_PARAMETERIZE_CONSTANTS)) {
+      // Copies differing in constants share one motif; the differing
+      // constants stay at the call sites.
+      const iree_host_size_t first_job = plan->job_count;
       status = loom_reduce_add_duplicate_jobs(plan, finding);
+      for (iree_host_size_t j = first_job; j < plan->job_count; ++j) {
+        plan->jobs[j].vary_constants = !exact;
+      }
+    } else {
+      status = loom_reduce_skip(
+          plan, finding->fingerprint,
+          finding->rule == LOOM_ANALYZE_RULE_REIMPLEMENTED_MOTIF
+              ? "copies differ from the existing motif in constants or types"
+              : "copies differ in element types");
     }
   }
   for (iree_host_size_t j = 0; j < plan->job_count && iree_status_is_ok(status);

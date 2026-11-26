@@ -354,6 +354,9 @@ static iree_status_t loom_analyze_write_json(
         &object, IREE_SV("input_count"), finding->input_count));
     IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
         &object, IREE_SV("output_count"), finding->output_count));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &object, IREE_SV("call_site_constants"),
+        finding->call_site_constant_count));
     IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
         &object, IREE_SV("removable_ops"), finding->removable_op_count));
     IREE_RETURN_IF_ERROR(
