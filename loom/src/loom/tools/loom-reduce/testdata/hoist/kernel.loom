@@ -1,0 +1,53 @@
+// Shapes loom-reduce must preserve when it extracts a motif:
+// - each copy allocates workgroup scratch, so the allocation and the size it
+//   depends on stay at every call site and the buffer becomes a parameter;
+// - a value used afterwards only inside a type (%count) is still returned;
+// - copies inside pure functions make the motif and its calls pure.
+func.def @stage_rows(%input: buffer, %rows: index, %row: index) -> (f32) {
+  %c0 = index.constant 0 : offset
+  %bytes = index.constant 1024 : offset
+  %shared = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %count = index.div %rows, %row : index
+  %stage_view = buffer.view %shared[%c0] : buffer -> view<[%rows]xf32>
+  %input_view = buffer.view %input[%c0] : buffer -> view<[%rows]xf32>
+  %value = view.load %input_view[%row] : view<[%rows]xf32> -> f32
+  view.store %value, %stage_view[%row] : f32, view<[%rows]xf32>
+  %count_view = buffer.view %shared[%c0] : buffer -> view<[%count]xf32>
+  %result = view.load %count_view[%row] : view<[%count]xf32> -> f32
+  func.return %result : f32
+}
+
+func.def @stage_columns(%source: buffer, %columns: index, %column: index) -> (f32) {
+  %zero = index.constant 0 : offset
+  %size = index.constant 1024 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %size : buffer
+  %width = index.div %columns, %column : index
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<[%columns]xf32>
+  %source_view = buffer.view %source[%zero] : buffer -> view<[%columns]xf32>
+  %loaded = view.load %source_view[%column] : view<[%columns]xf32> -> f32
+  view.store %loaded, %scratch_view[%column] : f32, view<[%columns]xf32>
+  %next = index.add %column, %column : index
+  %width_view = buffer.view %scratch[%zero] : buffer -> view<[%width]xf32>
+  %staged = view.load %width_view[%next] : view<[%width]xf32> -> f32
+  func.return %staged : f32
+}
+
+func.def pure @padded_extent(%count: index, %pad: index) -> (index) {
+  %one = index.constant 1 : index
+  %grown = index.add %count, %pad : index
+  %rounded = index.sub %grown, %one : index
+  %quotient = index.div %rounded, %pad : index
+  %extent = index.mul %quotient, %pad : index
+  %total = index.add %extent, %count : index
+  func.return %total : index
+}
+
+func.def pure @padded_width(%width: index, %align: index) -> (index) {
+  %unit = index.constant 1 : index
+  %sum = index.add %width, %align : index
+  %less = index.sub %sum, %unit : index
+  %blocks = index.div %less, %align : index
+  %padded = index.mul %blocks, %align : index
+  %slack = index.sub %padded, %width : index
+  func.return %slack : index
+}

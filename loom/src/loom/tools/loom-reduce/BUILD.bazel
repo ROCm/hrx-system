@@ -1,0 +1,68 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
+load("//loom/binding/c:shared.bzl", "loomc_cc_binary")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "reduce",
+    srcs = ["reduce.c"],
+    hdrs = ["reduce.h"],
+    deps = [
+        "//loom/src/loom/error:source",
+        "//loom/src/loom/format/text:printer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:storage",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/tools/loom-analyze:clone_analysis",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loomc_cc_binary(
+    name = "loom-reduce",
+    srcs = ["loom-reduce.c"],
+    deps = [
+        ":reduce",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/tooling/cli:help",
+        "//loom/src/loom/tooling/io:file",
+        "//loom/src/loom/tools/loom-analyze:clone_analysis",
+        "//loom/src/loom/tools/loom-analyze:inputs",
+        "//loom/src/loom/tools/loom-analyze:session",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+    ],
+)
+
+iree_cli_test(
+    name = "execution_test",
+    data = [
+        "testdata/constants/kernel.loom",
+        "testdata/corpus/family/first.loom",
+        "testdata/corpus/family/second.loom",
+        "testdata/expected/constants.loom",
+        "testdata/expected/hoist.loom",
+        "testdata/expected/kernel.loom",
+        "testdata/hoist/kernel.loom",
+        "testdata/tree/kernel.loom",
+    ],
+    manifests = ["loom-reduce.test.json"],
+    tags = ["hostonly"],
+    tools = {
+        "loom-reduce": ":loom-reduce",
+    },
+)

@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "prints agent documentation",
+      "run": {
+        "tool": "loom-reduce",
+        "args": ["--agents_md"]
+      },
+      "stdout": {"contains": ["## loom-reduce"]}
+    },
+    {
+      "name": "requires an output directory",
+      "run": {
+        "tool": "loom-reduce",
+        "args": ["{srcdir}/testdata/tree"]
+      },
+      "exit": {"code": 2},
+      "stderr": {"contains": ["--output-dir is required"]}
+    },
+    {
+      "name": "requires one source root",
+      "run": {
+        "tool": "loom-reduce",
+        "args": ["--output-dir={tmp}/out"]
+      },
+      "exit": {"code": 2},
+      "stderr": {"contains": ["exactly one source root"]}
+    },
+    {
+      "name": "rejects an unknown scope",
+      "run": {
+        "tool": "loom-reduce",
+        "args": ["--scope=global", "--output-dir={tmp}/out", "{srcdir}/testdata/tree"]
+      },
+      "exit": {"code": 2},
+      "stderr": {"contains": ["unknown --scope 'global'"]}
+    },
+    {
+      "name": "refuses a non-empty output directory",
+      "run": {
+        "tool": "loom-reduce",
+        "args": ["--output-dir={srcdir}/testdata", "{srcdir}/testdata/tree"]
+      },
+      "exit": {"code": 2},
+      "stderr": {"contains": ["is not empty"]}
+    },
+    {
+      "name": "file scope writes the rewritten tree and report",
+      "run": {
+        "tool": "loom-reduce",
+        "args": [
+          "--output-dir={tmp}/out",
+          "--report={tmp}/report.json",
+          "{srcdir}/testdata/tree"
+        ]
+      },
+      "stderr": {"empty": true},
+      "files": [
+        {"path": "{tmp}/out/kernel.loom", "equals": "{srcdir}/testdata/expected/kernel.loom"},
+        {"path": "{tmp}/report.json", "non_empty": true}
+      ]
+    },
+    {
+      "name": "keeps allocations at call sites and pure motifs pure",
+      "run": {
+        "tool": "loom-reduce",
+        "args": [
+          "--output-dir={tmp}/out",
+          "{srcdir}/testdata/hoist"
+        ]
+      },
+      "stderr": {"empty": true},
+      "files": [
+        {"path": "{tmp}/out/kernel.loom", "equals": "{srcdir}/testdata/expected/hoist.loom"}
+      ]
+    },
+    {
+      "name": "keeps differing constants at call sites",
+      "run": {
+        "tool": "loom-reduce",
+        "args": [
+          "--parameterize=constants",
+          "--output-dir={tmp}/out",
+          "{srcdir}/testdata/constants"
+        ]
+      },
+      "stderr": {"empty": true},
+      "files": [
+        {"path": "{tmp}/out/kernel.loom", "equals": "{srcdir}/testdata/expected/constants.loom"}
+      ]
+    },
+    {
+      "name": "rejects type parameterization",
+      "run": {
+        "tool": "loom-reduce",
+        "args": [
+          "--parameterize=types",
+          "--output-dir={tmp}/out",
+          "{srcdir}/testdata/constants"
+        ]
+      },
+      "exit": {"code": 2},
+      "stderr": {"contains": ["motifs cannot be generic over element types"]}
+    },
+    {
+      "name": "corpus scope writes a shared motif file and link inputs",
+      "run": {
+        "tool": "loom-reduce",
+        "args": [
+          "--scope=corpus",
+          "--output-dir={tmp}/out",
+          "--links={tmp}/links.json",
+          "{srcdir}/testdata/corpus"
+        ]
+      },
+      "stderr": {"empty": true},
+      "files": [
+        {"path": "{tmp}/out/family/loom_reduce_family_motifs.loom", "non_empty": true},
+        {"path": "{tmp}/links.json", "non_empty": true}
+      ]
+    }
+  ]
+}

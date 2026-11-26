@@ -1,0 +1,24 @@
+// The same tiling computation with different tile sizes. With
+// --parameterize=constants, each tile size constant stays in its function and
+// is passed to one shared motif covering the whole computation.
+func.def @tile16(%index: index, %base: index) -> (index) {
+  %scaled = index.mul %index, %base : index
+  %tile = index.constant 16 : index
+  %offset = index.add %scaled, %tile : index
+  %row = index.div %offset, %tile : index
+  %column = index.rem %offset, %tile : index
+  %packed = index.add %row, %column : index
+  %result = index.mul %packed, %base : index
+  func.return %result : index
+}
+
+func.def @tile32(%position: index, %origin: index) -> (index) {
+  %product = index.mul %position, %origin : index
+  %size = index.constant 32 : index
+  %sum = index.add %product, %size : index
+  %quotient = index.div %sum, %size : index
+  %remainder = index.rem %sum, %size : index
+  %combined = index.add %quotient, %remainder : index
+  %result = index.sub %combined, %origin : index
+  func.return %result : index
+}

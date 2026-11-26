@@ -1,0 +1,11 @@
+// One copy of an address computation; the other is in second.loom.
+func.def @first_address(%row: index, %col: index, %stride: index, %base: index) -> (index) {
+  %start = index.add %row, %col : index
+  %scaled = index.mul %start, %stride : index
+  %offset = index.add %scaled, %col : index
+  %shifted = index.add %base, %offset : index
+  %wrapped = index.rem %shifted, %stride : index
+  %bucket = index.div %shifted, %stride : index
+  %address = index.add %bucket, %wrapped : index
+  func.return %address : index
+}

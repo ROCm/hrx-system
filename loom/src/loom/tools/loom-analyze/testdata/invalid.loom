@@ -1,0 +1,5 @@
+// This module does not verify: %missing is never defined.
+func.def @broken(%value: index) -> (index) {
+  %sum = index.add %value, %missing : index
+  func.return %sum : index
+}

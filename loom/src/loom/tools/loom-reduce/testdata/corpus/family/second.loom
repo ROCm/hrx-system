@@ -1,0 +1,11 @@
+// The second copy of the address computation in first.loom.
+func.def @second_address(%tile_row: index, %tile_col: index, %pitch: index, %origin: index) -> (index) {
+  %first = index.mul %tile_row, %tile_col : index
+  %row_bytes = index.mul %first, %pitch : index
+  %local = index.add %row_bytes, %tile_col : index
+  %global = index.add %origin, %local : index
+  %lane = index.rem %global, %pitch : index
+  %group = index.div %global, %pitch : index
+  %result = index.add %group, %lane : index
+  func.return %result : index
+}

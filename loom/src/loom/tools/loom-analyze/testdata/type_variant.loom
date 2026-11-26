@@ -1,0 +1,21 @@
+// Two functions repeat one computation in different element types. They match
+// only with --parameterize=types, and no motif can replace both today.
+func.def @mix_i32(%lhs: i32, %rhs: i32) -> (i32) {
+  %sum = scalar.addi %lhs, %rhs : i32
+  %left = scalar.addi %sum, %lhs : i32
+  %right = scalar.addi %left, %rhs : i32
+  %both = scalar.addi %right, %sum : i32
+  %again = scalar.addi %both, %left : i32
+  %result = scalar.addi %again, %right : i32
+  func.return %result : i32
+}
+
+func.def @mix_i64(%lhs: i64, %rhs: i64) -> (i64) {
+  %sum = scalar.addi %lhs, %rhs : i64
+  %left = scalar.addi %sum, %lhs : i64
+  %right = scalar.addi %left, %rhs : i64
+  %both = scalar.addi %right, %sum : i64
+  %again = scalar.addi %both, %left : i64
+  %result = scalar.addi %again, %right : i64
+  func.return %result : i64
+}
