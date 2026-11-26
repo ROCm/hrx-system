@@ -141,9 +141,13 @@ loom-reduce --output-dir=reduced/ --report=reduce.json kernels/
 ```
 
 ```text
-loom-reduce: 293 motif(s) replace 998 copies in 79 file(s); removes 6542 of 46773 ops (14.0%)
-loom-reduce: 49 skipped, 10 reverted after verification
+loom-reduce: 473 motif(s) replace 1670 copies in 116 file(s); removes 6742 of 46773 ops (14.4%)
+loom-reduce: 16 skipped, 8 reverted after verification
+loom-reduce: 0 existing motif(s) reused; 33 new motif(s) made where reuse was impossible
 ```
+
+`loom-reduce` considers sequences of four or more operations (`--min-ops`) and
+skips any whose calls would not remove operations.
 
 Each selected finding becomes one `func.def inline` motif and each callable copy
 becomes a call. With the default `--scope=file`, a motif is defined at the end
@@ -155,18 +159,45 @@ motifs go to one motif file in that directory, together with the declarations
 their bodies reference. The file is named `loom_reduce_<directory>_motifs.loom`
 by default, so motif files of different groups never share a name; set
 `--motif-file`, where `{group}` stands for the directory. Calling files
-gain a `func.decl`. Copies of an existing `func.def` in the same file become
-calls to it.
+gain a `func.decl`.
 
 ```shell
 loom-reduce --scope=corpus --links=links.json --output-dir=reduced/ kernels/
 ```
 
 ```text
-loom-reduce: 399 motif(s) replace 1433 copies in 172 file(s); removes 9764 of 46773 ops (20.9%)
-loom-reduce: 70 skipped, 22 reverted after verification
-loom-reduce: 169 file(s) now need new link inputs; see links.json
+loom-reduce: 633 motif(s) replace 2521 copies in 215 file(s); removes 11670 of 46773 ops (25.0%)
+loom-reduce: 37 skipped, 26 reverted after verification
+loom-reduce: 13 existing motif(s) reused; 20 new motif(s) made where reuse was impossible
+loom-reduce: 212 file(s) now need new link inputs; see links.json
 ```
+
+### Reuse before creating
+
+A sequence that repeats the body of an existing function is not given a new
+motif; its copies call that function. Copies in the function's own file call it
+in place. With `--scope=corpus`, copies elsewhere in its group call it too:
+either it already lives in the group's motif file (a motif from an earlier
+run), or its definition moves there unchanged under the same name, its original
+file keeps a `func.decl`, and `links.json` records that the original file now
+needs the motif file. Moving only that definition, instead of linking its whole
+original file elsewhere, avoids bringing other definitions along.
+
+A new motif is made only when reuse is impossible, and `reduce.json` lists the
+reason under `reuse_fallbacks`:
+- the function is a `template.def` provider; moving a provider would make it a
+  selection candidate in programs that never linked it;
+- its name is defined more than once in the group, so callers could bind to
+  different bodies;
+- its body is not a single block ending in `func.return`, or its signature does
+  not match what the copies supply and use.
+
+### Repeat until nothing changes
+
+Each run can expose new copies, for example sequences that now differ only by a
+call. Running `loom-reduce` again on its own output until it reports no motifs
+converges in a few passes; on the same corpus three passes reduce 46,773
+operations to 32,444 (30.6%). Apply each run's `links.json` before the next.
 
 `links.json` maps each rewritten file to the motif files it now needs:
 `{"requires": {"family/ops/a.loom": ["family/loom_reduce_family_motifs.loom"]}}`. Add

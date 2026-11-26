@@ -31,8 +31,9 @@ IREE_FLAG(string, scope, "file",
 IREE_FLAG(string, motif_file, "loom_reduce_{group}_motifs.loom",
           "Motif file name created in each top-level directory (corpus "
           "scope); {group} becomes the directory name.");
-IREE_FLAG(int32_t, min_ops, 6,
-          "Minimum duplicated sequence size in operations.");
+IREE_FLAG(int32_t, min_ops, 4,
+          "Minimum duplicated sequence size in operations. Sequences whose "
+          "calls would not remove operations are skipped.");
 IREE_FLAG(int32_t, min_occurrences, 2,
           "Minimum number of copies of a duplicated sequence.");
 IREE_FLAG(string, report, "",
@@ -195,8 +196,13 @@ static void loom_reduce_print_agents_markdown(FILE* stream) {
       "motifs to `<dir>/loom_reduce_<dir>_motifs.loom` with the declarations\n"
       "they reference, adds\n"
       "`func.decl` lines to calling files, and records in `--links` which\n"
-      "files each rewritten source now needs linked. Copies of an existing\n"
-      "`func.def` in the same file become calls to it.\n"
+      "files each rewritten source now needs linked.\n"
+      "\n"
+      "Copies of an existing `func.def` call it rather than getting a new\n"
+      "motif; in corpus scope its definition moves unchanged into the group's\n"
+      "motif file when copies live in other files. `reduce.json` lists under\n"
+      "`reuse_fallbacks` why reuse was impossible where a new motif was made.\n"
+      "Run repeatedly on the output until no motifs are reported.\n"
       "\n"
       "Every rewritten file is parsed and verified in memory; motifs touching "
       "a\n"
@@ -416,11 +422,14 @@ int main(int argc, char** argv) {
         "loom-reduce: %u motif(s) replace %u copies in %u file(s); "
         "removes %" PRIu64 " of %" PRIu64
         " ops (%.1f%%)\n"
-        "loom-reduce: %u skipped, %u reverted after verification\n",
+        "loom-reduce: %u skipped, %u reverted after verification\n"
+        "loom-reduce: %u existing motif(s) reused; %u new motif(s) made "
+        "where reuse was impossible\n",
         summary.motif_count, summary.replaced_copy_count,
         summary.changed_file_count, summary.removed_op_count, total,
         total ? 100.0 * (double)summary.removed_op_count / (double)total : 0.0,
-        summary.skipped_count, summary.reverted_count);
+        summary.skipped_count, summary.reverted_count, summary.reused_count,
+        summary.reuse_fallback_count);
     if (summary.linked_file_count) {
       fprintf(stdout, "loom-reduce: %u file(s) now need new link inputs%s%s\n",
               summary.linked_file_count, FLAG_links[0] ? "; see " : "",

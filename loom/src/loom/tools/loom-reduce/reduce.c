@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "iree/base/internal/arena.h"
+#include "loom/error/source.h"
 #include "loom/format/text/printer.h"
 #include "loom/ir/context.h"
 #include "loom/ops/op_defs.h"
@@ -143,6 +144,16 @@ typedef struct loom_reduce_job_t {
   uint32_t copy_count;
   // Source hosting a new motif, or UINT32_MAX for an existing motif.
   uint32_t motif_source;
+  // Existing motifs: the source defining the called function after the
+  // rewrite. When the definition moves there from |definition_source| (a
+  // relocation), [definition_start, definition_end) is its original text.
+  uint32_t host_source;
+  uint32_t definition_source;
+  bool relocate;
+  iree_host_size_t definition_start;
+  iree_host_size_t definition_end;
+  // Existing motifs: `func.decl @name(...)` for files calling it elsewhere.
+  iree_string_view_t declaration;
   // Existing motifs: parameter and result counts of the called definition.
   uint32_t parameter_count;
   uint32_t result_count;
@@ -168,6 +179,11 @@ struct loom_reduce_plan_t {
   loom_reduce_skip_t* skips;
   iree_host_size_t skip_count;
   iree_host_size_t skip_capacity;
+  // Findings repeating an existing function that got a new motif instead,
+  // with the reason reuse was impossible.
+  loom_reduce_skip_t* fallbacks;
+  iree_host_size_t fallback_count;
+  iree_host_size_t fallback_capacity;
   bool applied;
 };
 
@@ -314,6 +330,8 @@ static iree_status_t loom_reduce_new_job(loom_reduce_plan_t* plan,
   loom_reduce_job_t* job = &plan->jobs[plan->job_count++];
   memset(job, 0, sizeof(*job));
   job->motif_source = UINT32_MAX;
+  job->host_source = UINT32_MAX;
+  job->definition_source = UINT32_MAX;
   *out_job = job;
   return iree_ok_status();
 }
@@ -365,6 +383,56 @@ static iree_string_view_t loom_reduce_group(const loom_reduce_plan_t* plan,
     return iree_string_view_empty();
   }
   return iree_make_string_view(relative_path.data, slash);
+}
+
+// Returns the source of |group|'s shared motif file, adding an empty one when
+// the root has none yet. `{group}` in the configured name becomes the group
+// directory ("root" for files directly under the root), so motif files of
+// different groups never share a name when their groups are combined later.
+static iree_status_t loom_reduce_group_motif_source(loom_reduce_plan_t* plan,
+                                                    iree_string_view_t group,
+                                                    uint32_t* out_source) {
+  iree_string_builder_t path;
+  iree_string_builder_initialize(plan->allocator, &path);
+  iree_status_t status = iree_ok_status();
+  if (!iree_string_view_is_empty(group)) {
+    status = iree_string_builder_append_format(&path, "%.*s/", (int)group.size,
+                                               group.data);
+  }
+  const iree_string_view_t placeholder = IREE_SV("{group}");
+  iree_string_view_t name = plan->options.motif_file_name;
+  while (iree_status_is_ok(status) && !iree_string_view_is_empty(name)) {
+    const iree_host_size_t at = iree_string_view_find_char(name, '{', 0);
+    const bool is_placeholder =
+        at != IREE_STRING_VIEW_NPOS &&
+        iree_string_view_starts_with(
+            iree_string_view_substr(name, at, IREE_HOST_SIZE_MAX), placeholder);
+    const iree_host_size_t literal =
+        at == IREE_STRING_VIEW_NPOS ? name.size : at + (is_placeholder ? 0 : 1);
+    status = iree_string_builder_append_string(
+        &path, iree_make_string_view(name.data, literal));
+    name = iree_string_view_substr(name, literal, IREE_HOST_SIZE_MAX);
+    if (iree_status_is_ok(status) && is_placeholder) {
+      status = iree_string_builder_append_string(
+          &path, iree_string_view_is_empty(group) ? IREE_SV("root") : group);
+      name =
+          iree_string_view_substr(name, placeholder.size, IREE_HOST_SIZE_MAX);
+    }
+  }
+  iree_string_view_t relative = iree_string_view_empty();
+  if (iree_status_is_ok(status)) {
+    status = loom_reduce_arena_copy(plan, iree_string_builder_view(&path),
+                                    &relative);
+  }
+  iree_string_builder_deinitialize(&path);
+  IREE_RETURN_IF_ERROR(status);
+  *out_source = loom_reduce_find_relative(plan, relative);
+  if (*out_source == UINT32_MAX) {
+    IREE_RETURN_IF_ERROR(loom_reduce_add_source(
+        plan, iree_string_view_empty(), relative, iree_string_view_empty(),
+        /*module=*/NULL, out_source));
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_reduce_add_duplicate_jobs(
@@ -442,52 +510,8 @@ static iree_status_t loom_reduce_add_duplicate_jobs(
     if (plan->options.scope == LOOM_REDUCE_SCOPE_FILE) {
       job->motif_source = job->copies[0].source;
     } else {
-      iree_string_builder_t path;
-      iree_string_builder_initialize(plan->allocator, &path);
-      iree_status_t status = iree_ok_status();
-      if (!iree_string_view_is_empty(group)) {
-        status = iree_string_builder_append_format(&path, "%.*s/",
-                                                   (int)group.size, group.data);
-      }
-      // `{group}` in the name becomes the group directory ("root" for files
-      // directly under the root), so motif files of different groups never
-      // share a name when their groups are combined later.
-      const iree_string_view_t placeholder = IREE_SV("{group}");
-      iree_string_view_t name = plan->options.motif_file_name;
-      while (iree_status_is_ok(status) && !iree_string_view_is_empty(name)) {
-        const iree_host_size_t at = iree_string_view_find_char(name, '{', 0);
-        const bool is_placeholder =
-            at != IREE_STRING_VIEW_NPOS &&
-            iree_string_view_starts_with(
-                iree_string_view_substr(name, at, IREE_HOST_SIZE_MAX),
-                placeholder);
-        const iree_host_size_t literal = at == IREE_STRING_VIEW_NPOS
-                                             ? name.size
-                                             : at + (is_placeholder ? 0 : 1);
-        status = iree_string_builder_append_string(
-            &path, iree_make_string_view(name.data, literal));
-        name = iree_string_view_substr(name, literal, IREE_HOST_SIZE_MAX);
-        if (iree_status_is_ok(status) && is_placeholder) {
-          status = iree_string_builder_append_string(
-              &path,
-              iree_string_view_is_empty(group) ? IREE_SV("root") : group);
-          name = iree_string_view_substr(name, placeholder.size,
-                                         IREE_HOST_SIZE_MAX);
-        }
-      }
-      iree_string_view_t relative = iree_string_view_empty();
-      if (iree_status_is_ok(status)) {
-        status = loom_reduce_arena_copy(plan, iree_string_builder_view(&path),
-                                        &relative);
-      }
-      iree_string_builder_deinitialize(&path);
-      IREE_RETURN_IF_ERROR(status);
-      job->motif_source = loom_reduce_find_relative(plan, relative);
-      if (job->motif_source == UINT32_MAX) {
-        IREE_RETURN_IF_ERROR(loom_reduce_add_source(
-            plan, iree_string_view_empty(), relative, iree_string_view_empty(),
-            /*module=*/NULL, &job->motif_source));
-      }
+      IREE_RETURN_IF_ERROR(
+          loom_reduce_group_motif_source(plan, group, &job->motif_source));
     }
   }
   return iree_ok_status();
@@ -612,6 +636,25 @@ static uint32_t loom_reduce_find_binding(const loom_analyze_binding_t* bindings,
   return UINT32_MAX;
 }
 
+static iree_status_t loom_reduce_find_declaration(
+    loom_reduce_plan_t* plan, loom_reduce_source_t* source,
+    iree_string_view_t symbol, iree_string_builder_t* builder, bool* out_found);
+
+// Records why an existing function cannot be reused, then gives its copies a
+// new motif instead.
+static iree_status_t loom_reduce_fall_back(
+    loom_reduce_plan_t* plan, const loom_analyze_finding_t* finding,
+    const char* reason) {
+  if (plan->fallback_count == plan->fallback_capacity) {
+    IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
+        plan->allocator, plan->fallback_count + 1, sizeof(loom_reduce_skip_t),
+        &plan->fallback_capacity, (void**)&plan->fallbacks));
+  }
+  plan->fallbacks[plan->fallback_count++] =
+      (loom_reduce_skip_t){finding->fingerprint, reason};
+  return loom_reduce_add_duplicate_jobs(plan, finding);
+}
+
 static iree_status_t loom_reduce_add_existing_job(
     loom_reduce_plan_t* plan, const loom_analyze_finding_t* finding) {
   const loom_analyze_occurrence_t* definition = NULL;
@@ -623,10 +666,48 @@ static iree_status_t loom_reduce_add_existing_job(
   const uint32_t definition_source =
       definition ? loom_reduce_find_loaded(plan, definition->file) : UINT32_MAX;
   if (definition_source == UINT32_MAX) {
-    return loom_reduce_skip(plan, finding->fingerprint,
-                            "existing motif source is unavailable");
+    return loom_reduce_fall_back(plan, finding,
+                                 "the existing motif's source is unavailable");
   }
   const loom_reduce_source_t* source = &plan->sources[definition_source];
+
+  // An existing function is reused rather than duplicated. Copies in its own
+  // file call it in place. Copies elsewhere in its group call it in the
+  // group's motif file: either it already lives there, or its definition
+  // moves there unchanged, since linking its original file elsewhere could
+  // bring conflicting definitions of other symbols with it. A new motif is
+  // made only when reuse is impossible (template providers, multi-block
+  // bodies, names defined more than once in the group, other groups).
+  bool cross_file = false;
+  const iree_string_view_t group =
+      loom_reduce_group(plan, source->relative_path);
+  for (uint32_t i = 0; i < finding->occurrence_count; ++i) {
+    const loom_analyze_occurrence_t* occurrence = &finding->occurrences[i];
+    if (occurrence->is_motif_definition || occurrence->in_launch_config) {
+      continue;
+    }
+    const uint32_t copy_source =
+        loom_reduce_find_loaded(plan, occurrence->file);
+    if (copy_source == definition_source) {
+      continue;
+    }
+    if (copy_source == UINT32_MAX ||
+        plan->options.scope == LOOM_REDUCE_SCOPE_FILE ||
+        !iree_string_view_equal(
+            loom_reduce_group(plan, plan->sources[copy_source].relative_path),
+            group)) {
+      return loom_reduce_fall_back(
+          plan, finding,
+          "copies lie outside the existing motif's group, or file scope cannot "
+          "call into another file");
+    }
+    cross_file = true;
+  }
+  uint32_t host_source = definition_source;
+  if (cross_file) {
+    IREE_RETURN_IF_ERROR(
+        loom_reduce_group_motif_source(plan, group, &host_source));
+  }
 
   // The definition's entry block arguments are the parameters and its
   // func.return operands the results.
@@ -635,8 +716,9 @@ static iree_status_t loom_reduce_add_existing_job(
   if (!definition_op ||
       !iree_string_view_equal(loom_op_name(source->module, definition_op),
                               IREE_SV("func.def"))) {
-    return loom_reduce_skip(plan, finding->fingerprint,
-                            "existing motif is not a func.def");
+    return loom_reduce_fall_back(plan, finding,
+                                 "the existing motif is not a func.def; "
+                                 "template providers are not called directly");
   }
   loom_region_t* body = loom_func_like_body(
       loom_func_like_cast(source->module, (loom_op_t*)definition_op));
@@ -646,13 +728,14 @@ static iree_status_t loom_reduce_add_existing_job(
   if (!terminator ||
       !iree_string_view_equal(loom_op_name(source->module, terminator),
                               IREE_SV("func.return"))) {
-    return loom_reduce_skip(plan, finding->fingerprint,
-                            "existing motif does not end in func.return");
+    return loom_reduce_fall_back(
+        plan, finding,
+        "the existing motif is not a single block ending in func.return");
   }
   if (entry->arg_count > LOOM_REDUCE_MAX_BINDINGS ||
       terminator->operand_count > LOOM_REDUCE_MAX_BINDINGS) {
-    return loom_reduce_skip(plan, finding->fingerprint,
-                            "existing motif has too many parameters");
+    return loom_reduce_fall_back(plan, finding,
+                                 "the existing motif has too many parameters");
   }
   iree_string_view_t parameters[LOOM_REDUCE_MAX_BINDINGS];
   const uint32_t parameter_count = entry->arg_count;
@@ -671,9 +754,9 @@ static iree_status_t loom_reduce_add_existing_job(
     argument_order[k] = loom_reduce_find_binding(
         definition->inputs, definition->input_count, parameters[k]);
     if (argument_order[k] == UINT32_MAX) {
-      return loom_reduce_skip(
-          plan, finding->fingerprint,
-          "existing motif has a parameter the copies do not supply");
+      return loom_reduce_fall_back(
+          plan, finding,
+          "the existing motif has a parameter the copies do not supply");
     }
   }
   uint32_t result_order[LOOM_REDUCE_MAX_BINDINGS];
@@ -681,30 +764,92 @@ static iree_status_t loom_reduce_add_existing_job(
     result_order[k] = loom_reduce_find_binding(
         definition->outputs, definition->output_count, returned[k]);
     if (result_order[k] == UINT32_MAX) {
-      return loom_reduce_skip(
-          plan, finding->fingerprint,
-          "existing motif returns different values than the copies use");
+      return loom_reduce_fall_back(
+          plan, finding,
+          "the existing motif returns different values than the copies use");
     }
   }
   if (returned_count != definition->output_count) {
-    return loom_reduce_skip(
-        plan, finding->fingerprint,
-        "existing motif returns different values than the copies use");
+    return loom_reduce_fall_back(
+        plan, finding,
+        "the existing motif returns different values than the copies use");
   }
 
-  // Only copies in the definition's own file: linking the definition file
-  // elsewhere can bring conflicting definitions of other symbols with it.
+  // Moving the definition needs its name defined only once in the group
+  // and a source range covering exactly the func.def.
+  const bool relocate = host_source != definition_source;
+  iree_host_size_t definition_start = 0;
+  iree_host_size_t definition_end = 0;
+  if (relocate) {
+    for (iree_host_size_t i = 0; i < plan->source_count; ++i) {
+      const loom_reduce_source_t* other = &plan->sources[i];
+      if (i == definition_source || !other->module ||
+          !iree_string_view_equal(loom_reduce_group(plan, other->relative_path),
+                                  group)) {
+        continue;
+      }
+      const loom_op_t* op =
+          loom_reduce_symbol_op(other->module, finding->motif_symbol);
+      if (op && !iree_string_view_ends_with(loom_op_name(other->module, op),
+                                            IREE_SV(".decl"))) {
+        return loom_reduce_fall_back(
+            plan, finding,
+            "the existing motif's name is defined more than once in its group");
+      }
+    }
+    loom_source_range_t range;
+    const loom_source_resolver_t resolver = {NULL, NULL};
+    if (!loom_source_resolve(resolver, source->module, definition_op->location,
+                             &range) ||
+        !loom_reduce_offset(source, range.start_line, range.start_column,
+                            &definition_start) ||
+        !loom_reduce_offset(source, range.end_line, range.end_column,
+                            &definition_end) ||
+        definition_end <= definition_start) {
+      return loom_reduce_fall_back(
+          plan, finding, "the existing motif's source range does not resolve");
+    }
+    const iree_string_view_t text = loom_reduce_trim(
+        iree_make_string_view(source->text.data + definition_start,
+                              definition_end - definition_start));
+    if (!loom_reduce_starts_with(text, "func.def") ||
+        !iree_string_view_ends_with(text, IREE_SV("}"))) {
+      return loom_reduce_fall_back(
+          plan, finding,
+          "the existing motif's source range is not exactly its func.def");
+    }
+  }
+  iree_string_builder_t declaration;
+  iree_string_builder_initialize(plan->allocator, &declaration);
+  bool declared = false;
+  iree_status_t status = loom_reduce_find_declaration(
+      plan, &plan->sources[definition_source], finding->motif_symbol,
+      &declaration, &declared);
+  iree_string_view_t declaration_text = iree_string_view_empty();
+  if (iree_status_is_ok(status) && declared) {
+    iree_string_view_t text = iree_string_builder_view(&declaration);
+    while (text.size && text.data[text.size - 1] == '\n') {
+      --text.size;
+    }
+    status = loom_reduce_arena_copy(plan, text, &declaration_text);
+  }
+  iree_string_builder_deinitialize(&declaration);
+  IREE_RETURN_IF_ERROR(status);
+  if (!declared) {
+    return loom_reduce_fall_back(
+        plan, finding, "the existing motif has no declarable signature");
+  }
+
   uint32_t count = 0;
   for (uint32_t i = 0; i < finding->occurrence_count; ++i) {
     const loom_analyze_occurrence_t* occurrence = &finding->occurrences[i];
-    if (!occurrence->is_motif_definition && !occurrence->in_launch_config &&
-        loom_reduce_find_loaded(plan, occurrence->file) == definition_source) {
+    if (!occurrence->is_motif_definition && !occurrence->in_launch_config) {
       ++count;
     }
   }
   if (count == 0) {
-    return loom_reduce_skip(plan, finding->fingerprint,
-                            "existing motif is only copied in other files");
+    return loom_reduce_fall_back(plan, finding,
+                                 "the existing motif has no callable copies");
   }
 
   loom_reduce_job_t* job = NULL;
@@ -714,6 +859,12 @@ static iree_status_t loom_reduce_add_existing_job(
   job->op_count = finding->op_count;
   job->parameter_count = parameter_count;
   job->result_count = returned_count;
+  job->host_source = host_source;
+  job->definition_source = definition_source;
+  job->relocate = relocate;
+  job->definition_start = definition_start;
+  job->definition_end = definition_end;
+  job->declaration = declaration_text;
   IREE_RETURN_IF_ERROR(
       loom_reduce_arena_copy(plan, finding->motif_symbol, &job->name));
   uint32_t* arguments = NULL;
@@ -729,8 +880,7 @@ static iree_status_t loom_reduce_add_existing_job(
       &plan->arena, count * sizeof(loom_reduce_copy_t), (void**)&job->copies));
   for (uint32_t i = 0; i < finding->occurrence_count; ++i) {
     const loom_analyze_occurrence_t* occurrence = &finding->occurrences[i];
-    if (occurrence->is_motif_definition || occurrence->in_launch_config ||
-        loom_reduce_find_loaded(plan, occurrence->file) != definition_source) {
+    if (occurrence->is_motif_definition || occurrence->in_launch_config) {
       continue;
     }
     loom_reduce_copy_t* copy = &job->copies[job->copy_count];
@@ -781,11 +931,7 @@ iree_status_t loom_reduce_plan_create(const loom_reduce_options_t* options,
       status = loom_reduce_skip(plan, finding->fingerprint,
                                 "copies differ in constants or types");
     } else if (finding->rule == LOOM_ANALYZE_RULE_REIMPLEMENTED_MOTIF) {
-      status = options->scope == LOOM_REDUCE_SCOPE_FILE
-                   ? loom_reduce_skip(
-                         plan, finding->fingerprint,
-                         "calling an existing motif needs --scope=corpus")
-                   : loom_reduce_add_existing_job(plan, finding);
+      status = loom_reduce_add_existing_job(plan, finding);
     } else {
       status = loom_reduce_add_duplicate_jobs(plan, finding);
     }
@@ -814,6 +960,7 @@ void loom_reduce_plan_free(loom_reduce_plan_t* plan) {
   iree_allocator_free(plan->allocator, plan->sources);
   iree_allocator_free(plan->allocator, plan->jobs);
   iree_allocator_free(plan->allocator, plan->skips);
+  iree_allocator_free(plan->allocator, plan->fallbacks);
   iree_arena_deinitialize(&plan->arena);
   iree_arena_block_pool_deinitialize(&plan->block_pool);
   iree_allocator_free(plan->allocator, plan);
@@ -1001,22 +1148,23 @@ static iree_status_t loom_reduce_find_alias(const loom_reduce_source_t* source,
   return iree_ok_status();
 }
 
-// Appends the declarations and aliases a motif body references, taken from
-// the source of its first copy. Sets |*out_complete| false when a referenced
-// symbol has no declaration there.
-static iree_status_t loom_reduce_required_declarations(
-    loom_reduce_plan_t* plan, const loom_reduce_job_t* job,
+// Appends the declarations and aliases |body| references, taken from
+// |source|, skipping |exclude| (the function the body defines, if any). Sets
+// |*out_complete| false when a referenced symbol has no declaration there.
+static iree_status_t loom_reduce_body_declarations(
+    loom_reduce_plan_t* plan, loom_reduce_source_t* source,
+    iree_string_view_t body, iree_string_view_t exclude,
     iree_string_builder_t* aliases, iree_string_builder_t* declarations,
     bool* out_complete) {
   *out_complete = true;
-  const loom_reduce_copy_t* template = &job->copies[0];
-  loom_reduce_source_t* source = &plan->sources[template->source];
-  const iree_string_view_t body = loom_reduce_copy_body(plan, template);
   loom_reduce_strings_t names;
   loom_reduce_strings_initialize(plan->allocator, &names);
   iree_status_t status = loom_reduce_collect_references(body, '@', &names);
   for (iree_host_size_t i = 0; i < names.count && iree_status_is_ok(status);
        ++i) {
+    if (iree_string_view_equal(names.items[i], exclude)) {
+      continue;
+    }
     bool found = false;
     status = loom_reduce_find_declaration(plan, source, names.items[i],
                                           declarations, &found);
@@ -1034,6 +1182,19 @@ static iree_status_t loom_reduce_required_declarations(
   }
   loom_reduce_strings_deinitialize(&names);
   return status;
+}
+
+// Appends the declarations and aliases a new motif's body references, taken
+// from the source of its first copy.
+static iree_status_t loom_reduce_required_declarations(
+    loom_reduce_plan_t* plan, const loom_reduce_job_t* job,
+    iree_string_builder_t* aliases, iree_string_builder_t* declarations,
+    bool* out_complete) {
+  const loom_reduce_copy_t* template = &job->copies[0];
+  return loom_reduce_body_declarations(plan, &plan->sources[template->source],
+                                       loom_reduce_copy_body(plan, template),
+                                       iree_string_view_empty(), aliases,
+                                       declarations, out_complete);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1099,6 +1260,11 @@ static iree_status_t loom_reduce_validate(loom_reduce_plan_t* plan,
                                           loom_reduce_job_t* job,
                                           const char** out_reason) {
   *out_reason = NULL;
+  if (job->removed_op_count == 0) {
+    // Short sequences with few copies cost more as calls than they save.
+    *out_reason = "the motif would not remove operations";
+    return iree_ok_status();
+  }
   const loom_reduce_copy_t* template = &job->copies[0];
   const iree_string_view_t body = loom_reduce_copy_body(plan, template);
   if (!job->existing) {
@@ -1694,6 +1860,27 @@ static iree_host_size_t loom_reduce_preamble_length(iree_string_view_t text) {
   return text.size;
 }
 
+// Returns the symbol a `<dialect>.decl @name...` line declares.
+static iree_string_view_t loom_reduce_declared_symbol(iree_string_view_t line) {
+  const iree_host_size_t at = iree_string_view_find_char(line, '@', 0);
+  if (at == IREE_STRING_VIEW_NPOS) {
+    return iree_string_view_empty();
+  }
+  const iree_string_view_t rest =
+      iree_string_view_substr(line, at + 1, IREE_HOST_SIZE_MAX);
+  return iree_make_string_view(rest.data, loom_reduce_name_length(rest));
+}
+
+// Returns true when job |job| defines |name| in |source| after the rewrite.
+static bool loom_reduce_job_defines(const loom_reduce_job_t* job,
+                                    uint32_t source, iree_string_view_t name) {
+  if (!iree_string_view_equal(job->name, name)) {
+    return false;
+  }
+  return job->existing ? job->host_source == source
+                       : job->motif_source == source;
+}
+
 // Renders every file the jobs at |active| rewrite or create.
 static iree_status_t loom_reduce_render(loom_reduce_plan_t* plan,
                                         const uint32_t* active,
@@ -1704,10 +1891,10 @@ static iree_status_t loom_reduce_render(loom_reduce_plan_t* plan,
     plan->sources[i].rendered = false;
   }
 
-  // 1. Replace copies with calls.
+  // 1. Replace copies with calls; a moving definition becomes its declaration.
   iree_host_size_t edit_count = 0;
   for (iree_host_size_t i = 0; i < active_count; ++i) {
-    edit_count += plan->jobs[active[i]].copy_count;
+    edit_count += plan->jobs[active[i]].copy_count + 1;
   }
   loom_reduce_edit_t* edits = NULL;
   if (edit_count) {
@@ -1722,6 +1909,11 @@ static iree_status_t loom_reduce_render(loom_reduce_plan_t* plan,
       edits[edit_count++] =
           (loom_reduce_edit_t){copy->source, copy->start, copy->end, job, copy};
     }
+    if (job->relocate) {
+      edits[edit_count++] =
+          (loom_reduce_edit_t){job->definition_source, job->definition_start,
+                               job->definition_end, job, NULL};
+    }
   }
   if (edit_count > 1) {
     qsort(edits, edit_count, sizeof(*edits), loom_reduce_compare_edits);
@@ -1735,7 +1927,7 @@ static iree_status_t loom_reduce_render(loom_reduce_plan_t* plan,
          ++e) {
       if (edits[e].start < cursor) {
         status = iree_make_status(
-            IREE_STATUS_INTERNAL, "overlapping copies in %.*s",
+            IREE_STATUS_INTERNAL, "overlapping rewrites in %.*s",
             (int)source->relative_path.size, source->relative_path.data);
         break;
       }
@@ -1743,8 +1935,11 @@ static iree_status_t loom_reduce_render(loom_reduce_plan_t* plan,
           &source->output, iree_make_string_view(source->text.data + cursor,
                                                  edits[e].start - cursor));
       if (iree_status_is_ok(status)) {
-        status = loom_reduce_append_call(&source->output, edits[e].job,
-                                         edits[e].copy);
+        status = edits[e].copy
+                     ? loom_reduce_append_call(&source->output, edits[e].job,
+                                               edits[e].copy)
+                     : iree_string_builder_append_string(
+                           &source->output, edits[e].job->declaration);
       }
       cursor = edits[e].end;
     }
@@ -1758,7 +1953,7 @@ static iree_status_t loom_reduce_render(loom_reduce_plan_t* plan,
   iree_allocator_free(allocator, edits);
   IREE_RETURN_IF_ERROR(status);
 
-  // 2. Declarations for motifs defined in another file.
+  // 2. Declarations in calling files for functions defined elsewhere.
   iree_string_builder_t scratch;
   iree_string_builder_initialize(allocator, &scratch);
   for (iree_host_size_t s = 0;
@@ -1773,7 +1968,9 @@ static iree_status_t loom_reduce_render(loom_reduce_plan_t* plan,
     for (iree_host_size_t i = 0; i < active_count && iree_status_is_ok(status);
          ++i) {
       const loom_reduce_job_t* job = &plan->jobs[active[i]];
-      if (job->existing || job->motif_source == s ||
+      const uint32_t host =
+          job->existing ? job->host_source : job->motif_source;
+      if (host == s || (job->relocate && job->definition_source == s) ||
           loom_reduce_strings_contains(&seen, job->name)) {
         continue;
       }
@@ -1781,18 +1978,24 @@ static iree_status_t loom_reduce_render(loom_reduce_plan_t* plan,
       for (uint32_t c = 0; c < job->copy_count && !calls; ++c) {
         calls = job->copies[c].source == s;
       }
-      if (!calls) {
+      // A file that already declares or defines the function needs nothing.
+      if (!calls || (job->existing && source->module &&
+                     loom_reduce_symbol_op(source->module, job->name))) {
         continue;
       }
       status = loom_reduce_strings_add(&seen, job->name);
-      if (iree_status_is_ok(status)) {
+      if (iree_status_is_ok(status) && job->existing) {
+        status = iree_string_builder_append_format(&scratch, "%.*s\n",
+                                                   (int)job->declaration.size,
+                                                   job->declaration.data);
+      } else if (iree_status_is_ok(status)) {
         status = iree_string_builder_append_cstring(&scratch, "func.decl ");
-      }
-      if (iree_status_is_ok(status)) {
-        status = loom_reduce_append_signature(&scratch, job);
-      }
-      if (iree_status_is_ok(status)) {
-        status = iree_string_builder_append_cstring(&scratch, "\n");
+        if (iree_status_is_ok(status)) {
+          status = loom_reduce_append_signature(&scratch, job);
+        }
+        if (iree_status_is_ok(status)) {
+          status = iree_string_builder_append_cstring(&scratch, "\n");
+        }
       }
     }
     loom_reduce_strings_deinitialize(&seen);
@@ -1827,109 +2030,137 @@ static iree_status_t loom_reduce_render(loom_reduce_plan_t* plan,
     iree_string_builder_deinitialize(&combined);
   }
 
-  // 3. Motif definitions, appended to the file hosting them.
+  // 3. Hosted definitions: new motifs and functions moved into a motif file,
+  //    with only the declarations their bodies need that the file lacks.
   for (iree_host_size_t s = 0;
        s < plan->source_count && iree_status_is_ok(status); ++s) {
     loom_reduce_source_t* source = &plan->sources[s];
     bool hosts = false;
-    bool separate = true;
-    for (iree_host_size_t i = 0; i < active_count; ++i) {
+    for (iree_host_size_t i = 0; i < active_count && !hosts; ++i) {
       const loom_reduce_job_t* job = &plan->jobs[active[i]];
-      if (job->existing || job->motif_source != s) {
-        continue;
-      }
-      hosts = true;
-      for (uint32_t c = 0; c < job->copy_count; ++c) {
-        if (job->copies[c].source == s) {
-          separate = false;
-        }
-      }
+      hosts = job->existing ? (job->relocate && job->host_source == s)
+                            : job->motif_source == s;
     }
     if (!hosts) {
       continue;
     }
+    const bool created = iree_string_view_is_empty(source->text);
+
+    iree_string_builder_t aliases, declarations;
+    iree_string_builder_initialize(allocator, &aliases);
+    iree_string_builder_initialize(allocator, &declarations);
+    for (iree_host_size_t i = 0; i < active_count && iree_status_is_ok(status);
+         ++i) {
+      const loom_reduce_job_t* job = &plan->jobs[active[i]];
+      bool complete = false;
+      if (!job->existing && job->motif_source == s) {
+        bool separate = true;
+        for (uint32_t c = 0; c < job->copy_count; ++c) {
+          if (job->copies[c].source == s) {
+            separate = false;
+          }
+        }
+        if (separate) {
+          status = loom_reduce_required_declarations(plan, job, &aliases,
+                                                     &declarations, &complete);
+        }
+      } else if (job->relocate && job->host_source == s) {
+        loom_reduce_source_t* definition =
+            &plan->sources[job->definition_source];
+        status = loom_reduce_body_declarations(
+            plan, definition,
+            iree_make_string_view(definition->text.data + job->definition_start,
+                                  job->definition_end - job->definition_start),
+            job->name, &aliases, &declarations, &complete);
+      }
+    }
     iree_string_builder_reset(&scratch);
-    if (source->rendered) {
-      status = iree_string_builder_append_string(
-          &scratch, iree_string_builder_view(&source->output));
-    } else {
-      status = iree_string_builder_append_string(&scratch, source->text);
-    }
-    if (iree_status_is_ok(status) && separate &&
-        iree_string_view_is_empty(source->text)) {
-      // A created motif file declares what its bodies reference.
-      iree_string_builder_t aliases, declarations;
-      iree_string_builder_initialize(allocator, &aliases);
-      iree_string_builder_initialize(allocator, &declarations);
-      for (iree_host_size_t i = 0;
-           i < active_count && iree_status_is_ok(status); ++i) {
-        const loom_reduce_job_t* job = &plan->jobs[active[i]];
-        if (job->existing || job->motif_source != s) {
-          continue;
-        }
-        bool complete = false;
-        status = loom_reduce_required_declarations(plan, job, &aliases,
-                                                   &declarations, &complete);
-      }
-      loom_reduce_strings_t unique;
-      loom_reduce_strings_initialize(allocator, &unique);
-      if (iree_status_is_ok(status)) {
-        status = iree_string_builder_append_cstring(
-            &scratch,
-            "// Motifs extracted by loom-reduce. Do not edit by hand: rerun\n"
-            "// loom-analyze and loom-reduce on the original sources "
-            "instead.\n\n");
-      }
-      iree_string_builder_t* blocks[2] = {&aliases, &declarations};
-      for (int b = 0; b < 2 && iree_status_is_ok(status); ++b) {
-        iree_string_view_t remaining = iree_string_builder_view(blocks[b]);
-        while (!iree_string_view_is_empty(remaining) &&
-               iree_status_is_ok(status)) {
-          const iree_string_view_t line = loom_reduce_next_line(&remaining);
-          if (loom_reduce_strings_contains(&unique, line)) {
-            continue;
-          }
-          status = loom_reduce_strings_add(&unique, line);
-          if (iree_status_is_ok(status)) {
-            status = iree_string_builder_append_format(
-                &scratch, "%.*s\n", (int)line.size, line.data);
-          }
-        }
-      }
-      loom_reduce_strings_deinitialize(&unique);
-      iree_string_builder_deinitialize(&aliases);
-      iree_string_builder_deinitialize(&declarations);
-    }
-    // Trim trailing newlines, then append the motifs.
     if (iree_status_is_ok(status)) {
-      iree_string_view_t text = iree_string_builder_view(&scratch);
+      iree_string_view_t text = source->rendered
+                                    ? iree_string_builder_view(&source->output)
+                                    : source->text;
       while (text.size && text.data[text.size - 1] == '\n') {
         --text.size;
       }
-      iree_string_builder_reset(&source->output);
-      status = iree_string_builder_append_string(&source->output, text);
+      status = iree_string_builder_append_string(&scratch, text);
+      if (iree_status_is_ok(status)) {
+        status = iree_string_builder_append_cstring(
+            &scratch,
+            created ? "// Motifs extracted by loom-reduce. Do not edit by "
+                      "hand: rerun\n// loom-analyze and loom-reduce on the "
+                      "original sources instead.\n\n"
+                    : "\n\n// Motifs extracted by loom-reduce.\n");
+      }
     }
-    if (iree_status_is_ok(status)) {
-      // A created motif file already says what it holds in its header.
-      const bool created = iree_string_view_is_empty(source->text);
-      status = iree_string_builder_append_cstring(
-          &source->output,
-          created ? "\n\n" : "\n\n// Motifs extracted by loom-reduce.\n\n");
+    loom_reduce_strings_t unique;
+    loom_reduce_strings_initialize(allocator, &unique);
+    iree_string_builder_t* blocks[2] = {&aliases, &declarations};
+    for (int b = 0; b < 2 && iree_status_is_ok(status); ++b) {
+      iree_string_view_t remaining = iree_string_builder_view(blocks[b]);
+      while (!iree_string_view_is_empty(remaining) &&
+             iree_status_is_ok(status)) {
+        const iree_string_view_t line = loom_reduce_next_line(&remaining);
+        if (iree_string_view_is_empty(line) ||
+            loom_reduce_strings_contains(&unique, line)) {
+          continue;
+        }
+        // Skip what the file already declares, defines, or will define.
+        bool present = false;
+        if (b == 0) {
+          // An alias line already spelled in the file.
+          for (iree_host_size_t k = 0;
+               !created && !present && k + line.size <= source->text.size;
+               ++k) {
+            present = memcmp(source->text.data + k, line.data, line.size) == 0;
+          }
+        } else {
+          const iree_string_view_t symbol = loom_reduce_declared_symbol(line);
+          present = source->module &&
+                    loom_reduce_symbol_op(source->module, symbol) != NULL;
+          for (iree_host_size_t i = 0; i < active_count && !present; ++i) {
+            present = loom_reduce_job_defines(&plan->jobs[active[i]],
+                                              (uint32_t)s, symbol);
+          }
+        }
+        status = loom_reduce_strings_add(&unique, line);
+        if (iree_status_is_ok(status) && !present) {
+          status = iree_string_builder_append_format(&scratch, "%.*s\n",
+                                                     (int)line.size, line.data);
+        }
+      }
     }
-    bool first = true;
+    loom_reduce_strings_deinitialize(&unique);
+    iree_string_builder_deinitialize(&aliases);
+    iree_string_builder_deinitialize(&declarations);
+
+    // Moved functions keep their text; new motifs follow.
+    for (iree_host_size_t i = 0; i < active_count && iree_status_is_ok(status);
+         ++i) {
+      const loom_reduce_job_t* job = &plan->jobs[active[i]];
+      if (job->relocate && job->host_source == s) {
+        const loom_reduce_source_t* definition =
+            &plan->sources[job->definition_source];
+        status = iree_string_builder_append_format(
+            &scratch, "\n%.*s\n",
+            (int)(job->definition_end - job->definition_start),
+            definition->text.data + job->definition_start);
+      }
+    }
     for (iree_host_size_t i = 0; i < active_count && iree_status_is_ok(status);
          ++i) {
       const loom_reduce_job_t* job = &plan->jobs[active[i]];
       if (job->existing || job->motif_source != s) {
         continue;
       }
-      if (!first) {
-        status = iree_string_builder_append_cstring(&source->output, "\n");
-      }
-      first = false;
+      status = iree_string_builder_append_cstring(&scratch, "\n");
       if (iree_status_is_ok(status)) {
-        status = loom_reduce_append_motif(plan, &source->output, job);
+        status = loom_reduce_append_motif(plan, &scratch, job);
       }
+    }
+    if (iree_status_is_ok(status)) {
+      iree_string_builder_reset(&source->output);
+      status = iree_string_builder_append_string(
+          &source->output, iree_string_builder_view(&scratch));
     }
     source->rendered = true;
   }
@@ -1944,6 +2175,12 @@ static iree_status_t loom_reduce_render(loom_reduce_plan_t* plan,
 static bool loom_reduce_job_touches(const loom_reduce_job_t* job,
                                     uint32_t source) {
   if (!job->existing && job->motif_source == source) {
+    return true;
+  }
+  if (job->existing && job->host_source == source) {
+    return true;
+  }
+  if (job->relocate && job->definition_source == source) {
     return true;
   }
   for (uint32_t c = 0; c < job->copy_count; ++c) {
@@ -2024,7 +2261,36 @@ iree_status_t loom_reduce_plan_apply(loom_reduce_plan_t* plan,
   if (iree_status_is_ok(status)) {
     status = loom_reduce_reject_call_cycles(plan, active, active_count);
   }
-  // Drop the jobs the cycle check skipped.
+  // A function cannot move while another rewrite edits inside its body; the
+  // move happens in a later pass.
+  for (iree_host_size_t i = 0; i < active_count; ++i) {
+    loom_reduce_job_t* job = &plan->jobs[active[i]];
+    if (!job->relocate || job->status != LOOM_REDUCE_JOB_PENDING) {
+      continue;
+    }
+    for (iree_host_size_t k = 0; k < active_count; ++k) {
+      const loom_reduce_job_t* other = &plan->jobs[active[k]];
+      if (k == i || other->status != LOOM_REDUCE_JOB_PENDING) {
+        continue;
+      }
+      for (uint32_t c = 0; c < other->copy_count; ++c) {
+        const loom_reduce_copy_t* copy = &other->copies[c];
+        if (copy->source == job->definition_source &&
+            copy->start < job->definition_end &&
+            copy->end > job->definition_start) {
+          job->status = LOOM_REDUCE_JOB_SKIPPED;
+          job->reason =
+              "the existing motif's body is itself being reduced; rerun to "
+              "reuse it";
+          break;
+        }
+      }
+      if (job->status != LOOM_REDUCE_JOB_PENDING) {
+        break;
+      }
+    }
+  }
+  // Drop the jobs the cycle and relocation checks skipped.
   iree_host_size_t kept_count = 0;
   for (iree_host_size_t i = 0; i < active_count; ++i) {
     if (plan->jobs[active[i]].status == LOOM_REDUCE_JOB_PENDING) {
@@ -2125,8 +2391,17 @@ static bool loom_reduce_links_to(const loom_reduce_plan_t* plan,
                                  uint32_t source, uint32_t motif_source) {
   for (iree_host_size_t j = 0; j < plan->job_count; ++j) {
     const loom_reduce_job_t* job = &plan->jobs[j];
-    if (job->status != LOOM_REDUCE_JOB_APPLIED || job->existing ||
-        job->motif_source != motif_source || motif_source == source) {
+    if (job->status != LOOM_REDUCE_JOB_APPLIED || motif_source == source) {
+      continue;
+    }
+    if (job->existing) {
+      if (job->host_source != motif_source) {
+        continue;
+      }
+      if (job->relocate && job->definition_source == source) {
+        return true;
+      }
+    } else if (job->motif_source != motif_source) {
       continue;
     }
     for (uint32_t c = 0; c < job->copy_count; ++c) {
@@ -2142,11 +2417,15 @@ void loom_reduce_plan_summary(const loom_reduce_plan_t* plan,
                               loom_reduce_summary_t* out_summary) {
   memset(out_summary, 0, sizeof(*out_summary));
   out_summary->skipped_count = (uint32_t)plan->skip_count;
+  out_summary->reuse_fallback_count = (uint32_t)plan->fallback_count;
   for (iree_host_size_t j = 0; j < plan->job_count; ++j) {
     const loom_reduce_job_t* job = &plan->jobs[j];
     switch (job->status) {
       case LOOM_REDUCE_JOB_APPLIED:
         ++out_summary->motif_count;
+        if (job->existing) {
+          ++out_summary->reused_count;
+        }
         out_summary->replaced_copy_count += job->copy_count;
         out_summary->removed_op_count += job->removed_op_count;
         break;
@@ -2223,6 +2502,10 @@ iree_status_t loom_reduce_plan_write_report(const loom_reduce_plan_t* plan,
       &object, IREE_SV("skipped"), summary.skipped_count));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
       &object, IREE_SV("reverted"), summary.reverted_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("reused"), summary.reused_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("reuse_fallbacks"), summary.reuse_fallback_count));
   IREE_RETURN_IF_ERROR(loom_json_object_end(&object));
 
   IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&root, IREE_SV("jobs")));
@@ -2234,8 +2517,7 @@ iree_status_t loom_reduce_plan_write_report(const loom_reduce_plan_t* plan,
     IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
     IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
         &object, IREE_SV("motif"), job->name));
-    const uint32_t host =
-        job->existing ? job->copies[0].source : job->motif_source;
+    const uint32_t host = job->existing ? job->host_source : job->motif_source;
     IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
         &object, IREE_SV("file"),
         job->copy_count || !job->existing ? plan->sources[host].relative_path
@@ -2276,6 +2558,22 @@ iree_status_t loom_reduce_plan_write_report(const loom_reduce_plan_t* plan,
     IREE_RETURN_IF_ERROR(loom_json_object_end(&object));
   }
   IREE_RETURN_IF_ERROR(loom_json_array_end(&skips));
+
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(&root, IREE_SV("reuse_fallbacks")));
+  loom_json_array_writer_t fallbacks;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &fallbacks));
+  for (iree_host_size_t i = 0; i < plan->fallback_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&fallbacks));
+    IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+    IREE_RETURN_IF_ERROR(
+        loom_reduce_write_fingerprint(&object, plan->fallbacks[i].fingerprint));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &object, IREE_SV("reason"),
+        iree_make_cstring_view(plan->fallbacks[i].reason)));
+    IREE_RETURN_IF_ERROR(loom_json_object_end(&object));
+  }
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&fallbacks));
 
   IREE_RETURN_IF_ERROR(
       loom_json_object_begin_field(&root, IREE_SV("changed_files")));

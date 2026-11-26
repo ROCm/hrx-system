@@ -19,6 +19,7 @@ loom_cc_library(
     srcs = ["reduce.c"],
     hdrs = ["reduce.h"],
     deps = [
+        "//loom/src/loom/error:source",
         "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:storage",

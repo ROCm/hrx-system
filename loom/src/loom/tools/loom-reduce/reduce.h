@@ -90,6 +90,11 @@ typedef struct loom_reduce_summary_t {
   uint32_t reverted_count;
   // Rewritten files that now need additional link inputs.
   uint32_t linked_file_count;
+  // Applied jobs that call an existing function instead of a new motif.
+  uint32_t reused_count;
+  // Findings repeating an existing function that needed a new motif because
+  // reuse was impossible; the report lists the reasons.
+  uint32_t reuse_fallback_count;
 } loom_reduce_summary_t;
 
 typedef struct loom_reduce_plan_t loom_reduce_plan_t;
