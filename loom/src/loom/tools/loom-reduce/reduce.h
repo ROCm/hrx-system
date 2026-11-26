@@ -48,6 +48,9 @@ typedef enum loom_reduce_scope_e {
 typedef struct loom_reduce_options_t {
   loom_reduce_scope_t scope;
   // Motif file name created in each top-level directory (corpus scope).
+  // `{group}` is replaced by the directory name ("root" for files directly
+  // under the root), keeping motif files of different groups distinct when
+  // they are later combined, for example embedded by file name.
   iree_string_view_t motif_file_name;
 } loom_reduce_options_t;
 

@@ -74,7 +74,7 @@
       },
       "stderr": {"empty": true},
       "files": [
-        {"path": "{tmp}/out/family/loom_reduce_motifs.loom", "non_empty": true},
+        {"path": "{tmp}/out/family/loom_reduce_family_motifs.loom", "non_empty": true},
         {"path": "{tmp}/links.json", "non_empty": true}
       ]
     }

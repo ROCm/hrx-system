@@ -151,8 +151,10 @@ of the file holding its copies, so no declarations or link inputs change.
 
 `--scope=corpus` also shares motifs between files. Copies are grouped by the
 first directory under the root, such as one kernel family, and each group's
-motifs go to one motif file in that directory, `loom_reduce_motifs.loom` by
-default, together with the declarations their bodies reference. Calling files
+motifs go to one motif file in that directory, together with the declarations
+their bodies reference. The file is named `loom_reduce_<directory>_motifs.loom`
+by default, so motif files of different groups never share a name; set
+`--motif-file`, where `{group}` stands for the directory. Calling files
 gain a `func.decl`. Copies of an existing `func.def` in the same file become
 calls to it.
 
@@ -167,7 +169,7 @@ loom-reduce: 169 file(s) now need new link inputs; see links.json
 ```
 
 `links.json` maps each rewritten file to the motif files it now needs:
-`{"requires": {"family/ops/a.loom": ["family/loom_reduce_motifs.loom"]}}`. Add
+`{"requires": {"family/ops/a.loom": ["family/loom_reduce_family_motifs.loom"]}}`. Add
 those files to the link inputs of every program that compiles the rewritten
 sources.
 

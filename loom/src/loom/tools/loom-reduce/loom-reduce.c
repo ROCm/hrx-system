@@ -28,9 +28,9 @@ IREE_FLAG(string, scope, "file",
           "file: define each motif beside its copies (no link changes). "
           "corpus: share motifs across files within each top-level directory "
           "of the root.");
-IREE_FLAG(string, motif_file, "loom_reduce_motifs.loom",
+IREE_FLAG(string, motif_file, "loom_reduce_{group}_motifs.loom",
           "Motif file name created in each top-level directory (corpus "
-          "scope).");
+          "scope); {group} becomes the directory name.");
 IREE_FLAG(int32_t, min_ops, 6,
           "Minimum duplicated sequence size in operations.");
 IREE_FLAG(int32_t, min_occurrences, 2,
@@ -192,7 +192,8 @@ static void loom_reduce_print_agents_markdown(FILE* stream) {
       "`--scope=file` defines each motif at the end of the file holding its\n"
       "copies; no declarations or link inputs change. `--scope=corpus` groups\n"
       "copies by the first directory under the root, writes each group's\n"
-      "motifs to one motif file with the declarations they reference, adds\n"
+      "motifs to `<dir>/loom_reduce_<dir>_motifs.loom` with the declarations\n"
+      "they reference, adds\n"
       "`func.decl` lines to calling files, and records in `--links` which\n"
       "files each rewritten source now needs linked. Copies of an existing\n"
       "`func.def` in the same file become calls to it.\n"

@@ -449,9 +449,31 @@ static iree_status_t loom_reduce_add_duplicate_jobs(
         status = iree_string_builder_append_format(&path, "%.*s/",
                                                    (int)group.size, group.data);
       }
-      if (iree_status_is_ok(status)) {
+      // `{group}` in the name becomes the group directory ("root" for files
+      // directly under the root), so motif files of different groups never
+      // share a name when their groups are combined later.
+      const iree_string_view_t placeholder = IREE_SV("{group}");
+      iree_string_view_t name = plan->options.motif_file_name;
+      while (iree_status_is_ok(status) && !iree_string_view_is_empty(name)) {
+        const iree_host_size_t at = iree_string_view_find_char(name, '{', 0);
+        const bool is_placeholder =
+            at != IREE_STRING_VIEW_NPOS &&
+            iree_string_view_starts_with(
+                iree_string_view_substr(name, at, IREE_HOST_SIZE_MAX),
+                placeholder);
+        const iree_host_size_t literal = at == IREE_STRING_VIEW_NPOS
+                                             ? name.size
+                                             : at + (is_placeholder ? 0 : 1);
         status = iree_string_builder_append_string(
-            &path, plan->options.motif_file_name);
+            &path, iree_make_string_view(name.data, literal));
+        name = iree_string_view_substr(name, literal, IREE_HOST_SIZE_MAX);
+        if (iree_status_is_ok(status) && is_placeholder) {
+          status = iree_string_builder_append_string(
+              &path,
+              iree_string_view_is_empty(group) ? IREE_SV("root") : group);
+          name = iree_string_view_substr(name, placeholder.size,
+                                         IREE_HOST_SIZE_MAX);
+        }
       }
       iree_string_view_t relative = iree_string_view_empty();
       if (iree_status_is_ok(status)) {
