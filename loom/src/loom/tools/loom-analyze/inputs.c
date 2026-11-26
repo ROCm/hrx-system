@@ -119,7 +119,7 @@ static loom_analyze_path_kind_t loom_analyze_input_path_kind(const char* path) {
 static iree_status_t loom_analyze_input_list_add_directory(
     loom_analyze_input_list_t* list, const char* directory,
     const iree_string_view_t* excludes, iree_host_size_t exclude_count,
-    int depth) {
+    bool all_files, int depth) {
   // Guards against symlink cycles; real source trees are far shallower.
   if (depth > 64) {
     return iree_ok_status();
@@ -152,9 +152,9 @@ static iree_status_t loom_analyze_input_list_add_directory(
       continue;
     }
     if (entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-      status = loom_analyze_input_list_add_directory(list, child, excludes,
-                                                     exclude_count, depth + 1);
-    } else if (loom_analyze_input_has_loom_extension(name)) {
+      status = loom_analyze_input_list_add_directory(
+          list, child, excludes, exclude_count, all_files, depth + 1);
+    } else if (all_files || loom_analyze_input_has_loom_extension(name)) {
       status = loom_analyze_input_list_append(list, child, strlen(child));
     }
   } while (iree_status_is_ok(status) && FindNextFileA(handle, &entry));
@@ -183,10 +183,10 @@ static iree_status_t loom_analyze_input_list_add_directory(
     }
     const loom_analyze_path_kind_t kind = loom_analyze_input_path_kind(child);
     if (kind == LOOM_ANALYZE_PATH_DIRECTORY) {
-      status = loom_analyze_input_list_add_directory(list, child, excludes,
-                                                     exclude_count, depth + 1);
+      status = loom_analyze_input_list_add_directory(
+          list, child, excludes, exclude_count, all_files, depth + 1);
     } else if (kind == LOOM_ANALYZE_PATH_FILE &&
-               loom_analyze_input_has_loom_extension(name)) {
+               (all_files || loom_analyze_input_has_loom_extension(name))) {
       status = loom_analyze_input_list_append(list, child, strlen(child));
     }
   }
@@ -211,7 +211,8 @@ iree_status_t loom_analyze_input_list_add_path(
                               "input path '%s' does not exist", buffer);
     case LOOM_ANALYZE_PATH_DIRECTORY:
       return loom_analyze_input_list_add_directory(list, buffer, excludes,
-                                                   exclude_count, 0);
+                                                   exclude_count,
+                                                   /*all_files=*/false, 0);
     case LOOM_ANALYZE_PATH_FILE:
       if (loom_analyze_input_is_excluded(buffer, excludes, exclude_count)) {
         return iree_ok_status();
@@ -240,4 +241,21 @@ void loom_analyze_input_list_finalize(loom_analyze_input_list_t* list) {
     list->paths[kept++] = list->paths[i];
   }
   list->count = kept;
+}
+
+iree_status_t loom_analyze_input_list_add_tree(loom_analyze_input_list_t* list,
+                                               iree_string_view_t directory) {
+  char buffer[4096];
+  if (directory.size >= sizeof(buffer)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE, "path too long: %.*s",
+                            (int)directory.size, directory.data);
+  }
+  memcpy(buffer, directory.data, directory.size);
+  buffer[directory.size] = 0;
+  if (loom_analyze_input_path_kind(buffer) != LOOM_ANALYZE_PATH_DIRECTORY) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "directory '%s' does not exist", buffer);
+  }
+  return loom_analyze_input_list_add_directory(list, buffer, NULL, 0,
+                                               /*all_files=*/true, 0);
 }

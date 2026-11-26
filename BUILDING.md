@@ -279,8 +279,8 @@ up that sanitizer environment separately.
 
 Loom tools link statically by default. Release bundles can share the compiler
 and runtime used by `loom-compile`, `loom-opt`, `loom-format`, `loom-link`,
-`loom-import-cxx`, `loom-run`, `loom-analyze`, `loom-serve`, `loom-test`, and
-`loom-benchmark`:
+`loom-import-cxx`, `loom-run`, `loom-analyze`, `loom-reduce`, `loom-serve`,
+`loom-test`, and `loom-benchmark`:
 
 ```bash
 iree-bazel-build --config=opt --//loom/config:shared_tools \

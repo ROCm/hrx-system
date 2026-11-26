@@ -13,14 +13,11 @@
 #include "iree/base/api.h"
 #include "iree/base/tooling/flags.h"
 #include "loom/tooling/cli/help.h"
-#include "loom/tooling/cli/loomc_result.h"
 #include "loom/tooling/io/file.h"
 #include "loom/tools/loom-analyze/clone_analysis.h"
 #include "loom/tools/loom-analyze/inputs.h"
 #include "loom/tools/loom-analyze/report.h"
-#include "loomc/interop.h"
-#include "loomc/iree.h"
-#include "loomc/target/configured_ir.h"
+#include "loom/tools/loom-analyze/session.h"
 
 #define LOOM_ANALYZE_VERSION "0.1.0"
 
@@ -51,85 +48,27 @@ typedef struct loom_analyze_loaded_input_t {
   loomc_module_t* module;
 } loom_analyze_loaded_input_t;
 
-static iree_status_t loom_analyze_create_context(
-    iree_allocator_t allocator, loomc_context_t** out_context) {
-  const loomc_allocator_t compiler_allocator =
-      loomc_allocator_from_iree(allocator);
-  loomc_target_environment_t* environment = NULL;
-  iree_status_t status =
-      iree_status_from_loomc(loomc_target_environment_create_configured_ir(
-          compiler_allocator, &environment));
-  if (iree_status_is_ok(status)) {
-    const loomc_context_target_options_t target_options = {
-        .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
-        .structure_size = sizeof(target_options),
-        .target_environment = environment,
-    };
-    const loomc_context_options_t context_options = {
-        .type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
-        .structure_size = sizeof(context_options),
-        .next = &target_options,
-    };
-    status = iree_status_from_loomc(loomc_context_create(
-        &context_options, compiler_allocator, out_context));
-  }
-  loomc_target_environment_release(environment);
-  return status;
-}
-
-// Parses and verifies one input, then indexes it. Returns OK with
+// Reads, parses and verifies one input, then indexes it. Returns OK with
 // |*out_accepted| false when the input has diagnostics; those are printed.
 static iree_status_t loom_analyze_load_input(
-    const char* path, loomc_context_t* context, loomc_workspace_t* workspace,
+    const char* path, loom_analyze_session_t* session,
     loom_analyze_analyzer_t* analyzer, iree_allocator_t allocator,
     loom_analyze_loaded_input_t* out_input, bool* out_accepted) {
   *out_accepted = false;
-  const loomc_allocator_t compiler_allocator =
-      loomc_allocator_from_iree(allocator);
   const iree_string_view_t filename = iree_make_cstring_view(path);
   IREE_RETURN_IF_ERROR(
       loom_tooling_read_input_file(filename, allocator, &out_input->contents));
-
-  const loomc_source_options_t source_options = {
-      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      .structure_size = sizeof(source_options),
-      .format = LOOMC_SOURCE_FORMAT_TEXT,
-      .identifier = loomc_string_view_from_iree(filename),
-      .contents = loomc_byte_span_from_iree(out_input->contents->const_buffer),
-      .storage = LOOMC_SOURCE_STORAGE_BORROWED,
-  };
-  loomc_source_t* source = NULL;
-  IREE_RETURN_IF_ERROR(iree_status_from_loomc(
-      loomc_source_create(&source_options, compiler_allocator, &source)));
-  loomc_result_t* result = NULL;
+  const loom_module_t* native_module = NULL;
   bool accepted = false;
-  iree_status_t status =
-      iree_status_from_loomc(loomc_module_deserialize_from_source(
-          context, workspace, source, NULL, compiler_allocator,
-          &out_input->module, &result));
-  loomc_source_release(source);
-  if (iree_status_is_ok(status)) {
-    status = loom_tooling_cli_print_loomc_result(stderr, result, &accepted);
+  IREE_RETURN_IF_ERROR(loom_analyze_session_load(
+      session, filename, out_input->contents->const_buffer, stderr,
+      &out_input->module, &native_module, &accepted));
+  if (accepted) {
+    IREE_RETURN_IF_ERROR(
+        loom_analyze_analyzer_add_module(analyzer, native_module));
   }
-  loomc_result_release(result);
-  result = NULL;
-
-  // The interop view verifies the module and exposes native IR read-only.
-  loomc_module_interop_view_t view;
-  memset(&view, 0, sizeof(view));
-  if (iree_status_is_ok(status) && accepted) {
-    status = iree_status_from_loomc(loomc_module_get_interop_view(
-        out_input->module, compiler_allocator, &view, &result));
-    if (iree_status_is_ok(status)) {
-      status = loom_tooling_cli_print_loomc_result(stderr, result, &accepted);
-    }
-    loomc_result_release(result);
-  }
-  if (iree_status_is_ok(status) && accepted) {
-    status = loom_analyze_analyzer_add_module(analyzer, view.module);
-  }
-  *out_accepted = iree_status_is_ok(status) && accepted;
-  return status;
+  *out_accepted = accepted;
+  return iree_ok_status();
 }
 
 static void loom_analyze_print_agents_markdown(FILE* stream) {
@@ -219,8 +158,7 @@ int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
 
   iree_allocator_t allocator = iree_allocator_system();
-  loomc_context_t* context = NULL;
-  loomc_workspace_t* workspace = NULL;
+  loom_analyze_session_t* session = NULL;
   loom_analyze_analyzer_t* analyzer = NULL;
   loom_analyze_input_list_t inputs;
   loom_analyze_input_list_initialize(allocator, &inputs);
@@ -274,11 +212,7 @@ int main(int argc, char** argv) {
                                          sizeof(*loaded), (void**)&loaded);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_analyze_create_context(allocator, &context);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_status_from_loomc(loomc_workspace_create(
-        NULL, loomc_allocator_from_iree(allocator), &workspace));
+    status = loom_analyze_session_create(allocator, &session);
   }
   if (iree_status_is_ok(status)) {
     status = loom_analyze_analyzer_create(&options, allocator, &analyzer);
@@ -291,8 +225,8 @@ int main(int argc, char** argv) {
        ++i) {
     bool accepted = false;
     iree_status_t input_status =
-        loom_analyze_load_input(inputs.paths[i], context, workspace, analyzer,
-                                allocator, &loaded[loaded_count++], &accepted);
+        loom_analyze_load_input(inputs.paths[i], session, analyzer, allocator,
+                                &loaded[loaded_count++], &accepted);
     if (!iree_status_is_ok(input_status)) {
       iree_status_fprint(stderr, input_status);
       iree_status_free(input_status);
@@ -340,8 +274,7 @@ int main(int argc, char** argv) {
   }
   iree_allocator_free(allocator, loaded);
   loom_analyze_input_list_deinitialize(&inputs);
-  loomc_workspace_release(workspace);
-  loomc_context_release(context);
+  loom_analyze_session_free(session);
 
   IREE_TRACE_ZONE_END(z0);
   IREE_TRACE_APP_EXIT(exit_code);

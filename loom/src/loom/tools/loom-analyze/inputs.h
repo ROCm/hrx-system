@@ -45,6 +45,10 @@ iree_status_t loom_analyze_input_list_add_path(
     loom_analyze_input_list_t* list, iree_string_view_t path,
     const iree_string_view_t* excludes, iree_host_size_t exclude_count);
 
+// Adds every regular file under |directory|, whatever its extension.
+iree_status_t loom_analyze_input_list_add_tree(loom_analyze_input_list_t* list,
+                                               iree_string_view_t directory);
+
 // Sorts paths and removes duplicates.
 void loom_analyze_input_list_finalize(loom_analyze_input_list_t* list);
 

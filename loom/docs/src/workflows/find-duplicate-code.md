@@ -99,8 +99,9 @@ replaced by a call. The finding still identifies the duplicated computation.
 
 ## Apply the refactor plan
 
-`loom-analyze` never edits source. Its JSON report is a complete plan for a
-separate rewriter, whether a script or an agent:
+`loom-analyze` never edits source. Its JSON report is a complete plan that
+[`loom-reduce`](#reduce-the-source) applies, and that any other rewriter, such
+as a script or an agent, can apply too:
 
 ```shell
 loom-analyze --format=json --output=plan.json kernels/
@@ -132,33 +133,59 @@ any copy uses afterwards, so all copies share one signature.
 
 ## Reduce the source
 
-`loom-reduce` applies the plan. It copies the source tree to an empty output
-directory and rewrites only the copy:
+`loom-reduce` applies the same analysis and rewrites the duplication away. It
+copies the source root to an empty output directory and rewrites only the copy:
 
 ```shell
-loom-analyze --format=json --output=plan.json kernels/
-loom-reduce --plan=plan.json --output-dir=reduced/ --report=reduce.json
+loom-reduce --output-dir=reduced/ --report=reduce.json kernels/
 ```
-
-Run it from the directory where `loom-analyze` ran, or pass `--root`. Each
-selected finding becomes one `func.def inline` motif, defined at the end of the
-file holding its copies, and each callable copy becomes a call. Findings whose
-copies differ in constants or types, and copies of an existing motif in another
-file, are skipped with a reason. Every rewritten file is parsed and verified
-with `loom-analyze`; a file that fails keeps only the motifs that verify on
-their own. The summary and `reduce.json` list applied, skipped and reverted
-motifs:
 
 ```text
 loom-reduce: 293 motif(s) replace 998 copies in 79 file(s); removes 6542 of 46773 ops (14.0%)
 loom-reduce: 49 skipped, 10 reverted after verification
 ```
 
-Analyzing the reduced tree again can find further copies; a second pass on the
-same corpus removed another 841 operations. Inlining makes most kernels compile
-to identical code, but the compiler may select different instructions around a
-call boundary, so compare the compiled kernels and measure any that change
-before adopting the reduced sources.
+Each selected finding becomes one `func.def inline` motif and each callable copy
+becomes a call. With the default `--scope=file`, a motif is defined at the end
+of the file holding its copies, so no declarations or link inputs change.
+
+`--scope=corpus` also shares motifs between files. Copies are grouped by the
+first directory under the root, such as one kernel family, and each group's
+motifs go to one motif file in that directory, `loom_reduce_motifs.loom` by
+default, together with the declarations their bodies reference. Calling files
+gain a `func.decl`. Copies of an existing `func.def` in the same file become
+calls to it.
+
+```shell
+loom-reduce --scope=corpus --links=links.json --output-dir=reduced/ kernels/
+```
+
+```text
+loom-reduce: 399 motif(s) replace 1433 copies in 172 file(s); removes 9764 of 46773 ops (20.9%)
+loom-reduce: 70 skipped, 22 reverted after verification
+loom-reduce: 169 file(s) now need new link inputs; see links.json
+```
+
+`links.json` maps each rewritten file to the motif files it now needs:
+`{"requires": {"family/ops/a.loom": ["family/loom_reduce_motifs.loom"]}}`. Add
+those files to the link inputs of every program that compiles the rewritten
+sources.
+
+A rewrite is skipped with a reason when it cannot be expressed:
+- `buffer.alloca` in the sequence, which would allocate once per call;
+- a parameter type naming a value that is not an earlier parameter;
+- a referenced symbol without a declaration;
+- a motif that would take part in a call cycle, since inline motifs cannot
+  recurse.
+
+Every rewritten file is parsed and verified. Motifs touching a failing file are
+re-admitted one at a time, and those that still fail are reported as reverted.
+`reduce.json` lists every motif with its status and reason.
+
+Analyzing the reduced tree again can find further copies. Inlining makes most
+kernels compile to identical code, but the compiler may select different
+instructions around a former call boundary, so compare the compiled kernels and
+measure any that change before adopting the reduced sources.
 
 ## Use loom-analyze in CI
 

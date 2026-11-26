@@ -70,7 +70,6 @@ def loom_python_wheel(name, version, catalog = "", testonly = False):
             "loom-export-cxx = loom.tools.export_cxx:main",
             "loom-fetch = loom.model.fetch_main:main",
             "loom-lint = loom.tools.source_lint:main",
-            "loom-reduce = loom.tools.source_reduce:main",
         ]},
         extra_distinfo_files = {
             Label("//:LICENSE"): "licenses/LICENSE",

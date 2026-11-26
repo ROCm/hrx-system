@@ -125,7 +125,6 @@ py_package(
         "//loom/py/loom/tools:compile_report",
         "//loom/py/loom/tools:export_cxx",
         "//loom/py/loom/tools:source_lint",
-        "//loom/py/loom/tools:source_reduce",
     ],
 )
 

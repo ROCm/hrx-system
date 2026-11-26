@@ -1,0 +1,26 @@
+// Two functions finish with the same address computation after different
+// first steps. loom-reduce moves the shared computation into one motif.
+func.def @row_address(%row: index, %col: index, %stride: index, %base: index) -> (index) {
+  %start = index.add %row, %col : index
+  %address = func.call @loom_reduce_3f77f3bf221e_ee2b47(%start, %stride, %col, %base) : (index, index, index, index) -> (index)
+  func.return %address : index
+}
+
+func.def @tile_address(%tile_row: index, %tile_col: index, %pitch: index, %origin: index) -> (index) {
+  %first = index.mul %tile_row, %tile_col : index
+  %result = func.call @loom_reduce_3f77f3bf221e_ee2b47(%first, %pitch, %tile_col, %origin) : (index, index, index, index) -> (index)
+  func.return %result : index
+}
+
+// Motifs extracted by loom-reduce.
+
+// Motif extracted by loom-reduce from 2 copies (6 ops each).
+func.def inline @loom_reduce_3f77f3bf221e_ee2b47(%start: index, %stride: index, %col: index, %base: index) -> (index) {
+  %scaled = index.mul %start, %stride : index
+  %offset = index.add %scaled, %col : index
+  %shifted = index.add %base, %offset : index
+  %wrapped = index.rem %shifted, %stride : index
+  %bucket = index.div %shifted, %stride : index
+  %address = index.add %bucket, %wrapped : index
+  func.return %address : index
+}
