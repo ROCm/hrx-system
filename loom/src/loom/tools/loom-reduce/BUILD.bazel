@@ -53,7 +53,9 @@ iree_cli_test(
     data = [
         "testdata/corpus/family/first.loom",
         "testdata/corpus/family/second.loom",
+        "testdata/expected/hoist.loom",
         "testdata/expected/kernel.loom",
+        "testdata/hoist/kernel.loom",
         "testdata/tree/kernel.loom",
     ],
     manifests = ["loom-reduce.test.json"],

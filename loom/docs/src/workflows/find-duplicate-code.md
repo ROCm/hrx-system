@@ -141,8 +141,8 @@ loom-reduce --output-dir=reduced/ --report=reduce.json kernels/
 ```
 
 ```text
-loom-reduce: 473 motif(s) replace 1670 copies in 116 file(s); removes 6742 of 46773 ops (14.4%)
-loom-reduce: 16 skipped, 8 reverted after verification
+loom-reduce: 481 motif(s) replace 1691 copies in 117 file(s); removes 6786 of 46773 ops (14.5%)
+loom-reduce: 16 skipped, 0 reverted after verification
 loom-reduce: 0 existing motif(s) reused; 33 new motif(s) made where reuse was impossible
 ```
 
@@ -150,7 +150,8 @@ loom-reduce: 0 existing motif(s) reused; 33 new motif(s) made where reuse was im
 skips any whose calls would not remove operations.
 
 Each selected finding becomes one `func.def inline` motif and each callable copy
-becomes a call. With the default `--scope=file`, a motif is defined at the end
+becomes a call. A copy inside a `pure` function makes the motif `pure` and its
+calls `func.call pure`, so the function stays verifiably pure. With the default `--scope=file`, a motif is defined at the end
 of the file holding its copies, so no declarations or link inputs change.
 
 `--scope=corpus` also shares motifs between files. Copies are grouped by the
@@ -166,10 +167,10 @@ loom-reduce --scope=corpus --links=links.json --output-dir=reduced/ kernels/
 ```
 
 ```text
-loom-reduce: 633 motif(s) replace 2521 copies in 215 file(s); removes 11670 of 46773 ops (25.0%)
-loom-reduce: 37 skipped, 26 reverted after verification
+loom-reduce: 665 motif(s) replace 2623 copies in 218 file(s); removes 12734 of 46773 ops (27.2%)
+loom-reduce: 29 skipped, 2 reverted after verification
 loom-reduce: 13 existing motif(s) reused; 20 new motif(s) made where reuse was impossible
-loom-reduce: 212 file(s) now need new link inputs; see links.json
+loom-reduce: 215 file(s) now need new link inputs; see links.json
 ```
 
 ### Reuse before creating
@@ -196,16 +197,36 @@ reason under `reuse_fallbacks`:
 
 Each run can expose new copies, for example sequences that now differ only by a
 call. Running `loom-reduce` again on its own output until it reports no motifs
-converges in a few passes; on the same corpus three passes reduce 46,773
-operations to 32,444 (30.6%). Apply each run's `links.json` before the next.
+converges in a few passes; on the same corpus four passes reduce 46,773
+operations to 30,855 (34.0%). Apply each run's `links.json` before the next.
+With all link inputs applied, 181 of the 191 kernels that compile before the
+rewrite compile to byte-identical code objects for `gfx1151`, and none fail.
 
 `links.json` maps each rewritten file to the motif files it now needs:
 `{"requires": {"family/ops/a.loom": ["family/loom_reduce_family_motifs.loom"]}}`. Add
 those files to the link inputs of every program that compiles the rewritten
 sources.
 
+### Allocations stay at the call site
+
+Each call must keep its own allocation, so a top-level `buffer.alloca` in a
+sequence stays where it is, before the call, together with the operations of
+the sequence its size depends on, and its buffer is passed to the motif:
+
+```text
+%bytes = index.constant 1024 : offset
+%shared = buffer.alloca<workgroup> align(16) %bytes : buffer
+%c0, %count = func.call @loom_reduce_3731a21bd5a8_ee2b47(%rows, %row, %input, %shared) : (index, index, buffer, buffer) -> (offset, index)
+```
+
+The motif receives only the values its body uses. Those operations must be pure
+and must not hold regions.
+
+### Skipped rewrites
+
 A rewrite is skipped with a reason when it cannot be expressed:
-- `buffer.alloca` in the sequence, which would allocate once per call;
+- a `buffer.alloca` nested in a region of the sequence, which would allocate
+  once per call;
 - a parameter type naming a value that is not an earlier parameter;
 - a referenced symbol without a declaration;
 - a motif that would take part in a call cycle, since inline motifs cannot

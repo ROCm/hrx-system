@@ -15,6 +15,7 @@
 #include "loom/error/source.h"
 #include "loom/format/text/printer.h"
 #include "loom/ir/context.h"
+#include "loom/ir/value_refs.h"
 #include "loom/ops/op_defs.h"
 #include "loom/util/json.h"
 
@@ -121,12 +122,32 @@ typedef struct loom_reduce_source_t {
   bool rendered;
 } loom_reduce_source_t;
 
+// An operation that stays at the call site: a top-level `buffer.alloca` or an
+// operation of the sequence it depends on. Its results become motif
+// parameters, so each call keeps its own allocation.
+typedef struct loom_reduce_hoist_t {
+  // Byte range of the operation's text and the lines it occupies alone.
+  iree_host_size_t start;
+  iree_host_size_t end;
+  uint32_t start_line;
+  uint32_t end_line;
+} loom_reduce_hoist_t;
+
 typedef struct loom_reduce_copy_t {
   uint32_t source;
   iree_host_size_t start;
   iree_host_size_t end;
   uint32_t start_column;
   const loom_analyze_occurrence_t* occurrence;
+  // New motifs: allocations kept before the call, in source order.
+  loom_reduce_hoist_t* hoists;
+  uint32_t hoist_count;
+  // Results of |hoists|; those at |passed| are referenced by the rest of the
+  // sequence and become trailing motif parameters.
+  loom_analyze_binding_t* hoisted_values;
+  uint32_t hoisted_value_count;
+  uint32_t* passed;
+  uint32_t passed_count;
   // Existing motifs: occurrence input index per motif parameter and output
   // index per motif result.
   const uint32_t* argument_order;
@@ -157,6 +178,17 @@ typedef struct loom_reduce_job_t {
   // Existing motifs: parameter and result counts of the called definition.
   uint32_t parameter_count;
   uint32_t result_count;
+  // New motifs with hoisted allocations: allocations per copy, and the
+  // occurrence output indices the motif still returns (hoisted buffers are
+  // already defined at the call site).
+  uint32_t hoist_count;
+  uint32_t passed_count;
+  // The called function is `pure`: it is defined and declared pure and
+  // called with `func.call pure`, so pure functions holding copies stay
+  // verifiably pure.
+  bool pure;
+  const uint32_t* output_order;
+  uint32_t output_count;
   uint64_t removed_op_count;
 } loom_reduce_job_t;
 
@@ -361,8 +393,10 @@ static uint64_t loom_reduce_removed_ops(const loom_reduce_job_t* job) {
   if (job->existing) {
     return count * (ops - 1);
   }
-  // Each copy becomes one call; one motif body and its func.return are added.
-  const uint64_t added = ops + 1 + count;
+  // Each copy becomes its hoisted allocations and one call; one motif body
+  // without the allocations and its func.return are added.
+  const uint64_t hoisted = job->hoist_count;
+  const uint64_t added = (ops - hoisted + 1) + count * (hoisted + 1);
   return count * ops > added ? count * ops - added : 0;
 }
 
@@ -559,6 +593,27 @@ static iree_string_view_t loom_reduce_defined_symbol(
   return iree_string_view_empty();
 }
 
+// Returns true when |op| is a function-like op with the `pure` contract.
+static bool loom_reduce_is_pure_function(const loom_module_t* module,
+                                         const loom_op_t* op) {
+  const loom_func_like_t function = loom_func_like_cast(module, (loom_op_t*)op);
+  return loom_func_like_isa(function) &&
+         loom_func_like_effect_contract(function) ==
+             LOOM_CALLABLE_EFFECT_CONTRACT_PURE;
+}
+
+// Returns true when the innermost function enclosing |op| is `pure`.
+static bool loom_reduce_in_pure_function(const loom_module_t* module,
+                                         const loom_op_t* op) {
+  for (const loom_op_t* parent = op->parent_op; parent;
+       parent = parent->parent_op) {
+    if (loom_func_like_isa(loom_func_like_cast(module, (loom_op_t*)parent))) {
+      return loom_reduce_is_pure_function(module, parent);
+    }
+  }
+  return false;
+}
+
 // Calls |fn| with the name of every symbol |op|'s attributes reference.
 static iree_status_t loom_reduce_for_each_symbol_ref(
     const loom_module_t* module, const loom_op_t* op,
@@ -720,6 +775,7 @@ static iree_status_t loom_reduce_add_existing_job(
                                  "the existing motif is not a func.def; "
                                  "template providers are not called directly");
   }
+  const bool pure = loom_reduce_is_pure_function(source->module, definition_op);
   loom_region_t* body = loom_func_like_body(
       loom_func_like_cast(source->module, (loom_op_t*)definition_op));
   const loom_block_t* entry =
@@ -855,6 +911,7 @@ static iree_status_t loom_reduce_add_existing_job(
   loom_reduce_job_t* job = NULL;
   IREE_RETURN_IF_ERROR(loom_reduce_new_job(plan, &job));
   job->existing = true;
+  job->pure = pure;
   job->fingerprint = finding->fingerprint;
   job->op_count = finding->op_count;
   job->parameter_count = parameter_count;
@@ -898,6 +955,407 @@ static iree_status_t loom_reduce_add_existing_job(
   return iree_ok_status();
 }
 
+//===----------------------------------------------------------------------===//
+// Allocation hoisting
+//===----------------------------------------------------------------------===//
+
+static bool loom_reduce_op_range(const loom_module_t* module,
+                                 const loom_op_t* op,
+                                 loom_source_range_t* out_range) {
+  const loom_source_resolver_t resolver = {NULL, NULL};
+  return loom_source_resolve(resolver, module, op->location, out_range) &&
+         out_range->start_line > 0;
+}
+
+static bool loom_reduce_position_before(uint32_t line, uint32_t column,
+                                        uint32_t other_line,
+                                        uint32_t other_column) {
+  return line < other_line || (line == other_line && column < other_column);
+}
+
+// Returns the operation of |block| or its nested regions starting at
+// |line|:|column|, or NULL.
+static const loom_op_t* loom_reduce_find_op_at(const loom_module_t* module,
+                                               const loom_block_t* block,
+                                               uint32_t line, uint32_t column) {
+  for (const loom_op_t* op = block ? block->first_op : NULL; op;
+       op = op->next_op) {
+    loom_source_range_t range;
+    if (!loom_reduce_op_range(module, op, &range)) {
+      continue;
+    }
+    if (range.start_line == line && range.start_column == column) {
+      return op;
+    }
+    // Descend only into operations whose source range encloses the position.
+    if (op->region_count == 0 ||
+        loom_reduce_position_before(line, column, range.start_line,
+                                    range.start_column) ||
+        (range.end_line >= range.start_line &&
+         loom_reduce_position_before(range.end_line, range.end_column, line,
+                                     column))) {
+      continue;
+    }
+    loom_region_t** regions = loom_op_regions(op);
+    for (uint8_t r = 0; r < op->region_count; ++r) {
+      for (uint16_t b = 0; regions[r] && b < regions[r]->block_count; ++b) {
+        const loom_op_t* found =
+            loom_reduce_find_op_at(module, regions[r]->blocks[b], line, column);
+        if (found) {
+          return found;
+        }
+      }
+    }
+  }
+  return NULL;
+}
+
+static bool loom_reduce_is_alloca(const loom_module_t* module,
+                                  const loom_op_t* op) {
+  return iree_string_view_equal(loom_op_name(module, op),
+                                IREE_SV("buffer.alloca"));
+}
+
+// Returns true when a region of |op| holds a `buffer.alloca` at any depth.
+static bool loom_reduce_regions_allocate(const loom_module_t* module,
+                                         const loom_op_t* op) {
+  loom_region_t** regions = loom_op_regions(op);
+  for (uint8_t r = 0; r < op->region_count; ++r) {
+    for (uint16_t b = 0; regions[r] && b < regions[r]->block_count; ++b) {
+      const loom_block_t* block = regions[r]->blocks[b];
+      for (const loom_op_t* child = block ? block->first_op : NULL; child;
+           child = child->next_op) {
+        if (loom_reduce_is_alloca(module, child) ||
+            loom_reduce_regions_allocate(module, child)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+// Returns true when only spaces separate [start, end) of |text| from the
+// surrounding line breaks.
+static bool loom_reduce_alone_on_lines(iree_string_view_t text,
+                                       iree_host_size_t start,
+                                       iree_host_size_t end) {
+  for (iree_host_size_t i = start; i > 0 && text.data[i - 1] != '\n'; --i) {
+    if (text.data[i - 1] != ' ' && text.data[i - 1] != '\t') {
+      return false;
+    }
+  }
+  for (iree_host_size_t i = end; i < text.size && text.data[i] != '\n'; ++i) {
+    if (text.data[i] != ' ' && text.data[i] != '\t' && text.data[i] != '\r') {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Prints the type of |value| of |source|'s module into plan storage.
+static iree_status_t loom_reduce_print_value_type(
+    loom_reduce_plan_t* plan, loom_reduce_source_t* source,
+    const loom_value_t* value, iree_string_view_t* out_type) {
+  if (!source->printer_ready) {
+    loom_text_printer_initialize(source->module, &source->printer);
+    source->printer_ready = true;
+  }
+  iree_string_builder_t printed;
+  iree_string_builder_initialize(plan->allocator, &printed);
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(&printed, &stream);
+  iree_status_t status = loom_text_printer_write_type(
+      &source->printer, value->type, &stream, NULL);
+  if (iree_status_is_ok(status)) {
+    status = loom_reduce_arena_copy(plan, iree_string_builder_view(&printed),
+                                    out_type);
+  }
+  iree_string_builder_deinitialize(&printed);
+  return status;
+}
+
+// Records |op| of |copy|'s sequence as hoisted: its text moves before the
+// call and its results become motif parameters. Sets |*out_reason| when it
+// cannot move.
+static iree_status_t loom_reduce_add_hoist(loom_reduce_plan_t* plan,
+                                           loom_reduce_copy_t* copy,
+                                           const loom_op_t* op,
+                                           const char** out_reason) {
+  loom_reduce_source_t* source = &plan->sources[copy->source];
+  const loom_module_t* module = source->module;
+  loom_source_range_t range;
+  loom_reduce_hoist_t* hoist = &copy->hoists[copy->hoist_count];
+  if (!loom_reduce_op_range(module, op, &range) ||
+      range.end_line < range.start_line ||
+      !loom_reduce_offset(source, range.start_line, range.start_column,
+                          &hoist->start) ||
+      !loom_reduce_offset(source, range.end_line, range.end_column,
+                          &hoist->end) ||
+      hoist->end <= hoist->start) {
+    *out_reason = "a hoisted allocation's source range does not resolve";
+    return iree_ok_status();
+  }
+  if (!loom_reduce_alone_on_lines(source->text, hoist->start, hoist->end)) {
+    *out_reason = "a hoisted allocation shares its lines with other code";
+    return iree_ok_status();
+  }
+  hoist->start_line = range.start_line;
+  hoist->end_line = range.end_line;
+  ++copy->hoist_count;
+  for (uint16_t r = 0; r < op->result_count; ++r) {
+    const loom_value_t* result = loom_op_result_value(module, op, r);
+    if (result->name_id == LOOM_STRING_ID_INVALID ||
+        result->name_id >= module->strings.count) {
+      *out_reason = "a hoisted allocation's result has no source name";
+      return iree_ok_status();
+    }
+    loom_analyze_binding_t* binding =
+        &copy->hoisted_values[copy->hoisted_value_count++];
+    binding->name = loom_string_table_get(&module->strings, result->name_id);
+    IREE_RETURN_IF_ERROR(
+        loom_reduce_print_value_type(plan, source, result, &binding->type));
+  }
+  return iree_ok_status();
+}
+
+// Values whose references loom_reduce_mark_value records.
+typedef struct loom_reduce_value_search_t {
+  loom_value_id_t* values;
+  bool* found;
+  uint32_t count;
+} loom_reduce_value_search_t;
+
+static iree_status_t loom_reduce_mark_value(loom_value_id_t provider,
+                                            loom_value_id_t type_carrier,
+                                            void* user_data) {
+  (void)type_carrier;
+  loom_reduce_value_search_t* search = (loom_reduce_value_search_t*)user_data;
+  for (uint32_t i = 0; i < search->count; ++i) {
+    if (search->values[i] == provider) {
+      search->found[i] = true;
+    }
+  }
+  return iree_ok_status();
+}
+
+// Collects the allocations of |copy|'s sequence, located through its module:
+// each top-level `buffer.alloca` together with the operations of the sequence
+// it depends on. They move before the call, so every call keeps its own
+// allocation. Sets |*out_reason| when one cannot move.
+// Returns the first operation of |copy|'s sequence, or NULL.
+static const loom_op_t* loom_reduce_copy_first_op(
+    const loom_reduce_plan_t* plan, const loom_reduce_copy_t* copy) {
+  const loom_module_t* module = plan->sources[copy->source].module;
+  const loom_region_t* body = module ? module->body : NULL;
+  const loom_op_t* first = NULL;
+  for (uint16_t b = 0; body && !first && b < body->block_count; ++b) {
+    first = loom_reduce_find_op_at(module, body->blocks[b],
+                                   copy->occurrence->start_line,
+                                   copy->occurrence->start_column);
+  }
+  return first;
+}
+
+static iree_status_t loom_reduce_collect_hoists(loom_reduce_plan_t* plan,
+                                                loom_reduce_copy_t* copy,
+                                                const loom_op_t* first,
+                                                const char** out_reason) {
+  const loom_module_t* module = plan->sources[copy->source].module;
+  const loom_analyze_occurrence_t* occurrence = copy->occurrence;
+  // The sequence is |first| and the siblings starting before its end.
+  uint32_t length = 0;
+  uint32_t alloca_count = 0;
+  for (const loom_op_t* op = first; op; op = op->next_op) {
+    loom_source_range_t range;
+    if (!loom_reduce_op_range(module, op, &range) ||
+        !loom_reduce_position_before(range.start_line, range.start_column,
+                                     occurrence->end_line,
+                                     occurrence->end_column)) {
+      break;
+    }
+    ++length;
+    if (loom_reduce_is_alloca(module, op)) {
+      ++alloca_count;
+    } else if (loom_reduce_regions_allocate(module, op)) {
+      *out_reason =
+          "a buffer.alloca nested in a region would allocate once per call";
+      return iree_ok_status();
+    }
+  }
+  if (alloca_count == 0) {
+    return iree_ok_status();
+  }
+  const loom_op_t** ops = NULL;
+  bool* marked = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(&plan->arena, length * sizeof(*ops), (void**)&ops));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      &plan->arena, length * sizeof(*marked), (void**)&marked));
+  uint32_t i = 0;
+  for (const loom_op_t* op = first; i < length; op = op->next_op, ++i) {
+    ops[i] = op;
+    marked[i] = loom_reduce_is_alloca(module, op);
+  }
+  // Mark what the allocations depend on. Definitions precede their uses, so
+  // one backward pass reaches the whole slice.
+  uint32_t hoist_count = 0;
+  uint32_t value_count = 0;
+  for (uint32_t k = length; k-- > 0;) {
+    if (!marked[k]) {
+      continue;
+    }
+    const loom_op_t* op = ops[k];
+    if (!loom_reduce_is_alloca(module, op) &&
+        (op->region_count > 0 ||
+         !iree_any_bit_set(op->traits, LOOM_TRAIT_PURE))) {
+      *out_reason =
+          "a buffer.alloca depends on an operation of the sequence that "
+          "cannot move before the call";
+      return iree_ok_status();
+    }
+    ++hoist_count;
+    value_count += op->result_count;
+    for (uint16_t o = 0; o < op->operand_count; ++o) {
+      const loom_value_t* value = loom_op_operand_value(module, op, o);
+      if (loom_value_is_block_arg(value)) {
+        continue;
+      }
+      const loom_op_t* definition = loom_value_def_op(value);
+      for (uint32_t d = 0; d < k; ++d) {
+        if (ops[d] == definition) {
+          marked[d] = true;
+          break;
+        }
+      }
+    }
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      &plan->arena, hoist_count * sizeof(loom_reduce_hoist_t),
+      (void**)&copy->hoists));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      &plan->arena, (value_count + 1) * sizeof(loom_analyze_binding_t),
+      (void**)&copy->hoisted_values));
+  for (uint32_t k = 0; k < length && !*out_reason; ++k) {
+    if (marked[k]) {
+      IREE_RETURN_IF_ERROR(
+          loom_reduce_add_hoist(plan, copy, ops[k], out_reason));
+    }
+  }
+  if (*out_reason) {
+    return iree_ok_status();
+  }
+
+  // Pass only the hoisted values the rest of the sequence references, through
+  // operands, types, or attributes.
+  loom_reduce_value_search_t search = {0};
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      &plan->arena, (value_count + 1) * sizeof(loom_value_id_t),
+      (void**)&search.values));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      &plan->arena, (value_count + 1) * sizeof(bool), (void**)&search.found));
+  for (uint32_t k = 0; k < length; ++k) {
+    if (!marked[k]) {
+      continue;
+    }
+    const loom_value_id_t* results = loom_op_const_results(ops[k]);
+    for (uint16_t r = 0; r < ops[k]->result_count; ++r) {
+      search.found[search.count] = false;
+      search.values[search.count++] = results[r];
+    }
+  }
+  for (uint32_t k = 0; k < length; ++k) {
+    if (!marked[k]) {
+      IREE_RETURN_IF_ERROR(loom_op_walk_subtree_value_refs(
+          module, ops[k], loom_reduce_mark_value, &search));
+    }
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(&plan->arena,
+                                           (value_count + 1) * sizeof(uint32_t),
+                                           (void**)&copy->passed));
+  for (uint32_t v = 0; v < search.count; ++v) {
+    if (search.found[v]) {
+      copy->passed[copy->passed_count++] = v;
+    }
+  }
+  return iree_ok_status();
+}
+
+// Returns true when |name| is a value |copy| hoists before its call.
+static bool loom_reduce_is_hoisted(const loom_reduce_copy_t* copy,
+                                   iree_string_view_t name) {
+  return loom_reduce_find_binding(copy->hoisted_values,
+                                  copy->hoisted_value_count,
+                                  name) != UINT32_MAX;
+}
+
+// Keeps a new motif's allocations at its call sites: each copy's top-level
+// `buffer.alloca` ops stay before its call and their buffers become trailing
+// motif parameters, so every call site keeps its own allocation.
+static iree_status_t loom_reduce_prepare_hoists(loom_reduce_plan_t* plan,
+                                                loom_reduce_job_t* job) {
+  const loom_analyze_occurrence_t* occurrence = job->copies[0].occurrence;
+  job->output_count = occurrence->output_count;
+  const char* reason = NULL;
+  for (uint32_t c = 0; c < job->copy_count && !reason; ++c) {
+    const loom_op_t* first = loom_reduce_copy_first_op(plan, &job->copies[c]);
+    if (!first) {
+      reason = "a copy's operations do not resolve";
+      break;
+    }
+    // A copy inside a pure function makes the motif pure; the verifier checks
+    // that its body is.
+    job->pure =
+        job->pure || loom_reduce_in_pure_function(
+                         plan->sources[job->copies[c].source].module, first);
+    IREE_RETURN_IF_ERROR(
+        loom_reduce_collect_hoists(plan, &job->copies[c], first, &reason));
+    if (!reason &&
+        (job->copies[c].hoist_count != job->copies[0].hoist_count ||
+         job->copies[c].hoisted_value_count !=
+             job->copies[0].hoisted_value_count ||
+         job->copies[c].passed_count != job->copies[0].passed_count)) {
+      reason = "copies disagree on their allocations";
+    }
+  }
+  job->hoist_count = reason ? 0 : job->copies[0].hoist_count;
+  job->passed_count = reason ? 0 : job->copies[0].passed_count;
+  if (!reason && job->hoist_count > 0) {
+    // Hoisted buffers are defined before the call; the motif does not return
+    // them. Copies match structurally, so the same outputs drop in each.
+    uint32_t* order = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate(
+        &plan->arena, (occurrence->output_count + 1) * sizeof(uint32_t),
+        (void**)&order));
+    uint32_t kept = 0;
+    for (uint32_t i = 0; i < occurrence->output_count && !reason; ++i) {
+      const bool hoisted =
+          loom_reduce_is_hoisted(&job->copies[0], occurrence->outputs[i].name);
+      for (uint32_t c = 1; c < job->copy_count; ++c) {
+        const loom_analyze_occurrence_t* other = job->copies[c].occurrence;
+        if (i >= other->output_count ||
+            loom_reduce_is_hoisted(&job->copies[c], other->outputs[i].name) !=
+                hoisted) {
+          reason = "copies disagree on their allocations";
+          break;
+        }
+      }
+      if (!hoisted) {
+        order[kept++] = i;
+      }
+    }
+    job->output_order = order;
+    job->output_count = kept;
+  }
+  if (reason && job->status == LOOM_REDUCE_JOB_PENDING) {
+    job->status = LOOM_REDUCE_JOB_SKIPPED;
+    job->reason = reason;
+    job->hoist_count = 0;
+    job->passed_count = 0;
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_reduce_plan_create(const loom_reduce_options_t* options,
                                       const loom_reduce_input_t* inputs,
                                       iree_host_size_t input_count,
@@ -936,8 +1394,13 @@ iree_status_t loom_reduce_plan_create(const loom_reduce_options_t* options,
       status = loom_reduce_add_duplicate_jobs(plan, finding);
     }
   }
-  for (iree_host_size_t j = 0; j < plan->job_count; ++j) {
-    plan->jobs[j].removed_op_count = loom_reduce_removed_ops(&plan->jobs[j]);
+  for (iree_host_size_t j = 0; j < plan->job_count && iree_status_is_ok(status);
+       ++j) {
+    loom_reduce_job_t* job = &plan->jobs[j];
+    if (!job->existing && job->copy_count > 0) {
+      status = loom_reduce_prepare_hoists(plan, job);
+    }
+    job->removed_op_count = loom_reduce_removed_ops(job);
   }
   if (!iree_status_is_ok(status)) {
     loom_reduce_plan_free(plan);
@@ -1113,7 +1576,9 @@ static iree_status_t loom_reduce_find_declaration(
           loom_reduce_trim(iree_make_string_view(text.data + at, brace - at));
       *out_found = true;
       status = iree_string_builder_append_format(
-          builder, "func.decl %.*s\n", (int)signature.size, signature.data);
+          builder, "func.decl %s%.*s\n",
+          loom_reduce_is_pure_function(source->module, op) ? "pure " : "",
+          (int)signature.size, signature.data);
     }
   } else if (iree_string_view_ends_with(name, IREE_SV(".target"))) {
     *out_found = true;
@@ -1267,15 +1732,6 @@ static iree_status_t loom_reduce_validate(loom_reduce_plan_t* plan,
   }
   const loom_reduce_copy_t* template = &job->copies[0];
   const iree_string_view_t body = loom_reduce_copy_body(plan, template);
-  if (!job->existing) {
-    for (iree_host_size_t i = 0; i + 13 <= body.size; ++i) {
-      if (memcmp(body.data + i, "buffer.alloca", 13) == 0) {
-        *out_reason =
-            "moving buffer.alloca into a motif would allocate once per call";
-        return iree_ok_status();
-      }
-    }
-  }
   // Only the last top-level operation can be a terminator; check every
   // top-level line, as loom-analyze excludes block terminators already.
   const uint32_t base_indent = template->start_column - 1;
@@ -1329,7 +1785,8 @@ static iree_status_t loom_reduce_validate(loom_reduce_plan_t* plan,
       return iree_ok_status();
     }
   }
-  for (uint32_t i = 0; i < occurrence->output_count; ++i) {
+  for (uint32_t k = 0; k < job->output_count; ++k) {
+    const uint32_t i = job->output_order ? job->output_order[k] : k;
     if (!loom_reduce_type_references_known(occurrence->outputs[i].type,
                                            occurrence->inputs,
                                            occurrence->input_count)) {
@@ -1694,55 +2151,87 @@ static iree_status_t loom_reduce_reject_call_cycles(loom_reduce_plan_t* plan,
 // Rendering
 //===----------------------------------------------------------------------===//
 
-static iree_status_t loom_reduce_append_types(
+static iree_status_t loom_reduce_append_types_after(
     iree_string_builder_t* builder, const loom_analyze_binding_t* bindings,
-    const uint32_t* order, uint32_t count) {
+    const uint32_t* order, uint32_t count, bool separate) {
   for (uint32_t i = 0; i < count; ++i) {
     const loom_analyze_binding_t* binding = &bindings[order ? order[i] : i];
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        builder, "%s%.*s", i ? ", " : "", (int)binding->type.size,
+        builder, "%s%.*s", i || separate ? ", " : "", (int)binding->type.size,
         binding->type.data));
   }
   return iree_ok_status();
 }
 
-static iree_status_t loom_reduce_append_names(
+static iree_status_t loom_reduce_append_names_after(
     iree_string_builder_t* builder, const loom_analyze_binding_t* bindings,
-    const uint32_t* order, uint32_t count) {
+    const uint32_t* order, uint32_t count, bool separate) {
   for (uint32_t i = 0; i < count; ++i) {
     const loom_analyze_binding_t* binding = &bindings[order ? order[i] : i];
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        builder, "%s%%%.*s", i ? ", " : "", (int)binding->name.size,
+        builder, "%s%%%.*s", i || separate ? ", " : "", (int)binding->name.size,
         binding->name.data));
   }
   return iree_ok_status();
 }
 
-static iree_status_t loom_reduce_append_call(iree_string_builder_t* builder,
+static iree_status_t loom_reduce_append_types(
+    iree_string_builder_t* builder, const loom_analyze_binding_t* bindings,
+    const uint32_t* order, uint32_t count) {
+  return loom_reduce_append_types_after(builder, bindings, order, count,
+                                        /*separate=*/false);
+}
+
+static iree_status_t loom_reduce_append_names(
+    iree_string_builder_t* builder, const loom_analyze_binding_t* bindings,
+    const uint32_t* order, uint32_t count) {
+  return loom_reduce_append_names_after(builder, bindings, order, count,
+                                        /*separate=*/false);
+}
+
+static iree_status_t loom_reduce_append_call(const loom_reduce_plan_t* plan,
+                                             iree_string_builder_t* builder,
                                              const loom_reduce_job_t* job,
                                              const loom_reduce_copy_t* copy) {
   const loom_analyze_occurrence_t* occurrence = copy->occurrence;
   const uint32_t argument_count =
       job->existing ? job->parameter_count : occurrence->input_count;
   const uint32_t result_count =
-      job->existing ? job->result_count : occurrence->output_count;
+      job->existing ? job->result_count : job->output_count;
+  const uint32_t* result_order =
+      job->existing ? copy->result_order : job->output_order;
+  // Hoisted allocations stay in place, one per line, before the call.
+  const iree_string_view_t text = plan->sources[copy->source].text;
+  for (uint32_t h = 0; h < job->hoist_count; ++h) {
+    const loom_reduce_hoist_t* hoist = &copy->hoists[h];
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, "%.*s\n%*s", (int)(hoist->end - hoist->start),
+        text.data + hoist->start, (int)(copy->start_column - 1), ""));
+  }
   if (result_count > 0) {
-    IREE_RETURN_IF_ERROR(loom_reduce_append_names(
-        builder, occurrence->outputs, copy->result_order, result_count));
+    IREE_RETURN_IF_ERROR(loom_reduce_append_names(builder, occurrence->outputs,
+                                                  result_order, result_count));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, " = "));
   }
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      builder, "func.call @%.*s(", (int)job->name.size, job->name.data));
+      builder, "func.call %s@%.*s(", job->pure ? "pure " : "",
+      (int)job->name.size, job->name.data));
   IREE_RETURN_IF_ERROR(loom_reduce_append_names(
       builder, occurrence->inputs, copy->argument_order, argument_count));
+  IREE_RETURN_IF_ERROR(loom_reduce_append_names_after(
+      builder, copy->hoisted_values, copy->passed, job->passed_count,
+      argument_count > 0));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ") : ("));
   IREE_RETURN_IF_ERROR(loom_reduce_append_types(
       builder, occurrence->inputs, copy->argument_order, argument_count));
+  IREE_RETURN_IF_ERROR(loom_reduce_append_types_after(
+      builder, copy->hoisted_values, copy->passed, job->passed_count,
+      argument_count > 0));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ")"));
   if (result_count > 0) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, " -> ("));
-    IREE_RETURN_IF_ERROR(loom_reduce_append_types(
-        builder, occurrence->outputs, copy->result_order, result_count));
+    IREE_RETURN_IF_ERROR(loom_reduce_append_types(builder, occurrence->outputs,
+                                                  result_order, result_count));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ")"));
   }
   return iree_ok_status();
@@ -1760,11 +2249,20 @@ static iree_status_t loom_reduce_append_signature(
         builder, "%s%%%.*s: %.*s", i ? ", " : "", (int)input->name.size,
         input->name.data, (int)input->type.size, input->type.data));
   }
+  const loom_reduce_copy_t* template = &job->copies[0];
+  for (uint32_t h = 0; h < job->passed_count; ++h) {
+    const loom_analyze_binding_t* value =
+        &template->hoisted_values[template->passed[h]];
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, "%s%%%.*s: %.*s", occurrence->input_count + h ? ", " : "",
+        (int)value->name.size, value->name.data, (int)value->type.size,
+        value->type.data));
+  }
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ")"));
-  if (occurrence->output_count > 0) {
+  if (job->output_count > 0) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, " -> ("));
     IREE_RETURN_IF_ERROR(loom_reduce_append_types(
-        builder, occurrence->outputs, NULL, occurrence->output_count));
+        builder, occurrence->outputs, job->output_order, job->output_count));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ")"));
   }
   return iree_ok_status();
@@ -1778,15 +2276,27 @@ static iree_status_t loom_reduce_append_motif(loom_reduce_plan_t* plan,
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       builder,
       "// Motif extracted by loom-reduce from %u copies (%u ops each).\n"
-      "func.def inline ",
-      job->copy_count, job->op_count));
+      "func.def %sinline ",
+      job->copy_count, job->op_count, job->pure ? "pure " : ""));
   IREE_RETURN_IF_ERROR(loom_reduce_append_signature(builder, job));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, " {\n"));
   const uint32_t base_indent = template->start_column - 1;
   iree_string_view_t remaining = loom_reduce_copy_body(plan, template);
   bool first = true;
+  uint32_t line_number = occurrence->start_line;
   while (!iree_string_view_is_empty(remaining)) {
     iree_string_view_t line = loom_reduce_next_line(&remaining);
+    // Hoisted allocations stay at the call sites.
+    bool hoisted = false;
+    for (uint32_t h = 0; h < job->hoist_count && !hoisted; ++h) {
+      hoisted = line_number >= template->hoists[h].start_line &&
+                line_number <= template->hoists[h].end_line;
+    }
+    ++line_number;
+    if (hoisted) {
+      first = false;
+      continue;
+    }
     if (!first) {
       iree_host_size_t indent = 0;
       while (indent < line.size && line.data[indent] == ' ') {
@@ -1804,14 +2314,14 @@ static iree_status_t loom_reduce_append_motif(loom_reduce_plan_t* plan,
           builder, "  %.*s\n", (int)line.size, line.data));
     }
   }
-  if (occurrence->output_count > 0) {
+  if (job->output_count > 0) {
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, "  func.return "));
     IREE_RETURN_IF_ERROR(loom_reduce_append_names(
-        builder, occurrence->outputs, NULL, occurrence->output_count));
+        builder, occurrence->outputs, job->output_order, job->output_count));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, " : "));
     IREE_RETURN_IF_ERROR(loom_reduce_append_types(
-        builder, occurrence->outputs, NULL, occurrence->output_count));
+        builder, occurrence->outputs, job->output_order, job->output_count));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n}\n"));
   } else {
     IREE_RETURN_IF_ERROR(
@@ -1936,8 +2446,8 @@ static iree_status_t loom_reduce_render(loom_reduce_plan_t* plan,
                                                  edits[e].start - cursor));
       if (iree_status_is_ok(status)) {
         status = edits[e].copy
-                     ? loom_reduce_append_call(&source->output, edits[e].job,
-                                               edits[e].copy)
+                     ? loom_reduce_append_call(plan, &source->output,
+                                               edits[e].job, edits[e].copy)
                      : iree_string_builder_append_string(
                            &source->output, edits[e].job->declaration);
       }
@@ -1989,7 +2499,8 @@ static iree_status_t loom_reduce_render(loom_reduce_plan_t* plan,
                                                    (int)job->declaration.size,
                                                    job->declaration.data);
       } else if (iree_status_is_ok(status)) {
-        status = iree_string_builder_append_cstring(&scratch, "func.decl ");
+        status = iree_string_builder_append_cstring(
+            &scratch, job->pure ? "func.decl pure " : "func.decl ");
         if (iree_status_is_ok(status)) {
           status = loom_reduce_append_signature(&scratch, job);
         }

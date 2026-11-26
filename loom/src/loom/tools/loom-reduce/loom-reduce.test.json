@@ -62,6 +62,20 @@
       ]
     },
     {
+      "name": "keeps allocations at call sites and pure motifs pure",
+      "run": {
+        "tool": "loom-reduce",
+        "args": [
+          "--output-dir={tmp}/out",
+          "{srcdir}/testdata/hoist"
+        ]
+      },
+      "stderr": {"empty": true},
+      "files": [
+        {"path": "{tmp}/out/kernel.loom", "equals": "{srcdir}/testdata/expected/hoist.loom"}
+      ]
+    },
+    {
       "name": "corpus scope writes a shared motif file and link inputs",
       "run": {
         "tool": "loom-reduce",

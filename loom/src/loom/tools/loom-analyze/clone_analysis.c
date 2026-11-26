@@ -12,6 +12,7 @@
 #include "loom/error/source.h"
 #include "loom/format/text/printer.h"
 #include "loom/ir/context.h"
+#include "loom/ir/type_dependencies.h"
 #include "loom/ir/type_refs.h"
 #include "loom/ir/value_refs.h"
 #include "loom/ops/op_defs.h"
@@ -1137,6 +1138,30 @@ static void loom_analyze_detection_free(iree_allocator_t allocator,
   loom_analyze_index_vector_free(allocator, &detection->group);
 }
 
+// Returns true when |user|, lifted to its ancestor in |block|, follows |last|
+// or lies outside |block|.
+static bool loom_analyze_used_after(const loom_op_t* user,
+                                    const loom_block_t* block,
+                                    const loom_op_t* last) {
+  while (user && user->parent_block != block) {
+    user = user->parent_op;
+  }
+  return !user || user->block_ordinal > last->block_ordinal;
+}
+
+// Returns the operation owning |value_id|: its defining operation, or the
+// operation whose region holds the block it is an argument of.
+static const loom_op_t* loom_analyze_value_owner(const loom_module_t* module,
+                                                 loom_value_id_t value_id) {
+  const loom_value_t* value = loom_module_value(module, value_id);
+  if (loom_value_is_block_arg(value)) {
+    const loom_block_t* block = loom_value_def_block(value);
+    return block && block->parent_region ? block->parent_region->parent_op
+                                         : NULL;
+  }
+  return loom_value_owner_op(value);
+}
+
 // Counts values defined by the window's top-level operations that are used
 // after the window: the results a motif replacing the window must return.
 // Nested values cannot escape their regions except through the owning op's
@@ -1171,12 +1196,26 @@ static uint32_t loom_analyze_window_outputs(
       const loom_use_t* uses = loom_value_uses(value);
       bool escapes = false;
       for (uint32_t u = 0; u < value->use_count && !escapes; ++u) {
-        // Lift nested users to their ancestor in the window's block.
-        const loom_op_t* user = loom_use_user_op(uses[u]);
-        while (user && user->parent_block != block) {
-          user = user->parent_op;
+        escapes =
+            loom_analyze_used_after(loom_use_user_op(uses[u]), block, last);
+      }
+      // Later types (view<[%n]xf32>) and attributes may name the value too.
+      loom_type_use_iterator_t iterator;
+      if (!escapes) {
+        loom_type_users_begin(&module->type_uses, results[r], &iterator);
+        for (loom_value_id_t carrier = loom_type_users_next(&iterator);
+             !escapes && carrier != LOOM_VALUE_ID_INVALID;
+             carrier = loom_type_users_next(&iterator)) {
+          escapes = loom_analyze_used_after(
+              loom_analyze_value_owner(module, carrier), block, last);
         }
-        escapes = !user || user->block_ordinal > last->block_ordinal;
+      }
+      if (!escapes) {
+        loom_attribute_users_begin(&module->type_uses, results[r], &iterator);
+        for (loom_attribute_user_t user = loom_attribute_users_next(&iterator);
+             !escapes && user.op; user = loom_attribute_users_next(&iterator)) {
+          escapes = loom_analyze_used_after(user.op, block, last);
+        }
       }
       if (escapes) {
         if (out_values && count < capacity) {
