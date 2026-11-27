@@ -821,6 +821,9 @@ bool BuildContextPrivateDataForDevice(
     return Fail("invalid context-private buffer output", out_error);
   }
   *out_context_private_buffer = {};
+  if (device.mcdm_abi == McdmAbi::aie4) {
+    return Fail("AIE4 MCDM context private data is not implemented", out_error);
+  }
   if (device.mcdm_abi == McdmAbi::legacy_v0) {
     return BuildLegacyV0ContextPrivateDataFromXclbin(
         xclbin, xclbin_size, process_id, allocator, out_blob, out_info,

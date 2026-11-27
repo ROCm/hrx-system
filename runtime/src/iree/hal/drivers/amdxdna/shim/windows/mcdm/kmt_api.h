@@ -87,6 +87,8 @@ enum class BufferKind {
   cacheable,
   execbuf,
   context_private,
+  // AIE4 hardware-context HSA queue: KMD-shared CERT BO in bank 1.
+  aie4_hsa,
 };
 
 // Packet/context layout contract. Distinct from HardwareType: STXH and KRK1
@@ -101,6 +103,9 @@ enum class McdmAbi {
   legacy_v2,
   legacy,
   compact,
+  // AIE4 miniports: XRT hwcontext_aie4 / hwqueue_aie4
+  // contexts, XRT_CMD_EXECBUF submits (CreateAie4Context).
+  aie4,
 };
 
 // PCI SKU from XRT_UMD_ADAPTER_INFO.hw_type
@@ -116,6 +121,11 @@ enum class HardwareType : uint32_t {
   stxh = 3,  // Strix Halo / PCI REV_11.
   krk1 = 4,  // Krackan / PCI REV_20.
 };
+
+// AIE4 miniports report hw_type values at or above 5, past XRT's public
+// enum; XRT selects its AIE4 shim for every such value.
+constexpr uint32_t kFirstAie4HardwareType = 5;
+bool IsAie4HardwareType(uint32_t hw_type);
 
 const char* HardwareTypeName(uint32_t hw_type);
 
@@ -152,6 +162,12 @@ struct McdmAbiDiagnostics {
   bool legacy_query_attempted = false;
   NTSTATUS compact_query_status = 0;
   NTSTATUS legacy_query_status = 0;
+  // Full XRT_UMD_ADAPTER_INFO, probed after both prefixes are rejected.
+  bool full_query_attempted = false;
+  NTSTATUS full_query_status = 0;
+  bool full_adapter_info = false;
+  uint64_t context_reserved_bo_dynamic_bytes = 0;
+  bool is_iommu_bypassed = false;
 };
 
 struct DriverVersion {
@@ -335,6 +351,13 @@ struct Context {
   bool completion_ring_ready = false;
   bool completion_ring_owned = false;
   uint64_t next_command_id = 1;
+  // AIE4 (hwcontext_aie4/hwqueue_aie4) state. The HSA and health BOs back the
+  // firmware context; the status BO receives KMD-written TIMEOUT/ABORT states.
+  Buffer aie4_hsa_buffer;
+  Buffer aie4_health_buffer;
+  Buffer aie4_status_buffer;
+  uint32_t aie4_num_ucs = 0;
+  uint32_t aie4_status_next_offset = 0;
 };
 
 struct CommandAperture {
@@ -451,6 +474,30 @@ void DestroyDevice(const KmtApi& api, Device* device);
 bool CreateBuffer(const KmtApi& api, const Device& device, BufferKind kind,
                   uint64_t size, Buffer* out_buffer, Error* out_error,
                   uint8_t slot_index = 0);
+
+// AIE4 hardware context on an IOMMU-enabled miniport (XRT
+// create_hw_context_aie4(partition_size) + hwqueue_aie4): HSA and health BOs,
+// D3DKMTCreateContextVirtual with XRT_CREATE_HWCTX_ARGS, a HW queue, and its
+// status BO. Bypass-mode miniports are rejected.
+bool CreateAie4Context(const KmtApi& api, const Device& device,
+                       uint32_t partition_cols, Context* out_context,
+                       Error* out_error);
+void DestroyAie4Context(const KmtApi& api, const Device& device,
+                        Context* context);
+
+// Submits one ERT_START_DPU packet as XRT_CMD_EXECBUF. The packet is copied
+// into the private data followed by the exec BO GPU VA, as hwqueue_aie4 does.
+bool SubmitAie4Execbuf(const KmtApi& api, const Device& device,
+                       Context* context, const Buffer& exec_buffer,
+                       const void* ert_packet, uint32_t ert_bytes,
+                       uint64_t* out_fence_id, uint32_t* out_status_offset,
+                       Error* out_error);
+
+// Waits for |fence_id| on the context's HW-queue progress fence. Returns false
+// with |out_timed_out| set when |timeout_ms| elapses first.
+bool WaitAie4Fence(const KmtApi& api, const Device& device,
+                   const Context& context, uint64_t fence_id,
+                   uint32_t timeout_ms, bool* out_timed_out, Error* out_error);
 
 // Makes CPU writes to a Lock2-mapped buffer visible before device execution.
 // Buffer ownership must synchronize all writers into the calling thread.

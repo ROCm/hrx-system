@@ -20,7 +20,8 @@ namespace {
 int g_close_count = 0;
 D3DKMT_HANDLE g_closed_adapters[4] = {};
 NTSTATUS g_query_statuses[4] = {};
-uint32_t g_query_outputs[4][3] = {};
+// Six words hold the full 24-byte XRT_UMD_ADAPTER_INFO.
+uint32_t g_query_outputs[4][6] = {};
 UINT g_query_sizes[4] = {};
 D3DKMT_HANDLE g_query_adapters[4] = {};
 KMTQUERYADAPTERINFOTYPE g_query_types[4] = {};
@@ -720,7 +721,7 @@ TEST(KmtApiTest, HardwareTypeNamesMatchMiniport) {
   EXPECT_STREQ(HardwareTypeName(2), "STX2");
   EXPECT_STREQ(HardwareTypeName(3), "STXH");
   EXPECT_STREQ(HardwareTypeName(4), "KRK1");
-  EXPECT_STREQ(HardwareTypeName(16), "UNKNOWN");
+  EXPECT_STREQ(HardwareTypeName(5), "AIE4");
 }
 
 TEST(KmtApiTest, RejectsStxHardwareType) {
@@ -1140,10 +1141,11 @@ TEST(KmtApiTest, RejectsUnknownThreeDwordAbiIdentity) {
   EXPECT_EQ(g_query_count, 2u);
 }
 
-TEST(KmtApiTest, RejectsBothAbiQueryShapesRejected) {
+TEST(KmtApiTest, RejectsAllAbiQueryShapesRejected) {
   ResetFakes();
   g_query_statuses[0] = static_cast<NTSTATUS>(0xC0000023u);
   g_query_statuses[1] = static_cast<NTSTATUS>(0xC0000023u);
+  g_query_statuses[2] = static_cast<NTSTATUS>(0xC0000023u);
   KmtApi api = {};
   api.query_adapter_info = FakeQueryAdapterInfo;
   McdmAbi abi = McdmAbi::legacy;
@@ -1151,10 +1153,108 @@ TEST(KmtApiTest, RejectsBothAbiQueryShapesRejected) {
 
   EXPECT_FALSE(QueryProbedMcdmAbi(api, 0x5678, &abi, &error));
   EXPECT_NE(std::strstr(ErrorMessage(&error),
-                        "rejected both three-dword and two-dword "
+                        "rejected two-dword, three-dword, and full "
                         "UMDRIVERPRIVATE adapter-info"),
             nullptr);
-  EXPECT_EQ(g_query_count, 2u);
+  EXPECT_EQ(g_query_count, 3u);
+}
+
+// AIE4 miniports reject 8/12-byte queries and answer the 24-byte struct.
+TEST(KmtApiTest, SelectsAie4AbiFromFullAdapterInfo) {
+  ResetFakes();
+  g_query_statuses[0] = static_cast<NTSTATUS>(0xC0000023u);
+  g_query_statuses[1] = static_cast<NTSTATUS>(0xC0000023u);
+  g_query_outputs[2][1] = 6;
+  g_query_outputs[2][2] = 0x10000000u;
+  KmtApi api = {};
+  api.query_adapter_info = FakeQueryAdapterInfo;
+  McdmAbiDiagnostics diagnostics = {};
+  Error error = {};
+
+  ASSERT_TRUE(QueryMcdmAbiDiagnostics(api, 0x5678, &diagnostics, &error))
+      << ErrorMessage(&error);
+  EXPECT_EQ(diagnostics.selected_abi, McdmAbi::aie4);
+  EXPECT_EQ(diagnostics.probed_abi, McdmAbi::aie4);
+  EXPECT_EQ(diagnostics.hw_type, 6u);
+  EXPECT_STREQ(HardwareTypeName(diagnostics.hw_type), "AIE4");
+  EXPECT_TRUE(diagnostics.identity_accepted);
+  EXPECT_FALSE(diagnostics.compact_adapter_info);
+  EXPECT_TRUE(diagnostics.full_query_attempted);
+  EXPECT_EQ(diagnostics.full_query_status, 0);
+  EXPECT_TRUE(diagnostics.full_adapter_info);
+  EXPECT_EQ(diagnostics.context_reserved_bo_dynamic_bytes, 0x10000000u);
+  EXPECT_FALSE(diagnostics.is_iommu_bypassed);
+  EXPECT_EQ(g_query_count, 3u);
+  EXPECT_EQ(g_query_sizes[0], 8u);
+  EXPECT_EQ(g_query_sizes[1], 12u);
+  EXPECT_EQ(g_query_sizes[2], 24u);
+  EXPECT_TRUE(g_query_data_was_zero[2]);
+}
+
+TEST(KmtApiTest, RecordsIommuBypassFromFullAdapterInfo) {
+  ResetFakes();
+  g_query_statuses[0] = static_cast<NTSTATUS>(0xC0000023u);
+  g_query_statuses[1] = static_cast<NTSTATUS>(0xC0000023u);
+  g_query_outputs[2][1] = 5;
+  g_query_outputs[2][4] = 1;
+  KmtApi api = {};
+  api.query_adapter_info = FakeQueryAdapterInfo;
+  McdmAbiDiagnostics diagnostics = {};
+  Error error = {};
+
+  ASSERT_TRUE(QueryMcdmAbiDiagnostics(api, 0x5678, &diagnostics, &error))
+      << ErrorMessage(&error);
+  EXPECT_EQ(diagnostics.selected_abi, McdmAbi::aie4);
+  EXPECT_STREQ(HardwareTypeName(diagnostics.hw_type), "AIE4");
+  EXPECT_TRUE(diagnostics.is_iommu_bypassed);
+}
+
+TEST(KmtApiTest, RejectsNonAie4FullAdapterInfo) {
+  ResetFakes();
+  g_query_statuses[0] = static_cast<NTSTATUS>(0xC0000023u);
+  g_query_statuses[1] = static_cast<NTSTATUS>(0xC0000023u);
+  g_query_outputs[2][1] = static_cast<uint32_t>(HardwareType::krk1);
+  KmtApi api = {};
+  api.query_adapter_info = FakeQueryAdapterInfo;
+  McdmAbi abi = McdmAbi::legacy;
+  Error error = {};
+
+  EXPECT_FALSE(QueryProbedMcdmAbi(api, 0x5678, &abi, &error));
+  EXPECT_NE(std::strstr(ErrorMessage(&error),
+                        "unsupported UMDRIVERPRIVATE full adapter info"),
+            nullptr);
+  EXPECT_EQ(g_query_count, 3u);
+}
+
+TEST(KmtApiTest, Aie4ShortAdapterInfoFailsClosed) {
+  // An AIE4 hw_type in the historical two-dword prefix is not a known layout.
+  ResetFakes();
+  g_query_outputs[0][1] = 6;
+  KmtApi api = {};
+  api.query_adapter_info = FakeQueryAdapterInfo;
+  McdmAbi abi = McdmAbi::legacy;
+  Error error = {};
+
+  EXPECT_FALSE(QueryProbedMcdmAbi(api, 0x5678, &abi, &error));
+  EXPECT_EQ(g_query_count, 1u);
+}
+
+TEST(KmtApiTest, Aie4HardwareTypeNames) {
+  EXPECT_FALSE(IsAie4HardwareType(static_cast<uint32_t>(HardwareType::krk1)));
+  EXPECT_TRUE(IsAie4HardwareType(5));
+  EXPECT_STREQ(HardwareTypeName(4), "KRK1");
+  EXPECT_STREQ(HardwareTypeName(5), "AIE4");
+  EXPECT_STREQ(HardwareTypeName(16), "AIE4");
+}
+
+TEST(KmtApiTest, Aie4AbiHasNoAie2pSubmitLayout) {
+  const McdmSubmissionPolicy policy = GetMcdmSubmissionPolicy(McdmAbi::aie4);
+  EXPECT_FALSE(policy.supports_command_chaining);
+  EXPECT_FALSE(policy.submit_completion_is_deferred);
+  EXPECT_FALSE(SupportsHostBufferReuse(McdmAbi::aie4));
+  const McdmAbiInfo info = GetMcdmAbiInfo(McdmAbi::aie4);
+  EXPECT_EQ(info.submit_private_prefix_size, 0u);
+  EXPECT_EQ(info.pathb_private_size, 0u);
 }
 
 TEST(KmtApiTest, RejectsUnknownAbiQueryFailure) {

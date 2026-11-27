@@ -15,6 +15,7 @@
 #include <array>
 #include <atomic>
 #include <cstdarg>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
@@ -848,6 +849,38 @@ bool UsesLegacyV2ContextLayout(const DriverVersion& version) {
 constexpr uint32_t kExpectedKmdVersion = 0;
 constexpr uint32_t kCompactAdapterInfoExtra = 0;
 
+// XRT_UMD_ADAPTER_INFO as returned by current miniports. They reject every
+// shorter query with STATUS_BUFFER_TOO_SMALL.
+struct FullAdapterInfo {
+  uint32_t kmd_version;
+  uint32_t hw_type;
+  uint64_t context_reserved_bo_dynamic_bytes;
+  uint8_t is_iommu_bypassed;  // BOOLEAN
+};
+static_assert(sizeof(FullAdapterInfo) == 24,
+              "XRT_UMD_ADAPTER_INFO must remain 24 bytes");
+static_assert(offsetof(FullAdapterInfo, context_reserved_bo_dynamic_bytes) == 8,
+              "XRT_UMD_ADAPTER_INFO reserved-bytes offset");
+static_assert(offsetof(FullAdapterInfo, is_iommu_bypassed) == 16,
+              "XRT_UMD_ADAPTER_INFO IOMMU-bypass offset");
+
+// Only AIE4 miniports are known to require the full struct. An AIE2P miniport
+// that does would need its packet layout established first, so fail closed.
+bool SelectAbiFromFullAdapterInfo(const FullAdapterInfo& info, McdmAbi* out_abi,
+                                  Error* out_error) {
+  if (info.kmd_version != kExpectedKmdVersion ||
+      !IsAie4HardwareType(info.hw_type)) {
+    SetErrorFormat(out_error,
+                   "unsupported UMDRIVERPRIVATE full adapter info "
+                   "kmd_version=%u hw_type=%s (%u)",
+                   info.kmd_version, HardwareTypeName(info.hw_type),
+                   info.hw_type);
+    return false;
+  }
+  *out_abi = McdmAbi::aie4;
+  return true;
+}
+
 bool SelectAbiFromAdapterInfo(uint32_t kmd_version, uint32_t hw_type,
                               bool compact_prefix, uint32_t compact_extra,
                               McdmAbi* out_abi,
@@ -936,6 +969,10 @@ bool QueryNpuPciIdsFromPnP(uint32_t* out_vendor_id, uint32_t* out_device_id,
                                    out_revision_id);
 }
 
+bool IsAie4HardwareType(uint32_t hw_type) {
+  return hw_type >= kFirstAie4HardwareType;
+}
+
 const char* HardwareTypeName(uint32_t hw_type) {
   switch (static_cast<HardwareType>(hw_type)) {
     case HardwareType::phx:
@@ -949,11 +986,10 @@ const char* HardwareTypeName(uint32_t hw_type) {
     case HardwareType::krk1:
       return "KRK1";
   }
-  return "UNKNOWN";
+  return IsAie4HardwareType(hw_type) ? "AIE4" : "UNKNOWN";
 }
 
-bool SelectMcdmAbiForDriverVersion(McdmAbi probed_abi,
-                                   bool has_driver_version,
+bool SelectMcdmAbiForDriverVersion(McdmAbi probed_abi, bool has_driver_version,
                                    const DriverVersion& driver_version,
                                    McdmAbi* out_abi, Error* out_error) {
   if (!out_abi) {
@@ -1002,6 +1038,10 @@ McdmSubmissionPolicy GetMcdmSubmissionPolicy(McdmAbi abi) {
       return {/*supports_command_chaining=*/true,
               /*uses_shared_command_code_view=*/false,
               /*submit_completion_is_deferred=*/true};
+    case McdmAbi::aie4:
+      return {/*supports_command_chaining=*/false,
+              /*uses_shared_command_code_view=*/false,
+              /*submit_completion_is_deferred=*/false};
   }
   return {};
 }
@@ -1063,10 +1103,39 @@ bool QueryMcdmAbiDiagnostics(const KmtApi& api, D3DKMT_HANDLE adapter,
   NTSTATUS compact_status = api.query_adapter_info(&query);
   diagnostics.compact_query_status = compact_status;
   if (compact_status == kStatusBufferTooSmall) {
-    SetError(out_error,
-             "MCDM driver rejected both three-dword and two-dword "
-             "UMDRIVERPRIVATE adapter-info queries");
-    return false;
+    FullAdapterInfo full_data = {};
+    query.pPrivateDriverData = &full_data;
+    query.PrivateDriverDataSize = sizeof(full_data);
+    diagnostics.full_query_attempted = true;
+    NTSTATUS full_status = api.query_adapter_info(&query);
+    diagnostics.full_query_status = full_status;
+    if (full_status == kStatusBufferTooSmall) {
+      SetError(out_error,
+               "MCDM driver rejected two-dword, three-dword, and full "
+               "UMDRIVERPRIVATE adapter-info queries");
+      return false;
+    }
+    if (full_status != 0) {
+      return CheckStatus("D3DKMTQueryAdapterInfo(UMDRIVERPRIVATE full)",
+                         full_status, out_error);
+    }
+    McdmAbi full_abi = McdmAbi::aie4;
+    if (!SelectAbiFromFullAdapterInfo(full_data, &full_abi, out_error)) {
+      return false;
+    }
+    diagnostics.probed_abi = full_abi;
+    diagnostics.selected_abi = full_abi;
+    diagnostics.full_adapter_info = true;
+    diagnostics.context_reserved_bo_dynamic_bytes =
+        full_data.context_reserved_bo_dynamic_bytes;
+    diagnostics.is_iommu_bypassed = full_data.is_iommu_bypassed != 0;
+    const uint32_t full_words[3] = {
+        full_data.kmd_version, full_data.hw_type,
+        static_cast<uint32_t>(full_data.context_reserved_bo_dynamic_bytes)};
+    RecordAdapterInfo(&diagnostics, full_data.kmd_version, full_data.hw_type,
+                      /*compact_prefix=*/false, full_words, 3);
+    *out_diagnostics = diagnostics;
+    return true;
   }
   if (compact_status != 0) {
     return CheckStatus("D3DKMTQueryAdapterInfo(UMDRIVERPRIVATE compact)",
@@ -1103,6 +1172,11 @@ McdmAbiInfo GetMcdmAbiInfo(McdmAbi abi) {
   McdmAbiInfo info = {};
   info.command_aperture_code_slot_size = 0x8000;
   info.command_aperture_release_wait_for_cpu = true;
+  if (abi == McdmAbi::aie4) {
+    // AIE4 has no command aperture or path-B packet prefix (its submits use
+    // Aie4CmdArgs); keep every AIE2P layout field zero.
+    return info;
+  }
   if (abi == McdmAbi::compact) {
     info.command_aperture_code_slot_size = 0x10000;
     info.command_aperture_release_wait_for_cpu = false;
@@ -1260,6 +1334,9 @@ BufferKindInfo GetBufferKindInfo(BufferKind kind) {
       return {"execbuf", 0x3328, 0x80000000};
     case BufferKind::context_private:
       return {"context_private", 0x332c, 0x02000000};
+    case BufferKind::aie4_hsa:
+      // XCL_BO_FLAGS_KERNBUF | bank 1 (XRT device::create_hsabo).
+      return {"aie4_hsa", 0x332c, 0x02000001};
   }
   return {"host_only", 0x3329, 0x20000000};
 }
@@ -1615,9 +1692,13 @@ bool CreateBuffer(const KmtApi& api, const Device& device, BufferKind kind,
   alloc_info.pPrivateDriverData = &alloc_private;
   alloc_info.PrivateDriverDataSize = sizeof(alloc_private);
 
+  if (kind == BufferKind::aie4_hsa) {
+    alloc_private.reserved1 = 1;  // XRT_CREATE_BO_ARGS.BankNumber
+  }
+
   D3DKMT_CREATEALLOCATION create = {};
   create.hDevice = device.device;
-  if (kind == BufferKind::context_private) {
+  if (kind == BufferKind::context_private || kind == BufferKind::aie4_hsa) {
     create.Flags.CreateResource = 1;
     create.Flags.CreateShared = 1;
   }
@@ -2043,6 +2124,292 @@ void DestroyContext(const KmtApi& api, const Device& device, Context* context) {
   if (!context) return;
   DestroyContextHwQueue(api, context);
   DestroyContextAfterHwQueue(api, device, context);
+}
+
+namespace {
+
+// Buffer and packet layouts of the AIE4 miniport interface.
+constexpr uint32_t kAie4HsaBufferSize = 3 * kPageSize;
+constexpr uint32_t kAie4HealthBufferSize = kPageSize;
+constexpr uint32_t kAie4StatusBufferSize = kPageSize;
+constexpr uint32_t kAie4StatusMessageSize = 8;
+constexpr uint32_t kXrtCmdExecbuf = 3;
+constexpr uint32_t kStatusResponseTypeKmd = 0;
+constexpr uint32_t kStatusResponseTypeCert = 1;
+
+struct Aie4CtxHealthInfo {
+  uint64_t buffer_handle;
+  uint32_t status_resp_type;
+  uint32_t size;
+  uint64_t health_buf;
+};
+
+struct Aie4CreateHwctxArgs {
+  uint8_t xclbin_uuid[16];
+  uint8_t qos[64];
+  uint32_t slotidx;
+  uint32_t reserved0;
+  uint64_t sram_base_addr;
+  uint32_t pid;
+  uint32_t num_cols;
+  uint32_t num_ucs;
+  uint32_t out_flags;
+  uint32_t opc;
+  uint32_t ctx_type;
+  Aie4CtxHealthInfo health;
+  uint64_t hsa_addr;
+  uint32_t hsa_mem_size;
+  uint32_t hsa_alloc_handle;
+};
+static_assert(sizeof(Aie4CreateHwctxArgs) == 160, "XRT_CREATE_HWCTX_ARGS");
+static_assert(offsetof(Aie4CreateHwctxArgs, slotidx) == 80, "slotidx");
+static_assert(offsetof(Aie4CreateHwctxArgs, pid) == 96, "pid");
+static_assert(offsetof(Aie4CreateHwctxArgs, num_cols) == 100, "m_num_cols");
+static_assert(offsetof(Aie4CreateHwctxArgs, num_ucs) == 104, "num_ucs");
+static_assert(offsetof(Aie4CreateHwctxArgs, health) == 120, "ctx_health_info");
+static_assert(offsetof(Aie4CreateHwctxArgs, hsa_addr) == 144, "Aie4");
+
+struct Aie4StatusMsg {
+  uint64_t buffer_handle;
+  uint64_t gpu_va;
+  uint32_t offset;
+  uint32_t length;
+  uint64_t user_buf;
+  uint32_t status_resp_type;
+  uint32_t reserved0;
+};
+static_assert(sizeof(Aie4StatusMsg) == 40, "XRT_STATUS_MSG");
+
+struct Aie4CmdArgs {
+  uint32_t opcode;
+  uint32_t reserved0;
+  uint64_t buffer_handle;
+  uint64_t size;
+  uint64_t offset;
+  uint32_t direction;
+  uint32_t reserved1;
+  Aie4StatusMsg sts;
+  uint8_t extension;
+  uint8_t reserved2[3];
+  uint32_t gpu_vas_offset;
+  uint64_t exec_chain_cmd_addr;
+  uint32_t exec_chain_cmd_size;
+  uint32_t exec_chain_cmd_count;
+  uint8_t exec_chain_cmd_type;
+  uint8_t reserved3[7];
+  uint64_t gpu_va_to_pa;
+};
+static_assert(sizeof(Aie4CmdArgs) == 120, "XRT_CMD_ARGS");
+static_assert(offsetof(Aie4CmdArgs, sts) == 40, "StsInfo");
+static_assert(offsetof(Aie4CmdArgs, gpu_vas_offset) == 84, "GpuVasOffset");
+
+}  // namespace
+
+void DestroyAie4Context(const KmtApi& api, const Device& device,
+                        Context* context) {
+  if (!context) return;
+  // hwqueue_aie4 teardown order: queue, status BO, context, then context BOs.
+  DestroyContextHwQueue(api, context);
+  DestroyBuffer(api, device, &context->aie4_status_buffer);
+  if (context->context) {
+    D3DKMT_DESTROYCONTEXT destroy_context = {};
+    destroy_context.hContext = context->context;
+    api.destroy_context(&destroy_context);
+    context->context = 0;
+  }
+  DestroyBuffer(api, device, &context->aie4_health_buffer);
+  DestroyBuffer(api, device, &context->aie4_hsa_buffer);
+  context->progress_fence = 0;
+  context->progress_fence_cpu = nullptr;
+  context->progress_fence_gpu = 0;
+  context->next_fence_id = 1;
+}
+
+bool CreateAie4Context(const KmtApi& api, const Device& device,
+                       uint32_t partition_cols, Context* out_context,
+                       Error* out_error) {
+  if (!out_context) {
+    SetError(out_error, "CreateAie4Context called with null output");
+    return false;
+  }
+  if (device.mcdm_abi != McdmAbi::aie4) {
+    SetError(out_error, "CreateAie4Context requires an AIE4 miniport");
+    return false;
+  }
+  if (device.mcdm_abi_diagnostics.is_iommu_bypassed) {
+    // Bypass mode needs carveout BOs and XRT_CMD_CREATE_AIE4_CTX.
+    SetError(out_error, "AIE4 IOMMU-bypassed miniports are not supported");
+    return false;
+  }
+
+  Context context = {};
+  auto fail = [&]() {
+    DestroyAie4Context(api, device, &context);
+    return false;
+  };
+  if (!CreateBuffer(api, device, BufferKind::aie4_hsa, kAie4HsaBufferSize,
+                    &context.aie4_hsa_buffer, out_error) ||
+      !CreateBuffer(api, device, BufferKind::context_private,
+                    kAie4HealthBufferSize, &context.aie4_health_buffer,
+                    out_error) ||
+      !WaitForPendingPagingBeforeSubmit(api, device, out_error)) {
+    return fail();
+  }
+  std::memset(context.aie4_hsa_buffer.cpu_ptr, 0, kAie4HsaBufferSize);
+  std::memset(context.aie4_health_buffer.cpu_ptr, 0, kAie4HealthBufferSize);
+
+  Aie4CreateHwctxArgs args = {};
+  args.pid = GetCurrentProcessId();
+  args.num_cols = partition_cols ? partition_cols : 1;
+  args.health.buffer_handle = context.aie4_health_buffer.allocation;
+  args.health.status_resp_type = kStatusResponseTypeKmd;
+  args.health.size = kAie4HealthBufferSize;
+  args.health.health_buf = static_cast<uint64_t>(
+      reinterpret_cast<uintptr_t>(context.aie4_health_buffer.cpu_ptr));
+  args.hsa_addr = context.aie4_hsa_buffer.gpu_va;
+  args.hsa_mem_size = kAie4HsaBufferSize;
+  args.hsa_alloc_handle = context.aie4_hsa_buffer.allocation;
+
+  D3DKMT_CREATECONTEXTVIRTUAL create_context = {};
+  create_context.hDevice = device.device;
+  create_context.NodeOrdinal = 0;
+  create_context.EngineAffinity = 1;
+  create_context.Flags.HwQueueSupported = 1;
+  create_context.Flags.DisableGpuTimeout = 0;
+  create_context.pPrivateDriverData = &args;
+  create_context.PrivateDriverDataSize = sizeof(args);
+  create_context.ClientHint = kClientHintVitis;
+  NTSTATUS status = api.create_context_virtual(&create_context);
+  if (!CheckStatus("D3DKMTCreateContextVirtual(AIE4)", status, out_error)) {
+    return fail();
+  }
+  context.context = create_context.hContext;
+  context.slot_index = static_cast<uint8_t>(args.slotidx);
+  context.aie4_num_ucs = args.num_ucs;
+
+  D3DKMT_CREATEHWQUEUE create_queue = {};
+  create_queue.hHwContext = context.context;
+  status = api.create_hw_queue(&create_queue);
+  if (!CheckStatus("D3DKMTCreateHwQueue(AIE4)", status, out_error)) {
+    return fail();
+  }
+  context.hw_queue = create_queue.hHwQueue;
+  context.progress_fence = create_queue.hHwQueueProgressFence;
+  context.progress_fence_cpu =
+      create_queue.HwQueueProgressFenceCPUVirtualAddress;
+  context.progress_fence_gpu =
+      create_queue.HwQueueProgressFenceGPUVirtualAddress;
+
+  if (!CreateBuffer(api, device, BufferKind::context_private,
+                    kAie4StatusBufferSize, &context.aie4_status_buffer,
+                    out_error) ||
+      !WaitForPendingPagingBeforeSubmit(api, device, out_error)) {
+    return fail();
+  }
+  std::memset(context.aie4_status_buffer.cpu_ptr, 0, kAie4StatusBufferSize);
+
+  *out_context = context;
+  return true;
+}
+
+bool SubmitAie4Execbuf(const KmtApi& api, const Device& device,
+                       Context* context, const Buffer& exec_buffer,
+                       const void* ert_packet, uint32_t ert_bytes,
+                       uint64_t* out_fence_id, uint32_t* out_status_offset,
+                       Error* out_error) {
+  if (!context || !context->hw_queue || !context->aie4_status_buffer.cpu_ptr ||
+      !ert_packet || ert_bytes == 0 || !out_fence_id || !out_status_offset) {
+    SetError(out_error, "SubmitAie4Execbuf called with invalid arguments");
+    return false;
+  }
+  const size_t payload_size =
+      sizeof(Aie4CmdArgs) + ert_bytes + sizeof(uint64_t);
+  alignas(Aie4CmdArgs) uint8_t payload[kPageSize] = {};
+  if (payload_size > sizeof(payload)) {
+    SetErrorFormat(out_error, "AIE4 EXECBUF payload is too large: %zu",
+                   payload_size);
+    return false;
+  }
+
+  const uint32_t status_offset = context->aie4_status_next_offset;
+  context->aie4_status_next_offset =
+      (status_offset + kAie4StatusMessageSize) % kAie4StatusBufferSize;
+  uint8_t* status_slot =
+      static_cast<uint8_t*>(context->aie4_status_buffer.cpu_ptr) +
+      status_offset;
+  std::memset(status_slot, 0, kAie4StatusMessageSize);
+
+  auto* args = reinterpret_cast<Aie4CmdArgs*>(payload);
+  args->opcode = kXrtCmdExecbuf;
+  args->buffer_handle = exec_buffer.allocation;
+  args->size = ert_bytes + sizeof(uint64_t);
+  args->gpu_vas_offset = ert_bytes;
+  args->sts.buffer_handle = context->aie4_status_buffer.allocation;
+  args->sts.gpu_va = context->aie4_status_buffer.gpu_va;
+  args->sts.offset = status_offset;
+  args->sts.length = kAie4StatusMessageSize;
+  args->sts.user_buf =
+      static_cast<uint64_t>(reinterpret_cast<uintptr_t>(status_slot));
+  args->sts.status_resp_type = kStatusResponseTypeCert;
+  std::memcpy(payload + sizeof(Aie4CmdArgs), ert_packet, ert_bytes);
+  const uint64_t exec_gpu_va = exec_buffer.gpu_va;
+  std::memcpy(payload + sizeof(Aie4CmdArgs) + ert_bytes, &exec_gpu_va,
+              sizeof(exec_gpu_va));
+
+  D3DKMT_SUBMITCOMMANDTOHWQUEUE submit = {};
+  submit.hHwQueue = context->hw_queue;
+  submit.HwQueueProgressFenceId = context->next_fence_id;
+  submit.CommandBuffer = exec_buffer.gpu_va;
+  submit.CommandLength = static_cast<UINT>(exec_buffer.size);
+  submit.PrivateDriverDataSize = static_cast<UINT>(payload_size);
+  submit.pPrivateDriverData = payload;
+  if (!SubmitCommandToHwQueueAfterPaging(
+          api, device, &submit, "D3DKMTSubmitCommandToHwQueue(AIE4 EXECBUF)",
+          out_error)) {
+    return false;
+  }
+  *out_fence_id = context->next_fence_id++;
+  *out_status_offset = status_offset;
+  return true;
+}
+
+bool WaitAie4Fence(const KmtApi& api, const Device& device,
+                   const Context& context, uint64_t fence_id,
+                   uint32_t timeout_ms, bool* out_timed_out, Error* out_error) {
+  if (out_timed_out) *out_timed_out = false;
+  const auto* const completed =
+      static_cast<const volatile UINT64*>(context.progress_fence_cpu);
+  if (completed && *completed >= fence_id) return true;
+
+  HANDLE event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  if (!event) {
+    SetError(out_error, "CreateEventW for AIE4 fence wait failed");
+    return false;
+  }
+  D3DKMT_HANDLE objects[1] = {context.progress_fence};
+  UINT64 values[1] = {fence_id};
+  D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMCPU wait = {};
+  wait.hDevice = device.device;
+  wait.ObjectCount = 1;
+  wait.ObjectHandleArray = objects;
+  wait.FenceValueArray = values;
+  wait.hAsyncEvent = event;
+  NTSTATUS status = api.wait_from_cpu(&wait);
+  if (!CheckStatus("D3DKMTWaitForSynchronizationObjectFromCpu(AIE4)", status,
+                   out_error)) {
+    CloseHandle(event);
+    return false;
+  }
+  const DWORD result = WaitForSingleObject(event, timeout_ms);
+  CloseHandle(event);
+  if (result == WAIT_OBJECT_0) return true;
+  if (result == WAIT_TIMEOUT && out_timed_out) *out_timed_out = true;
+  SetErrorFormat(out_error,
+                 "AIE4 HW-queue fence %llu not reached within %u ms "
+                 "(completed=%llu)",
+                 static_cast<unsigned long long>(fence_id), timeout_ms,
+                 static_cast<unsigned long long>(completed ? *completed : 0));
+  return false;
 }
 
 bool CreateCommandAperture(const KmtApi& api, const Device& device,

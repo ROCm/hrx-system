@@ -273,6 +273,18 @@ const WindowsMcdmOpcodeHandler& windows_mcdm_opcode_handler(
       false,
       true,
   };
+  // AIE4 only: ert_dpu_data entries follow the CU mask; args live in the
+  // patched instruction BO.
+  static constexpr WindowsMcdmOpcodeHandler kStartDpu = {
+      IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_DPU,
+      "start_dpu",
+      ERT_START_DPU,
+      1,
+      false,
+      false,
+      false,
+      true,
+  };
   switch (opcode) {
     case IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_CU:
       return kStartCu;
@@ -283,7 +295,7 @@ const WindowsMcdmOpcodeHandler& windows_mcdm_opcode_handler(
     case IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_COMMAND_CHAIN:
       return kCommandChain;
     case IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_DPU:
-      break;
+      return kStartDpu;
     case IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_NPU_FULL_ELF:
       return kStartNpuFullElf;
   }
@@ -333,9 +345,9 @@ iree_status_t from_c_command_opcode(
       *out_opcode = IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_COMMAND_CHAIN;
       return iree_ok_status();
     case IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_DPU:
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "amdxdna Windows MCDM does not support START_DPU");
+      // Only AIE4 devices accept it; command_create rejects it elsewhere.
+      *out_opcode = IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_DPU;
+      return iree_ok_status();
     case IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_NPU_FULL_ELF:
       *out_opcode = IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_NPU_FULL_ELF;
       return iree_ok_status();
@@ -355,9 +367,9 @@ iree_status_t from_c_context_image_type(
       *out_type = IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_TYPE_XCLBIN;
       return iree_ok_status();
     case IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_TYPE_NONE:
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "amdxdna Windows MCDM does not support empty AIE4 context images");
+      // Only AIE4 devices accept it; create_context rejects it elsewhere.
+      *out_type = IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_TYPE_NONE;
+      return iree_ok_status();
   }
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                           "unknown amdxdna native context image type");
@@ -513,6 +525,19 @@ struct iree_hal_amdxdna_native_device_t {
   iree_hal_amdxdna_native_c_driver_stack_t driver_stack = {};
 };
 
+static bool device_is_aie4(const iree_hal_amdxdna_native_device_t* device) {
+  return device && device->device.mcdm_abi == mcdm::McdmAbi::aie4;
+}
+
+// One page holds the START_DPU packet and its ert_dpu_data entries; matches
+// the hwqueue_aie4 private-data limit.
+constexpr uint64_t kAie4ExecBoSize = 4096;
+
+static_assert(sizeof(ert_dpu_data) == 24,
+              "AIE4 miniports consume the 24-byte XRT ert_dpu_data");
+// TDR normally fires first; this bounds a CERT hang without a timeout state.
+constexpr uint32_t kAie4StartDpuWaitTimeoutMs = 20000;
+
 struct PathBPdiReference {
   iree_hal_amdxdna_native_context_t* context = nullptr;
   uint64_t aperture_offset = 0;
@@ -641,6 +666,10 @@ struct iree_hal_amdxdna_native_command_t {
   BoundBuffer* bound_buffers = nullptr;
   size_t bound_buffer_count = 0;
   size_t bound_buffer_capacity = 0;
+  // AIE4 START_DPU: CERT overwrites the whole ERT header on completion. Keep
+  // the compiled packet so a reissue restores opcode/count, as on Linux.
+  uint8_t* aie4_packet_snapshot = nullptr;
+  uint32_t aie4_packet_snapshot_bytes = 0;
 };
 
 bool iree_hal_amdxdna_native_windows_reserve_code_slots(
@@ -1612,6 +1641,75 @@ iree_status_t bind_buffer_ref(iree_hal_amdxdna_native_command_t* command,
       BoundBuffer{position, buffer, offset, size};
   command->pathb_chain_bound_residency_checked = false;
   return iree_ok_status();
+}
+
+// Writes one ert_dpu_data per occupied column after the CU mask, each pointing
+// into |control_buffer| by GPU VA. |chained| counts the entries that follow.
+iree_status_t write_aie4_dpu_columns(
+    iree_hal_amdxdna_native_command_t* command,
+    iree_hal_amdxdna_native_buffer_t* control_buffer,
+    iree_device_size_t control_buffer_size,
+    const iree_hal_amdxdna_native_c_dpu_column_t* columns,
+    iree_host_size_t column_count) {
+  if (IREE_UNLIKELY(!device_is_aie4(command->device) ||
+                    command->opcode !=
+                        IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_DPU)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "amdxdna Windows MCDM START_DPU columns require an AIE4 command");
+  }
+  if (IREE_UNLIKELY(!control_buffer || control_buffer_size == 0 || !columns ||
+                    column_count == 0)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "amdxdna Windows MCDM START_DPU columns are empty");
+  }
+  if (IREE_UNLIKELY(control_buffer_size >
+                        iree_hal_amdxdna_native_buffer_size(control_buffer) ||
+                    control_buffer_size >
+                        std::numeric_limits<uint32_t>::max() ||
+                    column_count > std::numeric_limits<uint16_t>::max())) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "amdxdna Windows MCDM START_DPU instruction stream is out of range");
+  }
+  ert_start_kernel_cmd* packet = command->start_packet;
+  if (IREE_UNLIKELY(packet->count != 1 + packet->extra_cu_masks)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "amdxdna Windows MCDM START_DPU columns were already added");
+  }
+  const uint64_t base =
+      iree_hal_amdxdna_native_buffer_device_address(control_buffer);
+  if (IREE_UNLIKELY(base == 0)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "amdxdna Windows MCDM START_DPU control buffer has no GPU VA");
+  }
+  auto* dpu =
+      reinterpret_cast<ert_dpu_data*>(packet->data + packet->extra_cu_masks);
+  for (iree_host_size_t i = 0; i < column_count; ++i) {
+    const uint64_t end =
+        static_cast<uint64_t>(columns[i].byte_offset) + columns[i].byte_size;
+    if (IREE_UNLIKELY(columns[i].byte_size == 0 ||
+                      columns[i].byte_size % sizeof(uint32_t) != 0 ||
+                      end > control_buffer_size)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "amdxdna Windows MCDM START_DPU column %" PRIhsz
+                              " is outside the instruction stream",
+                              i);
+    }
+    IREE_RETURN_IF_ERROR(inc_pkt_count(command, sizeof(ert_dpu_data)));
+    dpu[i].dtrace_buffer = 0;
+    dpu[i].instruction_buffer = base + columns[i].byte_offset;
+    dpu[i].instruction_buffer_size = columns[i].byte_size;
+    dpu[i].uc_index = columns[i].uc_index;
+    dpu[i].chained = static_cast<uint16_t>(column_count - 1 - i);
+  }
+  command->control_buffer = control_buffer;
+  command->control_buffer_size = control_buffer_size;
+  command->aie4_packet_snapshot_bytes = 0;
+  return bind_buffer_ref(command, /*position=*/0, control_buffer, /*offset=*/0,
+                         control_buffer_size);
 }
 
 bool is_pathb_aperture_control_binding(
@@ -3099,7 +3197,10 @@ iree_status_t iree_hal_amdxdna_native_device_create(
       device->driver_stack.pci_revision_id = revision_id;
     }
   }
-  if (device->driver_stack.has_pci_ids) {
+  if (device->device.mcdm_abi == mcdm::McdmAbi::aie4) {
+    // Four concurrent START_DPU contexts; the cache publishes budget-1.
+    device->virtual_context_budget = 5;
+  } else if (device->driver_stack.has_pci_ids) {
     device->virtual_context_budget =
         iree_hal_amdxdna_hardware_context_budget_for_pci(
             device->driver_stack.pci_vendor_id,
@@ -3244,6 +3345,23 @@ iree_status_t iree_hal_amdxdna_native_device_query_caps(
   caps.command_chain_status =
       IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_BY_DEFAULT;
   caps.driver_stack = device->driver_stack;
+  if (device_is_aie4(device)) {
+    // hwcontext_aie4/hwqueue_aie4: empty-image contexts, one synchronous
+    // START_DPU per submit, plain KMT BOs (no command aperture).
+    caps.context_image_models =
+        IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_MODEL_NONE;
+    caps.dispatch_models = IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_START_DPU;
+    caps.default_dispatch_opcode =
+        IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_DPU;
+    caps.completion_models =
+        IREE_HAL_AMDXDNA_NATIVE_C_COMPLETION_MODEL_SYNCHRONOUS_WAIT;
+    caps.max_command_chain_slots = 0;
+    caps.native_owns_control_code_publication = false;
+    caps.requires_executable_context_cache = false;
+    caps.submit_completion_is_deferred = false;
+    caps.command_chain_status =
+        IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_UNIDENTIFIED_STACK;
+  }
   *out_caps = caps;
   if (!submission_policy.supports_command_chaining) {
     out_caps->max_command_chain_slots = 0;
@@ -3266,7 +3384,10 @@ iree_status_t iree_hal_amdxdna_native_device_alloc_buffer(
   *out_buffer = nullptr;
   IREE_RETURN_IF_ERROR(validate_device_size_fits_u64(size));
 
-  if (iree_hal_amdxdna_native_windows_buffer_requires_context(type)) {
+  // AIE4 has no context-local aperture; every BO is a live KMT allocation whose
+  // GPU VA is patched into control code before its context exists.
+  if (!device_is_aie4(device) &&
+      iree_hal_amdxdna_native_windows_buffer_requires_context(type)) {
     return create_deferred_native_buffer(
         device, type, static_cast<uint64_t>(size), out_buffer);
   }
@@ -3282,6 +3403,34 @@ iree_status_t iree_hal_amdxdna_native_device_alloc_buffer(
   return iree_ok_status();
 }
 
+static iree_status_t create_aie4_context(
+    iree_hal_amdxdna_native_device_t* device,
+    const iree_hal_amdxdna_native_c_context_image_t* image,
+    iree_hal_amdxdna_native_context_t** out_context) {
+  mcdm::Error error;
+  mcdm::Context context;
+  if (!mcdm::CreateAie4Context(device->api, device->device,
+                               image->partition_cols, &context, &error)) {
+    return status_from_mcdm_error(
+        "amdxdna Windows MCDM AIE4 context creation failed", error);
+  }
+  iree_hal_amdxdna_native_context_t* native_context = nullptr;
+  iree_status_t status =
+      iree_allocator_malloc(device->host_allocator, sizeof(*native_context),
+                            reinterpret_cast<void**>(&native_context));
+  if (!iree_status_is_ok(status)) {
+    mcdm::DestroyAie4Context(device->api, device->device, &context);
+    return status;
+  }
+  new (native_context) iree_hal_amdxdna_native_context_t();
+  native_context->device = device;
+  native_context->kmt = device->device;
+  native_context->context = context;
+  native_context->queue.context = native_context;
+  *out_context = native_context;
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_amdxdna_native_device_create_context(
     iree_hal_amdxdna_native_device_t* device,
     const iree_hal_amdxdna_native_c_context_image_t* image,
@@ -3293,6 +3442,17 @@ iree_status_t iree_hal_amdxdna_native_device_create_context(
   IREE_ASSERT_ARGUMENT(out_context);
   *out_context_pool_exhausted = false;
   *out_context = nullptr;
+  if (device_is_aie4(device)) {
+    // AIE2P context blobs must never reach an AIE4 miniport.
+    if (IREE_UNLIKELY(image->type !=
+                      IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_TYPE_NONE)) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "amdxdna Windows MCDM AIE4 (%s) contexts take no PDI/xclbin image",
+          mcdm::HardwareTypeName(device->device.mcdm_abi_diagnostics.hw_type));
+    }
+    return create_aie4_context(device, image, out_context);
+  }
   if (IREE_UNLIKELY(image->type !=
                     IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_TYPE_XCLBIN)) {
     return iree_make_status(
@@ -3439,10 +3599,21 @@ void iree_hal_amdxdna_native_context_destroy(
     iree_hal_amdxdna_native_context_t* context) {
   if (!context) return;
   iree_hal_amdxdna_native_device_t* device = context->device;
+  if (device_is_aie4(device)) {
+    // Submissions are synchronous, so no work can still reference the context.
+    if (context->kmt.device == 0 ||
+        kmt_handle_is_current_device(device, context->kmt.device)) {
+      mcdm::DestroyAie4Context(device->api, context->kmt, &context->context);
+    }
+    iree_allocator_t host_allocator = device->host_allocator;
+    context->~iree_hal_amdxdna_native_context_t();
+    iree_allocator_free(host_allocator, context);
+    return;
+  }
   std::unique_lock<std::mutex> context_lock(device->pathb_context_mutex);
-  device->pathb_context_cv.wait(
-      context_lock,
-      [&]() { return device->pathb_active_submission_count == 0; });
+  device->pathb_context_cv.wait(context_lock, [&]() {
+    return device->pathb_active_submission_count == 0;
+  });
   const bool kmt_alive =
       context->kmt.device == 0 ||
       kmt_handle_is_current_device(device, context->kmt.device);
@@ -3819,6 +3990,14 @@ iree_status_t iree_hal_amdxdna_native_command_create(
   *out_command = nullptr;
 
   const WindowsMcdmOpcodeHandler& handler = windows_mcdm_opcode_handler(opcode);
+  const bool is_aie4 = device_is_aie4(device);
+  if ((opcode == IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_DPU) !=
+      is_aie4) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        is_aie4 ? "amdxdna Windows MCDM AIE4 supports only START_DPU commands"
+                : "amdxdna Windows MCDM START_DPU requires an AIE4 device");
+  }
   iree_hal_amdxdna_native_buffer_t* exec_buffer = nullptr;
   iree_status_t status = iree_ok_status();
   uint64_t exec_buffer_size = kMaxExecBoSize;
@@ -3827,8 +4006,26 @@ iree_status_t iree_hal_amdxdna_native_command_create(
   } else {
     exec_buffer_size = kWindowsDpuPathBExecBoSize;
   }
-  status = create_deferred_native_buffer_with_kind(
-      device, mcdm::BufferKind::execbuf, exec_buffer_size, &exec_buffer);
+  if (is_aie4) {
+    // AIE4 has no command aperture: CERT writes completion through the exec
+    // BO's own GPU VA, so it must be a live KMT allocation.
+    mcdm::Buffer buffer;
+    mcdm::Device created_on;
+    status =
+        create_buffer_on_live_device(device, mcdm::BufferKind::execbuf,
+                                     kAie4ExecBoSize, &buffer, &created_on);
+    if (iree_status_is_ok(status)) {
+      status = create_native_buffer_from_mcdm(
+          device, buffer, IREE_HAL_AMDXDNA_NATIVE_BUFFER_TYPE_CACHEABLE,
+          &exec_buffer);
+      if (!iree_status_is_ok(status)) {
+        mcdm::DestroyBuffer(device->api, created_on, &buffer);
+      }
+    }
+  } else {
+    status = create_deferred_native_buffer_with_kind(
+        device, mcdm::BufferKind::execbuf, exec_buffer_size, &exec_buffer);
+  }
   if (!iree_status_is_ok(status)) return status;
 
   iree_hal_amdxdna_native_command_t* command = nullptr;
@@ -3865,6 +4062,8 @@ void iree_hal_amdxdna_native_command_destroy(
     iree_hal_amdxdna_native_command_t* command) {
   if (!command) return;
   release_command_persistent_code_slots(command);
+  iree_allocator_free(command->device->host_allocator,
+                      command->aie4_packet_snapshot);
   iree_allocator_free(command->device->host_allocator, command->bound_buffers);
   iree_allocator_free(command->device->host_allocator,
                       command->pathb_chain_child_code_offsets);
@@ -3910,6 +4109,7 @@ iree_status_t iree_hal_amdxdna_native_command_reset(
   command->pathb_chain_child_code_offset_count = 0;
   command->chain_child_count = 0;
   command->bound_buffer_count = 0;
+  command->aie4_packet_snapshot_bytes = 0;
 
   std::memset(command->start_packet, 0, command->command_size);
   command->start_packet->state = ERT_CMD_STATE_NEW;
@@ -3971,6 +4171,15 @@ iree_status_t iree_hal_amdxdna_native_command_add_control_buffer(
   command->control_buffer_size = control_buffer_size;
   command->pathb_code_staged = false;
   command->pathb_code_staged_size = 0;
+  if (handler.opcode == IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_DPU) {
+    // One column: the whole control stream on microcontroller 0.
+    iree_hal_amdxdna_native_c_dpu_column_t column = {};
+    column.uc_index = 0;
+    column.byte_offset = 0;
+    column.byte_size = static_cast<uint32_t>(control_buffer_size);
+    return write_aie4_dpu_columns(command, control_buffer, control_buffer_size,
+                                  &column, 1);
+  }
   if (!handler.uses_partial_elf && !uses_full_elf) {
     return iree_ok_status();
   }
@@ -5177,11 +5386,123 @@ static iree_status_t iree_hal_amdxdna_native_submit_wait(
   }
 }
 
+// hwqueue_aie4::submit_command + wait_command for one START_DPU packet.
+static iree_status_t aie4_submit_and_wait(
+    iree_hal_amdxdna_native_queue_t* queue,
+    iree_hal_amdxdna_native_command_t* command, iree_string_view_t label) {
+  iree_hal_amdxdna_native_context_t* context = queue->context;
+  iree_hal_amdxdna_native_device_t* device = context->device;
+  if (IREE_UNLIKELY(command->opcode !=
+                        IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_DPU ||
+                    !command->control_buffer)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "amdxdna Windows MCDM AIE4 %.*s needs a START_DPU command with "
+        "instruction columns",
+        static_cast<int>(label.size), label.data);
+  }
+
+  ert_start_kernel_cmd* packet = command->start_packet;
+  if (packet->opcode == ERT_START_DPU) {
+    const size_t bytes =
+        (static_cast<size_t>(packet->count) + 1) * sizeof(uint32_t);
+    if (IREE_UNLIKELY(bytes > command->command_size)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "amdxdna Windows MCDM AIE4 packet overflows its "
+                              "exec BO");
+    }
+    if (!command->aie4_packet_snapshot) {
+      IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+          device->host_allocator, command->command_size,
+          reinterpret_cast<void**>(&command->aie4_packet_snapshot)));
+    }
+    std::memcpy(command->aie4_packet_snapshot, packet, bytes);
+    command->aie4_packet_snapshot_bytes = static_cast<uint32_t>(bytes);
+  } else if (command->aie4_packet_snapshot_bytes) {
+    std::memcpy(packet, command->aie4_packet_snapshot,
+                command->aie4_packet_snapshot_bytes);
+  } else {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "amdxdna Windows MCDM AIE4 START_DPU header was lost before submit");
+  }
+  packet->state = ERT_CMD_STATE_NEW;
+  const uint32_t ert_bytes =
+      (packet->count + 1) * static_cast<uint32_t>(sizeof(uint32_t));
+
+  mcdm::Error error;
+  mcdm::Buffer& exec_bo = command->exec_buffer->buffer;
+  if (!mcdm::SyncBuffer(device->api, context->kmt, exec_bo, 0, ert_bytes,
+                        &error)) {
+    return status_from_mcdm_error(
+        "amdxdna Windows MCDM AIE4 exec BO publication failed", error);
+  }
+  uint64_t fence_id = 0;
+  uint32_t status_offset = 0;
+  if (!mcdm::SubmitAie4Execbuf(device->api, context->kmt, &context->context,
+                               exec_bo, packet, ert_bytes, &fence_id,
+                               &status_offset, &error)) {
+    return status_from_mcdm_error(
+        "amdxdna Windows MCDM AIE4 EXECBUF submit failed", error);
+  }
+  ++queue->exec_command_count;
+
+  bool timed_out = false;
+  if (!mcdm::WaitAie4Fence(device->api, context->kmt, context->context,
+                           fence_id, kAie4StartDpuWaitTimeoutMs, &timed_out,
+                           &error)) {
+    iree_status_t status = status_from_mcdm_error(
+        "amdxdna Windows MCDM AIE4 fence wait failed", error);
+    if (!timed_out) return status;
+    iree_status_ignore(status);
+    return iree_make_status(IREE_STATUS_DEADLINE_EXCEEDED,
+                            "amdxdna Windows MCDM AIE4 %.*s fence %llu timed "
+                            "out after %u ms",
+                            static_cast<int>(label.size), label.data,
+                            static_cast<unsigned long long>(fence_id),
+                            kAie4StartDpuWaitTimeoutMs);
+  }
+
+  // The KMD writes TIMEOUT/ABORT into the status slot; CERT writes the
+  // terminal state into the exec BO header through its GPU VA.
+  const mcdm::Buffer& status_bo = context->context.aie4_status_buffer;
+  if (!mcdm::InvalidateBufferCpuReads(status_bo, status_offset,
+                                      sizeof(uint32_t), &error) ||
+      !mcdm::InvalidateBufferCpuReads(exec_bo, 0, ert_bytes, &error)) {
+    return status_from_mcdm_error(
+        "amdxdna Windows MCDM AIE4 completion read-back failed", error);
+  }
+  uint32_t status_header = 0;
+  std::memcpy(&status_header,
+              static_cast<const uint8_t*>(status_bo.cpu_ptr) + status_offset,
+              sizeof(status_header));
+  const uint32_t status_state = status_header & 0xFu;
+  if (status_state == ERT_CMD_STATE_TIMEOUT ||
+      status_state == ERT_CMD_STATE_ABORT) {
+    return iree_make_status(
+        status_state == ERT_CMD_STATE_TIMEOUT ? IREE_STATUS_DEADLINE_EXCEEDED
+                                              : IREE_STATUS_ABORTED,
+        "amdxdna Windows MCDM AIE4 %.*s ended in KMD state %u",
+        static_cast<int>(label.size), label.data, status_state);
+  }
+  const uint32_t state = packet->state;
+  if (state == ERT_CMD_STATE_COMPLETED) return iree_ok_status();
+  return iree_make_status(
+      IREE_STATUS_INTERNAL,
+      "amdxdna Windows MCDM AIE4 %.*s finished with ERT state %u (header "
+      "0x%08x, status slot 0x%08x)",
+      static_cast<int>(label.size), label.data, state, packet->header,
+      status_header);
+}
+
 iree_status_t iree_hal_amdxdna_native_queue_submit_and_wait(
     iree_hal_amdxdna_native_queue_t* queue,
     iree_hal_amdxdna_native_command_t* command, iree_string_view_t label) {
   IREE_ASSERT_ARGUMENT(queue);
   IREE_ASSERT_ARGUMENT(command);
+  if (device_is_aie4(queue->context->device)) {
+    return aie4_submit_and_wait(queue, command, label);
+  }
   iree_hal_amdxdna_native_submission_t submission;
   std::memset(&submission, 0, sizeof(submission));
   submission.host_allocator = queue->context->device->host_allocator;
@@ -5200,6 +5521,11 @@ iree_status_t iree_hal_amdxdna_native_queue_submit(
   IREE_ASSERT_ARGUMENT(command);
   IREE_ASSERT_ARGUMENT(out_submission);
   *out_submission = nullptr;
+  if (device_is_aie4(queue->context->device)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "amdxdna Windows MCDM AIE4 completes "
+                            "synchronously; use submit_and_wait");
+  }
   iree_allocator_t host_allocator = queue->context->device->host_allocator;
   iree_hal_amdxdna_native_submission_t* submission = nullptr;
   IREE_RETURN_IF_ERROR(
@@ -5229,6 +5555,12 @@ iree_status_t iree_hal_amdxdna_native_queue_submit_all(
   IREE_ASSERT_ARGUMENT(out_submission);
   *out_submission = nullptr;
   if (command_count == 0) return iree_ok_status();
+  if (device_is_aie4(queue->context->device)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "amdxdna Windows MCDM AIE4 completes synchronously; use "
+        "submit_all_and_wait");
+  }
 
   iree_allocator_t host_allocator = queue->context->device->host_allocator;
   iree_hal_amdxdna_native_submission_t* submission = nullptr;
@@ -5686,20 +6018,15 @@ extern "C" iree_status_t iree_hal_amdxdna_native_command_c_add_control_buffer(
       command, control_buffer, control_buffer_size);
 }
 
-extern "C" iree_status_t iree_hal_amdxdna_native_command_c_add_start_dpu_columns(
+extern "C" iree_status_t
+iree_hal_amdxdna_native_command_c_add_start_dpu_columns(
     iree_hal_amdxdna_native_command_t* command,
     iree_hal_amdxdna_native_buffer_t* control_buffer,
     iree_device_size_t control_buffer_size,
     const iree_hal_amdxdna_native_c_dpu_column_t* columns,
     iree_host_size_t column_count) {
-  (void)command;
-  (void)control_buffer;
-  (void)control_buffer_size;
-  (void)columns;
-  (void)column_count;
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "amdxdna Windows START_DPU column packets are not "
-                          "implemented");
+  return write_aie4_dpu_columns(command, control_buffer, control_buffer_size,
+                                columns, column_count);
 }
 
 extern "C" iree_status_t iree_hal_amdxdna_native_command_c_add_arg_32(
