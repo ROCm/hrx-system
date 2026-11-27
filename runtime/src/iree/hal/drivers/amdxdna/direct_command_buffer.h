@@ -79,6 +79,45 @@ void iree_hal_amdxdna_direct_command_buffer_set_completion_batch(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_amdxdna_completion_batch_t* completion_batch);
 
+// Native command chains a reusable command buffer prepared on its first
+// execute. They are owned by that command buffer (not the device chain cache)
+// and resubmitted unchanged by later executes: a reusable command buffer
+// without a binding table has fixed bindings and constants, so its patched
+// control code never changes.
+typedef struct iree_hal_amdxdna_prepared_submission_t
+    iree_hal_amdxdna_prepared_submission_t;
+
+// True when the device of the one-shot |base_command_buffer| completes native
+// command chains synchronously, so one execute's chains have retired before
+// another can resubmit them.
+bool iree_hal_amdxdna_direct_command_buffer_supports_prepared(
+    iree_hal_command_buffer_t* base_command_buffer);
+
+// Makes the one-shot |base_command_buffer| build each chain group it flushes
+// into a new prepared submission instead of the device chain cache. Call
+// before replaying a reusable command buffer into it.
+iree_status_t iree_hal_amdxdna_direct_command_buffer_begin_prepare(
+    iree_hal_command_buffer_t* base_command_buffer);
+
+// After end(): the prepared submission, owned by the caller, or NULL when a
+// flushed group was not a command chain (those keep the regular path).
+iree_hal_amdxdna_prepared_submission_t*
+iree_hal_amdxdna_direct_command_buffer_take_prepared(
+    iree_hal_command_buffer_t* base_command_buffer);
+
+// False once a hardware context was released after |prepared| was built.
+bool iree_hal_amdxdna_prepared_submission_is_current(
+    const iree_hal_amdxdna_prepared_submission_t* prepared);
+
+// Submits every chain of |prepared| in order through the one-shot
+// |base_command_buffer|, as its first execute did.
+iree_status_t iree_hal_amdxdna_direct_command_buffer_submit_prepared(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_amdxdna_prepared_submission_t* prepared);
+
+void iree_hal_amdxdna_prepared_submission_free(
+    iree_hal_amdxdna_prepared_submission_t* prepared);
+
 void iree_hal_amdxdna_device_destroy_single_command_cache(
     iree_hal_amdxdna_device* device);
 

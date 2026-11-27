@@ -58,6 +58,7 @@ static void iree_hal_amdxdna_device_initialize(
   // device_create.
   iree_atomic_store(&device->chain_max_slots, 0, iree_memory_order_relaxed);
   iree_atomic_store(&device->queue_epoch, 0, iree_memory_order_relaxed);
+  iree_atomic_store(&device->context_generation, 0, iree_memory_order_relaxed);
 
   iree_hal_resource_initialize(&iree_hal_amdxdna_device_vtable,
                                &device->resource);
@@ -78,6 +79,8 @@ static void iree_hal_amdxdna_device_before_release_context(
   iree_hal_amdxdna_device* device = (iree_hal_amdxdna_device*)user_data;
   iree_hal_amdxdna_native_queue_t* queue =
       iree_hal_amdxdna_native_context_ref_queue(context_ref);
+  iree_atomic_fetch_add(&device->context_generation, 1,
+                        iree_memory_order_acq_rel);
   iree_hal_amdxdna_device_invalidate_command_caches_for_queue(device, queue);
 }
 
@@ -2102,6 +2105,13 @@ iree_status_t iree_hal_amdxdna_device_create(
         device->host_allocator,
         device->native_caps.max_cached_chain_child_commands,
         &device->chain_command_cache);
+  }
+  if (iree_status_is_ok(status)) {
+    // AIE4 START_DPU children are immutable-template instruction BOs whose
+    // bindings can be re-patched in place.
+    device->chain_command_cache->recycle_children =
+        (device->native_caps.dispatch_models &
+         IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_START_DPU) != 0;
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdxdna_program_image_store_create(

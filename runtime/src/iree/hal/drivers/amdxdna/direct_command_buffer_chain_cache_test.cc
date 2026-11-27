@@ -823,4 +823,86 @@ TEST(ChainCommandCacheTest,
   iree_hal_amdxdna_chain_group_deinitialize(TestAllocator(), &request_group);
 }
 
+uint32_t kThreeWordControlCodeData[] = {0x100, 0x101, 0x102};
+iree_hal_amdxdna_u32_list_t kThreeWordControlCode = {
+    kThreeWordControlCodeData,
+    IREE_ARRAYSIZE(kThreeWordControlCodeData),
+};
+
+// A free child (or fresh descriptor) of executable template |identity|,
+// |entry_point|: three control words and one binding, as MakeCmd.
+iree_hal_amdxdna_chain_cmd_t MakeTemplateCmd(uint64_t identity,
+                                             uint32_t entry_point,
+                                             uint64_t device_addr) {
+  iree_hal_amdxdna_chain_cmd_t cmd = MakeCmd(FakeBuffer(0x10), device_addr);
+  cmd.src_asm_inst = &kThreeWordControlCode;
+  cmd.src_use_native_partial_elf = false;
+  cmd.src_executable_identity = identity;
+  cmd.src_entry_point = entry_point;
+  cmd.src_run_ordinal = 0;
+  return cmd;
+}
+
+TEST(ChainCommandCacheTest, TakeFreeChildMatchesTemplateNewestFirst) {
+  iree_hal_amdxdna_device_chain_command_cache_t cache = {};
+  cache.host_allocator = TestAllocator();
+  cache.recycle_children = true;
+  IREE_CHECK_OK(iree_allocator_malloc_array(
+      TestAllocator(), 4, sizeof(*cache.free_children),
+      reinterpret_cast<void**>(&cache.free_children)));
+  auto older = MakeTemplateCmd(/*identity=*/7, /*entry_point=*/2, 0x1000);
+  auto other_entry = MakeTemplateCmd(/*identity=*/7, /*entry_point=*/3, 0x2000);
+  auto newer = MakeTemplateCmd(/*identity=*/7, /*entry_point=*/2, 0x3000);
+  iree_hal_amdxdna_chain_cmd_move(&cache.free_children[0], &older);
+  iree_hal_amdxdna_chain_cmd_move(&cache.free_children[1], &other_entry);
+  iree_hal_amdxdna_chain_cmd_move(&cache.free_children[2], &newer);
+  cache.free_child_count = 3;
+
+  auto fresh = MakeTemplateCmd(/*identity=*/7, /*entry_point=*/2, 0x9000);
+  iree_hal_amdxdna_chain_cmd_t taken;
+  ASSERT_TRUE(iree_hal_amdxdna_chain_command_cache_take_free_child(
+      &cache, &fresh, &taken));
+  EXPECT_EQ(taken.binding_device_addrs[0], 0x3000u);
+  EXPECT_EQ(cache.free_child_count, 2u);
+  iree_hal_amdxdna_chain_cmd_deinitialize(TestAllocator(), &taken);
+
+  ASSERT_TRUE(iree_hal_amdxdna_chain_command_cache_take_free_child(
+      &cache, &fresh, &taken));
+  EXPECT_EQ(taken.binding_device_addrs[0], 0x1000u);
+  iree_hal_amdxdna_chain_cmd_deinitialize(TestAllocator(), &taken);
+
+  // Only the other entry point's child is left; another executable, entry
+  // point, CU or shape never matches.
+  EXPECT_FALSE(iree_hal_amdxdna_chain_command_cache_take_free_child(
+      &cache, &fresh, &taken));
+  auto other_executable = MakeTemplateCmd(/*identity=*/8, /*entry_point=*/3, 0);
+  EXPECT_FALSE(iree_hal_amdxdna_chain_command_cache_take_free_child(
+      &cache, &other_executable, &taken));
+  auto other_cu = MakeTemplateCmd(/*identity=*/7, /*entry_point=*/3, 0);
+  other_cu.src_cu_idx.index = 8;
+  EXPECT_FALSE(iree_hal_amdxdna_chain_command_cache_take_free_child(
+      &cache, &other_cu, &taken));
+  auto other_shape = MakeTemplateCmd(/*identity=*/7, /*entry_point=*/3, 0);
+  other_shape.src_asm_inst = &kControlCode;
+  EXPECT_FALSE(iree_hal_amdxdna_chain_command_cache_take_free_child(
+      &cache, &other_shape, &taken));
+  auto same_entry = MakeTemplateCmd(/*identity=*/7, /*entry_point=*/3, 0);
+  ASSERT_TRUE(iree_hal_amdxdna_chain_command_cache_take_free_child(
+      &cache, &same_entry, &taken));
+  EXPECT_EQ(taken.binding_device_addrs[0], 0x2000u);
+  EXPECT_EQ(cache.free_child_count, 0u);
+  iree_hal_amdxdna_chain_cmd_deinitialize(TestAllocator(), &taken);
+
+  // A cache that does not recycle hands out nothing.
+  cache.recycle_children = false;
+  EXPECT_FALSE(iree_hal_amdxdna_chain_command_cache_take_free_child(
+      &cache, &fresh, &taken));
+
+  for (auto* cmd :
+       {&fresh, &other_executable, &other_cu, &other_shape, &same_entry}) {
+    iree_hal_amdxdna_chain_cmd_deinitialize(TestAllocator(), cmd);
+  }
+  iree_allocator_free(TestAllocator(), cache.free_children);
+}
+
 }  // namespace

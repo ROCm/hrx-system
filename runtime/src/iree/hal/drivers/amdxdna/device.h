@@ -105,6 +105,10 @@ typedef struct iree_hal_amdxdna_device {
   // safe, but we still need atomic load/store to avoid torn reads on the
   // 0 -> max sentinel transition.
   iree_atomic_uint32_t chain_max_slots;
+  // Advanced whenever a native hardware context is released. Prepared
+  // submissions record it and are rebuilt once it changes, so they never
+  // resubmit chains bound to a released context.
+  iree_atomic_int64_t context_generation;
   // True when creation successfully changed hardware power mode away from the
   // default and teardown should best-effort restore the default.
   bool power_mode_applied;

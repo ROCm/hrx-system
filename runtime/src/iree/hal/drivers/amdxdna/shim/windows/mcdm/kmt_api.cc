@@ -2220,6 +2220,10 @@ void DestroyAie4Context(const KmtApi& api, const Device& device,
   }
   DestroyBuffer(api, device, &context->aie4_health_buffer);
   DestroyBuffer(api, device, &context->aie4_hsa_buffer);
+  if (context->aie4_wait_event) {
+    CloseHandle(context->aie4_wait_event);
+    context->aie4_wait_event = nullptr;
+  }
   context->progress_fence = 0;
   context->progress_fence_cpu = nullptr;
   context->progress_fence_gpu = 0;
@@ -2451,11 +2455,16 @@ bool WaitAie4Fence(const KmtApi& api, const Device& device,
       static_cast<const volatile UINT64*>(context.progress_fence_cpu);
   if (completed && *completed >= fence_id) return true;
 
-  HANDLE event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-  if (!event) {
-    SetError(out_error, "CreateEventW for AIE4 fence wait failed");
-    return false;
+  if (!context.aie4_wait_event) {
+    context.aie4_wait_event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!context.aie4_wait_event) {
+      SetError(out_error, "CreateEventW for AIE4 fence wait failed");
+      return false;
+    }
+  } else {
+    ResetEvent(context.aie4_wait_event);
   }
+  HANDLE event = context.aie4_wait_event;
   D3DKMT_HANDLE objects[1] = {context.progress_fence};
   UINT64 values[1] = {fence_id};
   D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMCPU wait = {};
@@ -2467,12 +2476,12 @@ bool WaitAie4Fence(const KmtApi& api, const Device& device,
   NTSTATUS status = api.wait_from_cpu(&wait);
   if (!CheckStatus("D3DKMTWaitForSynchronizationObjectFromCpu(AIE4)", status,
                    out_error)) {
-    CloseHandle(event);
     return false;
   }
   const DWORD result = WaitForSingleObject(event, timeout_ms);
-  CloseHandle(event);
   if (result == WAIT_OBJECT_0) return true;
+  CloseHandle(event);
+  context.aie4_wait_event = nullptr;
   if (result == WAIT_TIMEOUT && out_timed_out) *out_timed_out = true;
   SetErrorFormat(out_error,
                  "AIE4 HW-queue fence %llu not reached within %u ms "

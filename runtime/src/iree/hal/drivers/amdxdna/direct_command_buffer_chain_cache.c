@@ -694,6 +694,134 @@ static void iree_hal_amdxdna_chain_command_cache_entry_deinitialize(
   memset(entry, 0, sizeof(*entry));
 }
 
+// Free children kept at most; each holds an instruction and an exec BO.
+#define IREE_HAL_AMDXDNA_CHAIN_CACHE_MAX_FREE_CHILDREN 512
+// Free parent chain commands kept at most; each holds an exec BO.
+#define IREE_HAL_AMDXDNA_CHAIN_CACHE_MAX_FREE_CHAINS 64
+
+static bool iree_hal_amdxdna_chain_cmd_is_recyclable(
+    const iree_hal_amdxdna_chain_cmd_t* cmd) {
+  return cmd->built && cmd->ctrl_code && cmd->command &&
+         !cmd->src_use_native_partial_elf && cmd->src_executable_identity != 0;
+}
+
+void iree_hal_amdxdna_chain_command_cache_entry_release_chains(
+    iree_hal_amdxdna_device_chain_command_cache_t* cache,
+    iree_hal_amdxdna_chain_command_cache_entry_t* entry) {
+  if (cache && cache->recycle_children && !cache->free_chains) {
+    iree_status_ignore(iree_allocator_malloc_array(
+        cache->host_allocator, IREE_HAL_AMDXDNA_CHAIN_CACHE_MAX_FREE_CHAINS,
+        sizeof(*cache->free_chains), (void**)&cache->free_chains));
+  }
+  for (iree_host_size_t i = 0; i < entry->chain_count; ++i) {
+    if (cache && cache->recycle_children && cache->free_chains &&
+        cache->free_chain_count <
+            IREE_HAL_AMDXDNA_CHAIN_CACHE_MAX_FREE_CHAINS) {
+      cache->free_chains[cache->free_chain_count++] = entry->chains[i];
+    } else {
+      iree_hal_amdxdna_native_command_c_destroy(entry->chains[i]);
+    }
+  }
+  entry->chain_count = 0;
+}
+
+// Evicts |entry| (idle), keeping its recyclable children when enabled.
+static void iree_hal_amdxdna_chain_command_cache_entry_evict(
+    iree_hal_amdxdna_device_chain_command_cache_t* cache,
+    iree_hal_amdxdna_chain_command_cache_entry_t* entry) {
+  if (cache->recycle_children && !entry->invalidated) {
+    if (!cache->free_children &&
+        !iree_status_is_ok(iree_allocator_malloc_array(
+            cache->host_allocator,
+            IREE_HAL_AMDXDNA_CHAIN_CACHE_MAX_FREE_CHILDREN,
+            sizeof(*cache->free_children), (void**)&cache->free_children))) {
+      cache->recycle_children = false;
+    }
+  }
+  if (cache->recycle_children && cache->free_children && !entry->invalidated) {
+    // Parent chains reference the children's exec BOs: release them first,
+    // keeping the commands themselves for later parents.
+    iree_hal_amdxdna_chain_command_cache_entry_release_chains(cache, entry);
+    for (iree_host_size_t i = 0; i < entry->group.cmd_count; ++i) {
+      iree_hal_amdxdna_chain_cmd_t* cmd = &entry->group.cmds[i];
+      if (!iree_hal_amdxdna_chain_cmd_is_recyclable(cmd)) continue;
+      if (cache->free_child_count ==
+          IREE_HAL_AMDXDNA_CHAIN_CACHE_MAX_FREE_CHILDREN) {
+        iree_hal_amdxdna_chain_cmd_deinitialize(cache->host_allocator,
+                                                &cache->free_children[0]);
+        for (iree_host_size_t j = 1; j < cache->free_child_count; ++j) {
+          iree_hal_amdxdna_chain_cmd_move(&cache->free_children[j - 1],
+                                          &cache->free_children[j]);
+        }
+        --cache->free_child_count;
+      }
+      iree_hal_amdxdna_chain_cmd_move(
+          &cache->free_children[cache->free_child_count++], cmd);
+    }
+  }
+  iree_hal_amdxdna_chain_command_cache_entry_deinitialize(cache->host_allocator,
+                                                          entry);
+  iree_hal_amdxdna_chain_command_cache_entry_prepare_empty(entry);
+}
+
+static void iree_hal_amdxdna_chain_command_cache_drain_free_children(
+    iree_hal_amdxdna_device_chain_command_cache_t* cache) {
+  for (iree_host_size_t i = 0; i < cache->free_child_count; ++i) {
+    iree_hal_amdxdna_chain_cmd_deinitialize(cache->host_allocator,
+                                            &cache->free_children[i]);
+  }
+  cache->free_child_count = 0;
+  for (iree_host_size_t i = 0; i < cache->free_chain_count; ++i) {
+    iree_hal_amdxdna_native_command_c_destroy(cache->free_chains[i]);
+  }
+  cache->free_chain_count = 0;
+}
+
+iree_hal_amdxdna_native_command_t*
+iree_hal_amdxdna_chain_command_cache_take_free_chain(
+    iree_hal_amdxdna_device_chain_command_cache_t* cache) {
+  while (cache && cache->free_chain_count != 0) {
+    iree_hal_amdxdna_native_command_t* chain =
+        cache->free_chains[--cache->free_chain_count];
+    iree_status_t status = iree_hal_amdxdna_native_command_c_reset(chain);
+    if (iree_status_is_ok(status)) return chain;
+    iree_status_ignore(status);
+    iree_hal_amdxdna_native_command_c_destroy(chain);
+  }
+  return NULL;
+}
+
+bool iree_hal_amdxdna_chain_command_cache_take_free_child(
+    iree_hal_amdxdna_device_chain_command_cache_t* cache,
+    const iree_hal_amdxdna_chain_cmd_t* fresh,
+    iree_hal_amdxdna_chain_cmd_t* out_child) {
+  if (!cache || !cache->recycle_children || !fresh->src_asm_inst ||
+      fresh->src_use_native_partial_elf ||
+      fresh->src_executable_identity == 0) {
+    return false;
+  }
+  // Newest first: the most recently evicted children are the likeliest to
+  // share their bindings with this miss.
+  for (iree_host_size_t i = cache->free_child_count; i > 0; --i) {
+    iree_hal_amdxdna_chain_cmd_t* child = &cache->free_children[i - 1];
+    if (child->src_executable_identity != fresh->src_executable_identity ||
+        child->src_entry_point != fresh->src_entry_point ||
+        child->src_run_ordinal != fresh->src_run_ordinal ||
+        child->src_cu_idx.index != fresh->src_cu_idx.index ||
+        child->ctrl_word_count != fresh->src_asm_inst->count ||
+        child->binding_count != fresh->binding_count) {
+      continue;
+    }
+    iree_hal_amdxdna_chain_cmd_move(out_child, child);
+    const iree_host_size_t last = --cache->free_child_count;
+    if (i - 1 != last) {
+      iree_hal_amdxdna_chain_cmd_move(child, &cache->free_children[last]);
+    }
+    return true;
+  }
+  return false;
+}
+
 void iree_hal_amdxdna_chain_command_cache_entry_discard(
     iree_hal_amdxdna_device_chain_command_cache_t* cache,
     iree_hal_amdxdna_chain_command_cache_entry_t* entry) {
@@ -720,6 +848,7 @@ void iree_hal_amdxdna_chain_command_cache_evict_idle_locked(
     }
     iree_hal_amdxdna_chain_command_cache_entry_discard(cache, entry);
   }
+  iree_hal_amdxdna_chain_command_cache_drain_free_children(cache);
 }
 
 void iree_hal_amdxdna_chain_command_cache_evict_idle(
@@ -752,6 +881,9 @@ void iree_hal_amdxdna_device_destroy_chain_command_cache(
     iree_hal_amdxdna_chain_command_cache_entry_deinitialize(
         cache->host_allocator, &cache->entries[i]);
   }
+  iree_hal_amdxdna_chain_command_cache_drain_free_children(cache);
+  iree_allocator_free(cache->host_allocator, cache->free_children);
+  iree_allocator_free(cache->host_allocator, cache->free_chains);
   iree_slim_mutex_deinitialize(&cache->mutex);
   iree_allocator_free(cache->host_allocator, cache);
   device->chain_command_cache = NULL;
@@ -1012,9 +1144,7 @@ bool iree_hal_amdxdna_chain_command_cache_trim_for_group(
     iree_hal_amdxdna_chain_command_cache_entry_t* evict_entry =
         iree_hal_amdxdna_chain_command_cache_find_lru_evictable_entry(cache);
     if (!evict_entry) return false;
-    iree_hal_amdxdna_chain_command_cache_entry_deinitialize(
-        cache->host_allocator, evict_entry);
-    iree_hal_amdxdna_chain_command_cache_entry_prepare_empty(evict_entry);
+    iree_hal_amdxdna_chain_command_cache_entry_evict(cache, evict_entry);
   }
 }
 
@@ -1143,9 +1273,7 @@ iree_hal_amdxdna_chain_command_cache_allocate_entry(
 
   entry = iree_hal_amdxdna_chain_command_cache_find_lru_evictable_entry(cache);
   if (!entry) return NULL;
-  iree_hal_amdxdna_chain_command_cache_entry_deinitialize(cache->host_allocator,
-                                                          entry);
-  iree_hal_amdxdna_chain_command_cache_entry_prepare_empty(entry);
+  iree_hal_amdxdna_chain_command_cache_entry_evict(cache, entry);
   return entry;
 }
 

@@ -5706,6 +5706,18 @@ static iree_status_t aie4_submit_chains_and_wait(
       break;
     }
   }
+  // The HW queue completes in order: one wait for the last issued chain, so
+  // the per-chain completions below find their fences reached instead of
+  // each waiting in the kernel. Its failure is reported by those completions.
+  for (iree_host_size_t i = issued_count; i > 0; --i) {
+    if (!issued[i - 1].chain) continue;
+    mcdm::Error error;
+    bool timed_out = false;
+    (void)mcdm::WaitAie4Fence(queue->context->device->api, queue->context->kmt,
+                              queue->context->context, issued[i - 1].fence_id,
+                              kAie4StartDpuWaitTimeoutMs, &timed_out, &error);
+    break;
+  }
   // Drain whatever was issued even after a failure: the children's exec BOs
   // and packets must not be reused while CERT may still write them.
   for (iree_host_size_t i = 0; i < issued_count; ++i) {

@@ -159,7 +159,41 @@ typedef struct iree_hal_amdxdna_device_chain_command_cache_t {
   iree_host_size_t max_instruction_bytes;
   iree_host_size_t entry_count;
   uint64_t use_clock;
+  // Set for AIE4 (START_DPU): built children of LRU-evicted entries are kept
+  // in |free_children| (fixed capacity, oldest dropped first) for a later
+  // miss of the same immutable executable template, which rewrites their
+  // bindings instead of allocating and materializing new instruction and exec
+  // BOs. Varying groups (such as per-layer MoE job lists) otherwise evict and
+  // rebuild every child.
+  bool recycle_children;
+  iree_hal_amdxdna_chain_cmd_t* free_children;
+  iree_host_size_t free_child_count;
+  // The evicted entries' parent chain commands (each owns an exec BO), reset
+  // and reused for the next entry's parents when |recycle_children| is set.
+  iree_hal_amdxdna_native_command_t** free_chains;
+  iree_host_size_t free_chain_count;
 } iree_hal_amdxdna_device_chain_command_cache_t;
+
+// Releases |entry|'s parent chain commands into |cache|'s free chains when it
+// recycles (else destroys them). Caller holds the cache mutex; |cache| may be
+// NULL.
+void iree_hal_amdxdna_chain_command_cache_entry_release_chains(
+    iree_hal_amdxdna_device_chain_command_cache_t* cache,
+    iree_hal_amdxdna_chain_command_cache_entry_t* entry);
+
+// A parent chain command of an evicted entry, reset for reuse, or NULL.
+// Caller holds the cache mutex.
+iree_hal_amdxdna_native_command_t*
+iree_hal_amdxdna_chain_command_cache_take_free_chain(
+    iree_hal_amdxdna_device_chain_command_cache_t* cache);
+
+// Moves a free child built from |fresh|'s executable template (same identity,
+// entry point, run ordinal, CU and shape) into |out_child|. Caller holds the
+// cache mutex.
+bool iree_hal_amdxdna_chain_command_cache_take_free_child(
+    iree_hal_amdxdna_device_chain_command_cache_t* cache,
+    const iree_hal_amdxdna_chain_cmd_t* fresh,
+    iree_hal_amdxdna_chain_cmd_t* out_child);
 
 void iree_hal_amdxdna_chain_cmd_initialize(iree_hal_amdxdna_chain_cmd_t* cmd);
 void iree_hal_amdxdna_chain_cmd_deinitialize(iree_allocator_t host_allocator,

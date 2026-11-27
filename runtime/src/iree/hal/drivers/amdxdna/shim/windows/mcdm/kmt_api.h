@@ -358,6 +358,9 @@ struct Context {
   Buffer aie4_status_buffer;
   uint32_t aie4_num_ucs = 0;
   uint32_t aie4_status_next_offset = 0;
+  // Manual-reset event WaitAie4Fence reuses for its bounded waits; dropped
+  // after a timeout, whose wait registration may still signal it.
+  mutable HANDLE aie4_wait_event = nullptr;
 };
 
 struct CommandAperture {

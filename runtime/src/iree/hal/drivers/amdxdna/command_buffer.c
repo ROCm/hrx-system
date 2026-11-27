@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "iree/base/internal/arena.h"
+#include "iree/base/internal/atomics.h"
 #include "iree/hal/drivers/amdxdna/direct_command_buffer.h"
 #include "iree/hal/drivers/amdxdna/dispatch.h"
 #include "iree/hal/utils/resource_set.h"
@@ -94,6 +95,16 @@ typedef struct iree_hal_amdxdna_command_buffer_t {
   iree_hal_amdxdna_native_c_device_caps_t native_caps;
   iree_hal_resource_set_t* resource_set;
   iree_hal_amdxdna_cmd_list_t cmd_list;
+  // Reusable command buffers of direct dispatches only (no buffer barriers,
+  // binding-table slots or indirect parameters): every execute submits the
+  // same native work, so the first one prepares it and later ones resubmit.
+  bool preparable;
+  // Set when preparing produced nothing to resubmit; later executes replay.
+  bool prepare_unsupported;
+  // Held by the execute that prepares or resubmits; a concurrent execute
+  // replays instead of touching the prepared chains.
+  iree_atomic_int32_t prepared_busy;
+  iree_hal_amdxdna_prepared_submission_t* prepared;
 } iree_hal_amdxdna_command_buffer_t;
 
 static const iree_hal_command_buffer_vtable_t
@@ -159,6 +170,11 @@ iree_status_t iree_hal_amdxdna_command_buffer_create(
     command_buffer->host_allocator = host_allocator;
     command_buffer->native_caps = *native_caps;
     command_buffer->resource_set = NULL;
+    command_buffer->preparable = false;
+    command_buffer->prepare_unsupported = false;
+    iree_atomic_store(&command_buffer->prepared_busy, 0,
+                      iree_memory_order_relaxed);
+    command_buffer->prepared = NULL;
     iree_hal_amdxdna_cmd_list_initialize(block_pool, &command_buffer->cmd_list);
     if (!iree_all_bits_set(mode, IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED)) {
       status = iree_hal_resource_set_allocate(block_pool,
@@ -182,6 +198,7 @@ static void iree_hal_amdxdna_command_buffer_destroy(
   iree_allocator_t host_allocator = command_buffer->host_allocator;
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  iree_hal_amdxdna_prepared_submission_free(command_buffer->prepared);
   iree_hal_amdxdna_cmd_list_deinitialize(&command_buffer->cmd_list);
   iree_hal_resource_set_free(command_buffer->resource_set);
   iree_allocator_free(host_allocator, command_buffer);
@@ -207,11 +224,18 @@ static iree_status_t iree_hal_amdxdna_command_buffer_begin(
   return iree_ok_status();
 }
 
+static bool iree_hal_amdxdna_command_buffer_is_preparable(
+    const iree_hal_amdxdna_command_buffer_t* command_buffer);
+
 static iree_status_t iree_hal_amdxdna_command_buffer_end(
     iree_hal_command_buffer_t* base_command_buffer) {
   iree_hal_amdxdna_command_buffer_t* command_buffer =
       iree_hal_amdxdna_command_buffer_cast(base_command_buffer);
   iree_hal_resource_set_freeze(command_buffer->resource_set);
+  command_buffer->preparable =
+      !iree_all_bits_set(command_buffer->base.mode,
+                         IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT) &&
+      iree_hal_amdxdna_command_buffer_is_preparable(command_buffer);
   return iree_ok_status();
 }
 
@@ -497,6 +521,28 @@ typedef struct iree_hal_amdxdna_cmd_dispatch_t {
   iree_hal_dispatch_flags_t flags;
 } iree_hal_amdxdna_cmd_dispatch_t;
 
+static bool iree_hal_amdxdna_command_buffer_is_preparable(
+    const iree_hal_amdxdna_command_buffer_t* command_buffer) {
+  if (iree_hal_amdxdna_cmd_list_is_empty(&command_buffer->cmd_list)) {
+    return false;
+  }
+  for (const iree_hal_amdxdna_cmd_header_t* header =
+           command_buffer->cmd_list.head;
+       header; header = header->next) {
+    if (header->type != IREE_HAL_AMDXDNA_CMD_DISPATCH) return false;
+    const iree_hal_amdxdna_cmd_dispatch_t* cmd =
+        (const iree_hal_amdxdna_cmd_dispatch_t*)header;
+    if (iree_hal_dispatch_uses_indirect_parameters(cmd->flags)) return false;
+    // Only accumulated dispatches reach the chain flush; others submit while
+    // being recorded, so a prepared submission would miss them.
+    if (!cmd->plan.use_chain_accumulation_policy) return false;
+    for (iree_host_size_t i = 0; i < cmd->bindings.count; ++i) {
+      if (!cmd->bindings.values[i].buffer) return false;
+    }
+  }
+  return true;
+}
+
 static iree_status_t iree_hal_amdxdna_command_buffer_dispatch(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_executable_t* executable,
@@ -598,14 +644,93 @@ static const iree_hal_amdxdna_cmd_apply_fn_t
             (iree_hal_amdxdna_cmd_apply_fn_t)iree_hal_amdxdna_apply_dispatch,
 };
 
+static iree_status_t iree_hal_amdxdna_command_buffer_replay(
+    iree_hal_amdxdna_command_buffer_t* command_buffer,
+    iree_hal_command_buffer_t* target_command_buffer,
+    iree_hal_buffer_binding_table_t binding_table);
+
+// Resubmits the prepared chains, or prepares them while replaying. Returns
+// false in |out_handled| when the caller must replay normally.
+static iree_status_t iree_hal_amdxdna_command_buffer_apply_prepared(
+    iree_hal_amdxdna_command_buffer_t* command_buffer,
+    iree_hal_command_buffer_t* target_command_buffer, bool* out_handled) {
+  *out_handled = false;
+  if (iree_atomic_exchange(&command_buffer->prepared_busy, 1,
+                           iree_memory_order_acquire) != 0) {
+    return iree_ok_status();
+  }
+  if (command_buffer->prepared &&
+      !iree_hal_amdxdna_prepared_submission_is_current(
+          command_buffer->prepared)) {
+    iree_hal_amdxdna_prepared_submission_free(command_buffer->prepared);
+    command_buffer->prepared = NULL;
+  }
+  iree_status_t status = iree_ok_status();
+  if (command_buffer->prepared) {
+    *out_handled = true;
+    status = iree_hal_command_buffer_begin(target_command_buffer);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_amdxdna_direct_command_buffer_submit_prepared(
+          target_command_buffer, command_buffer->prepared);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_command_buffer_end(target_command_buffer);
+    }
+    if (!iree_status_is_ok(status)) {
+      // A failed submit (e.g. a timed-out context) must not be resubmitted.
+      iree_hal_amdxdna_prepared_submission_free(command_buffer->prepared);
+      command_buffer->prepared = NULL;
+    }
+  } else {
+    *out_handled = true;
+    status = iree_hal_amdxdna_direct_command_buffer_begin_prepare(
+        target_command_buffer);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_amdxdna_command_buffer_replay(
+          command_buffer, target_command_buffer,
+          iree_hal_buffer_binding_table_empty());
+    }
+    iree_hal_amdxdna_prepared_submission_t* prepared =
+        iree_hal_amdxdna_direct_command_buffer_take_prepared(
+            target_command_buffer);
+    if (iree_status_is_ok(status) && prepared) {
+      command_buffer->prepared = prepared;
+    } else {
+      iree_hal_amdxdna_prepared_submission_free(prepared);
+      if (iree_status_is_ok(status)) {
+        command_buffer->prepare_unsupported = true;
+      }
+    }
+  }
+  iree_atomic_store(&command_buffer->prepared_busy, 0,
+                    iree_memory_order_release);
+  return status;
+}
+
 iree_status_t iree_hal_amdxdna_command_buffer_apply(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_command_buffer_t* target_command_buffer,
     iree_hal_buffer_binding_table_t binding_table) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-
   iree_hal_amdxdna_command_buffer_t* command_buffer =
       iree_hal_amdxdna_command_buffer_cast(base_command_buffer);
+  if (command_buffer->preparable && !command_buffer->prepare_unsupported &&
+      binding_table.count == 0 &&
+      iree_hal_amdxdna_direct_command_buffer_supports_prepared(
+          target_command_buffer)) {
+    bool handled = false;
+    iree_status_t status = iree_hal_amdxdna_command_buffer_apply_prepared(
+        command_buffer, target_command_buffer, &handled);
+    if (handled || !iree_status_is_ok(status)) return status;
+  }
+  return iree_hal_amdxdna_command_buffer_replay(
+      command_buffer, target_command_buffer, binding_table);
+}
+
+static iree_status_t iree_hal_amdxdna_command_buffer_replay(
+    iree_hal_amdxdna_command_buffer_t* command_buffer,
+    iree_hal_command_buffer_t* target_command_buffer,
+    iree_hal_buffer_binding_table_t binding_table) {
+  IREE_TRACE_ZONE_BEGIN(z0);
   iree_status_t status = iree_hal_command_buffer_begin(target_command_buffer);
   if (iree_status_is_ok(status)) {
     for (iree_hal_amdxdna_cmd_header_t* cmd = command_buffer->cmd_list.head;
