@@ -349,6 +349,17 @@ TEST(ApplyPatchTableAie4Test, AppliesDuplicateOffsetOnce) {
   EXPECT_EQ(ctrl[0] & 0x1FFFFFFu, static_cast<uint32_t>(base >> 32));
 }
 
+TEST(ApplyPatchTableAie4Test, AppliesLateDuplicateInUnsortedTableOnce) {
+  std::vector<uint32_t> ctrl(8, 0);
+  std::vector<uint32_t> patches = {8u, 0u, 0u, 0u, 0u, 0u, 8u, 0u, 0u};
+  uint64_t args[] = {0x1000u};
+  EXPECT_TRUE(iree_hal_amdxdna_apply_patch_table_aie4(
+      ctrl.data(), ctrl.size(), patches.data(), patches.size(), args, 1, 0));
+  const uint64_t base = 0x1000u + kAie4DdrWindow;
+  EXPECT_EQ(ctrl[3], static_cast<uint32_t>(base));
+  EXPECT_EQ(ctrl[2] & 0x1FFFFFFu, static_cast<uint32_t>(base >> 32));
+}
+
 TEST(ApplyPatchTableAie4Test, AddsBakedChunkOffset) {
   std::vector<uint32_t> ctrl(8, 0);
   ctrl[1] = 0x1000u;

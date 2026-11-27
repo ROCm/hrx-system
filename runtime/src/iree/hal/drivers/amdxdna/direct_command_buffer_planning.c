@@ -398,6 +398,9 @@ bool iree_hal_amdxdna_apply_patch_table_aie4(
   if (patch_count && !patches) return false;
   uint8_t* b = (uint8_t*)ctrl_code;
   size_t total = ctrl_words * sizeof(uint32_t);
+  // The ctrlcode loader emits tables sorted by offset without duplicates;
+  // while offsets keep increasing no earlier entry can share one.
+  bool increasing = true;
   for (size_t i = 0; i < patch_count; i += 3) {
     uint32_t offset = patches[i];
     uint32_t arg_idx = patches[i + 1];
@@ -413,11 +416,12 @@ bool iree_hal_amdxdna_apply_patch_table_aie4(
     if ((size_t)offset + 8 > total || (offset & 0x3u) != 0) {
       return false;
     }
+    if (i != 0 && offset <= patches[i - 3]) increasing = false;
     // Each microcontroller gets its own copy of the same page. The loader
     // keeps both relocation entries and packs one page, so applying the
     // second entry would add the buffer address on top of the first result.
     bool already_applied = false;
-    for (size_t prev = 0; prev < i; prev += 3) {
+    for (size_t prev = 0; !increasing && prev < i; prev += 3) {
       if (patches[prev] == offset) {
         already_applied = true;
         break;

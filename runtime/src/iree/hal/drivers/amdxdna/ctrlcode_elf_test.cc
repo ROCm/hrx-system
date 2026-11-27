@@ -19,10 +19,12 @@ namespace {
 
 constexpr uint32_t kShtNull = 0;
 constexpr uint32_t kShtProgbits = 1;
+constexpr uint32_t kShtSymtab = 2;
 constexpr uint32_t kShtStrtab = 3;
 constexpr uint32_t kShtRela = 4;
 constexpr uint32_t kShtNote = 7;
 constexpr uint32_t kShtDynsym = 11;
+constexpr uint32_t kShtGroup = 17;
 constexpr uint32_t kElf32EhdrSize = 52;
 constexpr uint32_t kElf32ShdrSize = 40;
 constexpr uint32_t kElf32SymSize = 16;
@@ -40,6 +42,13 @@ struct RelocDef {
 struct CtrltextSec {
   std::string name;
   std::vector<uint8_t> bytes;
+};
+
+// One kernel of a multi-kernel ELF: an SHT_GROUP named by `symbol` that owns
+// the sections named in `members`.
+struct GroupDef {
+  std::string symbol;
+  std::vector<std::string> members;
 };
 
 static void WriteU16(std::vector<uint8_t>* b, size_t off, uint16_t v) {
@@ -81,7 +90,8 @@ static uint16_t CtrltextShndx(const std::vector<CtrltextSec>& texts,
 
 static std::vector<uint8_t> BuildPagedCtrlcodeElf(
     uint8_t os_abi, uint8_t abi_version, const std::vector<CtrltextSec>& texts,
-    const std::vector<RelocDef>& relocs, uint32_t partition_cols = 0) {
+    const std::vector<RelocDef>& relocs, uint32_t partition_cols = 0,
+    const std::vector<GroupDef>& groups = {}) {
   struct DynsymEntry {
     std::string name;
     std::string section;
@@ -153,7 +163,38 @@ static std::vector<uint8_t> BuildPagedCtrlcodeElf(
     shstrtab.append(".note.xrt.configuration");
     shstrtab.push_back('\0');
   }
+  const uint32_t strtab_name_off = static_cast<uint32_t>(shstrtab.size());
+  shstrtab.append(".strtab");
+  shstrtab.push_back('\0');
+  const uint32_t symtab_name_off = static_cast<uint32_t>(shstrtab.size());
+  shstrtab.append(".symtab");
+  shstrtab.push_back('\0');
+  const uint32_t group_name_off = static_cast<uint32_t>(shstrtab.size());
+  shstrtab.append(".group");
+  shstrtab.push_back('\0');
   const uint32_t shstrtab_name = 1;
+
+  // Group symbols live in .symtab (via .strtab); each group lists its member
+  // section indices after a GRP_COMDAT flags word.
+  std::string strtab(1, '\0');
+  std::vector<uint8_t> symtab(kElf32SymSize, 0);  // NULL symbol.
+  std::vector<std::vector<uint8_t>> group_blobs;
+  for (const auto& group : groups) {
+    AppendU32(&symtab, static_cast<uint32_t>(strtab.size()));
+    AppendU32(&symtab, 0);
+    AppendU32(&symtab, 0);
+    symtab.push_back(0x01);  // STB_LOCAL, STT_OBJECT
+    symtab.push_back(0);
+    AppendU16(&symtab, 0);
+    strtab.append(group.symbol);
+    strtab.push_back('\0');
+    std::vector<uint8_t> blob;
+    AppendU32(&blob, 1);  // GRP_COMDAT
+    for (const auto& member : group.members) {
+      AppendU32(&blob, CtrltextShndx(texts, member));
+    }
+    group_blobs.push_back(std::move(blob));
+  }
 
   std::vector<uint8_t> note;
   if (partition_cols != 0) {
@@ -186,6 +227,15 @@ static std::vector<uint8_t> BuildPagedCtrlcodeElf(
   append_blob(rela.data(), rela.size());
   const uint32_t note_off = static_cast<uint32_t>(elf.size());
   if (!note.empty()) append_blob(note.data(), note.size());
+  const uint32_t strtab_off = static_cast<uint32_t>(elf.size());
+  append_blob(strtab.data(), strtab.size());
+  const uint32_t symtab_off = static_cast<uint32_t>(elf.size());
+  append_blob(symtab.data(), symtab.size());
+  std::vector<uint32_t> group_offs;
+  for (const auto& blob : group_blobs) {
+    group_offs.push_back(static_cast<uint32_t>(elf.size()));
+    append_blob(blob.data(), blob.size());
+  }
   const uint32_t shstr_off = static_cast<uint32_t>(elf.size());
   append_blob(shstrtab.data(), shstrtab.size());
   const uint32_t shoff = static_cast<uint32_t>(elf.size());
@@ -222,11 +272,26 @@ static std::vector<uint8_t> BuildPagedCtrlcodeElf(
     write_shdr(note_name_off, kShtNote, note_off,
                static_cast<uint32_t>(note.size()), 0, 0, 0);
   }
+  const uint16_t strtab_ndx =
+      static_cast<uint16_t>(1 + texts.size() + 3 + (note.empty() ? 0 : 1));
+  const uint16_t symtab_ndx = static_cast<uint16_t>(strtab_ndx + 1);
+  if (!groups.empty()) {
+    write_shdr(strtab_name_off, kShtStrtab, strtab_off,
+               static_cast<uint32_t>(strtab.size()), 0, 0, 0);
+    write_shdr(symtab_name_off, kShtSymtab, symtab_off,
+               static_cast<uint32_t>(symtab.size()), strtab_ndx, /*info=*/1,
+               kElf32SymSize);
+    for (size_t i = 0; i < groups.size(); ++i) {
+      write_shdr(group_name_off, kShtGroup, group_offs[i],
+                 static_cast<uint32_t>(group_blobs[i].size()), symtab_ndx,
+                 /*info=*/static_cast<uint32_t>(i + 1), 4);
+    }
+  }
   write_shdr(shstrtab_name, kShtStrtab, shstr_off,
              static_cast<uint32_t>(shstrtab.size()), 0, 0, 0);
 
-  const uint16_t shnum =
-      static_cast<uint16_t>(1 + texts.size() + 3 + (note.empty() ? 0 : 1) + 1);
+  const uint16_t shnum = static_cast<uint16_t>(
+      strtab_ndx + (groups.empty() ? 0 : 2 + groups.size()) + 1);
   const uint16_t shstrndx = static_cast<uint16_t>(shnum - 1);
 
   elf[0] = 0x7F;
@@ -459,6 +524,30 @@ TEST(CtrlcodeElfTest, PacksSparseAie4ColumnsWithoutEmptyPages) {
   iree_hal_amdxdna_ctrlcode_elf_deinitialize(iree_allocator_system(), &parsed);
 }
 
+TEST(CtrlcodeElfTest, DeduplicatesAndSortsAie4Patches) {
+  std::vector<uint8_t> page(32, 0);
+  auto reloc = [](uint32_t offset, const char* symbol) {
+    RelocDef r;
+    r.offset = offset;
+    r.symbol = symbol;
+    r.section = ".ctrltext.0.0";
+    return r;
+  };
+  auto elf = BuildPagedCtrlcodeElf(
+      IREE_HAL_AMDXDNA_CTRLCODE_ELF_OSABI_AIE4, 0x21, {{".ctrltext.0.0", page}},
+      {reloc(8, "1"), reloc(0, "0"), reloc(8, "1")});
+  iree_hal_amdxdna_ctrlcode_elf_t parsed = {};
+  IREE_ASSERT_OK(iree_hal_amdxdna_ctrlcode_elf_parse(
+      iree_make_const_byte_span(elf.data(), elf.size()),
+      iree_allocator_system(), &parsed));
+  ASSERT_EQ(parsed.patch_count, 6u);
+  EXPECT_EQ(parsed.patches[0], 16u);
+  EXPECT_EQ(parsed.patches[1], 0u);
+  EXPECT_EQ(parsed.patches[3], 16u + 8u);
+  EXPECT_EQ(parsed.patches[4], 1u);
+  iree_hal_amdxdna_ctrlcode_elf_deinitialize(iree_allocator_system(), &parsed);
+}
+
 TEST(CtrlcodeElfTest, AppendsPadInsideOwningColumn) {
   std::vector<uint8_t> col0(4, 0);
   WriteU32(&col0, 0, 0x11u);
@@ -530,6 +619,157 @@ TEST(CtrlcodeElfTest, RejectsUnsupportedOsAbi) {
       &parsed);
   EXPECT_EQ(iree_status_code(status), IREE_STATUS_UNIMPLEMENTED);
   iree_status_free(status);
+}
+
+static std::vector<uint8_t> Word(uint32_t value) {
+  std::vector<uint8_t> bytes(4, 0);
+  WriteU32(&bytes, 0, value);
+  return bytes;
+}
+
+// Two kernels shaped like a multi-kernel config ELF: pages on uC 0 and 2,
+// `.<col>.<page>.<kernel>` names, one shared .rela.dyn.
+static std::vector<uint8_t> BuildTwoKernelElf() {
+  RelocDef a_reloc;
+  a_reloc.offset = 0;
+  a_reloc.symbol = "0";
+  a_reloc.section = ".ctrltext.2.0.0";
+  RelocDef b_reloc;
+  b_reloc.offset = 4;
+  b_reloc.symbol = "1";
+  b_reloc.section = ".ctrltext.0.0.1";
+  return BuildPagedCtrlcodeElf(
+      IREE_HAL_AMDXDNA_CTRLCODE_ELF_OSABI_AIE2P_CONFIG, 3,
+      {{".ctrltext.0.0.0", Word(0xA0u)},
+       {".ctrltext.2.0.0", Word(0xA2u)},
+       {".ctrltext.0.0.1", Word(0xB0u)},
+       {".ctrltext.2.0.1", Word(0xB2u)}},
+      {a_reloc, b_reloc}, /*partition_cols=*/3,
+      {{"k_a", {".ctrltext.0.0.0", ".ctrltext.2.0.0"}},
+       {"k_b", {".ctrltext.0.0.1", ".ctrltext.2.0.1"}}});
+}
+
+TEST(CtrlcodeElfTest, ParsesKernelGroupByName) {
+  auto elf = BuildTwoKernelElf();
+  iree_hal_amdxdna_ctrlcode_elf_t parsed = {};
+  IREE_ASSERT_OK(iree_hal_amdxdna_ctrlcode_elf_parse_kernel(
+      iree_make_const_byte_span(elf.data(), elf.size()), IREE_SV("k_a"),
+      iree_allocator_system(), &parsed));
+  EXPECT_EQ(parsed.partition_cols, 3u);
+  ASSERT_EQ(parsed.ctrl_word_count, 16384u / 4u);
+  EXPECT_EQ(parsed.ctrl_words[0], 0xA0u);
+  EXPECT_EQ(parsed.ctrl_words[8192u / 4u], 0xA2u);
+  ASSERT_EQ(parsed.patch_count, 3u);
+  EXPECT_EQ(parsed.patches[0], 8192u + 16u);
+  EXPECT_EQ(parsed.patches[1], 0u);
+  EXPECT_EQ(parsed.skipped_non_host_relocs, 0u);
+  ASSERT_EQ(parsed.dpu_slice_count, 2u);
+  EXPECT_EQ(parsed.dpu_slices[0].uc_index, 0u);
+  EXPECT_EQ(parsed.dpu_slices[1].uc_index, 2u);
+  iree_hal_amdxdna_ctrlcode_elf_deinitialize(iree_allocator_system(), &parsed);
+}
+
+TEST(CtrlcodeElfTest, ParsesKernelGroupByXrtQualifiedName) {
+  auto elf = BuildTwoKernelElf();
+  iree_hal_amdxdna_ctrlcode_elf_t parsed = {};
+  IREE_ASSERT_OK(iree_hal_amdxdna_ctrlcode_elf_parse_kernel(
+      iree_make_const_byte_span(elf.data(), elf.size()), IREE_SV("main:k_b"),
+      iree_allocator_system(), &parsed));
+  ASSERT_EQ(parsed.ctrl_word_count, 16384u / 4u);
+  EXPECT_EQ(parsed.ctrl_words[0], 0xB0u);
+  EXPECT_EQ(parsed.ctrl_words[8192u / 4u], 0xB2u);
+  ASSERT_EQ(parsed.patch_count, 3u);
+  EXPECT_EQ(parsed.patches[0], 16u + 4u);
+  EXPECT_EQ(parsed.patches[1], 1u);
+  iree_hal_amdxdna_ctrlcode_elf_deinitialize(iree_allocator_system(), &parsed);
+}
+
+TEST(CtrlcodeElfTest, RejectsUnnamedOrUnknownKernelInMultiKernelElf) {
+  auto elf = BuildTwoKernelElf();
+  iree_hal_amdxdna_ctrlcode_elf_t parsed = {};
+  iree_status_t status = iree_hal_amdxdna_ctrlcode_elf_parse(
+      iree_make_const_byte_span(elf.data(), elf.size()),
+      iree_allocator_system(), &parsed);
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
+  iree_status_free(status);
+  status = iree_hal_amdxdna_ctrlcode_elf_parse_kernel(
+      iree_make_const_byte_span(elf.data(), elf.size()), IREE_SV("main:k_c"),
+      iree_allocator_system(), &parsed);
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_NOT_FOUND);
+  iree_status_free(status);
+}
+
+TEST(CtrlcodeElfTest, ParsesEveryKernelFromOneIndex) {
+  auto elf = BuildTwoKernelElf();
+  iree_hal_amdxdna_ctrlcode_elf_index_t* index = nullptr;
+  IREE_ASSERT_OK(iree_hal_amdxdna_ctrlcode_elf_index_create(
+      iree_make_const_byte_span(elf.data(), elf.size()),
+      iree_allocator_system(), &index));
+  ASSERT_EQ(iree_hal_amdxdna_ctrlcode_elf_index_kernel_count(index), 2u);
+  const uint32_t want_word[] = {0xA0u, 0xB0u};
+  const uint32_t want_patch[] = {8192u + 16u, 16u + 4u};
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    iree_hal_amdxdna_ctrlcode_elf_t parsed = {};
+    IREE_ASSERT_OK(iree_hal_amdxdna_ctrlcode_elf_index_parse_kernel(
+        index, iree_hal_amdxdna_ctrlcode_elf_index_kernel_name(index, i),
+        iree_allocator_system(), &parsed));
+    EXPECT_EQ(parsed.ctrl_words[0], want_word[i]);
+    ASSERT_EQ(parsed.patch_count, 3u);
+    EXPECT_EQ(parsed.patches[0], want_patch[i]);
+    iree_hal_amdxdna_ctrlcode_elf_deinitialize(iree_allocator_system(),
+                                               &parsed);
+  }
+  iree_hal_amdxdna_ctrlcode_elf_index_free(index);
+}
+
+TEST(CtrlcodeElfTest, EnumeratesKernelGroupsInSectionOrder) {
+  auto elf = BuildTwoKernelElf();
+  std::vector<std::string> names;
+  IREE_ASSERT_OK(iree_hal_amdxdna_ctrlcode_elf_enumerate_kernels(
+      iree_make_const_byte_span(elf.data(), elf.size()),
+      iree_allocator_system(),
+      [](void* user_data, iree_string_view_t name) {
+        static_cast<std::vector<std::string>*>(user_data)->emplace_back(
+            name.data, name.size);
+        return iree_ok_status();
+      },
+      &names));
+  EXPECT_EQ(names, (std::vector<std::string>{"k_a", "k_b"}));
+}
+
+TEST(CtrlcodeElfTest, ParsesKernelFromElfWithManySections) {
+  // Config ELFs can have thousands of sections; more than one page table's
+  // worth of sections must not be a limit.
+  constexpr int kKernels = 600;
+  std::vector<CtrltextSec> texts;
+  std::vector<GroupDef> groups;
+  for (int i = 0; i < kKernels; ++i) {
+    const std::string section = ".ctrltext.0.0." + std::to_string(i);
+    texts.push_back({section, Word(0x1000u + i)});
+    groups.push_back({"k" + std::to_string(i), {section}});
+  }
+  auto elf = BuildPagedCtrlcodeElf(
+      IREE_HAL_AMDXDNA_CTRLCODE_ELF_OSABI_AIE2P_CONFIG, 3, texts, {},
+      /*partition_cols=*/3, groups);
+  iree_hal_amdxdna_ctrlcode_elf_t parsed = {};
+  IREE_ASSERT_OK(iree_hal_amdxdna_ctrlcode_elf_parse_kernel(
+      iree_make_const_byte_span(elf.data(), elf.size()), IREE_SV("main:k599"),
+      iree_allocator_system(), &parsed));
+  ASSERT_EQ(parsed.ctrl_word_count, 8192u / 4u);
+  EXPECT_EQ(parsed.ctrl_words[0], 0x1000u + 599u);
+  ASSERT_EQ(parsed.dpu_slice_count, 1u);
+  iree_hal_amdxdna_ctrlcode_elf_deinitialize(iree_allocator_system(), &parsed);
+}
+
+TEST(CtrlcodeElfTest, IgnoresKernelNameWithoutGroups) {
+  auto elf = BuildPagedCtrlcodeElf(IREE_HAL_AMDXDNA_CTRLCODE_ELF_OSABI_AIE4,
+                                   0x21, {{".ctrltext.0.0", Word(0xAAu)}}, {});
+  iree_hal_amdxdna_ctrlcode_elf_t parsed = {};
+  IREE_ASSERT_OK(iree_hal_amdxdna_ctrlcode_elf_parse_kernel(
+      iree_make_const_byte_span(elf.data(), elf.size()), IREE_SV("vadd"),
+      iree_allocator_system(), &parsed));
+  EXPECT_EQ(parsed.ctrl_words[0], 0xAAu);
+  iree_hal_amdxdna_ctrlcode_elf_deinitialize(iree_allocator_system(), &parsed);
 }
 
 }  // namespace

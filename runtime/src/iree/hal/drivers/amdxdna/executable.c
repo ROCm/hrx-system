@@ -1425,8 +1425,20 @@ static iree_status_t iree_hal_amdxdna_elf_executable_create(
       z0, iree_hal_amdxdna_executable_allocate(host_allocator, export_count,
                                                &executable));
 
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t export_ordinal = 0; export_ordinal < export_count;
+  // One ELF index per module, built on first use: a multi-kernel module backs
+  // many exports.
+  const iree_host_size_t module_count =
+      iree_hal_amdxdna_elf_ModuleDef_vec_len(modules_vec);
+  iree_hal_amdxdna_ctrlcode_elf_index_t** module_indices = NULL;
+  iree_status_t status = iree_allocator_malloc_array(
+      host_allocator, module_count ? module_count : 1, sizeof(*module_indices),
+      (void**)&module_indices);
+  if (iree_status_is_ok(status)) {
+    memset(module_indices, 0,
+           (module_count ? module_count : 1) * sizeof(*module_indices));
+  }
+  for (iree_host_size_t export_ordinal = 0;
+       iree_status_is_ok(status) && export_ordinal < export_count;
        ++export_ordinal) {
     iree_hal_amdxdna_elf_ExportDef_table_t export_def =
         iree_hal_amdxdna_elf_ExportDef_vec_at(exports_vec, export_ordinal);
@@ -1446,11 +1458,18 @@ static iree_status_t iree_hal_amdxdna_elf_executable_create(
         iree_hal_amdxdna_elf_ModuleDef_vec_at(modules_vec, module_ordinal);
     flatbuffers_uint8_vec_t elf_fb =
         iree_hal_amdxdna_elf_ModuleDef_elf_get(module_def);
+    if (!module_indices[module_ordinal]) {
+      status = iree_hal_amdxdna_ctrlcode_elf_index_create(
+          iree_make_const_byte_span(elf_fb, flatbuffers_uint8_vec_len(elf_fb)),
+          host_allocator, &module_indices[module_ordinal]);
+      if (!iree_status_is_ok(status)) break;
+    }
+    // In a multi-kernel ELF the export name selects the kernel group.
     iree_hal_amdxdna_ctrlcode_elf_t parsed_elf;
     memset(&parsed_elf, 0, sizeof(parsed_elf));
-    status = iree_hal_amdxdna_ctrlcode_elf_parse(
-        iree_make_const_byte_span(elf_fb, flatbuffers_uint8_vec_len(elf_fb)),
-        host_allocator, &parsed_elf);
+    status = iree_hal_amdxdna_ctrlcode_elf_index_parse_kernel(
+        module_indices[module_ordinal], params->kernel_name, host_allocator,
+        &parsed_elf);
     if (!iree_status_is_ok(status)) break;
     if (parsed_elf.ctrl_word_count == 0) {
       iree_hal_amdxdna_ctrlcode_elf_deinitialize(host_allocator, &parsed_elf);
@@ -1482,6 +1501,12 @@ static iree_status_t iree_hal_amdxdna_elf_executable_create(
     parsed_elf.dpu_slices = NULL;
     parsed_elf.dpu_slice_count = 0;
     iree_hal_amdxdna_ctrlcode_elf_deinitialize(host_allocator, &parsed_elf);
+  }
+  if (module_indices) {
+    for (iree_host_size_t i = 0; i < module_count; ++i) {
+      iree_hal_amdxdna_ctrlcode_elf_index_free(module_indices[i]);
+    }
+    iree_allocator_free(host_allocator, module_indices);
   }
 
   if (!iree_status_is_ok(status)) {

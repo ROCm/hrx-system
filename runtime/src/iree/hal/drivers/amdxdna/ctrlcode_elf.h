@@ -66,9 +66,58 @@ typedef struct iree_hal_amdxdna_ctrlcode_elf_t {
 void iree_hal_amdxdna_ctrlcode_elf_deinitialize(
     iree_allocator_t host_allocator, iree_hal_amdxdna_ctrlcode_elf_t* elf);
 
+// Parses the whole ELF. An ELF with more than one kernel group (see
+// iree_hal_amdxdna_ctrlcode_elf_parse_kernel) is rejected.
 iree_status_t iree_hal_amdxdna_ctrlcode_elf_parse(
     iree_const_byte_span_t elf_bytes, iree_allocator_t host_allocator,
     iree_hal_amdxdna_ctrlcode_elf_t* out_elf);
+
+// Parses one kernel. Multi-kernel (OSABI 70 config) ELFs hold one SHT_GROUP
+// per kernel, named by its symbol and owning that kernel's
+// `.ctrltext.<col>.<page>.<n>` / `.ctrldata.<col>.<page>.<n>` sections; only
+// that group's pages and the relocations into them are used. `kernel_name` is
+// the group symbol, optionally prefixed by `<function>:` as XRT names kernels
+// (`main:k0_...`). It is ignored for ELFs without groups, and may be empty for
+// an ELF with exactly one group.
+iree_status_t iree_hal_amdxdna_ctrlcode_elf_parse_kernel(
+    iree_const_byte_span_t elf_bytes, iree_string_view_t kernel_name,
+    iree_allocator_t host_allocator, iree_hal_amdxdna_ctrlcode_elf_t* out_elf);
+
+// Section table, relocations bucketed by target section, and kernel groups of
+// one ELF, built once so each kernel is parsed from its own sections only
+// (config ELFs can hold hundreds of kernels). References |elf_bytes|,
+// which must outlive the index.
+typedef struct iree_hal_amdxdna_ctrlcode_elf_index_t
+    iree_hal_amdxdna_ctrlcode_elf_index_t;
+
+iree_status_t iree_hal_amdxdna_ctrlcode_elf_index_create(
+    iree_const_byte_span_t elf_bytes, iree_allocator_t host_allocator,
+    iree_hal_amdxdna_ctrlcode_elf_index_t** out_index);
+
+void iree_hal_amdxdna_ctrlcode_elf_index_free(
+    iree_hal_amdxdna_ctrlcode_elf_index_t* index);
+
+// iree_hal_amdxdna_ctrlcode_elf_parse_kernel on an index.
+iree_status_t iree_hal_amdxdna_ctrlcode_elf_index_parse_kernel(
+    const iree_hal_amdxdna_ctrlcode_elf_index_t* index,
+    iree_string_view_t kernel_name, iree_allocator_t host_allocator,
+    iree_hal_amdxdna_ctrlcode_elf_t* out_elf);
+
+// Kernel groups in section order; zero for ELFs without groups.
+iree_host_size_t iree_hal_amdxdna_ctrlcode_elf_index_kernel_count(
+    const iree_hal_amdxdna_ctrlcode_elf_index_t* index);
+iree_string_view_t iree_hal_amdxdna_ctrlcode_elf_index_kernel_name(
+    const iree_hal_amdxdna_ctrlcode_elf_index_t* index, iree_host_size_t i);
+
+typedef iree_status_t (*iree_hal_amdxdna_ctrlcode_elf_kernel_callback_fn_t)(
+    void* user_data, iree_string_view_t kernel_name);
+
+// Calls `callback` with each kernel group symbol in section order. ELFs
+// without groups have no named kernels and produce no calls.
+iree_status_t iree_hal_amdxdna_ctrlcode_elf_enumerate_kernels(
+    iree_const_byte_span_t elf_bytes, iree_allocator_t host_allocator,
+    iree_hal_amdxdna_ctrlcode_elf_kernel_callback_fn_t callback,
+    void* user_data);
 
 #ifdef __cplusplus
 }  // extern "C"
