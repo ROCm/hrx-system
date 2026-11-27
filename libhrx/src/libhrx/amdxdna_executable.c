@@ -16,6 +16,7 @@
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/drivers/amdxdna/device.h"
 #include "iree/hal/drivers/amdxdna/direct_command_buffer_planning.h"
+#include "iree/schemas/amdxdna_elf_executable_def_builder.h"
 #include "iree/schemas/amdxdna_xclbin_executable_def_builder.h"
 
 typedef struct hrx_amdxdna_serialization_workspace_t {
@@ -1033,3 +1034,235 @@ hrx_status_t hrx_amdxdna_executable_create(
                          "HRX was built without the amdxdna driver");
 }
 #endif  // HRX_HAS_IREE_AMDXDNA_DRIVER
+
+#if defined(HRX_HAS_IREE_AMDXDNA_DRIVER)
+static const size_t hrx_amdxdna_elf_export_v0_record_length =
+    HRX_AMDXDNA_V0_RECORD_LENGTH(hrx_amdxdna_elf_export_t,
+                                 control_parameter_count);
+
+static const hrx_amdxdna_elf_export_t* hrx_amdxdna_next_elf_export(
+    const hrx_amdxdna_elf_export_t* elf_export) {
+  return (const hrx_amdxdna_elf_export_t*)((const uint8_t*)elf_export +
+                                           elf_export->record_length);
+}
+
+static const size_t hrx_amdxdna_elf_create_params_v0_record_length =
+    HRX_AMDXDNA_V0_RECORD_LENGTH(hrx_amdxdna_elf_executable_create_params_t,
+                                 export_count);
+
+static hrx_status_t hrx_amdxdna_validate_elf_executable(
+    const hrx_amdxdna_elf_executable_create_params_t* params) {
+  if (!params) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "params is NULL");
+  }
+  if ((uintptr_t)params %
+          _Alignof(hrx_amdxdna_elf_executable_create_params_t) !=
+      0) {
+    return hrx_make_status(
+        HRX_STATUS_INVALID_ARGUMENT,
+        "amdxdna ELF executable parameter record is misaligned");
+  }
+  if (params->record_length < hrx_amdxdna_abi_header_length) {
+    return hrx_make_status(
+        HRX_STATUS_INVALID_ARGUMENT,
+        "amdxdna ELF executable parameter ABI header is truncated");
+  }
+  if (params->abi_version >
+      HRX_AMDXDNA_ELF_EXECUTABLE_CREATE_PARAMS_ABI_VERSION_0) {
+    return hrx_make_status(HRX_STATUS_UNIMPLEMENTED,
+                           "unsupported amdxdna ELF executable parameter ABI");
+  }
+  if (params->record_length < hrx_amdxdna_elf_create_params_v0_record_length) {
+    return hrx_make_status(
+        HRX_STATUS_INVALID_ARGUMENT,
+        "amdxdna ELF executable parameter record is truncated");
+  }
+  if (params->flags != 0 || params->reserved != 0) {
+    return hrx_make_status(
+        HRX_STATUS_INVALID_ARGUMENT,
+        "amdxdna ELF executable reserved fields must be zero");
+  }
+  if (!hrx_amdxdna_span_is_valid(params->elf) || params->elf.data_length == 0) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "the ELF is empty");
+  }
+  const hrx_amdxdna_elf_export_t* exports = params->exports;
+  const size_t export_count = params->export_count;
+  if (export_count == 0 || !exports) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "at least one export is required");
+  }
+  if (export_count > UINT32_MAX) {
+    return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                           "amdxdna ELF export count is too large");
+  }
+  const hrx_amdxdna_elf_export_t* elf_export = exports;
+  for (size_t i = 0; i < export_count; ++i) {
+    if (!hrx_amdxdna_record_stride_is_valid(
+            elf_export, elf_export->record_length,
+            hrx_amdxdna_abi_header_length,
+            _Alignof(hrx_amdxdna_elf_export_t))) {
+      return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                             "amdxdna ELF export record stride is invalid");
+    }
+    if (elf_export->abi_version > HRX_AMDXDNA_ELF_EXPORT_ABI_VERSION_0) {
+      return hrx_make_status(HRX_STATUS_UNIMPLEMENTED,
+                             "unsupported amdxdna ELF export record ABI");
+    }
+    if (elf_export->record_length < hrx_amdxdna_elf_export_v0_record_length) {
+      return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                             "amdxdna ELF export record is truncated");
+    }
+    if (elf_export->kernel_name.size == 0 || !elf_export->kernel_name.data) {
+      return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                             "a kernel name is empty");
+    }
+    if (elf_export->reserved != 0) {
+      return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                             "amdxdna ELF export reserved field must be zero");
+    }
+    if (elf_export->control_parameter_count != 0) {
+      return hrx_make_status(
+          HRX_STATUS_UNIMPLEMENTED,
+          "amdxdna ELF export control parameters are not implemented");
+    }
+    elf_export = hrx_amdxdna_next_elf_export(elf_export);
+  }
+  return hrx_ok_status();
+}
+#endif  // HRX_HAS_IREE_AMDXDNA_DRIVER
+
+hrx_status_t hrx_amdxdna_elf_serialize(
+    const hrx_amdxdna_elf_executable_create_params_t* params,
+    hrx_host_allocator_t host_allocator, uint8_t** out_data,
+    size_t* out_data_length) {
+  if (!out_data || !out_data_length) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "out_data or out_data_length is NULL");
+  }
+  *out_data = NULL;
+  *out_data_length = 0;
+#if !defined(HRX_HAS_IREE_AMDXDNA_DRIVER)
+  (void)params;
+  (void)host_allocator;
+  return hrx_make_status(HRX_STATUS_UNIMPLEMENTED,
+                         "HRX was built without the amdxdna driver");
+#else
+  hrx_status_t status = hrx_amdxdna_validate_elf_executable(params);
+  if (!hrx_status_is_ok(status)) return status;
+  const hrx_const_byte_span_t elf = params->elf;
+  const hrx_amdxdna_elf_export_t* exports = params->exports;
+  const size_t export_count = params->export_count;
+
+  flatbuffers_builder_t builder;
+  if (flatcc_builder_init(&builder) != 0) {
+    return hrx_amdxdna_builder_failure(
+        "failed to initialize amdxdna ELF executable builder");
+  }
+  iree_hal_amdxdna_elf_ExportDef_ref_t* export_refs = NULL;
+  status = hrx_amdxdna_allocate_ref_array(export_count, sizeof(*export_refs),
+                                          (void**)&export_refs);
+  if (hrx_status_is_ok(status) &&
+      flatbuffers_failed(
+          iree_hal_amdxdna_elf_ExecutableDef_start_as_root(&builder))) {
+    status = hrx_amdxdna_builder_failure(
+        "failed to start amdxdna ELF executable package");
+  }
+  iree_hal_amdxdna_elf_ModuleDef_ref_t module_ref = 0;
+  if (hrx_status_is_ok(status)) {
+    flatbuffers_uint8_vec_ref_t elf_ref =
+        flatbuffers_uint8_vec_create(&builder, elf.data, elf.data_length);
+    module_ref =
+        elf_ref ? iree_hal_amdxdna_elf_ModuleDef_create(&builder, elf_ref) : 0;
+    if (!module_ref) {
+      status = hrx_amdxdna_builder_failure(
+          "failed to add ELF module to amdxdna executable package");
+    }
+  }
+  const hrx_amdxdna_elf_export_t* elf_export = exports;
+  for (size_t i = 0; i < export_count && hrx_status_is_ok(status);
+       ++i, elf_export = hrx_amdxdna_next_elf_export(elf_export)) {
+    flatbuffers_string_ref_t name_ref = flatbuffers_string_create(
+        &builder, elf_export->kernel_name.data, elf_export->kernel_name.size);
+    export_refs[i] = 0;
+    if (name_ref &&
+        !flatbuffers_failed(iree_hal_amdxdna_elf_ExportDef_start(&builder)) &&
+        !flatbuffers_failed(
+            iree_hal_amdxdna_elf_ExportDef_module_ordinal_add(&builder, 0)) &&
+        !flatbuffers_failed(
+            iree_hal_amdxdna_elf_ExportDef_name_add(&builder, name_ref)) &&
+        !flatbuffers_failed(iree_hal_amdxdna_elf_ExportDef_binding_count_add(
+            &builder, elf_export->binding_count))) {
+      export_refs[i] = iree_hal_amdxdna_elf_ExportDef_end(&builder);
+    }
+    if (!export_refs[i]) {
+      status = hrx_amdxdna_builder_failure(
+          "failed to add export to amdxdna ELF executable package");
+    }
+  }
+  if (hrx_status_is_ok(status)) {
+    iree_hal_amdxdna_elf_ModuleDef_vec_ref_t modules_ref =
+        iree_hal_amdxdna_elf_ModuleDef_vec_create(&builder, &module_ref, 1);
+    iree_hal_amdxdna_elf_ExportDef_vec_ref_t exports_ref =
+        iree_hal_amdxdna_elf_ExportDef_vec_create(&builder, export_refs,
+                                                  export_count);
+    if (!modules_ref || !exports_ref ||
+        flatbuffers_failed(iree_hal_amdxdna_elf_ExecutableDef_exports_add(
+            &builder, exports_ref)) ||
+        flatbuffers_failed(iree_hal_amdxdna_elf_ExecutableDef_modules_add(
+            &builder, modules_ref)) ||
+        !iree_hal_amdxdna_elf_ExecutableDef_end_as_root(&builder)) {
+      status = hrx_amdxdna_builder_failure(
+          "failed to finish amdxdna ELF executable package");
+    }
+  }
+  size_t data_length = 0;
+  if (hrx_status_is_ok(status)) {
+    data_length = flatcc_builder_get_buffer_size(&builder);
+    if (data_length == 0) {
+      status = hrx_amdxdna_builder_failure(
+          "failed to finalize amdxdna ELF executable package");
+    }
+  }
+  if (hrx_status_is_ok(status)) {
+    status = hrx_host_allocator_malloc_uninitialized(
+        host_allocator, data_length, (void**)out_data);
+  }
+  if (hrx_status_is_ok(status) &&
+      !flatcc_builder_copy_buffer(&builder, *out_data, data_length)) {
+    status = hrx_amdxdna_builder_failure(
+        "failed to copy amdxdna ELF executable package");
+  }
+  if (hrx_status_is_ok(status)) {
+    *out_data_length = data_length;
+  } else {
+    hrx_host_allocator_free(host_allocator, *out_data);
+    *out_data = NULL;
+  }
+  hrx_host_allocator_free(hrx_host_allocator_system(), export_refs);
+  flatcc_builder_clear(&builder);
+  return status;
+#endif  // HRX_HAS_IREE_AMDXDNA_DRIVER
+}
+
+hrx_status_t hrx_amdxdna_elf_executable_create(
+    hrx_device_t device,
+    const hrx_amdxdna_elf_executable_create_params_t* params,
+    hrx_executable_t* executable) {
+  if (!device || !executable) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "device or executable is NULL");
+  }
+  *executable = NULL;
+  hrx_host_allocator_t host_allocator = hrx_host_allocator_system();
+  uint8_t* data = NULL;
+  size_t data_length = 0;
+  hrx_status_t status =
+      hrx_amdxdna_elf_serialize(params, host_allocator, &data, &data_length);
+  if (hrx_status_is_ok(status)) {
+    status = hrx_executable_load_data(
+        device, data, data_length, HRX_AMDXDNA_EXECUTABLE_TARGET_FAMILY,
+        HRX_AMDXDNA_EXECUTABLE_TARGET_KEY, executable);
+  }
+  hrx_host_allocator_free(host_allocator, data);
+  return status;
+}

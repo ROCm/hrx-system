@@ -25,6 +25,7 @@ if(IREE_HAL_DRIVER_AMDXDNA)
     iree::hal::drivers::amdxdna
     iree::hal::drivers::amdxdna::registration
     iree::base::internal::flatcc::building
+    iree::schemas::amdxdna_elf_executable_def_c_fbs
     iree::schemas::amdxdna_xclbin_executable_def_c_fbs
   )
 endif()
@@ -121,6 +122,7 @@ if(IREE_HAL_DRIVER_AMDXDNA)
     iree::hal::drivers::amdxdna
     iree::hal::drivers::amdxdna::registration
     iree::base::internal::flatcc::building
+    iree::schemas::amdxdna_elf_executable_def_c_fbs
     iree::schemas::amdxdna_xclbin_executable_def_c_fbs
   )
 endif()
@@ -255,6 +257,7 @@ if(IREE_HAL_DRIVER_AMDXDNA)
       iree::base::internal::flatcc::parsing
       iree::hal
       iree::hal::drivers::amdxdna
+      iree::schemas::amdxdna_elf_executable_def_c_fbs
       iree::schemas::amdxdna_xclbin_executable_def_c_fbs
       iree::testing::gtest
       iree::testing::gtest_main
@@ -280,6 +283,7 @@ if(IREE_HAL_DRIVER_AMDXDNA)
     iree::hal::drivers::amdxdna
     iree::base::tooling::flags
     iree::base::internal::flatcc::building
+    iree::schemas::amdxdna_elf_executable_def_c_fbs
     iree::schemas::amdxdna_xclbin_executable_def_c_fbs
   )
   target_compile_definitions(libhrx_src_libhrx_hrx.objects PRIVATE

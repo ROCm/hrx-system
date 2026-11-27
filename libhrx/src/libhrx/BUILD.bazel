@@ -91,6 +91,7 @@ HRX_DEPS = [
         "//runtime/src/iree/base/internal/flatcc:building",
         "//runtime/src/iree/hal/drivers/amdxdna",
         "//runtime/src/iree/hal/drivers/amdxdna/registration",
+        "//runtime/src/iree/schemas:amdxdna_elf_executable_def_c_fbs",
         "//runtime/src/iree/schemas:amdxdna_xclbin_executable_def_c_fbs",
     ],
     "//runtime/config/hal:driver_amdgpu": [
@@ -187,6 +188,7 @@ hrx_cc_test(
         "//runtime/src/iree/base/internal/flatcc:parsing",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amdxdna",
+        "//runtime/src/iree/schemas:amdxdna_elf_executable_def_c_fbs",
         "//runtime/src/iree/schemas:amdxdna_xclbin_executable_def_c_fbs",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

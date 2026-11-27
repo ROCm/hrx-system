@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -10,6 +11,8 @@
 
 #include "amdxdna_executable_reuse_key.h"
 #include "hrx_amdxdna.h"
+#include "iree/schemas/amdxdna_elf_executable_def_reader.h"
+#include "iree/schemas/amdxdna_elf_executable_def_verifier.h"
 #include "iree/schemas/amdxdna_xclbin_executable_def_reader.h"
 #include "iree/schemas/amdxdna_xclbin_executable_def_verifier.h"
 
@@ -506,11 +509,272 @@ void TestReuseKeyLongNameUsesHeapStorage() {
   CHECK(key.heap_descriptor == nullptr);
 }
 
+hrx_amdxdna_elf_export_t ElfExport(const char* kernel_name,
+                                   uint32_t binding_count) {
+  hrx_amdxdna_elf_export_t elf_export = hrx_amdxdna_elf_export_default();
+  elf_export.kernel_name = StringView(kernel_name);
+  elf_export.binding_count = binding_count;
+  return elf_export;
+}
+
+hrx_amdxdna_elf_executable_create_params_t ElfParams(
+    hrx_const_byte_span_t elf, const hrx_amdxdna_elf_export_t* exports,
+    size_t export_count) {
+  hrx_amdxdna_elf_executable_create_params_t params =
+      hrx_amdxdna_elf_executable_create_params_default();
+  params.elf = elf;
+  params.exports = exports;
+  params.export_count = export_count;
+  return params;
+}
+
+hrx_status_t SerializeElf(hrx_const_byte_span_t elf,
+                          const hrx_amdxdna_elf_export_t* exports,
+                          size_t export_count, uint8_t** out_data,
+                          size_t* out_data_length) {
+  const hrx_amdxdna_elf_executable_create_params_t params =
+      ElfParams(elf, exports, export_count);
+  return hrx_amdxdna_elf_serialize(&params, hrx_host_allocator_system(),
+                                   out_data, out_data_length);
+}
+
+void TestElfDefaults() {
+  const hrx_amdxdna_elf_export_t elf_export = hrx_amdxdna_elf_export_default();
+  CHECK(elf_export.record_length == sizeof(hrx_amdxdna_elf_export_t));
+  CHECK(elf_export.abi_version == HRX_AMDXDNA_ELF_EXPORT_ABI_VERSION_0);
+  CHECK(elf_export.kernel_name.data == nullptr);
+  CHECK(elf_export.kernel_name.size == 0);
+  CHECK(elf_export.binding_count == 0);
+  CHECK(elf_export.reserved == 0);
+  CHECK(elf_export.control_parameters == nullptr);
+  CHECK(elf_export.control_parameter_count == 0);
+
+  const hrx_amdxdna_elf_executable_create_params_t params =
+      hrx_amdxdna_elf_executable_create_params_default();
+  CHECK(params.record_length ==
+        sizeof(hrx_amdxdna_elf_executable_create_params_t));
+  CHECK(params.abi_version ==
+        HRX_AMDXDNA_ELF_EXECUTABLE_CREATE_PARAMS_ABI_VERSION_0);
+  CHECK(params.flags == 0);
+  CHECK(params.reserved == 0);
+  CHECK(params.elf.data == nullptr);
+  CHECK(params.elf.data_length == 0);
+  CHECK(params.exports == nullptr);
+  CHECK(params.export_count == 0);
+}
+
+void TestElfSerialize() {
+  // The serializer does not parse the ELF; any bytes stand in for one.
+  const std::array<uint8_t, 6> elf = {0x7F, 'E', 'L', 'F', 0x02, 0x01};
+  const std::array<hrx_amdxdna_elf_export_t, 2> elf_exports = {
+      ElfExport("main:gemm", 66), ElfExport("main:norm", 3)};
+  uint8_t* data = nullptr;
+  size_t data_length = 0;
+  hrx_status_t status =
+      SerializeElf(ByteSpan(elf.data(), elf.size()), elf_exports.data(),
+                   elf_exports.size(), &data, &data_length);
+  if (hrx_status_code(status) == HRX_STATUS_UNIMPLEMENTED) {
+    hrx_status_ignore(status);
+    std::printf("SKIP: HRX was built without the amdxdna driver\n");
+    return;
+  }
+  if (!CheckStatus(status, HRX_STATUS_OK)) return;
+  CHECK(data != nullptr);
+  if (!data) return;
+  CHECK(iree_hal_amdxdna_elf_ExecutableDef_verify_as_root(data, data_length) ==
+        0);
+  auto root = iree_hal_amdxdna_elf_ExecutableDef_as_root(data);
+  auto modules = iree_hal_amdxdna_elf_ExecutableDef_modules_get(root);
+  CHECK(iree_hal_amdxdna_elf_ModuleDef_vec_len(modules) == 1);
+  auto module_elf = iree_hal_amdxdna_elf_ModuleDef_elf_get(
+      iree_hal_amdxdna_elf_ModuleDef_vec_at(modules, 0));
+  CHECK(flatbuffers_uint8_vec_len(module_elf) == elf.size());
+  CHECK(std::memcmp(module_elf, elf.data(), elf.size()) == 0);
+  auto exports = iree_hal_amdxdna_elf_ExecutableDef_exports_get(root);
+  CHECK(iree_hal_amdxdna_elf_ExportDef_vec_len(exports) == elf_exports.size());
+  for (size_t i = 0; i < elf_exports.size(); ++i) {
+    auto export_def = iree_hal_amdxdna_elf_ExportDef_vec_at(exports, i);
+    flatbuffers_string_t name =
+        iree_hal_amdxdna_elf_ExportDef_name_get(export_def);
+    CHECK(std::string(name, flatbuffers_string_len(name)) ==
+          std::string(elf_exports[i].kernel_name.data,
+                      elf_exports[i].kernel_name.size));
+    CHECK(iree_hal_amdxdna_elf_ExportDef_module_ordinal_get(export_def) == 0);
+    CHECK(iree_hal_amdxdna_elf_ExportDef_binding_count_get(export_def) ==
+          elf_exports[i].binding_count);
+  }
+  hrx_host_allocator_free(hrx_host_allocator_system(), data);
+}
+
+void TestElfSerializeAcceptsLongerRecords() {
+  // A newer producer's records are longer; HRX steps exports by record_length
+  // and ignores trailing parameter fields it does not know.
+  struct ExtendedElfExport {
+    hrx_amdxdna_elf_export_t elf_export;
+    uint64_t future_field;
+  };
+  struct ExtendedElfParams {
+    hrx_amdxdna_elf_executable_create_params_t params;
+    uint64_t future_field;
+  };
+  const std::array<uint8_t, 4> elf = {0x7F, 'E', 'L', 'F'};
+  std::array<ExtendedElfExport, 2> records = {};
+  records[0].elf_export = ElfExport("first", 2);
+  records[1].elf_export = ElfExport("second", 5);
+  for (ExtendedElfExport& record : records) {
+    record.elf_export.record_length = sizeof(ExtendedElfExport);
+    record.future_field = UINT64_MAX;
+  }
+  ExtendedElfParams extended = {};
+  extended.params = ElfParams(ByteSpan(elf.data(), elf.size()),
+                              &records[0].elf_export, records.size());
+  extended.params.record_length = sizeof(ExtendedElfParams);
+  extended.future_field = UINT64_MAX;
+  hrx_host_allocator_t allocator = hrx_host_allocator_system();
+  uint8_t* data = nullptr;
+  size_t data_length = 0;
+  hrx_status_t status = hrx_amdxdna_elf_serialize(&extended.params, allocator,
+                                                  &data, &data_length);
+  if (hrx_status_code(status) == HRX_STATUS_UNIMPLEMENTED) {
+    hrx_status_ignore(status);
+    std::printf("SKIP: HRX was built without the amdxdna driver\n");
+    return;
+  }
+  if (!CheckStatus(status, HRX_STATUS_OK)) return;
+  auto root = iree_hal_amdxdna_elf_ExecutableDef_as_root(data);
+  auto exports = iree_hal_amdxdna_elf_ExecutableDef_exports_get(root);
+  CHECK(iree_hal_amdxdna_elf_ExportDef_vec_len(exports) == records.size());
+  auto second = iree_hal_amdxdna_elf_ExportDef_vec_at(exports, 1);
+  flatbuffers_string_t name = iree_hal_amdxdna_elf_ExportDef_name_get(second);
+  CHECK(std::string(name, flatbuffers_string_len(name)) == "second");
+  CHECK(iree_hal_amdxdna_elf_ExportDef_binding_count_get(second) == 5);
+  hrx_host_allocator_free(allocator, data);
+}
+
+void TestElfSerializeRejectsInvalidParams() {
+  const std::array<uint8_t, 4> elf = {0x7F, 'E', 'L', 'F'};
+  const hrx_amdxdna_elf_export_t elf_export = ElfExport("main", 1);
+  const hrx_amdxdna_elf_executable_create_params_t valid =
+      ElfParams(ByteSpan(elf.data(), elf.size()), &elf_export, 1);
+  hrx_host_allocator_t allocator = hrx_host_allocator_system();
+  uint8_t* data = nullptr;
+  size_t data_length = 0;
+  hrx_status_t probe =
+      hrx_amdxdna_elf_serialize(&valid, allocator, &data, &data_length);
+  if (hrx_status_code(probe) == HRX_STATUS_UNIMPLEMENTED) {
+    hrx_status_ignore(probe);
+    std::printf("SKIP: HRX was built without the amdxdna driver\n");
+    return;
+  }
+  CheckStatus(probe, HRX_STATUS_OK);
+  hrx_host_allocator_free(allocator, data);
+
+  CheckStatus(
+      hrx_amdxdna_elf_serialize(nullptr, allocator, &data, &data_length),
+      HRX_STATUS_INVALID_ARGUMENT);
+  CHECK(data == nullptr && data_length == 0);
+  CheckStatus(
+      hrx_amdxdna_elf_serialize(&valid, allocator, nullptr, &data_length),
+      HRX_STATUS_INVALID_ARGUMENT);
+  hrx_amdxdna_elf_executable_create_params_t header_only = valid;
+  header_only.record_length = 4;
+  CheckStatus(
+      hrx_amdxdna_elf_serialize(&header_only, allocator, &data, &data_length),
+      HRX_STATUS_INVALID_ARGUMENT);
+  hrx_amdxdna_elf_executable_create_params_t truncated = valid;
+  truncated.record_length =
+      offsetof(hrx_amdxdna_elf_executable_create_params_t, export_count);
+  CheckStatus(
+      hrx_amdxdna_elf_serialize(&truncated, allocator, &data, &data_length),
+      HRX_STATUS_INVALID_ARGUMENT);
+  hrx_amdxdna_elf_executable_create_params_t future_abi = valid;
+  future_abi.abi_version =
+      HRX_AMDXDNA_ELF_EXECUTABLE_CREATE_PARAMS_ABI_VERSION_0 + 1;
+  CheckStatus(
+      hrx_amdxdna_elf_serialize(&future_abi, allocator, &data, &data_length),
+      HRX_STATUS_UNIMPLEMENTED);
+  hrx_amdxdna_elf_executable_create_params_t flags = valid;
+  flags.flags = 1;
+  CheckStatus(hrx_amdxdna_elf_serialize(&flags, allocator, &data, &data_length),
+              HRX_STATUS_INVALID_ARGUMENT);
+  hrx_amdxdna_elf_executable_create_params_t reserved = valid;
+  reserved.reserved = 1;
+  CheckStatus(
+      hrx_amdxdna_elf_serialize(&reserved, allocator, &data, &data_length),
+      HRX_STATUS_INVALID_ARGUMENT);
+  CHECK(data == nullptr && data_length == 0);
+
+  hrx_executable_t executable = nullptr;
+  CheckStatus(hrx_amdxdna_elf_executable_create(nullptr, &valid, &executable),
+              HRX_STATUS_INVALID_ARGUMENT);
+  CHECK(executable == nullptr);
+}
+
+void TestElfSerializeRejectsInvalidExports() {
+  const std::array<uint8_t, 4> elf = {0x7F, 'E', 'L', 'F'};
+  const hrx_const_byte_span_t elf_span = ByteSpan(elf.data(), elf.size());
+  const hrx_amdxdna_elf_export_t name = ElfExport("main", 1);
+  uint8_t* data = nullptr;
+  size_t data_length = 0;
+  hrx_status_t probe = SerializeElf(elf_span, &name, 1, &data, &data_length);
+  if (hrx_status_code(probe) == HRX_STATUS_UNIMPLEMENTED) {
+    hrx_status_ignore(probe);
+    std::printf("SKIP: HRX was built without the amdxdna driver\n");
+    return;
+  }
+  CheckStatus(probe, HRX_STATUS_OK);
+  hrx_host_allocator_free(hrx_host_allocator_system(), data);
+
+  CheckStatus(SerializeElf(ByteSpan(nullptr, 0), &name, 1, &data, &data_length),
+              HRX_STATUS_INVALID_ARGUMENT);
+  CHECK(data == nullptr && data_length == 0);
+  CheckStatus(SerializeElf(ByteSpan(nullptr, 4), &name, 1, &data, &data_length),
+              HRX_STATUS_INVALID_ARGUMENT);
+  CheckStatus(SerializeElf(elf_span, nullptr, 1, &data, &data_length),
+              HRX_STATUS_INVALID_ARGUMENT);
+  CheckStatus(SerializeElf(elf_span, &name, 0, &data, &data_length),
+              HRX_STATUS_INVALID_ARGUMENT);
+  hrx_amdxdna_elf_export_t empty_name = name;
+  empty_name.kernel_name = {"", 0};
+  CheckStatus(SerializeElf(elf_span, &empty_name, 1, &data, &data_length),
+              HRX_STATUS_INVALID_ARGUMENT);
+  hrx_amdxdna_elf_export_t truncated = name;
+  truncated.record_length =
+      offsetof(hrx_amdxdna_elf_export_t, control_parameter_count);
+  CheckStatus(SerializeElf(elf_span, &truncated, 1, &data, &data_length),
+              HRX_STATUS_INVALID_ARGUMENT);
+  hrx_amdxdna_elf_export_t misaligned = name;
+  misaligned.record_length = sizeof(hrx_amdxdna_elf_export_t) + 1;
+  CheckStatus(SerializeElf(elf_span, &misaligned, 1, &data, &data_length),
+              HRX_STATUS_INVALID_ARGUMENT);
+  hrx_amdxdna_elf_export_t future_abi = name;
+  future_abi.abi_version = HRX_AMDXDNA_ELF_EXPORT_ABI_VERSION_0 + 1;
+  CheckStatus(SerializeElf(elf_span, &future_abi, 1, &data, &data_length),
+              HRX_STATUS_UNIMPLEMENTED);
+  hrx_amdxdna_elf_export_t reserved = name;
+  reserved.reserved = 1;
+  CheckStatus(SerializeElf(elf_span, &reserved, 1, &data, &data_length),
+              HRX_STATUS_INVALID_ARGUMENT);
+  const hrx_amdxdna_control_parameter_t parameter =
+      hrx_amdxdna_control_parameter_default();
+  hrx_amdxdna_elf_export_t with_parameters = name;
+  with_parameters.control_parameters = &parameter;
+  with_parameters.control_parameter_count = 1;
+  CheckStatus(SerializeElf(elf_span, &with_parameters, 1, &data, &data_length),
+              HRX_STATUS_UNIMPLEMENTED);
+  CHECK(data == nullptr && data_length == 0);
+}
+
 }  // namespace
 
 int main() {
   TestDefaults();
   TestCompleteDescription();
+  TestElfDefaults();
+  TestElfSerialize();
+  TestElfSerializeAcceptsLongerRecords();
+  TestElfSerializeRejectsInvalidParams();
+  TestElfSerializeRejectsInvalidExports();
   TestPriorEntryPointRecordOmitsControlParameters();
   TestPriorRunRecordOmitsRelocations();
   TestPriorCreateRecordOmitsStandalonePdis();

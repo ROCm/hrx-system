@@ -18,6 +18,8 @@ extern "C" {
 #define HRX_AMDXDNA_EXECUTABLE_CREATE_PARAMS_ABI_VERSION_1 1u
 #define HRX_AMDXDNA_EXECUTABLE_CREATE_PARAMS_ABI_VERSION_2 2u
 #define HRX_AMDXDNA_CONTROL_PARAMETER_ABI_VERSION_0 0u
+#define HRX_AMDXDNA_ELF_EXPORT_ABI_VERSION_0 0u
+#define HRX_AMDXDNA_ELF_EXECUTABLE_CREATE_PARAMS_ABI_VERSION_0 0u
 
 // `{0}` is valid C but GCC C++ -Wmissing-field-initializers rejects it when
 // later members are omitted. Value-init with `{}` zeroes every field in C++.
@@ -209,6 +211,74 @@ hrx_amdxdna_xadx_serialize(const hrx_amdxdna_executable_create_params_t* params,
 // HRX_AMDXDNA_EXECUTABLE_TARGET_FAMILY/KEY.
 HRX_API hrx_status_t hrx_amdxdna_executable_create(
     hrx_device_t device, const hrx_amdxdna_executable_create_params_t* params,
+    hrx_executable_t* executable);
+
+// One export of an AIE control-code ELF. |kernel_name| selects a kernel of a
+// multi-kernel ELF (one SHT_GROUP per kernel, as XRT names them:
+// "<function>:<instance>" or the group symbol); an ELF without groups has one
+// export. The export takes |binding_count| buffer bindings in argument order.
+// |control_parameters| lay out the firmware control parameter buffer the
+// kernel's control code reads through its scratch-pad-ctrl relocations; slots
+// no parameter names are zero.
+typedef struct hrx_amdxdna_elf_export_t {
+  uint32_t record_length;
+  uint32_t abi_version;
+  hrx_string_view_t kernel_name;
+  uint32_t binding_count;
+  uint32_t reserved;
+  const hrx_amdxdna_control_parameter_t* control_parameters;
+  size_t control_parameter_count;
+} hrx_amdxdna_elf_export_t;
+
+// Returns an initialized v0 ELF export record.
+static inline hrx_amdxdna_elf_export_t hrx_amdxdna_elf_export_default(void) {
+  hrx_amdxdna_elf_export_t elf_export = HRX_AMDXDNA_STRUCT_ZERO_INIT;
+  elf_export.record_length = (uint32_t)sizeof(elf_export);
+  elf_export.abi_version = HRX_AMDXDNA_ELF_EXPORT_ABI_VERSION_0;
+  return elf_export;
+}
+
+// An executable made from one AIE control-code ELF: export ordinal |i| is
+// |exports[i]|, walked using each record's |record_length|. Exports with the
+// same ELF share one hardware context, so their dispatches can run as one
+// command chain.
+typedef struct hrx_amdxdna_elf_executable_create_params_t {
+  uint32_t record_length;
+  uint32_t abi_version;
+  uint32_t flags;
+  uint32_t reserved;
+  hrx_const_byte_span_t elf;
+  const hrx_amdxdna_elf_export_t* exports;
+  size_t export_count;
+} hrx_amdxdna_elf_executable_create_params_t;
+
+// Returns initialized v0 ELF executable creation parameters.
+static inline hrx_amdxdna_elf_executable_create_params_t
+hrx_amdxdna_elf_executable_create_params_default(void) {
+  hrx_amdxdna_elf_executable_create_params_t params =
+      HRX_AMDXDNA_STRUCT_ZERO_INIT;
+  params.record_length = (uint32_t)sizeof(params);
+  params.abi_version = HRX_AMDXDNA_ELF_EXECUTABLE_CREATE_PARAMS_ABI_VERSION_0;
+  return params;
+}
+
+// Serializes an ELF executable description to the amdxdna ELF executable
+// container: one module holding the ELF and one export per export record, in
+// order. The returned bytes are allocated with |host_allocator| and must be
+// released with hrx_host_allocator_free using the same allocator. On failure,
+// |out_data| is NULL and |out_data_length| is zero. Like
+// hrx_amdxdna_xadx_serialize, this is for tooling and caching; runtime users
+// call hrx_amdxdna_elf_executable_create.
+HRX_API hrx_status_t hrx_amdxdna_elf_serialize(
+    const hrx_amdxdna_elf_executable_create_params_t* params,
+    hrx_host_allocator_t host_allocator, uint8_t** out_data,
+    size_t* out_data_length);
+
+// Creates and loads an ELF executable. All input storage is borrowed for the
+// duration of the call and may be released after it returns.
+HRX_API hrx_status_t hrx_amdxdna_elf_executable_create(
+    hrx_device_t device,
+    const hrx_amdxdna_elf_executable_create_params_t* params,
     hrx_executable_t* executable);
 
 #ifdef __cplusplus
