@@ -6,11 +6,13 @@
 
 #include "kmt_api.h"
 
+#include <immintrin.h>
+
 #include <algorithm>
 #include <array>
 #include <cstring>
-#include <immintrin.h>
 #include <tuple>
+#include <vector>
 
 #include "iree/testing/gtest.h"
 
@@ -43,6 +45,7 @@ uint64_t g_submit_fences[16] = {};
 uint64_t g_submit_offsets[16] = {};
 uint64_t g_submit_aperture_indices[16] = {};
 uint32_t g_submit_command_lengths[16] = {};
+std::vector<uint8_t> g_last_submit_private;
 uint64_t g_wait_fences[16] = {};
 D3DKMT_HANDLE g_gpu_wait_context = 0;
 D3DKMT_HANDLE g_gpu_wait_object = 0;
@@ -98,6 +101,7 @@ void ResetFakes() {
             std::end(g_submit_aperture_indices), 0);
   std::fill(std::begin(g_submit_command_lengths),
             std::end(g_submit_command_lengths), 0);
+  g_last_submit_private.clear();
   g_wait_count = 0;
   g_submit_failure_index = SIZE_MAX;
   g_submit_failure_status = static_cast<NTSTATUS>(0xC0000001u);
@@ -297,6 +301,10 @@ NTSTATUS APIENTRY FakeSubmitCommandToHwQueue(
                 sizeof(uint64_t));
   }
   g_submit_command_lengths[g_submit_count] = args->CommandLength;
+  const auto* private_data =
+      static_cast<const uint8_t*>(args->pPrivateDriverData);
+  g_last_submit_private.assign(private_data,
+                               private_data + args->PrivateDriverDataSize);
   g_submit_fences[g_submit_count++] = args->HwQueueProgressFenceId;
   if (call_index == g_submit_failure_index) return g_submit_failure_status;
   return 0;
@@ -1249,12 +1257,134 @@ TEST(KmtApiTest, Aie4HardwareTypeNames) {
 
 TEST(KmtApiTest, Aie4AbiHasNoAie2pSubmitLayout) {
   const McdmSubmissionPolicy policy = GetMcdmSubmissionPolicy(McdmAbi::aie4);
-  EXPECT_FALSE(policy.supports_command_chaining);
+  EXPECT_TRUE(policy.supports_command_chaining);
   EXPECT_FALSE(policy.submit_completion_is_deferred);
   EXPECT_FALSE(SupportsHostBufferReuse(McdmAbi::aie4));
   const McdmAbiInfo info = GetMcdmAbiInfo(McdmAbi::aie4);
   EXPECT_EQ(info.submit_private_prefix_size, 0u);
   EXPECT_EQ(info.pathb_private_size, 0u);
+}
+
+TEST(KmtApiTest, Aie4ChainCapacityFitsOnePage) {
+  // One-, three- and six-slice START_DPU packets (40, 88, 160 bytes).
+  EXPECT_EQ(Aie4ChainCapacity(40), 82u);
+  EXPECT_EQ(Aie4ChainCapacity(88), 41u);
+  EXPECT_EQ(Aie4ChainCapacity(160), 23u);
+}
+
+struct Aie4ChainFixture {
+  KmtApi api = {};
+  Device device = {};
+  Context context = {};
+  Buffer chain_buffer = {};
+  std::array<uint8_t, 4096> status = {};
+
+  Aie4ChainFixture() {
+    ResetFakes();
+    api.submit_command_to_hw_queue = FakeSubmitCommandToHwQueue;
+    api.wait_from_cpu = FakeWaitFromCpu;
+    device.device = 0x10;
+    device.mcdm_abi = McdmAbi::aie4;
+    context.hw_queue = 0x20;
+    context.next_fence_id = 3;
+    context.aie4_status_buffer.allocation = 0x40;
+    context.aie4_status_buffer.gpu_va = 0x5000;
+    context.aie4_status_buffer.size = status.size();
+    context.aie4_status_buffer.cpu_ptr = status.data();
+    chain_buffer.allocation = 0x50;
+    chain_buffer.gpu_va = 0x9000;
+    chain_buffer.size = 4096;
+  }
+};
+
+TEST(KmtApiTest, Aie4ChainPacksPacketsThenExecBoVas) {
+  Aie4ChainFixture f;
+  const uint32_t packet_a[3] = {0x39003001u, 1u, 0xAAu};
+  const uint32_t packet_b[2] = {0x39002001u, 1u};
+  const Aie4ChainEntry entries[2] = {{packet_a, sizeof(packet_a), 0x11000},
+                                     {packet_b, sizeof(packet_b), 0x12000}};
+  uint64_t fence_id = 0;
+  uint32_t status_offset = 0xffffffffu;
+  Error error = {};
+  ASSERT_TRUE(SubmitAie4Chain(f.api, f.device, &f.context, f.chain_buffer,
+                              entries, 2, &fence_id, &status_offset, &error))
+      << ErrorMessage(&error);
+  EXPECT_EQ(fence_id, 3u);
+  EXPECT_EQ(status_offset, 0u);
+  EXPECT_EQ(f.context.next_fence_id, 4u);
+  ASSERT_EQ(g_submit_count, 1u);
+  EXPECT_EQ(g_submit_opcodes[0], 6u);  // XRT_CMD_CHAIN
+  EXPECT_EQ(g_submit_command_lengths[0], 4096u);
+
+  // XRT_CMD_ARGS (120 bytes), then packet_a, packet_b, then both exec VAs.
+  const std::vector<uint8_t>& p = g_last_submit_private;
+  ASSERT_EQ(p.size(), 120u + 12u + 8u + 16u);
+  auto u32_at = [&](size_t off) {
+    uint32_t v = 0;
+    std::memcpy(&v, p.data() + off, sizeof(v));
+    return v;
+  };
+  auto u64_at = [&](size_t off) {
+    uint64_t v = 0;
+    std::memcpy(&v, p.data() + off, sizeof(v));
+    return v;
+  };
+  EXPECT_EQ(u64_at(8), 0x50u);   // BufferHandle
+  EXPECT_EQ(u64_at(16), 36u);    // Size
+  EXPECT_EQ(u64_at(40), 0x40u);  // StsInfo.BufferHandle
+  EXPECT_EQ(u32_at(84), 20u);    // GpuVasOffset
+  EXPECT_EQ(u32_at(100), 2u);    // ExecChain.CmdCount
+  EXPECT_EQ(std::memcmp(p.data() + 120, packet_a, sizeof(packet_a)), 0);
+  EXPECT_EQ(std::memcmp(p.data() + 132, packet_b, sizeof(packet_b)), 0);
+  EXPECT_EQ(u64_at(140), 0x11000u);
+  EXPECT_EQ(u64_at(148), 0x12000u);
+}
+
+TEST(KmtApiTest, Aie4ChainSubmitThroughDeviceCopyWaitsForPaging) {
+  Aie4ChainFixture f;
+  f.api.create_allocation2 = FakeCreateAllocation;
+  f.api.map_gpu_virtual_address = FakeMapGpuVirtualAddress;
+  f.api.make_resident = FakeMakeResident;
+  f.api.lock2 = FakeLock2;
+  f.device.paging_queue = 0x11;
+  f.device.paging_sync_object = 0x12;
+  uint64_t completed_paging_fence = 0;
+  f.device.paging_fence_cpu = &completed_paging_fence;
+  // Contexts keep a copy of the Device taken at context creation.
+  const Device context_copy = f.device;
+
+  Buffer exec_buffer = {};
+  Error error = {};
+  ASSERT_TRUE(CreateBuffer(f.api, f.device, BufferKind::execbuf, 4096,
+                           &exec_buffer, &error))
+      << ErrorMessage(&error);
+  const size_t waits_before_submit = g_wait_count;
+
+  const uint32_t packet[2] = {0x39002001u, 1u};
+  const Aie4ChainEntry entry = {packet, sizeof(packet), exec_buffer.gpu_va};
+  uint64_t fence_id = 0;
+  uint32_t status_offset = 0;
+  ASSERT_TRUE(SubmitAie4Chain(f.api, context_copy, &f.context, f.chain_buffer,
+                              &entry, 1, &fence_id, &status_offset, &error))
+      << ErrorMessage(&error);
+  ASSERT_EQ(g_wait_count, waits_before_submit + 1);
+  EXPECT_EQ(g_wait_fences[waits_before_submit], 11u);
+  EXPECT_EQ(g_submit_count, 1u);
+}
+
+TEST(KmtApiTest, Aie4ChainRejectsPayloadLargerThanOnePage) {
+  Aie4ChainFixture f;
+  std::array<uint8_t, 160> packet = {};
+  std::vector<Aie4ChainEntry> entries(24, {packet.data(), 160, 0x11000});
+  uint64_t fence_id = 0;
+  uint32_t status_offset = 0;
+  Error error = {};
+  EXPECT_FALSE(SubmitAie4Chain(f.api, f.device, &f.context, f.chain_buffer,
+                               entries.data(),
+                               static_cast<uint32_t>(entries.size()), &fence_id,
+                               &status_offset, &error));
+  EXPECT_EQ(g_submit_count, 0u);
+  EXPECT_EQ(f.context.next_fence_id, 3u);
 }
 
 TEST(KmtApiTest, RejectsUnknownAbiQueryFailure) {

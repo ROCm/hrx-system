@@ -104,7 +104,7 @@ enum class McdmAbi {
   legacy,
   compact,
   // AIE4 miniports: XRT hwcontext_aie4 / hwqueue_aie4
-  // contexts, XRT_CMD_EXECBUF submits (CreateAie4Context).
+  // contexts, XRT_CMD_EXECBUF / XRT_CMD_CHAIN submits (CreateAie4Context).
   aie4,
 };
 
@@ -492,6 +492,27 @@ bool SubmitAie4Execbuf(const KmtApi& api, const Device& device,
                        const void* ert_packet, uint32_t ert_bytes,
                        uint64_t* out_fence_id, uint32_t* out_status_offset,
                        Error* out_error);
+
+// One START_DPU of an AIE4 chain: its ERT packet and the GPU VA of the exec
+// BO whose header CERT completes.
+struct Aie4ChainEntry {
+  const void* ert_packet = nullptr;
+  uint32_t ert_bytes = 0;
+  uint64_t exec_gpu_va = 0;
+};
+
+// How many START_DPU packets of |ert_bytes| each fit one XRT_CMD_CHAIN submit
+// (private data is one page: XRT_CMD_ARGS, the packets, then their GPU VAs).
+uint32_t Aie4ChainCapacity(uint32_t ert_bytes);
+
+// Submits |entry_count| START_DPU packets as one XRT_CMD_CHAIN, as
+// hwqueue_aie4 does for ERT_CMD_CHAIN: the packets back to back in the private
+// data, followed by their exec BO GPU VAs. |chain_buffer| is the submitted
+// command buffer. CERT completes each entry through its own exec BO.
+bool SubmitAie4Chain(const KmtApi& api, const Device& device, Context* context,
+                     const Buffer& chain_buffer, const Aie4ChainEntry* entries,
+                     uint32_t entry_count, uint64_t* out_fence_id,
+                     uint32_t* out_status_offset, Error* out_error);
 
 // Waits for |fence_id| on the context's HW-queue progress fence. Returns false
 // with |out_timed_out| set when |timeout_ms| elapses first.

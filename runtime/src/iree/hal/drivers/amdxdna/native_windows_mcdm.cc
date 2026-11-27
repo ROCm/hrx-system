@@ -535,6 +535,11 @@ constexpr uint64_t kAie4ExecBoSize = 4096;
 
 static_assert(sizeof(ert_dpu_data) == 24,
               "AIE4 miniports consume the 24-byte XRT ert_dpu_data");
+// Commands per XRT_CMD_CHAIN: xrt::runlist submit_size. Runlists of kernels
+// that keep state on the array depend on these boundaries. Like XRT, 24
+// six-slice packets exceed the one-page private data and fail in
+// SubmitAie4Chain.
+constexpr uint32_t kAie4XrtRunlistChainSize = 24;
 // TDR normally fires first; this bounds a CERT hang without a timeout state.
 constexpr uint32_t kAie4StartDpuWaitTimeoutMs = 20000;
 
@@ -3346,21 +3351,24 @@ iree_status_t iree_hal_amdxdna_native_device_query_caps(
       IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_BY_DEFAULT;
   caps.driver_stack = device->driver_stack;
   if (device_is_aie4(device)) {
-    // hwcontext_aie4/hwqueue_aie4: empty-image contexts, one synchronous
-    // START_DPU per submit, plain KMT BOs (no command aperture).
+    // hwcontext_aie4/hwqueue_aie4: empty-image contexts, synchronous START_DPU
+    // or XRT_CMD_CHAIN submits, plain KMT BOs (no command aperture).
     caps.context_image_models =
         IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_MODEL_NONE;
-    caps.dispatch_models = IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_START_DPU;
+    // Multi-dispatch command buffers run as XRT_CMD_CHAINs, as xrt::runlist
+    // does; single dispatches never form a chain. Kernels that keep state on
+    // the array between dispatches require it.
+    caps.dispatch_models =
+        IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_START_DPU |
+        IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_COMMAND_CHAIN;
     caps.default_dispatch_opcode =
         IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_DPU;
     caps.completion_models =
         IREE_HAL_AMDXDNA_NATIVE_C_COMPLETION_MODEL_SYNCHRONOUS_WAIT;
-    caps.max_command_chain_slots = 0;
+    caps.max_command_chain_slots = kAie4XrtRunlistChainSize;
     caps.native_owns_control_code_publication = false;
     caps.requires_executable_context_cache = false;
     caps.submit_completion_is_deferred = false;
-    caps.command_chain_status =
-        IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_UNIDENTIFIED_STACK;
   }
   *out_caps = caps;
   if (!submission_policy.supports_command_chaining) {
@@ -3991,11 +3999,13 @@ iree_status_t iree_hal_amdxdna_native_command_create(
 
   const WindowsMcdmOpcodeHandler& handler = windows_mcdm_opcode_handler(opcode);
   const bool is_aie4 = device_is_aie4(device);
-  if ((opcode == IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_DPU) !=
-      is_aie4) {
+  const bool is_start_dpu =
+      opcode == IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_DPU;
+  if (is_aie4 ? !(is_start_dpu || handler.is_chain) : is_start_dpu) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        is_aie4 ? "amdxdna Windows MCDM AIE4 supports only START_DPU commands"
+        is_aie4 ? "amdxdna Windows MCDM AIE4 supports only START_DPU and "
+                  "command-chain commands"
                 : "amdxdna Windows MCDM START_DPU requires an AIE4 device");
   }
   iree_hal_amdxdna_native_buffer_t* exec_buffer = nullptr;
@@ -4429,8 +4439,12 @@ iree_status_t iree_hal_amdxdna_native_command_prepare_chain(
     IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_buffer_sync_all(
         commands[i]->exec_buffer,
         IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE));
-    chain_data->data[i] = mcdm::GetPathBChainChildHandle(
-        command->device->device, &commands[i]->exec_buffer->buffer);
+    // AIE4 chains name children by exec BO GPU VA in the submit itself.
+    chain_data->data[i] =
+        device_is_aie4(command->device)
+            ? commands[i]->exec_buffer->buffer.gpu_va
+            : mcdm::GetPathBChainChildHandle(command->device->device,
+                                             &commands[i]->exec_buffer->buffer);
     command->chain_children[command->chain_child_count++] = commands[i];
     IREE_RETURN_IF_ERROR(bind_buffer_ref(
         command, i, commands[i]->exec_buffer, 0,
@@ -5386,12 +5400,14 @@ static iree_status_t iree_hal_amdxdna_native_submit_wait(
   }
 }
 
-// hwqueue_aie4::submit_command + wait_command for one START_DPU packet.
-static iree_status_t aie4_submit_and_wait(
-    iree_hal_amdxdna_native_queue_t* queue,
-    iree_hal_amdxdna_native_command_t* command, iree_string_view_t label) {
-  iree_hal_amdxdna_native_context_t* context = queue->context;
-  iree_hal_amdxdna_native_device_t* device = context->device;
+// Restores a START_DPU packet CERT overwrote on the previous run (it writes
+// the terminal state over the whole header), resets its state and publishes
+// the exec BO. Returns the packet size including the header.
+static iree_status_t aie4_prepare_start_dpu(
+    iree_hal_amdxdna_native_context_t* context,
+    iree_hal_amdxdna_native_command_t* command, iree_string_view_t label,
+    uint32_t* out_ert_bytes) {
+  iree_hal_amdxdna_native_device_t* device = command->device;
   if (IREE_UNLIKELY(command->opcode !=
                         IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_DPU ||
                     !command->control_buffer)) {
@@ -5431,22 +5447,24 @@ static iree_status_t aie4_submit_and_wait(
       (packet->count + 1) * static_cast<uint32_t>(sizeof(uint32_t));
 
   mcdm::Error error;
-  mcdm::Buffer& exec_bo = command->exec_buffer->buffer;
-  if (!mcdm::SyncBuffer(device->api, context->kmt, exec_bo, 0, ert_bytes,
-                        &error)) {
+  if (!mcdm::SyncBuffer(device->api, context->kmt, command->exec_buffer->buffer,
+                        0, ert_bytes, &error)) {
     return status_from_mcdm_error(
         "amdxdna Windows MCDM AIE4 exec BO publication failed", error);
   }
-  uint64_t fence_id = 0;
-  uint32_t status_offset = 0;
-  if (!mcdm::SubmitAie4Execbuf(device->api, context->kmt, &context->context,
-                               exec_bo, packet, ert_bytes, &fence_id,
-                               &status_offset, &error)) {
-    return status_from_mcdm_error(
-        "amdxdna Windows MCDM AIE4 EXECBUF submit failed", error);
-  }
-  ++queue->exec_command_count;
+  *out_ert_bytes = ert_bytes;
+  return iree_ok_status();
+}
 
+// Waits for |fence_id| and checks the status slot, where the KMD writes
+// TIMEOUT/ABORT. CERT reports every other outcome in the exec BO headers.
+static iree_status_t aie4_wait_for_kmd_status(
+    iree_hal_amdxdna_native_queue_t* queue, uint64_t fence_id,
+    uint32_t status_offset, iree_string_view_t label,
+    uint32_t* out_status_header) {
+  iree_hal_amdxdna_native_context_t* context = queue->context;
+  iree_hal_amdxdna_native_device_t* device = context->device;
+  mcdm::Error error;
   bool timed_out = false;
   if (!mcdm::WaitAie4Fence(device->api, context->kmt, context->context,
                            fence_id, kAie4StartDpuWaitTimeoutMs, &timed_out,
@@ -5463,12 +5481,9 @@ static iree_status_t aie4_submit_and_wait(
                             kAie4StartDpuWaitTimeoutMs);
   }
 
-  // The KMD writes TIMEOUT/ABORT into the status slot; CERT writes the
-  // terminal state into the exec BO header through its GPU VA.
   const mcdm::Buffer& status_bo = context->context.aie4_status_buffer;
   if (!mcdm::InvalidateBufferCpuReads(status_bo, status_offset,
-                                      sizeof(uint32_t), &error) ||
-      !mcdm::InvalidateBufferCpuReads(exec_bo, 0, ert_bytes, &error)) {
+                                      sizeof(uint32_t), &error)) {
     return status_from_mcdm_error(
         "amdxdna Windows MCDM AIE4 completion read-back failed", error);
   }
@@ -5476,6 +5491,7 @@ static iree_status_t aie4_submit_and_wait(
   std::memcpy(&status_header,
               static_cast<const uint8_t*>(status_bo.cpu_ptr) + status_offset,
               sizeof(status_header));
+  *out_status_header = status_header;
   const uint32_t status_state = status_header & 0xFu;
   if (status_state == ERT_CMD_STATE_TIMEOUT ||
       status_state == ERT_CMD_STATE_ABORT) {
@@ -5485,14 +5501,224 @@ static iree_status_t aie4_submit_and_wait(
         "amdxdna Windows MCDM AIE4 %.*s ended in KMD state %u",
         static_cast<int>(label.size), label.data, status_state);
   }
-  const uint32_t state = packet->state;
+  return iree_ok_status();
+}
+
+// Appends the context health BO (ert_ctx_health_data_v1: version, npu_gen,
+// ctx_state, num_uc, ctx_error_type, then per-uC ert_uc_health_info) to a
+// failed |status|.
+static iree_status_t aie4_annotate_context_health(
+    iree_hal_amdxdna_native_context_t* context, iree_status_t status) {
+  const mcdm::Buffer& health = context->context.aie4_health_buffer;
+  mcdm::Error error;
+  if (!health.cpu_ptr ||
+      !mcdm::InvalidateBufferCpuReads(health, 0, 128, &error)) {
+    return status;
+  }
+  const auto* words = static_cast<const uint32_t*>(health.cpu_ptr);
+  char text[32 * 9] = {0};
+  int length = 0;
+  for (int i = 0; i < 32; ++i) {
+    length += snprintf(text + length, sizeof(text) - length,
+                       i ? " %08x" : "%08x", words[i]);
+  }
+  return iree_status_annotate_f(status, "AIE4 context health: %s", text);
+}
+
+// Reads the ERT state CERT wrote into |command|'s exec BO header.
+static iree_status_t aie4_read_start_dpu_state(
+    iree_hal_amdxdna_native_command_t* command, uint32_t ert_bytes,
+    uint32_t* out_state) {
+  mcdm::Error error;
+  if (!mcdm::InvalidateBufferCpuReads(command->exec_buffer->buffer, 0,
+                                      ert_bytes, &error)) {
+    return status_from_mcdm_error(
+        "amdxdna Windows MCDM AIE4 completion read-back failed", error);
+  }
+  *out_state = command->start_packet->state;
+  return iree_ok_status();
+}
+
+// hwqueue_aie4::submit_command + wait_command for one START_DPU packet.
+static iree_status_t aie4_submit_and_wait(
+    iree_hal_amdxdna_native_queue_t* queue,
+    iree_hal_amdxdna_native_command_t* command, iree_string_view_t label) {
+  iree_hal_amdxdna_native_context_t* context = queue->context;
+  iree_hal_amdxdna_native_device_t* device = context->device;
+  uint32_t ert_bytes = 0;
+  IREE_RETURN_IF_ERROR(
+      aie4_prepare_start_dpu(context, command, label, &ert_bytes));
+
+  mcdm::Error error;
+  uint64_t fence_id = 0;
+  uint32_t status_offset = 0;
+  if (!mcdm::SubmitAie4Execbuf(device->api, context->kmt, &context->context,
+                               command->exec_buffer->buffer,
+                               command->start_packet, ert_bytes, &fence_id,
+                               &status_offset, &error)) {
+    return status_from_mcdm_error(
+        "amdxdna Windows MCDM AIE4 EXECBUF submit failed", error);
+  }
+  ++queue->exec_command_count;
+
+  uint32_t status_header = 0;
+  iree_status_t wait_status = aie4_wait_for_kmd_status(
+      queue, fence_id, status_offset, label, &status_header);
+  if (!iree_status_is_ok(wait_status)) {
+    return aie4_annotate_context_health(context, wait_status);
+  }
+  uint32_t state = 0;
+  IREE_RETURN_IF_ERROR(aie4_read_start_dpu_state(command, ert_bytes, &state));
   if (state == ERT_CMD_STATE_COMPLETED) return iree_ok_status();
   return iree_make_status(
       IREE_STATUS_INTERNAL,
       "amdxdna Windows MCDM AIE4 %.*s finished with ERT state %u (header "
       "0x%08x, status slot 0x%08x)",
-      static_cast<int>(label.size), label.data, state, packet->header,
-      status_header);
+      static_cast<int>(label.size), label.data, state,
+      command->start_packet->header, status_header);
+}
+
+// One XRT_CMD_CHAIN on the HW queue, between issue and completion.
+struct Aie4IssuedChain {
+  iree_hal_amdxdna_native_command_t* chain = nullptr;
+  std::vector<mcdm::Aie4ChainEntry> entries;
+  uint64_t fence_id = 0;
+  uint32_t status_offset = 0;
+};
+
+// Restores and publishes every child of |chain| and records its packet for an
+// XRT_CMD_CHAIN submit.
+static iree_status_t aie4_prepare_chain(
+    iree_hal_amdxdna_native_context_t* context,
+    iree_hal_amdxdna_native_command_t* chain, iree_string_view_t label,
+    Aie4IssuedChain* out_issued) {
+  const iree_host_size_t child_count = chain->chain_child_count;
+  if (IREE_UNLIKELY(child_count == 0 ||
+                    child_count > std::numeric_limits<uint32_t>::max())) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "amdxdna Windows MCDM AIE4 chain has %zu commands",
+                            static_cast<size_t>(child_count));
+  }
+  out_issued->chain = chain;
+  out_issued->entries.resize(child_count);
+  for (iree_host_size_t i = 0; i < child_count; ++i) {
+    iree_hal_amdxdna_native_command_t* child = chain->chain_children[i];
+    mcdm::Aie4ChainEntry& entry = out_issued->entries[i];
+    IREE_RETURN_IF_ERROR(
+        aie4_prepare_start_dpu(context, child, label, &entry.ert_bytes));
+    entry.ert_packet = child->start_packet;
+    entry.exec_gpu_va = child->exec_buffer->buffer.gpu_va;
+  }
+  return iree_ok_status();
+}
+
+// hwqueue_aie4 ERT_CMD_CHAIN: the children's START_DPU packets go to the
+// device in one XRT_CMD_CHAIN submit and CERT completes each child through
+// its own exec BO.
+static iree_status_t aie4_submit_prepared_chain(
+    iree_hal_amdxdna_native_queue_t* queue, Aie4IssuedChain* issued) {
+  iree_hal_amdxdna_native_context_t* context = queue->context;
+  iree_hal_amdxdna_native_device_t* device = context->device;
+  const iree_host_size_t child_count = issued->entries.size();
+  mcdm::Error error;
+  if (!mcdm::SubmitAie4Chain(
+          device->api, context->kmt, &context->context,
+          issued->chain->exec_buffer->buffer, issued->entries.data(),
+          static_cast<uint32_t>(child_count), &issued->fence_id,
+          &issued->status_offset, &error)) {
+    return status_from_mcdm_error(
+        "amdxdna Windows MCDM AIE4 CHAIN submit failed", error);
+  }
+  queue->exec_command_count += child_count;
+  return iree_ok_status();
+}
+
+// Waits for an issued chain. Like XRT, a completed last child completes the
+// chain; otherwise the first child in an error state is reported.
+static iree_status_t aie4_complete_chain(iree_hal_amdxdna_native_queue_t* queue,
+                                         const Aie4IssuedChain& issued,
+                                         iree_string_view_t label) {
+  iree_hal_amdxdna_native_command_t* chain = issued.chain;
+  const iree_host_size_t child_count = issued.entries.size();
+  uint32_t status_header = 0;
+  iree_status_t wait_status = aie4_wait_for_kmd_status(
+      queue, issued.fence_id, issued.status_offset, label, &status_header);
+  if (!iree_status_is_ok(wait_status)) {
+    return aie4_annotate_context_health(queue->context, wait_status);
+  }
+  uint32_t state = 0;
+  IREE_RETURN_IF_ERROR(aie4_read_start_dpu_state(
+      chain->chain_children[child_count - 1],
+      issued.entries[child_count - 1].ert_bytes, &state));
+  if (state == ERT_CMD_STATE_COMPLETED) return iree_ok_status();
+  for (iree_host_size_t i = 0; i < child_count; ++i) {
+    IREE_RETURN_IF_ERROR(aie4_read_start_dpu_state(
+        chain->chain_children[i], issued.entries[i].ert_bytes, &state));
+    if (state > ERT_CMD_STATE_COMPLETED) {
+      return iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "amdxdna Windows MCDM AIE4 %.*s chain command %zu of %zu finished "
+          "with ERT state %u (status slot 0x%08x)",
+          static_cast<int>(label.size), label.data, static_cast<size_t>(i),
+          static_cast<size_t>(child_count), state, status_header);
+    }
+  }
+  return iree_make_status(
+      IREE_STATUS_INTERNAL,
+      "amdxdna Windows MCDM AIE4 %.*s chain of %zu signaled its fence before "
+      "its last command completed (state %u, status slot 0x%08x)",
+      static_cast<int>(label.size), label.data,
+      static_cast<size_t>(child_count), state, status_header);
+}
+
+static iree_status_t aie4_submit_chain_and_wait(
+    iree_hal_amdxdna_native_queue_t* queue,
+    iree_hal_amdxdna_native_command_t* chain, iree_string_view_t label) {
+  if (chain->chain_child_count == 0) return iree_ok_status();
+  Aie4IssuedChain issued;
+  IREE_RETURN_IF_ERROR(
+      aie4_prepare_chain(queue->context, chain, label, &issued));
+  IREE_RETURN_IF_ERROR(aie4_submit_prepared_chain(queue, &issued));
+  return aie4_complete_chain(queue, issued, label);
+}
+
+// Prepares every chain, then submits them back to back before waiting on
+// any. Warm kernels resume state their predecessor left on the array, and an
+// idle context between two chains of one runlist loses it; XRT's runlist
+// likewise submits all its 24-command chains at once.
+static iree_status_t aie4_submit_chains_and_wait(
+    iree_hal_amdxdna_native_queue_t* queue,
+    iree_hal_amdxdna_native_command_t* const* chains,
+    iree_host_size_t chain_count, iree_string_view_t label) {
+  std::vector<Aie4IssuedChain> issued(chain_count);
+  for (iree_host_size_t i = 0; i < chain_count; ++i) {
+    if (chains[i]->chain_child_count == 0) continue;
+    IREE_RETURN_IF_ERROR(
+        aie4_prepare_chain(queue->context, chains[i], label, &issued[i]));
+  }
+  iree_host_size_t issued_count = 0;
+  iree_status_t status = iree_ok_status();
+  for (; issued_count < chain_count; ++issued_count) {
+    if (!issued[issued_count].chain) continue;
+    status = aie4_submit_prepared_chain(queue, &issued[issued_count]);
+    if (!iree_status_is_ok(status)) {
+      issued[issued_count].chain = nullptr;
+      break;
+    }
+  }
+  // Drain whatever was issued even after a failure: the children's exec BOs
+  // and packets must not be reused while CERT may still write them.
+  for (iree_host_size_t i = 0; i < issued_count; ++i) {
+    if (!issued[i].chain) continue;
+    iree_status_t complete_status =
+        aie4_complete_chain(queue, issued[i], label);
+    if (iree_status_is_ok(status)) {
+      status = complete_status;
+    } else {
+      iree_status_ignore(complete_status);
+    }
+  }
+  return status;
 }
 
 iree_status_t iree_hal_amdxdna_native_queue_submit_and_wait(
@@ -5501,7 +5727,9 @@ iree_status_t iree_hal_amdxdna_native_queue_submit_and_wait(
   IREE_ASSERT_ARGUMENT(queue);
   IREE_ASSERT_ARGUMENT(command);
   if (device_is_aie4(queue->context->device)) {
-    return aie4_submit_and_wait(queue, command, label);
+    return command_is_pathb_chain(command)
+               ? aie4_submit_chain_and_wait(queue, command, label)
+               : aie4_submit_and_wait(queue, command, label);
   }
   iree_hal_amdxdna_native_submission_t submission;
   std::memset(&submission, 0, sizeof(submission));
@@ -5676,6 +5904,21 @@ iree_status_t iree_hal_amdxdna_native_queue_submit_all_and_wait(
   IREE_ASSERT_ARGUMENT(queue);
   IREE_ASSERT_ARGUMENT(commands);
   if (command_count == 0) return iree_ok_status();
+
+  if (device_is_aie4(queue->context->device)) {
+    bool all_chains = true;
+    for (iree_host_size_t i = 0; i < command_count; ++i) {
+      all_chains = all_chains && command_is_pathb_chain(commands[i]);
+    }
+    if (all_chains) {
+      return aie4_submit_chains_and_wait(queue, commands, command_count, label);
+    }
+    for (iree_host_size_t i = 0; i < command_count; ++i) {
+      IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_queue_submit_and_wait(
+          queue, commands[i], label));
+    }
+    return iree_ok_status();
+  }
 
   for (iree_host_size_t i = 0; i < command_count; ++i) {
     if (!command_is_pathb_chain(commands[i])) {

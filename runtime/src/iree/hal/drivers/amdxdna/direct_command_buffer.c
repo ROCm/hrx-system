@@ -749,7 +749,11 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_copy_buffer(
 // passes as its opcode arg).
 static const uint64_t kAie2ExecBufferKernelOpTxn = 3;
 
+// Host signature of a chain child: the template with constants and binding
+// addresses applied. AIE4 control-code self-patches use address 0 here; the
+// child's instruction BO address is applied when it is materialized.
 static iree_status_t iree_hal_amdxdna_prepare_npu_control_words(
+    const iree_hal_amdxdna_device* device,
     const iree_hal_amdxdna_u32_list_t* txn,
     const iree_hal_amdxdna_u32_list_t* patches, const uint64_t* args,
     size_t arg_count, iree_const_byte_span_t constants,
@@ -763,8 +767,9 @@ static iree_status_t iree_hal_amdxdna_prepare_npu_control_words(
     IREE_RETURN_IF_ERROR(iree_hal_amdxdna_patch_write32_constants(
         out_words, txn->count, constants));
   }
-  if (!iree_hal_amdxdna_apply_patch_table(out_words, txn->count, patches->data,
-                                          patches->count, args, arg_count)) {
+  if (!iree_hal_amdxdna_apply_dispatch_patch_table(
+          device, out_words, txn->count, patches->data, patches->count, args,
+          arg_count, /*control_code_addr=*/0)) {
     return iree_make_status(
         IREE_STATUS_INTERNAL,
         "amdxdna cmd-chain: invalid host patch table for control code");
@@ -801,7 +806,8 @@ static iree_status_t iree_hal_amdxdna_materialize_ctrl_code(
 }
 
 static iree_status_t iree_hal_amdxdna_prepare_npu_cmd_signature(
-    iree_allocator_t host_allocator, const iree_hal_amdxdna_u32_list_t* txn,
+    const iree_hal_amdxdna_device* device, iree_allocator_t host_allocator,
+    const iree_hal_amdxdna_u32_list_t* txn,
     const iree_hal_amdxdna_u32_list_t* patches, const uint64_t* args,
     iree_hal_amdxdna_native_buffer_t* const* arg_buffers,
     const iree_device_size_t* arg_offsets,
@@ -814,7 +820,7 @@ static iree_status_t iree_hal_amdxdna_prepare_npu_cmd_signature(
                                                    sizeof(*prepared_words),
                                                    (void**)&prepared_words));
   iree_status_t status = iree_hal_amdxdna_prepare_npu_control_words(
-      txn, patches, args, arg_count, constants, constant_patches,
+      device, txn, patches, args, arg_count, constants, constant_patches,
       prepared_words);
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdxdna_chain_cmd_set_signature(
@@ -1127,7 +1133,24 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_start_npu_cmd(
   const bool bindings_changed = iree_hal_amdxdna_ctrl_bindings_changed(
       cached->binding_buffers, cached->binding_offsets, cached->binding_lengths,
       cached->binding_count, fresh);
-  if (control_changed) {
+  if (iree_hal_amdxdna_device_uses_start_dpu(command_buffer->device)) {
+    // AIE4: restore the ELF template and re-apply patch57 (including
+    // control-code-* self-patches against this child's instruction BO). The
+    // AIE2P dynamic-field rewriter does not understand AIE4 BDs.
+    if (control_changed) {
+      IREE_RETURN_IF_ERROR(iree_hal_amdxdna_materialize_ctrl_code(
+          command_buffer->device, dst, txn->data, txn->count,
+          fresh->src_constant_patches,
+          iree_make_const_byte_span(fresh->src_constants,
+                                    fresh->src_constant_count),
+          fresh->src_patches->data, fresh->src_patches->count,
+          fresh->binding_device_addrs, fresh->binding_count,
+          iree_hal_amdxdna_native_buffer_c_device_address(cached->ctrl_code)));
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amdxdna_publish_ctrl_code(cached->ctrl_code));
+      memcpy(cached->ctrl_words, dst, txn->count * sizeof(*cached->ctrl_words));
+    }
+  } else if (control_changed) {
     IREE_RETURN_IF_ERROR(iree_hal_amdxdna_patch_publish_mapped_ctrl(
         cached->ctrl_code, dst, fresh));
     memcpy(cached->ctrl_words, dst, txn->count * sizeof(*cached->ctrl_words));
@@ -2691,8 +2714,8 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_flush_chains(
             iree_hal_amdxdna_chain_cmd_t* cmd = &group->cmds[i];
             if (cmd->ctrl_words) continue;
             status = iree_hal_amdxdna_prepare_npu_cmd_signature(
-                command_buffer->host_allocator, cmd->src_asm_inst,
-                cmd->src_patches, cmd->binding_device_addrs,
+                command_buffer->device, command_buffer->host_allocator,
+                cmd->src_asm_inst, cmd->src_patches, cmd->binding_device_addrs,
                 cmd->binding_buffers, cmd->binding_offsets,
                 cmd->binding_lengths, cmd->binding_count,
                 iree_make_const_byte_span(cmd->src_constants,

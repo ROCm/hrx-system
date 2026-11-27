@@ -1039,7 +1039,7 @@ McdmSubmissionPolicy GetMcdmSubmissionPolicy(McdmAbi abi) {
               /*uses_shared_command_code_view=*/false,
               /*submit_completion_is_deferred=*/true};
     case McdmAbi::aie4:
-      return {/*supports_command_chaining=*/false,
+      return {/*supports_command_chaining=*/true,
               /*uses_shared_command_code_view=*/false,
               /*submit_completion_is_deferred=*/false};
   }
@@ -2134,6 +2134,7 @@ constexpr uint32_t kAie4HealthBufferSize = kPageSize;
 constexpr uint32_t kAie4StatusBufferSize = kPageSize;
 constexpr uint32_t kAie4StatusMessageSize = 8;
 constexpr uint32_t kXrtCmdExecbuf = 3;
+constexpr uint32_t kXrtCmdChain = 6;
 constexpr uint32_t kStatusResponseTypeKmd = 0;
 constexpr uint32_t kStatusResponseTypeCert = 1;
 
@@ -2312,6 +2313,51 @@ bool CreateAie4Context(const KmtApi& api, const Device& device,
   return true;
 }
 
+namespace {
+
+// Fills the status slot and submits |args| (already holding opcode, size,
+// GpuVasOffset and the Data payload) with |command_buffer| as the command.
+bool SubmitAie4CmdArgs(const KmtApi& api, const Device& device,
+                       Context* context, const Buffer& command_buffer,
+                       Aie4CmdArgs* args, const char* what,
+                       uint64_t* out_fence_id, uint32_t* out_status_offset,
+                       Error* out_error) {
+  const uint32_t status_offset = context->aie4_status_next_offset;
+  context->aie4_status_next_offset =
+      (status_offset + kAie4StatusMessageSize) % kAie4StatusBufferSize;
+  uint8_t* status_slot =
+      static_cast<uint8_t*>(context->aie4_status_buffer.cpu_ptr) +
+      status_offset;
+  std::memset(status_slot, 0, kAie4StatusMessageSize);
+
+  args->buffer_handle = command_buffer.allocation;
+  args->sts.buffer_handle = context->aie4_status_buffer.allocation;
+  args->sts.gpu_va = context->aie4_status_buffer.gpu_va;
+  args->sts.offset = status_offset;
+  args->sts.length = kAie4StatusMessageSize;
+  args->sts.user_buf =
+      static_cast<uint64_t>(reinterpret_cast<uintptr_t>(status_slot));
+  args->sts.status_resp_type = kStatusResponseTypeCert;
+
+  D3DKMT_SUBMITCOMMANDTOHWQUEUE submit = {};
+  submit.hHwQueue = context->hw_queue;
+  submit.HwQueueProgressFenceId = context->next_fence_id;
+  submit.CommandBuffer = command_buffer.gpu_va;
+  submit.CommandLength = static_cast<UINT>(command_buffer.size);
+  submit.PrivateDriverDataSize =
+      static_cast<UINT>(sizeof(Aie4CmdArgs) + args->size);
+  submit.pPrivateDriverData = args;
+  if (!SubmitCommandToHwQueueAfterPaging(api, device, &submit, what,
+                                         out_error)) {
+    return false;
+  }
+  *out_fence_id = context->next_fence_id++;
+  *out_status_offset = status_offset;
+  return true;
+}
+
+}  // namespace
+
 bool SubmitAie4Execbuf(const KmtApi& api, const Device& device,
                        Context* context, const Buffer& exec_buffer,
                        const void* ert_packet, uint32_t ert_bytes,
@@ -2331,46 +2377,70 @@ bool SubmitAie4Execbuf(const KmtApi& api, const Device& device,
     return false;
   }
 
-  const uint32_t status_offset = context->aie4_status_next_offset;
-  context->aie4_status_next_offset =
-      (status_offset + kAie4StatusMessageSize) % kAie4StatusBufferSize;
-  uint8_t* status_slot =
-      static_cast<uint8_t*>(context->aie4_status_buffer.cpu_ptr) +
-      status_offset;
-  std::memset(status_slot, 0, kAie4StatusMessageSize);
-
   auto* args = reinterpret_cast<Aie4CmdArgs*>(payload);
   args->opcode = kXrtCmdExecbuf;
-  args->buffer_handle = exec_buffer.allocation;
   args->size = ert_bytes + sizeof(uint64_t);
   args->gpu_vas_offset = ert_bytes;
-  args->sts.buffer_handle = context->aie4_status_buffer.allocation;
-  args->sts.gpu_va = context->aie4_status_buffer.gpu_va;
-  args->sts.offset = status_offset;
-  args->sts.length = kAie4StatusMessageSize;
-  args->sts.user_buf =
-      static_cast<uint64_t>(reinterpret_cast<uintptr_t>(status_slot));
-  args->sts.status_resp_type = kStatusResponseTypeCert;
   std::memcpy(payload + sizeof(Aie4CmdArgs), ert_packet, ert_bytes);
   const uint64_t exec_gpu_va = exec_buffer.gpu_va;
   std::memcpy(payload + sizeof(Aie4CmdArgs) + ert_bytes, &exec_gpu_va,
               sizeof(exec_gpu_va));
+  return SubmitAie4CmdArgs(api, device, context, exec_buffer, args,
+                           "D3DKMTSubmitCommandToHwQueue(AIE4 EXECBUF)",
+                           out_fence_id, out_status_offset, out_error);
+}
 
-  D3DKMT_SUBMITCOMMANDTOHWQUEUE submit = {};
-  submit.hHwQueue = context->hw_queue;
-  submit.HwQueueProgressFenceId = context->next_fence_id;
-  submit.CommandBuffer = exec_buffer.gpu_va;
-  submit.CommandLength = static_cast<UINT>(exec_buffer.size);
-  submit.PrivateDriverDataSize = static_cast<UINT>(payload_size);
-  submit.pPrivateDriverData = payload;
-  if (!SubmitCommandToHwQueueAfterPaging(
-          api, device, &submit, "D3DKMTSubmitCommandToHwQueue(AIE4 EXECBUF)",
-          out_error)) {
+uint32_t Aie4ChainCapacity(uint32_t ert_bytes) {
+  return static_cast<uint32_t>((kPageSize - sizeof(Aie4CmdArgs)) /
+                               (ert_bytes + sizeof(uint64_t)));
+}
+
+bool SubmitAie4Chain(const KmtApi& api, const Device& device, Context* context,
+                     const Buffer& chain_buffer, const Aie4ChainEntry* entries,
+                     uint32_t entry_count, uint64_t* out_fence_id,
+                     uint32_t* out_status_offset, Error* out_error) {
+  if (!context || !context->hw_queue || !context->aie4_status_buffer.cpu_ptr ||
+      !entries || entry_count == 0 || !out_fence_id || !out_status_offset) {
+    SetError(out_error, "SubmitAie4Chain called with invalid arguments");
     return false;
   }
-  *out_fence_id = context->next_fence_id++;
-  *out_status_offset = status_offset;
-  return true;
+  alignas(Aie4CmdArgs) uint8_t payload[kPageSize] = {};
+  size_t data_size = 0;
+  for (uint32_t i = 0; i < entry_count; ++i) {
+    data_size += entries[i].ert_bytes;
+  }
+  data_size += static_cast<size_t>(entry_count) * sizeof(uint64_t);
+  if (sizeof(Aie4CmdArgs) + data_size > sizeof(payload)) {
+    SetErrorFormat(out_error,
+                   "AIE4 chain of %u commands needs %zu bytes of private data; "
+                   "the limit is %zu",
+                   entry_count, sizeof(Aie4CmdArgs) + data_size,
+                   sizeof(payload));
+    return false;
+  }
+
+  auto* args = reinterpret_cast<Aie4CmdArgs*>(payload);
+  uint8_t* data = payload + sizeof(Aie4CmdArgs);
+  size_t offset = 0;
+  for (uint32_t i = 0; i < entry_count; ++i) {
+    if (!entries[i].ert_packet || entries[i].ert_bytes == 0) {
+      SetErrorFormat(out_error, "AIE4 chain entry %u has no packet", i);
+      return false;
+    }
+    std::memcpy(data + offset, entries[i].ert_packet, entries[i].ert_bytes);
+    offset += entries[i].ert_bytes;
+  }
+  args->gpu_vas_offset = static_cast<uint32_t>(offset);
+  for (uint32_t i = 0; i < entry_count; ++i) {
+    std::memcpy(data + offset, &entries[i].exec_gpu_va, sizeof(uint64_t));
+    offset += sizeof(uint64_t);
+  }
+  args->opcode = kXrtCmdChain;
+  args->size = offset;
+  args->exec_chain_cmd_count = entry_count;
+  return SubmitAie4CmdArgs(api, device, context, chain_buffer, args,
+                           "D3DKMTSubmitCommandToHwQueue(AIE4 CHAIN)",
+                           out_fence_id, out_status_offset, out_error);
 }
 
 bool WaitAie4Fence(const KmtApi& api, const Device& device,
